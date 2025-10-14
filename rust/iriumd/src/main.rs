@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use std::fs;
 use tracing::{info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
@@ -35,12 +36,21 @@ enum Commands {
 }
 
 #[derive(Deserialize, Debug)]
-struct GenesisHeader {
-    chain_id: String,
-    genesis_time: String,
+struct HeaderFields {
+    version: u32,
+    prev_hash: String,
     merkle_root: String,
-    nonce: u64,
-    // Add additional fields if your header needs them
+    time: u64,
+    bits: String,
+    nonce: u32,
+    hash: String,
+}
+
+#[derive(Deserialize, Debug)]
+struct GenesisFile {
+    height: u64,
+    header: HeaderFields,
+    transactions: Vec<String>,
 }
 
 fn init_tracing(verbosity: u8) {
@@ -63,11 +73,38 @@ fn main() -> Result<()> {
         Commands::CheckGenesis { genesis } => {
             let raw = fs::read_to_string(&genesis)
                 .with_context(|| format!("reading {}", genesis))?;
-            let parsed: GenesisHeader = serde_json::from_str(&raw)
+            let parsed: GenesisFile = serde_json::from_str(&raw)
                 .with_context(|| "parsing genesis header JSON")?;
-            info!(?parsed, "loaded genesis header");
-            // TODO: implement concrete verification (hash/merkle) in next patch
-            println!("Genesis loaded: {:?}", parsed);
+            info!(height=%parsed.height, "loaded genesis header");
+
+            // Recompute double-SHA256 header hash to confirm integrity
+            let hdr = &parsed.header;
+            let bits_u32 = u32::from_str_radix(hdr.bits.trim_start_matches("0x"), 16)
+                .with_context(|| "parsing bits field as hex")?;
+            let mut header_bytes = Vec::with_capacity(80);
+            header_bytes.extend_from_slice(&hdr.version.to_le_bytes());
+            let prev = hex::decode(&hdr.prev_hash)
+                .with_context(|| "decoding prev_hash hex")?;
+            let merkle = hex::decode(&hdr.merkle_root)
+                .with_context(|| "decoding merkle_root hex")?;
+            if prev.len() != 32 || merkle.len() != 32 {
+                anyhow::bail!("prev_hash or merkle_root must be 32 bytes");
+            }
+            header_bytes.extend_from_slice(&prev.iter().rev().copied().collect::<Vec<u8>>());
+            header_bytes.extend_from_slice(&merkle.iter().rev().copied().collect::<Vec<u8>>());
+            header_bytes.extend_from_slice(&(hdr.time as u32).to_le_bytes());
+            header_bytes.extend_from_slice(&bits_u32.to_le_bytes());
+            header_bytes.extend_from_slice(&hdr.nonce.to_le_bytes());
+
+            let first = Sha256::digest(&header_bytes);
+            let second = Sha256::digest(&first);
+            let mut derived = second.to_vec();
+            derived.reverse();
+            let derived_hex = hex::encode(derived);
+            println!("derived header hash: {}", derived_hex);
+            println!("file header hash   : {}", hdr.hash);
+            println!("match: {}", derived_hex.eq_ignore_ascii_case(&hdr.hash));
+
             Ok(())
         }
         Commands::P2pHandshake { peer } => {

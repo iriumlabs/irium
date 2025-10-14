@@ -24,13 +24,13 @@ Irium is an original proof-of-work blockchain engineered specifically for the IR
 | Ticker | IRM |
 | Consensus | Proof-of-Work (SHA-256d) |
 | Block Target | 600 seconds |
-| Block Subsidy | 50 IRM (blocks 1–1,930,000) |
-| Halving Interval | None – constant subsidy until mining supply exhausted |
+| Block Subsidy | 50 IRM |
+| Halving Interval | 210,000 blocks |
 | Coinbase Maturity | 100 blocks |
 | Difficulty Retarget | 2016 blocks |
 | Maximum Supply | 100,000,000 IRM |
-| Founder Vesting | 3,500,000 IRM CLTV-locked for 3 years |
-| Public Distribution | 96,500,000 IRM mined over 1,930,000 blocks |
+| Founder Vesting | 3,500,000 IRM CLTV split across 1y/2y/3y UTXOs |
+| Public Distribution | 96,500,000 IRM mined over halving schedule |
 
 ## Repository Layout
 
@@ -83,7 +83,7 @@ Any tooling consuming the seed material should read both `seedlist.txt` and `see
 ## Genesis Configuration
 
 `configs/genesis.json` encodes the deterministic genesis distribution:
-- A single CLTV-bound UTXO locks the founder’s 3,500,000 IRM allocation for three full years before the key can spend it.
+- Three separate CLTV-bound UTXOs lock the founder’s 3,500,000 IRM across 1y, 2y, and 3y absolute block heights.
 - No other parties receive genesis funds; 96,500,000 IRM remain unminted so miners can earn them through proof-of-work.
 - The `scripts/create_genesis.py` utility constructs the genesis block header, transaction merkle root, and subsidy schedule directly from this configuration.
 
@@ -91,8 +91,8 @@ Any tooling consuming the seed material should read both `seedlist.txt` and `see
 
 Irium fixes the entire 100 million IRM supply while reserving 96.5 million IRM for proof-of-work mining:
 - Blocks target a 600-second interval with SHA-256d proof-of-work and retarget every 2016 blocks.
-- Blocks 1 through 1,930,000 each award a 50 IRM subsidy (5,000,000,000 satoshis); afterwards coinbase rewards drop to zero and miners rely on transaction fees only.
-- Genesis mints exactly 3,500,000 IRM into a three-year CLTV UTXO, keeping the remaining 96,500,000 IRM available for miners without any pre-allocation.
+- Initial block subsidy is 50 IRM with halvings every 210,000 blocks; long-term issuance asymptotically trends to zero.
+- Genesis mints exactly 3,500,000 IRM into three CLTV UTXOs (1y/2y/3y); the remaining 96,500,000 IRM are available to miners with no pre-allocation.
 - Coinbase outputs mature after 100 confirmations to deter short-term reorg incentives.
 - `ChainState` enforces value conservation by verifying that every coinbase transaction is limited to the permitted subsidy plus collected fees, so miners cannot inflate supply or create negative fee situations.
 
@@ -126,10 +126,11 @@ Example usage:
 from irium.wallet import Wallet
 
 wallet = Wallet()
-founder_address = wallet.import_wif("Kx1xjP2wbj7YtrxbLoqGqX1wywkitU6vUxaPyHtVnFQw7sJutJXq")
-wallet.register_utxo(bytes.fromhex("00" * 32), 0, 1_0000_0000, founder_address)
-tx = wallet.create_transaction([(founder_address, 10_0000_0000)], fee=1000)
-print(tx.serialize().hex())
+# Import a founder or user WIF via environment variable instead of hard-coding
+import os
+founder_wif = os.environ.get("FOUNDER_WIF")
+if founder_wif:
+    founder_address = wallet.import_wif(founder_wif)
 ```
 
 Wallet metadata can be stored alongside the peer directory under `state/` (the repository only tracks an empty placeholder to reserve the path, keeping private keys out of version control).

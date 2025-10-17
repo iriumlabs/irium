@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Irium - A SHA-256d Proof-of-Work blockchain with 8 unique innovations">
+    <title>Irium - Next Generation Blockchain</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="icon" type="image/svg+xml" href="logo.svg">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <img src="logo.svg" alt="Irium" class="logo">
+                <span>Irium</span>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="#about">About</a></li>
+                <li><a href="#features">Features</a></li>
+                <li><a href="#start">Get Started</a></li>
+                <li><a href="#network">Network</a></li>
+                <li><a href="https://github.com/iriumlabs/irium" target="_blank" class="btn-primary">GitHub</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <section class="hero">
+        <div class="container">
+            <div class="hero-coin">
+                <img src="logo.svg" alt="IRM" class="coin-logo">
+            </div>
+            <h1>Irium Blockchain</h1>
+            <p class="tagline">Next Generation Proof-of-Work</p>
+            <p class="subtitle">SHA-256d blockchain with 8 unique innovations</p>
+            <div class="hero-buttons">
+                <a href="#start" class="btn-primary btn-large">Get Started</a>
+                <a href="https://github.com/iriumlabs/irium/releases/latest" class="btn-secondary btn-large">Download</a>
+            </div>
+            <div class="hero-stats">
+                <div class="stat"><div class="stat-value">LIVE</div><div class="stat-label">Mainnet</div></div>
+                <div class="stat"><div class="stat-value">100M</div><div class="stat-label">Max Supply</div></div>
+                <div class="stat"><div class="stat-value">10min</div><div class="stat-label">Block Time</div></div>
+            </div>
+        </div>
+    </section>
+
+    <section id="about" class="section">
+        <div class="container">
+            <h2>About Irium</h2>
+            <p class="intro">Production-ready blockchain combining SHA-256d PoW security with modern innovations.</p>
+            <div class="grid-3">
+                <div class="card">
+                    <div class="icon">🔒</div>
+                    <h3>Secure</h3>
+                    <p>Battle-tested SHA-256d PoW consensus</p>
+                </div>
+                <div class="card">
+                    <div class="icon">🚀</div>
+                    <h3>Innovative</h3>
+                    <p>8 unique features</p>
+                </div>
+                <div class="card">
+                    <div class="icon">🌐</div>
+                    <h3>Decentralized</h3>
+                    <p>Zero-DNS bootstrap</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="features" class="section bg-dark">
+        <div class="container">
+            <h2>8 Unique Innovations</h2>
+            <div class="grid-4">
+                <div class="feature"><div class="num">1</div><h3>Zero-DNS Bootstrap</h3><p>Censorship-resistant network discovery</p></div>
+                <div class="feature"><div class="num">2</div><h3>Self-healing Peers</h3><p>Robust P2P with reputation</p></div>
+                <div class="feature"><div class="num">3</div><h3>Genesis Vesting</h3><p>On-chain CLTV time-locks</p></div>
+                <div class="feature"><div class="num">4</div><h3>Relay Rewards</h3><p>Incentivized tx propagation</p></div>
+                <div class="feature"><div class="num">5</div><h3>Sybil Resistance</h3><p>PoW handshake challenges</p></div>
+                <div class="feature"><div class="num">6</div><h3>Anchor Consensus</h3><p>Eclipse attack protection</p></div>
+                <div class="feature"><div class="num">7</div><h3>Light Clients</h3><p>SPV and NiPoPoW support</p></div>
+                <div class="feature"><div class="num">8</div><h3>Metadata Commits</h3><p>On-chain data anchoring</p></div>
+            </div>
+        </div>
+    </section>
+
+    <section id="start" class="section">
+        <div class="container">
+            <h2>Get Started</h2>
+            <div class="grid-3">
+                <div class="step">
+                    <div class="step-num">1</div>
+                    <h3>Download</h3>
+                    <pre><code>wget https://github.com/iriumlabs/irium/releases/download/v1.0.1/irium-bootstrap-v1.0.1.tar.gz</code></pre>
+                </div>
+                <div class="step">
+                    <div class="step-num">2</div>
+                    <h3>Install</h3>
+                    <pre><code>tar -xzf irium-bootstrap-v1.0.1.tar.gz
+cd irium-bootstrap-v1.0.1
+./install.sh</code></pre>
+                </div>
+                <div class="step">
+                    <div class="step-num">3</div>
+                    <h3>Run</h3>
+                    <pre><code>python3 scripts/irium-node.py</code></pre>
+                </div>
+            </div>
+            <div class="cta">
+                <a href="https://github.com/iriumlabs/irium/blob/main/QUICKSTART.md" class="btn-primary">Full Guide</a>
+            </div>
+        </div>
+    </section>
+
+    <section id="network" class="section bg-dark">
+        <div class="container">
+            <h2>Live Network</h2>
+            <div class="network-grid">
+                <div class="network-status">
+                    <h3>Mainnet</h3>
+                    <div class="badge live">LIVE</div>
+                </div>
+                <div class="network-info">
+                    <div class="info-item"><span>Seed:</span><span>207.244.247.86:38291</span></div>
+                    <div class="info-item"><span>Explorer:</span><span><a href="http://207.244.247.86:8082">207.244.247.86:8082</a></span></div>
+                    <div class="info-item"><span>Genesis:</span><span class="hash">cbdd1b91...000000</span></div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="section">
+        <div class="container">
+            <h2>Join the Community</h2>
+            <div class="grid-4">
+                <a href="https://github.com/iriumlabs/irium" class="community-card">
+                    <div class="icon">💻</div>
+                    <h3>GitHub</h3>
+                    <p>Code & Development</p>
+                </a>
+                <a href="https://github.com/iriumlabs/irium/discussions" class="community-card">
+                    <div class="icon">💬</div>
+                    <h3>Discussions</h3>
+                    <p>Ask & Share</p>
+                </a>
+                <a href="https://github.com/iriumlabs/irium/blob/main/WHITEPAPER.md" class="community-card">
+                    <div class="icon">📚</div>
+                    <h3>Whitepaper</h3>
+                    <p>Technical Specs</p>
+                </a>
+                <a href="mailto:info@iriumlabs.org" class="community-card">
+                    <div class="icon">📧</div>
+                    <h3>Contact</h3>
+                    <p>info@iriumlabs.org</p>
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2025 Irium Labs. MIT License.</p>
+            <div class="footer-links">
+                <a href="https://github.com/iriumlabs/irium">GitHub</a>
+                <a href="https://github.com/iriumlabs/irium/blob/main/WHITEPAPER.md">Whitepaper</a>
+                <a href="https://github.com/iriumlabs/irium/discussions">Community</a>
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

@@ -700,3 +700,41 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+/* Improved circular logo with gentle animation */
+.coin-container {
+    margin-bottom: 2rem;
+    width: 180px;
+    height: 180px;
+    margin-left: auto;
+    margin-right: auto;
+    border-radius: 50%;
+    overflow: hidden;
+    background: radial-gradient(circle, rgba(99, 102, 241, 0.2), transparent);
+    padding: 10px;
+}
+
+.hero-coin {
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    animation: gentleFloat 5s ease-in-out infinite, gentleSpin 15s linear infinite;
+    filter: drop-shadow(0 0 30px rgba(99, 102, 241, 0.8));
+    object-fit: cover;
+}
+
+@keyframes gentleFloat {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-15px) scale(1.05); }
+}
+
+@keyframes gentleSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Ensure nav and footer logos are circular */
+.logo, .footer-logo {
+    border-radius: 50% !important;
+    object-fit: cover;
+}

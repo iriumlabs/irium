@@ -7,15 +7,25 @@
 <link rel="stylesheet" href="style.css">
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 <style>
-.wp-content {
-    max-width: 900px;
-    margin: 6rem auto 3rem;
-    padding: 0 2rem;
-}
-.wp-content h1 { text-align: center; margin-bottom: 2rem; }
-.wp-content h2 { color: var(--primary); margin-top: 3rem; margin-bottom: 1rem; }
-.wp-content p { color: #d0d0d0; margin-bottom: 1rem; line-height: 1.8; }
-.back-btn { position: fixed; top: 100px; left: 2rem; }
+.wp-content { max-width: 900px; margin: 6rem auto 3rem; padding: 0 2rem; }
+.wp-header { text-align: center; margin-bottom: 3rem; padding-bottom: 2rem; border-bottom: 2px solid rgba(99, 102, 241, 0.3); }
+.wp-header h1 { font-family: 'Orbitron', sans-serif; font-size: 3rem; margin-bottom: 1rem; }
+.wp-subtitle { font-size: 1.3rem; color: var(--secondary); margin-bottom: 1rem; }
+.wp-badges { display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; margin-top: 1.5rem; }
+.badge { padding: 0.5rem 1.5rem; background: linear-gradient(135deg, #10b981, #059669); border-radius: 50px; font-weight: 700; font-size: 0.95rem; }
+.wp-section { margin-bottom: 3rem; }
+.wp-section h2 { font-family: 'Orbitron', sans-serif; font-size: 2.5rem; color: var(--primary); margin-bottom: 1.5rem; border-bottom: 2px solid rgba(99, 102, 241, 0.3); padding-bottom: 0.5rem; }
+.wp-section h3 { font-family: 'Orbitron', sans-serif; font-size: 1.8rem; color: var(--secondary); margin-top: 2rem; margin-bottom: 1rem; }
+.wp-section p { color: #d0d0d0; font-size: 1.1rem; line-height: 1.8; margin-bottom: 1rem; }
+.wp-section ul, .wp-section ol { color: #d0d0d0; margin-left: 2rem; margin-bottom: 1rem; }
+.wp-section li { margin-bottom: 0.5rem; line-height: 1.8; }
+.wp-table { width: 100%; border-collapse: collapse; margin: 2rem 0; background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px; overflow: hidden; }
+.wp-table th { background: rgba(99, 102, 241, 0.2); padding: 1rem; text-align: left; font-weight: 700; color: var(--secondary); }
+.wp-table td { padding: 1rem; border-top: 1px solid rgba(99, 102, 241, 0.2); color: #d0d0d0; }
+.wp-table tr:hover { background: rgba(99, 102, 241, 0.05); }
+.info-box { background: rgba(99, 102, 241, 0.1); border-left: 4px solid var(--primary); padding: 1.5rem; margin: 2rem 0; border-radius: 8px; }
+.code-block { background: rgba(0, 0, 0, 0.5); padding: 1.5rem; border-radius: 8px; font-family: 'Courier New', monospace; color: var(--secondary); overflow-x: auto; border: 1px solid rgba(99, 102, 241, 0.3); margin: 1.5rem 0; }
+.checkmark { color: #10b981; font-weight: bold; }
 </style>
 </head>
 <body>
@@ -23,82 +33,187 @@
 <nav class="nav">
 <div class="container">
 <div class="nav-brand">
-<img src="logo.svg" alt="Irium" class="nav-logo">
+<img src="logo.svg" alt="Irium" class="logo">
 <span>IRIUM</span>
 </div>
 <div>
-<a href="index.html" class="btn btn-secondary" style="padding: 0.5rem 1rem;">← HOME</a>
+<a href="index.html" class="btn btn-secondary" style="padding: 0.5rem 1.5rem; font-size: 0.9rem;">← HOME</a>
 </div>
 </div>
 </nav>
 
 <div class="wp-content">
+<div class="wp-header">
 <h1>Irium: DNS-Free Proof-of-Work Mainnet</h1>
-<p style="text-align: center; color: var(--secondary); font-size: 1.2rem;">Technical Whitepaper - Version 1.0.0</p>
-<p style="text-align: center; margin-bottom: 3rem;">Network Status: LIVE | Genesis: cbdd1b...000000 | Launch: October 16, 2025</p>
+<p class="wp-subtitle">Technical Whitepaper - Version 1.0.0</p>
+<div class="wp-badges">
+<span class="badge">MAINNET LIVE</span>
+<span class="badge" style="background: rgba(99, 102, 241, 0.3);">Genesis: cbdd1b...000000</span>
+<span class="badge" style="background: rgba(99, 102, 241, 0.3);">Launch: Oct 16, 2025</span>
+</div>
+</div>
 
+<div class="wp-section">
 <h2>Abstract</h2>
 <p>Irium is a purpose-built proof-of-work blockchain designed to maximize network independence and long-term survivability. The protocol eliminates reliance on DNS infrastructure, enforces transparent founder vesting via on-chain timelocks, incentivizes transaction relay quality without inflation, and prioritizes light client usability from genesis.</p>
+</div>
 
+<div class="wp-section">
 <h2>1. Introduction</h2>
 <p>Most established proof-of-work networks inherit architectural assumptions from Bitcoin, including DNS-based bootstrapping, addrman-driven peer discovery, and an absence of protocol-level incentives for fast relay. Irium rethinks these components to produce a mainnet that can launch and sustain itself even if all founding infrastructure disappears.</p>
-
 <p><strong>Irium launched on October 16, 2025 with:</strong></p>
-<ul style="color: #d0d0d0;">
+<ul>
 <li>Mined genesis block (5.4 billion hashes, 7 hours)</li>
 <li>Zero DNS dependencies</li>
 <li>Complete P2P networking</li>
 <li>All services operational</li>
 </ul>
+</div>
 
-<h2>2. System Architecture</h2>
-<p><strong>Core Modules:</strong> block.py, chain.py, tx.py, wallet.py, pow.py, network.py, protocol.py, p2p.py, mempool.py, uptime.py, sybil.py, relay.py, anchors.py, spv.py</p>
+<div class="wp-section">
+<h2>2. Technical Specifications</h2>
+<table class="wp-table">
+<tr><th>Parameter</th><th>Value</th></tr>
+<tr><td>Ticker</td><td>IRM</td></tr>
+<tr><td>Algorithm</td><td>SHA-256d (Bitcoin-compatible)</td></tr>
+<tr><td>Max Supply</td><td>100,000,000 IRM</td></tr>
+<tr><td>Genesis Vesting</td><td>3,500,000 IRM (3.5%)</td></tr>
+<tr><td>Mineable Supply</td><td>96,500,000 IRM (96.5%)</td></tr>
+<tr><td>Block Time</td><td>600 seconds (10 minutes)</td></tr>
+<tr><td>Initial Reward</td><td>50 IRM</td></tr>
+<tr><td>Halving Interval</td><td>210,000 blocks (~4 years)</td></tr>
+<tr><td>Difficulty Retarget</td><td>2016 blocks (~14 days)</td></tr>
+<tr><td>Coinbase Maturity</td><td>100 blocks</td></tr>
+<tr><td>Min Transaction Fee</td><td>0.0001 IRM</td></tr>
+<tr><td>P2P Port</td><td>38291</td></tr>
+</table>
+</div>
 
+<div class="wp-section">
 <h2>3. The 8 Core Innovations</h2>
-<p><strong>1. Zero-DNS Bootstrap</strong> - Signed seedlist.txt with raw IP multiaddrs. No DNS dependencies.</p>
-<p><strong>2. Self-Healing Peer Discovery</strong> - Uptime proof system with peer reputation scoring.</p>
-<p><strong>3. Genesis Vesting</strong> - 3.5M IRM locked with OP_CHECKLOCKTIMEVERIFY. Consensus-enforced.</p>
-<p><strong>4. Relay Rewards</strong> - Relay nodes earn 10% of transaction fees.</p>
-<p><strong>5. Sybil-Resistant P2P</strong> - Proof-of-work handshake challenge.</p>
-<p><strong>6. Anchor-File Consensus</strong> - Signed checkpoint headers protect against eclipse attacks.</p>
-<p><strong>7. Light Client First</strong> - SPV + NiPoPoW support from genesis.</p>
-<p><strong>8. On-Chain Metadata</strong> - Coinbase metadata field for document timestamping.</p>
 
+<h3>3.1 Zero-DNS Bootstrap</h3>
+<p><strong>Problem:</strong> DNS is centralized, censorable, and a single point of failure.</p>
+<p><strong>Solution:</strong> Signed seedlist.txt with raw IP multiaddrs (IPv4 + IPv6), signed anchors.json with checkpoint block headers, bootstrap script with no DNS queries.</p>
+<p class="checkmark">✅ Status: Implemented and operational</p>
+
+<h3>3.2 Self-Healing Peer Discovery</h3>
+<p><strong>Problem:</strong> Networks need stable, honest peers.</p>
+<p><strong>Solution:</strong> Uptime proof system (HMAC challenges), peer reputation scoring (0-1000 scale), automatic peer promotion/demotion.</p>
+<p class="checkmark">✅ Status: Implemented</p>
+
+<h3>3.3 Genesis Vesting with CLTV</h3>
+<p><strong>Problem:</strong> Founder allocations often lack transparency or enforcement.</p>
+<p><strong>Solution:</strong> 3.5M IRM locked in genesis block with OP_CHECKLOCKTIMEVERIFY. Unlock heights: 52,560 / 105,120 / 157,680 blocks. Consensus-enforced, irreversible.</p>
+<p class="checkmark">✅ Status: Implemented in genesis block</p>
+
+<h3>3.4 Per-Transaction Relay Rewards</h3>
+<p><strong>Problem:</strong> No incentive to run relay nodes.</p>
+<p><strong>Solution:</strong> Relay nodes earn 10% of transaction fees. Up to 3 relays per transaction (50%, 30%, 20% split). No supply inflation.</p>
+<p class="checkmark">✅ Status: Implemented</p>
+
+<h3>3.5 Sybil-Resistant P2P Handshake</h3>
+<p><strong>Problem:</strong> Botnets can saturate networks with fake peers.</p>
+<p><strong>Solution:</strong> Proof-of-work challenge during handshake, ephemeral key signing, timestamp validation.</p>
+<p class="checkmark">✅ Status: Implemented</p>
+
+<h3>3.6 Anchor-File Consensus</h3>
+<p><strong>Problem:</strong> Eclipse attacks can feed new nodes false chains.</p>
+<p><strong>Solution:</strong> Signed checkpoint headers (anchors.json), multiple trusted signers, verification against anchors.</p>
+<p class="checkmark">✅ Status: Implemented</p>
+
+<h3>3.7 Light Client First (SPV + NiPoPoW)</h3>
+<p><strong>Problem:</strong> Mobile devices can't store full blockchain.</p>
+<p><strong>Solution:</strong> SPV (Simplified Payment Verification), NiPoPoW (Non-Interactive Proofs of Proof-of-Work), header-only sync, merkle proof verification.</p>
+<p class="checkmark">✅ Status: Implemented</p>
+
+<h3>3.8 On-chain Metadata Commitments</h3>
+<p><strong>Problem:</strong> No native way to timestamp documents.</p>
+<p><strong>Solution:</strong> Coinbase metadata field, hash pointers to off-chain data, immutable timestamp proofs.</p>
+<p class="checkmark">✅ Status: Implemented</p>
+</div>
+
+<div class="wp-section">
 <h2>4. Economic Model</h2>
 <p><strong>Total Supply:</strong> 100,000,000 IRM (hard cap)</p>
 <p><strong>Genesis Vesting:</strong> 3,500,000 IRM (3.5%) - unlocks over 3 years</p>
-<p><strong>Mineable Supply:</strong> 96,500,000 IRM (96.5%) - fair distribution</p>
+<p><strong>Mineable Supply:</strong> 96,500,000 IRM (96.5%) - fair distribution through mining</p>
 <p><strong>Block Reward:</strong> 50 IRM (halves every 210,000 blocks)</p>
-<p><strong>Min Fee:</strong> 0.0001 IRM (10,000 satoshis)</p>
+<p><strong>Min Fee:</strong> 0.0001 IRM - ultra-low fees for micropayments</p>
 
-<h2>5. Security</h2>
-<p>✅ Consensus: Secure (SHA-256d PoW)</p>
-<p>✅ P2P Network: Secure (Sybil-resistant, anchor verification)</p>
-<p>✅ Transactions: Secure (UTXO model, validated)</p>
-<p>✅ Wallet: Secure (secp256k1, WIF format)</p>
+<h3>4.1 Fee Distribution</h3>
+<ul>
+<li>90% to block miner</li>
+<li>10% to relay nodes (up to 3 relays: 50%, 30%, 20%)</li>
+</ul>
+</div>
 
+<div class="wp-section">
+<h2>5. Security Analysis</h2>
+<div class="info-box">
+<p class="checkmark"><strong>✅ Consensus:</strong> Secure (SHA-256d PoW)</p>
+<p class="checkmark"><strong>✅ P2P Network:</strong> Secure (Sybil-resistant, anchor verification)</p>
+<p class="checkmark"><strong>✅ Transactions:</strong> Secure (UTXO model, validated)</p>
+<p class="checkmark"><strong>✅ Wallet:</strong> Secure (secp256k1, WIF format)</p>
+</div>
+</div>
+
+<div class="wp-section">
 <h2>6. Implementation Status</h2>
-<p>✅ Core blockchain - Complete</p>
-<p>✅ P2P networking - Complete</p>
-<p>✅ All 8 innovations - Complete</p>
-<p>✅ Mainnet launch - LIVE</p>
+<p class="checkmark">✅ Core blockchain - Complete</p>
+<p class="checkmark">✅ P2P networking - Complete</p>
+<p class="checkmark">✅ All 8 innovations - Complete</p>
+<p class="checkmark">✅ Mainnet launch - LIVE</p>
 
-<h2>Conclusion</h2>
+<h3>6.1 Public Services</h3>
+<ul>
+<li>Explorer: http://207.244.247.86:8082</li>
+<li>Wallet API: http://207.244.247.86:8080</li>
+<li>P2P Network: 207.244.247.86:38291</li>
+</ul>
+</div>
+
+<div class="wp-section">
+<h2>7. Conclusion</h2>
 <p>Irium represents a new generation of blockchain technology that addresses fundamental challenges in decentralization, security, and accessibility. With all 8 core innovations implemented and operational, Irium is ready to serve as a foundation for the next era of cryptocurrency.</p>
+<div class="info-box">
+<p><strong>Network Status:</strong> Mainnet LIVE and operational</p>
+<p><strong>Code Status:</strong> Production-ready, open source</p>
+<p><strong>Contact:</strong> info@iriumlabs.org</p>
+</div>
+</div>
 
-<p style="text-align: center; margin-top: 3rem; padding-top: 2rem; border-top: 1px solid rgba(99, 102, 241, 0.3);">
-<strong>Network Status:</strong> Mainnet LIVE<br>
-<strong>Code:</strong> Open source MIT License<br>
-<strong>Contact:</strong> info@iriumlabs.org
-</p>
+<div class="wp-section">
+<h2>Appendix A: Genesis Block</h2>
+<div class="code-block">
+Hash: cbdd1b9134adc846b3af5e2128f68214e1d8154912ff8da40685f47700000000
+Nonce: 1,110,943,221
+Timestamp: 1735689601 (October 16, 2025)
+Merkle Root: a0bd470d94bf7ef20539a0a6e2bd30629795f0bad5160d0495e07e85e4a5db04
+Difficulty: 0x1d00ffff (mainnet)
+
+Mining Stats:
+- Total hashes: 5,405,910,517
+- Mining time: 7 hours 4 minutes
+- Hashrate: 212,670 H/s average
+</div>
+</div>
+
+<div style="text-align: center; padding: 3rem 0; border-top: 2px solid rgba(99, 102, 241, 0.3); margin-top: 3rem;">
+<h2 style="font-family: 'Orbitron', sans-serif;">Irium Blockchain © 2025</h2>
+<p style="font-size: 1.2rem; margin-top: 1rem;">MIT License - Open Source</p>
+<p style="color: var(--primary); font-size: 1.5rem; margin-top: 1rem; font-weight: 700;">Built for true decentralization</p>
+</div>
 
 </div>
 
-<footer>
+<footer class="footer">
 <div class="container">
-<p>&copy; 2025 Irium Labs • Open Source MIT License</p>
+<div class="footer-bottom">
+<p>&copy; 2025 Irium Labs. Open Source - MIT License</p>
+<p><a href="index.html">Home</a> • <a href="https://github.com/iriumlabs/irium" target="_blank">GitHub</a></p>
+</div>
 </div>
 </footer>
-
 </body>
 </html>

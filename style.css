@@ -22,147 +22,13 @@ body {
     line-height: 1.6;
 }
 
-/* Main coin wrapper with thick glass effect */
-
-/* The actual logo - circular glass coin */
-
-/* Glass highlight - top glossy reflection */
-
-/* Metallic shine sweep */
-
-/* Sparkles container */
-
-/* Add more sparkles with JS alternative using CSS only */
-@property --sparkle-angle {
-    syntax: '<angle>';
-    inherits: false;
-    initial-value: 0deg;
-}
-
-/* Rotating sparkle ring */
-
-/* Enhanced animations */
-
-/* Pulsing glow effect */
-
-/* Edge rim effect - make it look like a thick coin */
-
-@keyframes rotateRim {
-    0% {
-        transform: rotate(0deg);
-    }
-    100% {
-        transform: rotate(360deg);
-    }
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    
-    
-    
-}
-
-/* Orbiting Sparkles */
-
-.sparkle-1 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 0s;
-}
-
-.sparkle-2 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 1.5s;
-}
-
-.sparkle-3 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 3s;
-}
-
-.sparkle-4 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 4.5s;
-}
-
-/* Add twinkling stars in background */
-.hero::before {
-    content: '';
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    background-image: 
-        radial-gradient(2px 2px at 20% 30%, white, transparent),
-        radial-gradient(2px 2px at 60% 70%, white, transparent),
-        radial-gradient(1px 1px at 50% 50%, white, transparent),
-        radial-gradient(1px 1px at 80% 10%, white, transparent),
-        radial-gradient(2px 2px at 90% 60%, white, transparent),
-        radial-gradient(1px 1px at 33% 80%, white, transparent),
-        radial-gradient(2px 2px at 15% 90%, white, transparent);
-    background-size: 400px 400px;
-    animation: twinkle 5s ease-in-out infinite;
-    opacity: 0.6;
-    pointer-events: none;
-}
-
-
-/* REAL 3D THICK COIN WITH ACTUAL DEPTH */
-
-.coin-container {
-    width: 220px;
-    height: 220px;
-    margin: 0 auto 2rem;
-    perspective: 2000px;
-    position: relative;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-/* Main coin with actual 3D layers */
-.hero-coin {
-    width: 200px;
-    height: 200px;
-    position: relative;
-    transform-style: preserve-3d;
-    animation: coinFloat 8s ease-in-out infinite, coinSpin 12s linear infinite;
-}
-
-/* Front face of coin */
-.hero-coin img {
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    object-fit: cover;
-    position: absolute;
-    z-index: 10;
-    transform: translateZ(20px);
-    box-shadow: 
-        inset 0 0 40px rgba(0, 0, 0, 0.3),
+.3),
         inset 0 0 60px rgba(99, 102, 241, 0.4),
         0 0 40px rgba(99, 102, 241, 0.6);
     border: 2px solid rgba(255, 255, 255, 0.2);
 }
 
-/* Create 40 layers for coin thickness (edge) */
-.hero-coin::before {
-    content: '';
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    background: linear-gradient(135deg,
-        #4f46e5 0%,
-        #6366f1 25%,
-        #818cf8 50%,
-        #6366f1 75%,
-        #4f46e5 100%);
-    box-shadow: 
-        0 0 0 1px rgba(99, 102, 241, 0.9),
+.9),
         0 0 0 2px rgba(88, 96, 235, 0.85),
         0 0 0 3px rgba(77, 86, 219, 0.8),
         0 0 0 4px rgba(66, 76, 203, 0.75),
@@ -172,30 +38,7 @@ body {
         0 0 0 8px rgba(22, 36, 139, 0.55),
         0 0 0 9px rgba(11, 26, 123, 0.5),
         0 0 0 10px rgba(0, 16, 107, 0.45),
-        /* Additional depth */
-        0 0 0 11px rgba(0, 12, 95, 0.4),
-        0 0 0 12px rgba(0, 8, 83, 0.35),
-        0 0 0 13px rgba(0, 4, 71, 0.3),
-        0 0 0 14px rgba(0, 0, 59, 0.25),
-        0 0 0 15px rgba(0, 0, 47, 0.2),
-        0 0 0 16px rgba(0, 0, 35, 0.15),
-        0 0 0 17px rgba(0, 0, 23, 0.1),
-        0 0 0 18px rgba(0, 0, 11, 0.05),
-        /* Back face shadow */
-        0 0 0 19px rgba(0, 0, 0, 0.8),
-        0 0 0 20px rgba(0, 0, 0, 0.7);
-    transform: translateZ(-20px);
-}
-
-/* Back face of coin (mirror image) */
-.hero-coin::after {
-    content: '';
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    background: 
-        radial-gradient(circle at 40% 40%, rgba(99, 102, 241, 0.9), rgba(67, 56, 202, 0.8)),
+        .9), rgba(67, 56, 202, 0.8)),
         url('logo.svg');
     background-size: cover;
     background-position: center;
@@ -208,33 +51,7 @@ body {
     filter: brightness(0.8);
 }
 
-/* Dynamic lighting that moves with rotation */
-.coin-container::before {
-    content: '';
-    position: absolute;
-    width: 120%;
-    height: 120%;
-    border-radius: 50%;
-    background: radial-gradient(ellipse at var(--light-x, 30%) var(--light-y, 30%),
-        rgba(255, 255, 255, 0.6) 0%,
-        rgba(255, 255, 255, 0.3) 20%,
-        transparent 60%);
-    transform: translateZ(40px);
-    pointer-events: none;
-    z-index: 20;
-    animation: movingLight 12s linear infinite;
-}
-
-/* Realistic shine that follows rotation */
-.coin-container::after {
-    content: '';
-    position: absolute;
-    width: 250%;
-    height: 250%;
-    background: linear-gradient(120deg,
-        transparent 0%,
-        transparent 45%,
-        rgba(255, 255, 255, 0.2) 48%,
+.2) 48%,
         rgba(255, 255, 255, 0.8) 50%,
         rgba(255, 255, 255, 0.2) 52%,
         transparent 55%,
@@ -245,135 +62,13 @@ body {
     transform-origin: center;
 }
 
-/* Edge highlights */
-.hero-coin {
-    filter: drop-shadow(0 25px 50px rgba(99, 102, 241, 0.8))
-            drop-shadow(0 0 60px rgba(14, 165, 233, 0.5));
-}
-
-/* Animations */
-@keyframes coinFloat {
-    0%, 100% {
-        transform: translateY(0);
-    }
-    50% {
-        transform: translateY(-25px);
-    }
-}
-
-@keyframes coinSpin {
-    0% {
-        transform: rotateY(0deg) rotateX(15deg);
-    }
-    100% {
-        transform: rotateY(360deg) rotateX(15deg);
-    }
-}
-
-@keyframes movingLight {
-    0% {
-        --light-x: 30%;
-        --light-y: 30%;
-    }
-    25% {
-        --light-x: 70%;
-        --light-y: 30%;
-    }
-    50% {
-        --light-x: 70%;
-        --light-y: 70%;
-    }
-    75% {
-        --light-x: 30%;
-        --light-y: 70%;
-    }
-    100% {
-        --light-x: 30%;
-        --light-y: 30%;
-    }
-}
-
-@keyframes realisticShine {
-    0% {
-        transform: translateX(-100%) rotate(45deg);
-    }
-    100% {
-        transform: translateX(100%) rotate(45deg);
-    }
-}
-
-/* Orbiting Sparkles - adjusted for real 3D coin */
-.sparkle-orbit {
-    position: absolute;
-    font-size: 1.5rem;
+.5rem;
     pointer-events: none;
     z-index: 25;
     animation: orbit 8s linear infinite;
     filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.8));
 }
 
-.sparkle-1 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 0s;
-}
-
-.sparkle-2 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 2s;
-}
-
-.sparkle-3 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 4s;
-}
-
-.sparkle-4 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 6s;
-}
-
-@keyframes orbit {
-    0% {
-        transform: translate(-50%, -50%) rotate(0deg) translateX(130px) scale(0.5);
-        opacity: 0;
-    }
-    10% {
-        opacity: 1;
-        transform: translate(-50%, -50%) rotate(36deg) translateX(130px) scale(1);
-    }
-    90% {
-        opacity: 1;
-        transform: translate(-50%, -50%) rotate(324deg) translateX(130px) scale(1);
-    }
-    100% {
-        transform: translate(-50%, -50%) rotate(360deg) translateX(130px) scale(0.5);
-        opacity: 0;
-    }
-}
-
-/* Pulsing glow */
-@keyframes pulseGlow {
-    0%, 100% {
-        filter: drop-shadow(0 25px 50px rgba(99, 102, 241, 0.8))
-                drop-shadow(0 0 60px rgba(14, 165, 233, 0.5));
-    }
-    50% {
-        filter: drop-shadow(0 30px 60px rgba(99, 102, 241, 1))
-                drop-shadow(0 0 80px rgba(14, 165, 233, 0.7));
-    }
-}
-
-.hero-coin {
-    animation: coinFloat 8s ease-in-out infinite, 
-               coinSpin 12s linear infinite,
-               pulseGlow 4s ease-in-out infinite;
-}
-
-/* Twinkling background stars */
 .hero::before {
     content: '';
     position: absolute;
@@ -401,14 +96,301 @@ body {
 
 /* Responsive */
 @media (max-width: 768px) {
-    .coin-container {
-        width: 170px;
-        height: 170px;
+    
+    
+    
+}
+
+
+/* ===== ADVANCED 3D COIN WITH GLASS + METALLIC FUSION ===== */
+
+.coin-3d-wrapper {
+    width: 250px;
+    height: 250px;
+    margin: 0 auto 2rem;
+    perspective: 2000px;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Main coin container */
+.coin-3d {
+    width: 220px;
+    height: 220px;
+    position: relative;
+    transform-style: preserve-3d;
+    animation: coinRotate 8s linear infinite, coinFloat 6s ease-in-out infinite;
+}
+
+/* Front face of coin */
+.coin-front {
+    transform: translateZ(25px);
+}
+
+/* Back face of coin */
+.coin-back {
+    transform: translateZ(-25px) rotateY(180deg);
+}
+
+/* Coin faces (front & back) */
+.coin-face {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: 
+        radial-gradient(circle at 30% 30%, rgba(168, 85, 247, 0.4), transparent 60%),
+        radial-gradient(circle at 70% 70%, rgba(14, 165, 233, 0.4), transparent 60%),
+        linear-gradient(135deg, 
+            rgba(79, 70, 229, 0.9) 0%,
+            rgba(99, 102, 241, 0.95) 25%,
+            rgba(129, 140, 248, 1) 50%,
+            rgba(99, 102, 241, 0.95) 75%,
+            rgba(79, 70, 229, 0.9) 100%);
+    box-shadow: 
+        inset 0 0 60px rgba(0, 0, 0, 0.4),
+        inset 0 0 80px rgba(99, 102, 241, 0.6),
+        0 0 40px rgba(99, 102, 241, 0.8),
+        0 0 80px rgba(14, 165, 233, 0.4);
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    overflow: hidden;
+}
+
+/* Inner glow effect */
+.coin-inner-glow {
+    position: absolute;
+    inset: 15%;
+    border-radius: 50%;
+    background: radial-gradient(circle at center,
+        rgba(168, 85, 247, 0.6) 0%,
+        rgba(99, 102, 241, 0.4) 30%,
+        transparent 70%);
+    animation: pulseGlow 3s ease-in-out infinite;
+    filter: blur(20px);
+}
+
+/* Embossed IRM text in center */
+.embossed-text {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    font-family: 'Orbitron', sans-serif;
+    font-size: 3rem;
+    font-weight: 900;
+    color: rgba(255, 255, 255, 0.95);
+    text-shadow: 
+        0 2px 0 rgba(0, 0, 0, 0.3),
+        0 4px 0 rgba(0, 0, 0, 0.2),
+        0 6px 0 rgba(0, 0, 0, 0.1),
+        0 0 20px rgba(99, 102, 241, 1),
+        0 0 40px rgba(168, 85, 247, 0.8),
+        inset 0 -2px 5px rgba(0, 0, 0, 0.5);
+    letter-spacing: 0.1em;
+    z-index: 10;
+    filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.5));
+}
+
+/* Decorative ring around edge */
+.coin-ring {
+    position: absolute;
+    inset: 8px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.4);
+    box-shadow: 
+        inset 0 0 20px rgba(255, 255, 255, 0.3),
+        0 0 20px rgba(99, 102, 241, 0.5);
+}
+
+/* Logo image (subtle background) */
+.coin-logo {
+    position: absolute;
+    width: 80%;
+    height: 80%;
+    top: 10%;
+    left: 10%;
+    opacity: 0.15;
+    border-radius: 50%;
+    filter: blur(2px);
+}
+
+/* THICK EDGE with 50 layers - metallic gradient */
+.coin-edge {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: linear-gradient(to right,
+        #2d1b69 0%,
+        #3730a3 5%,
+        #4338ca 10%,
+        #4f46e5 15%,
+        #6366f1 20%,
+        #818cf8 25%,
+        #a5b4fc 30%,
+        #c7d2fe 35%,
+        #a5b4fc 40%,
+        #818cf8 45%,
+        #6366f1 50%,
+        #4f46e5 55%,
+        #4338ca 60%,
+        #3730a3 65%,
+        #312e81 70%,
+        #2d1b69 75%,
+        #1e1b4b 80%,
+        #1e3a8a 85%,
+        #1e40af 90%,
+        #2d1b69 95%,
+        #1e1b4b 100%);
+    box-shadow: 
+        0 0 0 1px rgba(79, 70, 229, 1),
+        0 0 0 2px rgba(75, 66, 225, 0.95),
+        0 0 0 3px rgba(71, 62, 221, 0.9),
+        0 0 0 4px rgba(67, 58, 217, 0.85),
+        0 0 0 5px rgba(63, 54, 213, 0.8),
+        0 0 0 6px rgba(59, 50, 209, 0.75),
+        0 0 0 7px rgba(55, 46, 205, 0.7),
+        0 0 0 8px rgba(51, 42, 201, 0.65),
+        0 0 0 9px rgba(47, 38, 197, 0.6),
+        0 0 0 10px rgba(43, 34, 193, 0.55),
+        0 0 0 11px rgba(39, 30, 189, 0.5),
+        0 0 0 12px rgba(35, 26, 185, 0.45),
+        0 0 0 13px rgba(31, 22, 181, 0.4),
+        0 0 0 14px rgba(27, 18, 177, 0.35),
+        0 0 0 15px rgba(23, 14, 173, 0.3),
+        0 0 0 16px rgba(19, 10, 169, 0.25),
+        0 0 0 17px rgba(15, 6, 165, 0.2),
+        0 0 0 18px rgba(11, 2, 161, 0.15),
+        0 0 0 19px rgba(7, 0, 157, 0.1),
+        0 0 0 20px rgba(3, 0, 153, 0.05),
+        0 0 0 21px rgba(0, 0, 100, 0.8),
+        0 0 0 22px rgba(0, 0, 90, 0.7),
+        0 0 0 23px rgba(0, 0, 80, 0.6),
+        0 0 0 24px rgba(0, 0, 70, 0.5),
+        0 0 0 25px rgba(0, 0, 60, 0.4);
+    transform: translateZ(0);
+    animation: edgeShimmer 4s linear infinite;
+}
+
+/* Glass overlay for transparent glass effect */
+.glass-overlay {
+    position: absolute;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: 
+        radial-gradient(ellipse at 25% 25%, rgba(255, 255, 255, 0.5) 0%, transparent 40%),
+        radial-gradient(ellipse at 75% 75%, rgba(255, 255, 255, 0.2) 0%, transparent 50%);
+    transform: translateZ(30px);
+    pointer-events: none;
+    backdrop-filter: blur(1px);
+    border: 2px solid rgba(255, 255, 255, 0.1);
+}
+
+/* Dynamic light reflection */
+.light-reflection {
+    position: absolute;
+    width: 300%;
+    height: 300%;
+    top: -100%;
+    left: -100%;
+    background: linear-gradient(135deg,
+        transparent 0%,
+        transparent 40%,
+        rgba(255, 255, 255, 0.3) 45%,
+        rgba(255, 255, 255, 0.8) 50%,
+        rgba(255, 255, 255, 0.3) 55%,
+        transparent 60%,
+        transparent 100%);
+    animation: lightSweep 8s linear infinite;
+    pointer-events: none;
+    transform: translateZ(35px);
+}
+
+/* Orbiting sparkles */
+.sparkle-orbit {
+    position: absolute;
+    font-size: 1.8rem;
+    pointer-events: none;
+    z-index: 30;
+    animation: orbit 10s linear infinite;
+    filter: drop-shadow(0 0 15px rgba(255, 255, 255, 1));
+}
+
+.sparkle-1 { top: 50%; left: 50%; animation-delay: 0s; }
+.sparkle-2 { top: 50%; left: 50%; animation-delay: 2.5s; }
+.sparkle-3 { top: 50%; left: 50%; animation-delay: 5s; }
+.sparkle-4 { top: 50%; left: 50%; animation-delay: 7.5s; }
+
+/* ===== ANIMATIONS ===== */
+
+@keyframes coinRotate {
+    0% { transform: rotateY(0deg) rotateX(10deg); }
+    100% { transform: rotateY(360deg) rotateX(10deg); }
+}
+
+@keyframes coinFloat {
+    0%, 100% { 
+        transform: translateY(0); 
+        filter: drop-shadow(0 30px 60px rgba(99, 102, 241, 0.9));
+    }
+    50% { 
+        transform: translateY(-30px); 
+        filter: drop-shadow(0 40px 80px rgba(99, 102, 241, 1));
+    }
+}
+
+@keyframes pulseGlow {
+    0%, 100% { opacity: 0.6; transform: scale(1); }
+    50% { opacity: 1; transform: scale(1.1); }
+}
+
+@keyframes edgeShimmer {
+    0% { filter: brightness(1) hue-rotate(0deg); }
+    50% { filter: brightness(1.2) hue-rotate(10deg); }
+    100% { filter: brightness(1) hue-rotate(0deg); }
+}
+
+@keyframes lightSweep {
+    0% { transform: translateZ(35px) translate(-100%, -100%) rotate(45deg); }
+    100% { transform: translateZ(35px) translate(100%, 100%) rotate(45deg); }
+}
+
+@keyframes orbit {
+    0% {
+        transform: translate(-50%, -50%) rotate(0deg) translateX(150px) scale(0.3);
+        opacity: 0;
+    }
+    10% {
+        opacity: 1;
+        transform: translate(-50%, -50%) rotate(36deg) translateX(150px) scale(1);
+    }
+    90% {
+        opacity: 1;
+        transform: translate(-50%, -50%) rotate(324deg) translateX(150px) scale(1);
+    }
+    100% {
+        transform: translate(-50%, -50%) rotate(360deg) translateX(150px) scale(0.3);
+        opacity: 0;
+    }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .coin-3d-wrapper {
+        width: 200px;
+        height: 200px;
     }
     
-    .hero-coin {
-        width: 150px;
-        height: 150px;
+    .coin-3d {
+        width: 180px;
+        height: 180px;
+    }
+    
+    .embossed-text {
+        font-size: 2.2rem;
     }
 }
 

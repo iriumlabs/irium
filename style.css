@@ -774,3 +774,52 @@ body {
     height: 100%;
     border-radius: 50%;
 }
+
+/* Support section animations */
+#support .section-title {
+    animation: slideUp 0.8s ease-out 0.1s forwards;
+    opacity: 0;
+}
+
+.support-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 3rem;
+    margin-top: 3rem;
+}
+
+.support-grid .support-card:nth-child(1) {
+    animation: slideUp 0.8s ease-out 0.3s forwards;
+    opacity: 0;
+}
+
+.support-grid .support-card:nth-child(2) {
+    animation: slideUp 0.8s ease-out 0.5s forwards;
+    opacity: 0;
+}
+
+.contact-info {
+    animation: fadeIn 1s ease-out 0.7s forwards;
+    opacity: 0;
+}
+
+/* Footer animations */
+.footer-content {
+    animation: fadeIn 1s ease-out 0.2s forwards;
+    opacity: 0;
+}
+
+.footer-bottom {
+    animation: fadeIn 1s ease-out 0.4s forwards;
+    opacity: 0;
+}
+
+/* Footer link icons alignment */
+.footer-links a {
+    display: flex;
+    align-items: center;
+}
+
+.footer-links a svg {
+    flex-shrink: 0;
+}

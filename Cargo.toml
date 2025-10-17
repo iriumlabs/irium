@@ -1,3 +1,0 @@
-[workspace]
-members = ["rust/iriumd"]
-resolver = "2"

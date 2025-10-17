@@ -1,2 +1,0 @@
-# IPv4 and IPv6 multiaddresses for bootstrap
-/ipv4/207.244.247.86/tcp/38291

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Rajdhani:wght@400;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Inter:wght@400;600;700&display=swap');
 
 * {
     margin: 0;
@@ -11,536 +11,446 @@
     --secondary: #0ea5e9;
     --dark: #0f0f23;
     --darker: #05050f;
-    --accent: #a855f7;
 }
 
 body {
-    font-family: 'Rajdhani', sans-serif;
+    font-family: 'Inter', sans-serif;
     background: var(--dark);
     color: #ffffff;
-    overflow-x: hidden;
     line-height: 1.6;
+    overflow-x: hidden;
 }
 
-/* Main coin wrapper with thick glass effect */
-
-/* The actual logo - circular glass coin */
-
-/* Glass highlight - top glossy reflection */
-
-/* Metallic shine sweep */
-
-/* Sparkles container */
-
-/* Add more sparkles with JS alternative using CSS only */
-@property --sparkle-angle {
-    syntax: '<angle>';
-    inherits: false;
-    initial-value: 0deg;
-}
-
-/* Rotating sparkle ring */
-
-/* Enhanced animations */
-
-/* Pulsing glow effect */
-
-/* Edge rim effect - make it look like a thick coin */
-
-@keyframes rotateRim {
-    0% {
-        transform: rotate(0deg);
-    }
-    100% {
-        transform: rotate(360deg);
-    }
-}
-
-/* Responsive */
-@media (max-width: 768px) {
-    
-    
-    
-}
-
-/* Orbiting Sparkles */
-
-.sparkle-1 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 0s;
-}
-
-.sparkle-2 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 1.5s;
-}
-
-.sparkle-3 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 3s;
-}
-
-.sparkle-4 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 4.5s;
-}
-
-/* Add twinkling stars in background */
-.hero::before {
-    content: '';
-    position: absolute;
+.stars {
+    position: fixed;
+    top: 0;
+    left: 0;
     width: 100%;
     height: 100%;
-    background-image: 
-        radial-gradient(2px 2px at 20% 30%, white, transparent),
-        radial-gradient(2px 2px at 60% 70%, white, transparent),
-        radial-gradient(1px 1px at 50% 50%, white, transparent),
-        radial-gradient(1px 1px at 80% 10%, white, transparent),
-        radial-gradient(2px 2px at 90% 60%, white, transparent),
-        radial-gradient(1px 1px at 33% 80%, white, transparent),
-        radial-gradient(2px 2px at 15% 90%, white, transparent);
-    background-size: 400px 400px;
-    animation: twinkle 5s ease-in-out infinite;
-    opacity: 0.6;
+    background: radial-gradient(2px 2px at 20px 30px, white, transparent),
+                radial-gradient(2px 2px at 60px 70px, white, transparent),
+                radial-gradient(1px 1px at 50px 50px, white, transparent);
+    background-size: 200px 200px;
+    animation: stars 20s linear infinite;
+    opacity: 0.3;
     pointer-events: none;
 }
 
+@keyframes stars {
+    from { transform: translateY(0); }
+    to { transform: translateY(-200px); }
+}
 
-/* REAL 3D THICK COIN WITH ACTUAL DEPTH */
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 2rem;
+}
 
-.coin-container {
-    width: 220px;
-    height: 220px;
-    margin: 0 auto 2rem;
-    perspective: 2000px;
-    position: relative;
+/* Nav */
+.nav {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    background: rgba(15, 15, 35, 0.95);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid rgba(99, 102, 241, 0.3);
+    padding: 1rem 0;
+    z-index: 1000;
+}
+
+.nav .container {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.5rem;
+    font-weight: 900;
+    color: var(--primary);
+}
+
+.nav-logo {
+    width: 35px;
+    height: 35px;
+    border-radius: 50%;
+}
+
+.nav-socials {
+    display: flex;
+    gap: 1.5rem;
+}
+
+.nav-socials a {
+    color: #fff;
+    text-decoration: none;
+    font-weight: 600;
+    transition: color 0.3s;
+}
+
+.nav-socials a:hover {
+    color: var(--primary);
+}
+
+/* Hero */
+.hero {
+    min-height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
+    text-align: center;
+    padding-top: 80px;
 }
 
-/* Main coin with actual 3D layers */
+.coin-wrapper {
+    width: 180px;
+    height: 180px;
+    margin: 0 auto 2rem;
+    border-radius: 50%;
+    overflow: hidden;
+    box-shadow: 0 0 40px rgba(99, 102, 241, 0.6);
+}
+
 .hero-coin {
-    width: 200px;
-    height: 200px;
-    position: relative;
-    transform-style: preserve-3d;
-    animation: coinFloat 8s ease-in-out infinite, coinSpin 12s linear infinite;
-}
-
-/* Front face of coin */
-.hero-coin img {
     width: 100%;
     height: 100%;
     border-radius: 50%;
-    object-fit: cover;
-    position: absolute;
-    z-index: 10;
-    transform: translateZ(20px);
-    box-shadow: 
-        inset 0 0 40px rgba(0, 0, 0, 0.3),
-        inset 0 0 60px rgba(99, 102, 241, 0.4),
-        0 0 40px rgba(99, 102, 241, 0.6);
-    border: 2px solid rgba(255, 255, 255, 0.2);
+    animation: gentleFloat 4s ease-in-out infinite;
 }
 
-/* Create 40 layers for coin thickness (edge) */
-.hero-coin::before {
-    content: '';
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    background: linear-gradient(135deg,
-        #4f46e5 0%,
-        #6366f1 25%,
-        #818cf8 50%,
-        #6366f1 75%,
-        #4f46e5 100%);
-    box-shadow: 
-        0 0 0 1px rgba(99, 102, 241, 0.9),
-        0 0 0 2px rgba(88, 96, 235, 0.85),
-        0 0 0 3px rgba(77, 86, 219, 0.8),
-        0 0 0 4px rgba(66, 76, 203, 0.75),
-        0 0 0 5px rgba(55, 66, 187, 0.7),
-        0 0 0 6px rgba(44, 56, 171, 0.65),
-        0 0 0 7px rgba(33, 46, 155, 0.6),
-        0 0 0 8px rgba(22, 36, 139, 0.55),
-        0 0 0 9px rgba(11, 26, 123, 0.5),
-        0 0 0 10px rgba(0, 16, 107, 0.45),
-        /* Additional depth */
-        0 0 0 11px rgba(0, 12, 95, 0.4),
-        0 0 0 12px rgba(0, 8, 83, 0.35),
-        0 0 0 13px rgba(0, 4, 71, 0.3),
-        0 0 0 14px rgba(0, 0, 59, 0.25),
-        0 0 0 15px rgba(0, 0, 47, 0.2),
-        0 0 0 16px rgba(0, 0, 35, 0.15),
-        0 0 0 17px rgba(0, 0, 23, 0.1),
-        0 0 0 18px rgba(0, 0, 11, 0.05),
-        /* Back face shadow */
-        0 0 0 19px rgba(0, 0, 0, 0.8),
-        0 0 0 20px rgba(0, 0, 0, 0.7);
-    transform: translateZ(-20px);
+@keyframes gentleFloat {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-15px); }
 }
 
-/* Back face of coin (mirror image) */
-.hero-coin::after {
-    content: '';
-    position: absolute;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    background: 
-        radial-gradient(circle at 40% 40%, rgba(99, 102, 241, 0.9), rgba(67, 56, 202, 0.8)),
-        url('logo.svg');
-    background-size: cover;
-    background-position: center;
-    transform: translateZ(-20px) rotateY(180deg);
-    box-shadow: 
-        inset 0 0 40px rgba(0, 0, 0, 0.5),
-        inset 0 0 60px rgba(99, 102, 241, 0.3),
-        0 0 30px rgba(99, 102, 241, 0.4);
-    border: 2px solid rgba(255, 255, 255, 0.15);
-    filter: brightness(0.8);
+.hero h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 5rem;
+    font-weight: 900;
+    margin-bottom: 1rem;
+    color: #fff;
 }
 
-/* Dynamic lighting that moves with rotation */
-.coin-container::before {
-    content: '';
-    position: absolute;
-    width: 120%;
-    height: 120%;
-    border-radius: 50%;
-    background: radial-gradient(ellipse at var(--light-x, 30%) var(--light-y, 30%),
-        rgba(255, 255, 255, 0.6) 0%,
-        rgba(255, 255, 255, 0.3) 20%,
-        transparent 60%);
-    transform: translateZ(40px);
-    pointer-events: none;
-    z-index: 20;
-    animation: movingLight 12s linear infinite;
+.tagline {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: var(--secondary);
+    margin-bottom: 1rem;
 }
 
-/* Realistic shine that follows rotation */
-.coin-container::after {
-    content: '';
-    position: absolute;
-    width: 250%;
-    height: 250%;
-    background: linear-gradient(120deg,
-        transparent 0%,
-        transparent 45%,
-        rgba(255, 255, 255, 0.2) 48%,
-        rgba(255, 255, 255, 0.8) 50%,
-        rgba(255, 255, 255, 0.2) 52%,
-        transparent 55%,
-        transparent 100%);
-    animation: realisticShine 12s linear infinite;
-    pointer-events: none;
-    z-index: 15;
-    transform-origin: center;
+.subtitle {
+    font-size: 1.1rem;
+    color: #a0a0a0;
+    margin-bottom: 2rem;
 }
 
-/* Edge highlights */
-.hero-coin {
-    filter: drop-shadow(0 25px 50px rgba(99, 102, 241, 0.8))
-            drop-shadow(0 0 60px rgba(14, 165, 233, 0.5));
+.hero-stats {
+    display: flex;
+    justify-content: center;
+    gap: 3rem;
+    margin: 2rem 0;
 }
 
-/* Animations */
-@keyframes coinFloat {
-    0%, 100% {
-        transform: translateY(0);
-    }
-    50% {
-        transform: translateY(-25px);
-    }
+.hero-stats div {
+    display: flex;
+    flex-direction: column;
 }
 
-@keyframes coinSpin {
-    0% {
-        transform: rotateY(0deg) rotateX(15deg);
-    }
-    100% {
-        transform: rotateY(360deg) rotateX(15deg);
-    }
+.hero-stats strong {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2rem;
+    color: var(--primary);
 }
 
-@keyframes movingLight {
-    0% {
-        --light-x: 30%;
-        --light-y: 30%;
-    }
-    25% {
-        --light-x: 70%;
-        --light-y: 30%;
-    }
-    50% {
-        --light-x: 70%;
-        --light-y: 70%;
-    }
-    75% {
-        --light-x: 30%;
-        --light-y: 70%;
-    }
-    100% {
-        --light-x: 30%;
-        --light-y: 30%;
-    }
+.hero-stats span {
+    font-size: 0.85rem;
+    color: #808080;
 }
 
-@keyframes realisticShine {
-    0% {
-        transform: translateX(-100%) rotate(45deg);
-    }
-    100% {
-        transform: translateX(100%) rotate(45deg);
-    }
+.hero-buttons {
+    display: flex;
+    gap: 1rem;
+    justify-content: center;
 }
 
-/* Orbiting Sparkles - adjusted for real 3D coin */
-.sparkle-orbit {
-    position: absolute;
+/* Buttons */
+.btn {
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 700;
+    transition: all 0.3s;
+    display: inline-block;
+}
+
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    color: #fff;
+}
+
+.btn-primary:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 10px 30px rgba(99, 102, 241, 0.5);
+}
+
+.btn-secondary {
+    background: transparent;
+    color: #fff;
+    border: 2px solid var(--primary);
+}
+
+.btn-secondary:hover {
+    background: rgba(99, 102, 241, 0.1);
+}
+
+/* Sections */
+.section {
+    padding: 5rem 0;
+}
+
+.section.dark {
+    background: rgba(5, 5, 15, 0.5);
+}
+
+.section h2 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2.5rem;
+    text-align: center;
+    margin-bottom: 2rem;
+    color: var(--primary);
+}
+
+.intro {
+    max-width: 800px;
+    margin: 0 auto 1rem;
+    text-align: center;
+    font-size: 1.1rem;
+    color: #d0d0d0;
+}
+
+/* Features */
+.features-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 2rem;
+    margin-top: 3rem;
+}
+
+.feature {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 12px;
+    padding: 2rem;
+    transition: all 0.3s;
+}
+
+.feature:hover {
+    transform: translateY(-5px);
+    border-color: var(--primary);
+    box-shadow: 0 10px 30px rgba(99, 102, 241, 0.3);
+}
+
+.icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.feature h3 {
+    color: var(--secondary);
+    margin-bottom: 0.5rem;
+}
+
+/* Specs */
+.specs-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1.5rem;
+    margin-top: 2rem;
+}
+
+.spec {
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 8px;
+    padding: 1.5rem;
+    text-align: center;
+    transition: all 0.3s;
+}
+
+.spec:hover {
+    transform: scale(1.05);
+    border-color: var(--primary);
+}
+
+.spec strong {
+    display: block;
+    font-size: 0.85rem;
+    color: #808080;
+    margin-bottom: 0.5rem;
+}
+
+.spec span {
+    font-family: 'Orbitron', sans-serif;
     font-size: 1.5rem;
-    pointer-events: none;
-    z-index: 25;
-    animation: orbit 8s linear infinite;
-    filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.8));
+    color: var(--primary);
 }
 
-.sparkle-1 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 0s;
+/* Download */
+.download-box {
+    background: rgba(99, 102, 241, 0.1);
+    border: 2px solid rgba(99, 102, 241, 0.3);
+    border-radius: 12px;
+    padding: 2rem;
+    text-align: center;
+    margin-bottom: 3rem;
 }
 
-.sparkle-2 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 2s;
+.steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 2rem;
 }
 
-.sparkle-3 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 4s;
+.step {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 12px;
+    padding: 2rem;
+    position: relative;
 }
 
-.sparkle-4 {
-    top: 50%;
-    left: 50%;
-    animation-delay: 6s;
-}
-
-@keyframes orbit {
-    0% {
-        transform: translate(-50%, -50%) rotate(0deg) translateX(130px) scale(0.5);
-        opacity: 0;
-    }
-    10% {
-        opacity: 1;
-        transform: translate(-50%, -50%) rotate(36deg) translateX(130px) scale(1);
-    }
-    90% {
-        opacity: 1;
-        transform: translate(-50%, -50%) rotate(324deg) translateX(130px) scale(1);
-    }
-    100% {
-        transform: translate(-50%, -50%) rotate(360deg) translateX(130px) scale(0.5);
-        opacity: 0;
-    }
-}
-
-/* Pulsing glow */
-@keyframes pulseGlow {
-    0%, 100% {
-        filter: drop-shadow(0 25px 50px rgba(99, 102, 241, 0.8))
-                drop-shadow(0 0 60px rgba(14, 165, 233, 0.5));
-    }
-    50% {
-        filter: drop-shadow(0 30px 60px rgba(99, 102, 241, 1))
-                drop-shadow(0 0 80px rgba(14, 165, 233, 0.7));
-    }
-}
-
-.hero-coin {
-    animation: coinFloat 8s ease-in-out infinite, 
-               coinSpin 12s linear infinite,
-               pulseGlow 4s ease-in-out infinite;
-}
-
-/* Twinkling background stars */
-.hero::before {
-    content: '';
+.num {
     position: absolute;
-    width: 100%;
-    height: 100%;
-    background-image: 
-        radial-gradient(2px 2px at 20% 30%, white, transparent),
-        radial-gradient(2px 2px at 60% 70%, white, transparent),
-        radial-gradient(1px 1px at 50% 50%, white, transparent),
-        radial-gradient(1px 1px at 80% 10%, white, transparent),
-        radial-gradient(2px 2px at 90% 60%, white, transparent),
-        radial-gradient(1px 1px at 33% 80%, white, transparent),
-        radial-gradient(2px 2px at 15% 90%, white, transparent);
-    background-size: 500px 500px;
-    animation: twinkle 6s ease-in-out infinite;
-    opacity: 0.5;
-    pointer-events: none;
-    z-index: 0;
+    top: -15px;
+    left: 20px;
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 900;
+    font-size: 1.5rem;
 }
 
-@keyframes twinkle {
-    0%, 100% { opacity: 0.3; }
-    50% { opacity: 0.7; }
+.step h4 {
+    color: var(--secondary);
+    margin: 1rem 0;
+}
+
+.step code {
+    display: block;
+    background: rgba(0, 0, 0, 0.5);
+    padding: 1rem;
+    border-radius: 8px;
+    color: var(--secondary);
+    font-size: 0.9rem;
+    overflow-x: auto;
+}
+
+/* Wallet */
+.wallet-box {
+    text-align: center;
+    padding: 3rem;
+    background: rgba(99, 102, 241, 0.05);
+    border: 2px solid rgba(99, 102, 241, 0.3);
+    border-radius: 12px;
+}
+
+.badge {
+    display: inline-block;
+    padding: 0.8rem 2rem;
+    background: linear-gradient(135deg, var(--primary), var(--secondary));
+    border-radius: 50px;
+    font-weight: 900;
+    margin-top: 1rem;
+}
+
+/* Support */
+.support-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 2rem;
+    margin-top: 2rem;
+}
+
+.support-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 12px;
+    padding: 2rem;
+}
+
+.donate {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 1rem;
+    border-radius: 8px;
+    margin: 1rem 0;
+}
+
+.donate code {
+    display: block;
+    color: var(--secondary);
+    font-size: 0.9rem;
+    margin: 0.5rem 0;
+    word-break: break-all;
+}
+
+.success {
+    color: #10b981;
+    font-size: 0.9rem;
+}
+
+.note {
+    color: #808080;
+    font-size: 0.9rem;
+}
+
+.support-card ul {
+    list-style: none;
+    padding: 0;
+}
+
+.support-card li {
+    padding: 0.3rem 0;
+}
+
+/* Footer */
+footer {
+    background: rgba(5, 5, 15, 0.8);
+    border-top: 1px solid rgba(99, 102, 241, 0.3);
+    padding: 2rem 0;
+    text-align: center;
+}
+
+footer a {
+    color: var(--secondary);
+    text-decoration: none;
+}
+
+footer a:hover {
+    text-decoration: underline;
 }
 
 /* Responsive */
 @media (max-width: 768px) {
-    .coin-container {
-        width: 170px;
-        height: 170px;
+    .hero h1 {
+        font-size: 3rem;
     }
     
-    .hero-coin {
-        width: 150px;
-        height: 150px;
+    .hero-stats {
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    .support-grid {
+        grid-template-columns: 1fr;
     }
 }
-
-
-/* Pure CSS 3D Glossy Crypto Coin */
-.coin-container {
-    width: 200px;
-    height: 200px;
-    margin: 0 auto 2rem;
-    perspective: 1500px;
-    position: relative;
-}
-
-.hero-coin {
-    width: 200px;
-    height: 200px;
-    position: relative;
-    transform-style: preserve-3d;
-    animation: coinFloat 6s ease-in-out infinite, coinRotate 20s linear infinite;
-    filter: drop-shadow(0 25px 50px rgba(99, 102, 241, 0.8))
-            drop-shadow(0 0 40px rgba(14, 165, 233, 0.6))
-            drop-shadow(0 0 60px rgba(168, 85, 247, 0.4));
-}
-
-/* Create glossy effect with pseudo-elements */
-.hero-coin::before {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    width: 100%;
-    height: 100%;
-    background: radial-gradient(circle at 30% 30%, 
-        rgba(255, 255, 255, 0.8) 0%,
-        rgba(255, 255, 255, 0.3) 20%,
-        transparent 60%);
-    border-radius: 50%;
-    transform: translate(-50%, -50%);
-    pointer-events: none;
-    z-index: 2;
-}
-
-/* Add metallic shine */
-.hero-coin::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -50%;
-    width: 200%;
-    height: 100%;
-    background: linear-gradient(90deg,
-        transparent 0%,
-        rgba(255, 255, 255, 0.3) 50%,
-        transparent 100%);
-    animation: shine 3s infinite;
-    pointer-events: none;
-    z-index: 3;
-}
-
-@keyframes coinFloat {
-    0%, 100% {
-        transform: translateY(0) translateZ(0) rotateX(15deg);
-    }
-    50% {
-        transform: translateY(-30px) translateZ(30px) rotateX(-10deg);
-    }
-}
-
-@keyframes coinRotate {
-    0% {
-        transform: rotateY(0deg) rotateX(15deg);
-    }
-    100% {
-        transform: rotateY(360deg) rotateX(15deg);
-    }
-}
-
-@keyframes shine {
-    0% {
-        left: -50%;
-    }
-    100% {
-        left: 150%;
-    }
-}
-
-/* Make the actual logo image circular and centered */
-.hero-coin img {
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    object-fit: cover;
-    position: relative;
-    z-index: 1;
-    box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.3),
-                inset 0 0 60px rgba(99, 102, 241, 0.4);
-}
-
-/* Scroll animations */
-.animate-on-scroll {
-    opacity: 0;
-    transform: translateY(30px);
-    transition: opacity 0.8s ease, transform 0.8s ease;
-}
-
-.animate-on-scroll.animated {
-    opacity: 1;
-    transform: translateY(0);
-}
-
-/* Stagger delays for support cards */
-.support-card:nth-child(1).animate-on-scroll {
-    transition-delay: 0.2s;
-}
-
-.support-card:nth-child(2).animate-on-scroll {
-    transition-delay: 0.4s;
-}
-
-.contact-info.animate-on-scroll {
-    transition-delay: 0.6s;
-}
-
-/* Footer animations */
-.footer {
-    opacity: 0;
-    transform: translateY(30px);
-    transition: opacity 1s ease 0.3s, transform 1s ease 0.3s;
-}
-
-.footer.animated {
-    opacity: 1;
-    transform: translateY(0);
-}
-

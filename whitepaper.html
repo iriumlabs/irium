@@ -3,11 +3,150 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Irium Technical Whitepaper - DNS-Free Proof-of-Work Blockchain</title>
-<link rel="stylesheet" href="style.css?v=2">
+<title>Irium Technical Whitepaper | DNS-Free PoW Blockchain</title>
+<link rel="stylesheet" href="style.css">
 <link rel="icon" type="image/svg+xml" href="logo.svg">
+<style>
+.wp-content {
+    max-width: 1000px;
+    margin: 0 auto;
+    padding: 6rem 2rem 4rem;
+}
+.wp-header {
+    text-align: center;
+    margin-bottom: 4rem;
+    padding: 3rem 0;
+    border-bottom: 2px solid rgba(99, 102, 241, 0.3);
+}
+.wp-header h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+.wp-subtitle {
+    font-size: 1.5rem;
+    color: var(--secondary);
+    margin-bottom: 2rem;
+}
+.status-badges {
+    display: flex;
+    justify-content: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 2rem;
+}
+.badge {
+    padding: 0.6rem 1.5rem;
+    border-radius: 50px;
+    font-weight: 700;
+    font-size: 0.95rem;
+}
+.badge-live {
+    background: linear-gradient(135deg, #10b981, #059669);
+    box-shadow: 0 5px 20px rgba(16, 185, 129, 0.4);
+}
+.badge-info {
+    background: rgba(99, 102, 241, 0.2);
+    border: 1px solid rgba(99, 102, 241, 0.5);
+}
+.wp-section {
+    margin-bottom: 4rem;
+}
+.wp-section h2 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2.5rem;
+    margin-bottom: 1.5rem;
+    color: var(--primary);
+    border-bottom: 2px solid rgba(99, 102, 241, 0.3);
+    padding-bottom: 0.5rem;
+}
+.wp-section h3 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.8rem;
+    color: var(--secondary);
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+}
+.wp-section h4 {
+    font-size: 1.3rem;
+    color: #a0a0a0;
+    margin-top: 1.5rem;
+    margin-bottom: 0.8rem;
+}
+.wp-section p {
+    font-size: 1.1rem;
+    line-height: 1.8;
+    color: #d0d0d0;
+    margin-bottom: 1rem;
+}
+.wp-section ul, .wp-section ol {
+    margin-left: 2rem;
+    margin-bottom: 1.5rem;
+}
+.wp-section li {
+    margin-bottom: 0.8rem;
+    line-height: 1.8;
+    color: #d0d0d0;
+}
+.wp-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 2rem 0;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 8px;
+    overflow: hidden;
+}
+.wp-table th {
+    background: rgba(99, 102, 241, 0.2);
+    padding: 1rem;
+    text-align: left;
+    font-weight: 700;
+    color: var(--secondary);
+}
+.wp-table td {
+    padding: 1rem;
+    border-top: 1px solid rgba(99, 102, 241, 0.2);
+    color: #d0d0d0;
+}
+.wp-table tr:hover {
+    background: rgba(99, 102, 241, 0.05);
+}
+.code-block {
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1.5rem 0;
+    overflow-x: auto;
+}
+.code-block code {
+    font-family: 'Courier New', monospace;
+    color: var(--secondary);
+    font-size: 0.95rem;
+    line-height: 1.6;
+}
+.info-box {
+    background: rgba(99, 102, 241, 0.1);
+    border-left: 4px solid var(--primary);
+    padding: 1.5rem;
+    margin: 2rem 0;
+    border-radius: 8px;
+}
+.checkmark {
+    color: #10b981;
+}
+.back-btn {
+    position: fixed;
+    top: 100px;
+    left: 2rem;
+    z-index: 100;
+}
+</style>
 </head>
 <body>
+
+<div class="stars"></div>
 
 <nav class="nav">
 <div class="container">
@@ -15,42 +154,31 @@
 <img src="logo.svg" alt="Irium" class="logo">
 <span>IRIUM</span>
 </div>
-<div class="nav-right">
-<a href="index.html" class="btn btn-secondary" style="padding: 0.5rem 1rem; font-size: 0.9rem;">← Back to Home</a>
-<a href="https://x.com/GoIrium" target="_blank" class="social-icon">
-<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-</svg>
-</a>
-<a href="https://t.me/iriumlabs" target="_blank" class="social-icon">
-<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-<path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/>
-</svg>
-</a>
+<div class="nav-socials">
+<a href="index.html" class="btn btn-secondary" style="padding: 0.5rem 1.5rem; font-size: 0.9rem;">← HOME</a>
+<a href="https://github.com/iriumlabs/irium" target="_blank" title="GitHub"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></a>
+<a href="https://x.com/GoIrium" target="_blank" title="X (Twitter)"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>
+<a href="https://t.me/iriumlabs" target="_blank" title="Telegram"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg></a>
 </div>
 </div>
 </nav>
 
-<div class="whitepaper-header">
-<div class="container">
-<h1>Irium: DNS-Free Proof-of-Work Mainnet</h1>
-<p class="subtitle">Technical Whitepaper - Version 1.0.0</p>
-<div>
-<span class="status-badge">Network Status: LIVE on Mainnet</span>
-</div>
-<div style="margin-top: 1rem;">
-<div class="genesis-info">Genesis: cbdd1b...000000</div>
-<div class="genesis-info">Launch: October 16, 2025</div>
-</div>
-</div>
-</div>
+<div class="wp-content">
 
-<div class="whitepaper-content">
+<div class="wp-header">
+<h1>Irium: DNS-Free Proof-of-Work Mainnet</h1>
+<p class="wp-subtitle">Technical Whitepaper - Version 1.0.0</p>
+<div class="status-badges">
+<span class="badge badge-live">MAINNET LIVE</span>
+<span class="badge badge-info">Genesis: cbdd1b...000000</span>
+<span class="badge badge-info">Launch: October 16, 2025</span>
+</div>
+</div>
 
 <div class="wp-section">
 <h2>Abstract</h2>
 <p>Irium is a purpose-built proof-of-work blockchain designed to maximize network independence and long-term survivability. The protocol eliminates reliance on DNS infrastructure, enforces transparent founder vesting via on-chain timelocks, incentivizes transaction relay quality without inflation, and prioritizes light client usability from genesis. This whitepaper outlines the core design principles, system architecture, monetary policy, and implementation status of the IRM asset and its supporting network.</p>
-<div class="highlight-box">
+<div class="info-box">
 <strong>Current Implementation:</strong> Production mainnet is LIVE with all 8 core innovations operational.
 </div>
 </div>
@@ -76,10 +204,10 @@
 <li><strong>Mobile-first architecture</strong> with NiPoPoW-ready light clients from block 1</li>
 <li><strong>On-chain notarization layer</strong> for off-chain metadata commitments</li>
 </ol>
-<p class="checkmark">Status: ✅ All 6 goals achieved and operational.</p>
+<p class="checkmark"><strong>Status: ✅ All 6 goals achieved and operational.</strong></p>
 
 <h3>1.2 Technical Specifications</h3>
-<table class="spec-table">
+<table class="wp-table">
 <tr><th>Parameter</th><th>Value</th></tr>
 <tr><td>Ticker</td><td>IRM</td></tr>
 <tr><td>Algorithm</td><td>SHA-256d (Bitcoin-compatible)</td></tr>
@@ -133,10 +261,8 @@
 
 <h3>3.1 Proof-of-Work (SHA-256d)</h3>
 <p>Irium uses double SHA-256 hashing, identical to Bitcoin:</p>
-<div class="code-block">
-block_hash = SHA256(SHA256(header))
-valid_block = block_hash < target
-</div>
+<div class="code-block"><code>block_hash = SHA256(SHA256(header))
+valid_block = block_hash < target</code></div>
 
 <p><strong>Benefits:</strong></p>
 <ul>
@@ -156,14 +282,9 @@ valid_block = block_hash < target
 <h3>3.2 Difficulty Adjustment</h3>
 <p><strong>Target:</strong> 600 seconds per block (10 minutes)<br>
 <strong>Retarget Interval:</strong> Every 2016 blocks (~14 days)</p>
-
-<div class="code-block">
-expected_time = 2016 * 600  # 1,209,600 seconds
+<div class="code-block"><code>expected_time = 2016 * 600  # 1,209,600 seconds
 actual_time = last_block_time - first_block_time
-new_difficulty = old_difficulty * (actual_time / expected_time)
-</div>
-
-<p>Adjustments are clamped to prevent manipulation.</p>
+new_difficulty = old_difficulty * (actual_time / expected_time)</code></div>
 
 <h3>3.3 Block Validation</h3>
 <p>Each block must satisfy:</p>
@@ -175,7 +296,6 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <li>Coinbase reward ≤ subsidy + fees</li>
 <li>Block connects to valid chain tip</li>
 </ul>
-<p><em>Implementation: irium/chain.py (_validate_block_header)</em></p>
 </div>
 
 <div class="wp-section">
@@ -199,7 +319,7 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 </ul>
 
 <h3>4.2 Block Rewards Schedule</h3>
-<table class="spec-table">
+<table class="wp-table">
 <tr><th>Block Range</th><th>Reward</th><th>Blocks</th><th>Total IRM</th></tr>
 <tr><td>1 - 210,000</td><td>50 IRM</td><td>210,000</td><td>10,500,000</td></tr>
 <tr><td>210,001 - 420,000</td><td>25 IRM</td><td>210,000</td><td>5,250,000</td></tr>
@@ -237,7 +357,6 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 
 <h3>5.1 Zero-DNS Bootstrap</h3>
 <p><strong>Problem:</strong> DNS is centralized, censorable, and a single point of failure.</p>
-
 <p><strong>Irium Solution:</strong></p>
 <ul>
 <li>Signed <code>seedlist.txt</code> with raw IP multiaddrs (IPv4 + IPv6)</li>
@@ -246,11 +365,10 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <li>Distributed via GitHub, IPFS, torrents</li>
 <li>Signature verification with secp256k1</li>
 </ul>
-<p class="checkmark">Status: ✅ Implemented and operational</p>
+<p class="checkmark"><strong>Status: ✅ Implemented and operational</strong></p>
 
 <h3>5.2 Self-Healing Peer Discovery</h3>
 <p><strong>Problem:</strong> Networks need stable, honest peers; centralized trackers create vulnerabilities.</p>
-
 <p><strong>Irium Solution:</strong></p>
 <ul>
 <li>Uptime proof system (HMAC challenges)</li>
@@ -259,11 +377,10 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <li>Network 'remembers' reliable peers</li>
 <li><code>seedlist.runtime</code> updated automatically</li>
 </ul>
-<p class="checkmark">Status: ✅ Implemented</p>
+<p class="checkmark"><strong>Status: ✅ Implemented</strong></p>
 
 <h3>5.3 Genesis Vesting with On-chain CLTV</h3>
 <p><strong>Problem:</strong> Founder allocations often lack transparency or enforcement.</p>
-
 <p><strong>Irium Solution:</strong></p>
 <ul>
 <li>3.5M IRM locked in genesis block</li>
@@ -273,11 +390,10 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <li>Fully transparent in genesis.json</li>
 <li>Irreversible timelock</li>
 </ul>
-<p class="checkmark">Status: ✅ Implemented in genesis block</p>
+<p class="checkmark"><strong>Status: ✅ Implemented in genesis block</strong></p>
 
 <h3>5.4 Per-Transaction Relay Rewards</h3>
 <p><strong>Problem:</strong> No incentive to run relay nodes; slow transaction propagation.</p>
-
 <p><strong>Irium Solution:</strong></p>
 <ul>
 <li>Relay nodes earn 10% of transaction fees</li>
@@ -286,11 +402,10 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <li>Included in coinbase transaction</li>
 <li>No supply inflation (comes from tx fees)</li>
 </ul>
-<p class="checkmark">Status: ✅ Implemented</p>
+<p class="checkmark"><strong>Status: ✅ Implemented</strong></p>
 
 <h3>5.5 Sybil-Resistant P2P Handshake</h3>
 <p><strong>Problem:</strong> Botnets can saturate networks with fake peers.</p>
-
 <p><strong>Irium Solution:</strong></p>
 <ul>
 <li>Proof-of-work challenge during handshake</li>
@@ -299,11 +414,10 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <li>Configurable difficulty (default: 8 bits)</li>
 <li>Trivial for legitimate nodes, prohibitive for bots</li>
 </ul>
-<p class="checkmark">Status: ✅ Implemented</p>
+<p class="checkmark"><strong>Status: ✅ Implemented</strong></p>
 
 <h3>5.6 Anchor-File Consensus</h3>
 <p><strong>Problem:</strong> Eclipse attacks can feed new nodes false chains.</p>
-
 <p><strong>Irium Solution:</strong></p>
 <ul>
 <li>Signed checkpoint headers (<code>anchors.json</code>)</li>
@@ -311,11 +425,10 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <li>New nodes verify chain against anchors</li>
 <li>Protects even if all peers are malicious</li>
 </ul>
-<p class="checkmark">Status: ✅ Implemented</p>
+<p class="checkmark"><strong>Status: ✅ Implemented</strong></p>
 
 <h3>5.7 Light Client First (SPV + NiPoPoW)</h3>
 <p><strong>Problem:</strong> Mobile devices can't store full blockchain.</p>
-
 <p><strong>Irium Solution:</strong></p>
 <ul>
 <li>SPV (Simplified Payment Verification)</li>
@@ -324,11 +437,10 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <li>Merkle proof verification</li>
 <li>Superblock proofs for ultra-light clients</li>
 </ul>
-<p class="checkmark">Status: ✅ Implemented</p>
+<p class="checkmark"><strong>Status: ✅ Implemented</strong></p>
 
 <h3>5.8 On-chain Metadata Commitments</h3>
 <p><strong>Problem:</strong> No native way to timestamp documents.</p>
-
 <p><strong>Irium Solution:</strong></p>
 <ul>
 <li>Coinbase metadata field</li>
@@ -336,7 +448,7 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <li>Notarization layer</li>
 <li>Immutable timestamp proofs</li>
 </ul>
-<p class="checkmark">Status: ✅ Structure ready, integrated</p>
+<p class="checkmark"><strong>Status: ✅ Structure ready, integrated</strong></p>
 </div>
 
 <div class="wp-section">
@@ -363,11 +475,11 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <strong>DoS Attack:</strong> Message size limits, peer connection limits</p>
 
 <h3>6.3 Security Audit Summary</h3>
-<div class="highlight-box">
-<p class="checkmark">✅ Consensus: Secure<br>
-✅ P2P Network: Secure<br>
-✅ Transactions: Secure<br>
-✅ Wallet: Secure</p>
+<div class="info-box">
+<p class="checkmark"><strong>✅ Consensus:</strong> Secure<br>
+<strong>✅ P2P Network:</strong> Secure<br>
+<strong>✅ Transactions:</strong> Secure<br>
+<strong>✅ Wallet:</strong> Secure</p>
 </div>
 </div>
 
@@ -406,7 +518,7 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 </ul>
 
 <h3>7.2 Network Launch</h3>
-<div class="highlight-box">
+<div class="info-box">
 <p><strong>Mainnet Status: ✅ LIVE</strong></p>
 <ul>
 <li>Genesis mined: October 16, 2025</li>
@@ -445,7 +557,7 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 <h2>9. Conclusion</h2>
 <p>Irium represents a new generation of blockchain technology that addresses fundamental challenges in decentralization, security, and accessibility. With all 8 core innovations implemented and operational, Irium is ready to serve as a foundation for the next era of cryptocurrency.</p>
 
-<div class="highlight-box">
+<div class="info-box">
 <p><strong>Network Status:</strong> Mainnet LIVE and operational<br>
 <strong>Code Status:</strong> Production-ready, open source<br>
 <strong>Community:</strong> Welcome to join and contribute</p>
@@ -454,8 +566,7 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 
 <div class="wp-section">
 <h2>Appendix A: Genesis Block</h2>
-<div class="code-block">
-Hash: cbdd1b9134adc846b3af5e2128f68214e1d8154912ff8da40685f47700000000
+<div class="code-block"><code>Hash: cbdd1b9134adc846b3af5e2128f68214e1d8154912ff8da40685f47700000000
 Nonce: 1,110,943,221
 Timestamp: 1735689601 (October 16, 2025)
 Merkle Root: a0bd470d94bf7ef20539a0a6e2bd30629795f0bad5160d0495e07e85e4a5db04
@@ -464,28 +575,43 @@ Difficulty: 0x1d00ffff (mainnet)
 Mining Stats:
 - Total hashes: 5,405,910,517
 - Mining time: 7 hours 4 minutes
-- Hashrate: 212,670 H/s average
-</div>
+- Hashrate: 212,670 H/s average</code></div>
 </div>
 
-<div class="wp-section" style="text-align: center; padding: 3rem 0;">
+<div class="wp-section" style="text-align: center; padding: 3rem 0; border-top: 2px solid rgba(99, 102, 241, 0.3);">
 <h2>Irium Blockchain © 2025</h2>
-<p>MIT License - Open Source</p>
-<p style="color: #4f46e5; font-size: 1.3rem; margin-top: 1rem;">Built for true decentralization</p>
+<p style="font-size: 1.2rem; margin-top: 1rem;">MIT License - Open Source</p>
+<p style="color: var(--primary); font-size: 1.5rem; margin-top: 1rem; font-weight: 700;">Built for true decentralization</p>
 </div>
 
 </div>
 
 <footer class="footer">
 <div class="container">
-<p>&copy; 2025 Irium Labs. Open Source Project - MIT License</p>
-<p style="margin-top: 0.5rem;">
-<a href="https://github.com/iriumlabs/irium" target="_blank" style="color: #4f46e5; text-decoration: none;">GitHub</a> • 
-<a href="https://x.com/GoIrium" target="_blank" style="color: #4f46e5; text-decoration: none;">X/Twitter</a> • 
-<a href="https://t.me/iriumlabs" target="_blank" style="color: #4f46e5; text-decoration: none;">Telegram</a>
-</p>
+<div class="footer-content">
+<div class="footer-brand">
+<img src="logo.svg" alt="Irium" class="footer-logo">
+<p>True Decentralization</p>
+</div>
+<div class="footer-links">
+<h4>Resources</h4>
+<a href="index.html">Home</a>
+<a href="https://github.com/iriumlabs/irium" target="_blank">GitHub</a>
+</div>
+<div class="footer-links">
+<h4>Community</h4>
+<a href="https://x.com/GoIrium" target="_blank">X (Twitter)</a>
+<a href="https://t.me/iriumlabs" target="_blank">Telegram</a>
+<a href="mailto:dev@iriumlabs.org">Email</a>
+</div>
+</div>
+<div class="footer-bottom">
+<p>&copy; 2025 Irium Labs. Open Source - MIT License</p>
+<p>Built for a decentralized future</p>
+</div>
 </div>
 </footer>
 
+<script src="script.js"></script>
 </body>
 </html>

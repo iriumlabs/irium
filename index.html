@@ -3,217 +3,320 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Irium - Next Generation Blockchain</title>
-<link rel="stylesheet" href="style.css?v=2">
+<title>Irium - Next-Gen Blockchain | DNS-Free PoW Network</title>
+<link rel="stylesheet" href="style.css">
 <link rel="icon" type="image/svg+xml" href="logo.svg">
 </head>
 <body>
+
+<!-- Animated Background -->
+<div class="stars"></div>
+
+<!-- Navigation -->
 <nav class="nav">
 <div class="container">
 <div class="nav-brand">
 <img src="logo.svg" alt="Irium" class="logo">
 <span>IRIUM</span>
 </div>
-<div class="nav-right">
-<a href="https://x.com/GoIrium" target="_blank" class="social-icon">
-<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-<path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/>
-</svg>
-</a>
-<a href="https://t.me/iriumlabs" target="_blank" class="social-icon">
-<svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-<path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/>
-</svg>
-</a>
+<ul class="nav-links">
+<li><a href="#home">HOME</a></li>
+<li><a href="#about">ABOUT</a></li>
+<li><a href="#features">FEATURES</a></li>
+<li><a href="#specs">SPECS</a></li>
+<li><a href="#download">DOWNLOAD</a></li>
+<li><a href="whitepaper.html" target="_blank">WHITEPAPER</a></li>
+<li><a href="#support">SUPPORT</a></li>
+</ul>
+<div class="nav-socials">
+<a href="https://github.com/iriumlabs/irium" target="_blank" title="GitHub"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></a>
+<a href="https://x.com/GoIrium" target="_blank" title="X (Twitter)"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>
+<a href="https://t.me/iriumlabs" target="_blank" title="Telegram"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg></a>
 </div>
 </div>
 </nav>
-<section class="hero">
-<div class="coin-3d">
-<img src="logo.svg" alt="IRM" class="coin-logo">
+
+<!-- Hero Section -->
+<section id="home" class="hero">
+<div class="container hero-content">
+<div class="coin-container">
+<img src="logo.svg" alt="Irium Coin" class="hero-coin">
 </div>
-<h1>IRIUM</h1>
-<p class="subtitle">Next Generation Blockchain</p>
-<p class="desc">SHA-256d Proof-of-Work with 8 Revolutionary Innovations</p>
-<a href="https://github.com/iriumlabs/irium/releases/download/v1.0.1/irium-bootstrap-v1.0.1.tar.gz" class="btn-download" download>DOWNLOAD IRIUM v1.0.1</a>
-<p class="download-info">Bootstrap Package - 420 KB - Verified</p>
-</section>
-<section class="about">
-<div class="container">
-<h2>ABOUT IRIUM</h2>
-<p class="intro">Production-ready SHA-256d Proof-of-Work blockchain with 8 unique protocol innovations</p>
-<div class="features">
-<div class="feature">
-<div class="icon">🔒</div>
-<h3>BATTLE-TESTED SECURITY</h3>
-<p>SHA-256d Proof-of-Work consensus - the same algorithm securing Bitcoin</p>
+<h1 class="glitch" data-text="IRIUM">IRIUM</h1>
+<p class="hero-subtitle">Next-Generation DNS-Free Blockchain</p>
+<p class="hero-tagline">True Decentralization • Zero Dependencies • Built to Last Forever</p>
+<div class="hero-stats">
+<div class="stat">
+<span class="stat-value">100M</span>
+<span class="stat-label">MAX SUPPLY</span>
 </div>
-<div class="feature">
-<div class="icon">⚡</div>
-<h3>REVOLUTIONARY INNOVATIONS</h3>
-<p>8 unique protocol-level features solving real blockchain challenges</p>
+<div class="stat">
+<span class="stat-value">LIVE</span>
+<span class="stat-label">MAINNET</span>
 </div>
-<div class="feature">
-<div class="icon">🌍</div>
-<h3>TRULY DECENTRALIZED</h3>
-<p>Zero-DNS bootstrap, censorship-resistant, community-driven</p>
+<div class="stat">
+<span class="stat-value">SHA-256d</span>
+<span class="stat-label">ALGORITHM</span>
 </div>
+</div>
+<div class="hero-cta">
+<a href="#download" class="btn btn-primary">START MINING</a>
+<a href="whitepaper.html" class="btn btn-secondary" target="_blank">READ WHITEPAPER</a>
 </div>
 </div>
 </section>
-<section class="innovations">
+
+<!-- About Section -->
+<section id="about" class="section">
 <div class="container">
-<h2>8 UNIQUE INNOVATIONS</h2>
-<div class="grid">
-<div class="card">
-<div class="num">1</div>
+<h2 class="section-title">WHAT IS IRIUM?</h2>
+<div class="about-content">
+<p>Irium is a revolutionary proof-of-work blockchain engineered for <strong>maximum independence and survivability</strong>. Unlike traditional blockchains that rely on DNS infrastructure and centralized services, Irium operates with <strong>zero external dependencies</strong>.</p>
+<p>Launched on <strong>October 16, 2025</strong> with a fully mined genesis block after 5.4 billion hashes, Irium is designed to outlast any infrastructure collapse and maintain network consensus even in the most hostile environments.</p>
+<div class="highlight-box">
+<strong>Network Status: LIVE</strong><br>
+Genesis Hash: <code>cbdd1b9134adc846b3af5e2128f68214e1d8154912ff8da40685f47700000000</code>
+</div>
+</div>
+</div>
+</section>
+
+<!-- Features Section -->
+<section id="features" class="section section-dark">
+<div class="container">
+<h2 class="section-title">8 CORE INNOVATIONS</h2>
+<p class="section-subtitle">Revolutionary features built into the protocol</p>
+<div class="features-grid">
+<div class="feature-card">
+<div class="feature-icon">🌐</div>
 <h3>Zero-DNS Bootstrap</h3>
-<p>Censorship-resistant network discovery with signed seedlists. No DNS dependencies.</p>
+<p>No DNS dependencies. Network bootstraps from signed IP lists and checkpoints. Works anywhere, forever.</p>
 </div>
-<div class="card">
-<div class="num">2</div>
-<h3>Self-healing Peer Discovery</h3>
-<p>Uptime proofs and reputation scoring create robust network topology.</p>
+<div class="feature-card">
+<div class="feature-icon">🔄</div>
+<h3>Self-Healing Peers</h3>
+<p>Network automatically discovers and promotes reliable nodes. Uptime proofs ensure only quality peers survive.</p>
 </div>
-<div class="card">
-<div class="num">3</div>
-<h3>Genesis Vesting with CLTV</h3>
-<p>3.5M IRM locked with on-chain time-locks. Transparent and consensus-enforced.</p>
+<div class="feature-card">
+<div class="feature-icon">🔒</div>
+<h3>Genesis Vesting (CLTV)</h3>
+<p>3.5M IRM locked with on-chain timelocks. Transparent, consensus-enforced, irreversible. No trust needed.</p>
 </div>
-<div class="card">
-<div class="num">4</div>
+<div class="feature-card">
+<div class="feature-icon">⚡</div>
 <h3>Relay Rewards</h3>
-<p>Nodes earn 10% of tx fees for relaying. Incentivizes network participation.</p>
+<p>Transaction relays earn 10% of fees. Incentivizes fast propagation without supply inflation.</p>
 </div>
-<div class="card">
-<div class="num">5</div>
-<h3>Sybil-resistant Handshake</h3>
-<p>PoW-based handshake challenges prevent spam and Sybil attacks.</p>
+<div class="feature-card">
+<div class="feature-icon">🛡️</div>
+<h3>Sybil-Resistant P2P</h3>
+<p>Proof-of-work handshake prevents botnet attacks. Only legitimate nodes can connect.</p>
 </div>
-<div class="card">
-<div class="num">6</div>
-<h3>Anchor-File Consensus</h3>
-<p>Rolling checkpoints protect against eclipse attacks.</p>
+<div class="feature-card">
+<div class="feature-icon">⚓</div>
+<h3>Anchor Checkpoints</h3>
+<p>Signed chain anchors protect against eclipse attacks. New nodes verify against trusted checkpoints.</p>
 </div>
-<div class="card">
-<div class="num">7</div>
-<h3>Light Client Support</h3>
-<p>SPV and NiPoPoW proofs enable mobile wallets without full sync.</p>
+<div class="feature-card">
+<div class="feature-icon">📱</div>
+<h3>Light Client Ready</h3>
+<p>SPV + NiPoPoW support from genesis. Mobile wallets with header-only sync and logarithmic proofs.</p>
 </div>
-<div class="card">
-<div class="num">8</div>
-<h3>Metadata Commitments</h3>
-<p>On-chain data anchoring for timestamping and provably fair applications.</p>
+<div class="feature-card">
+<div class="feature-icon">📝</div>
+<h3>On-Chain Metadata</h3>
+<p>Timestamp any document on the blockchain. Immutable proof of existence for any data.</p>
 </div>
 </div>
 </div>
 </section>
-<section class="specs">
+
+<!-- Specs Section -->
+<section id="specs" class="section">
 <div class="container">
-<h2>BLOCKCHAIN SPECIFICATIONS</h2>
+<h2 class="section-title">BLOCKCHAIN SPECIFICATIONS</h2>
 <div class="specs-grid">
-<div class="spec"><strong>Ticker:</strong> IRM</div>
-<div class="spec"><strong>Algorithm:</strong> SHA-256d</div>
-<div class="spec"><strong>Max Supply:</strong> 100,000,000 IRM</div>
-<div class="spec"><strong>Block Time:</strong> 10 minutes</div>
-<div class="spec"><strong>Block Reward:</strong> 50 IRM</div>
-<div class="spec"><strong>Halving:</strong> Every 210,000 blocks</div>
-<div class="spec"><strong>Difficulty Adjust:</strong> Every 2016 blocks</div>
-<div class="spec"><strong>Maturity:</strong> 100 blocks</div>
+<div class="spec-card">
+<div class="spec-label">TICKER</div>
+<div class="spec-value">IRM</div>
+</div>
+<div class="spec-card">
+<div class="spec-label">ALGORITHM</div>
+<div class="spec-value">SHA-256d</div>
+</div>
+<div class="spec-card">
+<div class="spec-label">MAX SUPPLY</div>
+<div class="spec-value">100M IRM</div>
+</div>
+<div class="spec-card">
+<div class="spec-label">BLOCK TIME</div>
+<div class="spec-value">10 min</div>
+</div>
+<div class="spec-card">
+<div class="spec-label">BLOCK REWARD</div>
+<div class="spec-value">50 IRM</div>
+</div>
+<div class="spec-card">
+<div class="spec-label">HALVING</div>
+<div class="spec-value">210k blocks</div>
+</div>
+<div class="spec-card">
+<div class="spec-label">DIFFICULTY</div>
+<div class="spec-value">2016 blocks</div>
+</div>
+<div class="spec-card">
+<div class="spec-label">MATURITY</div>
+<div class="spec-value">100 blocks</div>
+</div>
 </div>
 </div>
 </section>
-<section class="get-started">
+
+<!-- Download Section -->
+<section id="download" class="section section-dark">
 <div class="container">
-<h2>HOW TO RUN IRIUM</h2>
-<p class="intro">Get started in 3 simple steps</p>
-<div class="steps">
-<div class="step">
-<div class="step-num">1</div>
-<h3>DOWNLOAD</h3>
-<p>Download the bootstrap package (includes node, miner, wallet)</p>
-<div class="code">wget https://github.com/iriumlabs/irium/releases/download/v1.0.1/irium-bootstrap-v1.0.1.tar.gz</div>
+<h2 class="section-title">GET STARTED</h2>
+<p class="section-subtitle">Download and run Irium in minutes</p>
+
+<div class="download-box">
+<div class="download-header">
+<h3>Irium Bootstrap Package v1.0.1</h3>
+<p>Includes node, miner, wallet, and all dependencies</p>
 </div>
-<div class="step">
-<div class="step-num">2</div>
-<h3>INSTALL</h3>
-<p>Extract and run the installation script</p>
-<div class="code">tar -xzf irium-bootstrap-v1.0.1.tar.gz<br>cd irium-bootstrap-v1.0.1<br>./install.sh</div>
+<a href="https://github.com/iriumlabs/irium/releases/download/v1.0.1/irium-bootstrap-v1.0.1.tar.gz" class="btn btn-download" download>
+<svg width="24" height="24" fill="currentColor" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+DOWNLOAD v1.0.1
+<small>420 KB • Verified ✓</small>
+</a>
 </div>
-<div class="step">
-<div class="step-num">3</div>
-<h3>RUN NODE</h3>
-<p>Start your Irium node and sync with mainnet</p>
-<div class="code">python3 scripts/irium-node.py</div>
+
+<div class="install-steps">
+<div class="step-card">
+<div class="step-number">1</div>
+<h4>Download</h4>
+<pre><code>wget https://github.com/iriumlabs/irium/releases/download/v1.0.1/irium-bootstrap-v1.0.1.tar.gz</code></pre>
+</div>
+<div class="step-card">
+<div class="step-number">2</div>
+<h4>Install</h4>
+<pre><code>tar -xzf irium-bootstrap-v1.0.1.tar.gz
+cd irium-bootstrap-v1.0.1
+./install.sh</code></pre>
+</div>
+<div class="step-card">
+<div class="step-number">3</div>
+<h4>Run Node</h4>
+<pre><code>python3 scripts/irium-node.py</code></pre>
 </div>
 </div>
-<div class="more-commands">
-<h3>Additional Commands</h3>
-<div class="command-grid">
-<div class="command">
+
+<div class="commands-grid">
+<div class="command-box">
 <h4>Create Wallet</h4>
-<div class="code">python3 scripts/irium-wallet-proper.py new</div>
+<pre><code>python3 scripts/irium-wallet-proper.py new</code></pre>
 </div>
-<div class="command">
+<div class="command-box">
 <h4>Start Mining</h4>
-<div class="code">python3 scripts/irium-miner.py</div>
+<pre><code>python3 scripts/irium-miner.py</code></pre>
 </div>
-<div class="command">
+<div class="command-box">
 <h4>Check Balance</h4>
-<div class="code">python3 scripts/irium-wallet-proper.py balance</div>
-</div>
+<pre><code>python3 scripts/irium-wallet-proper.py balance</code></pre>
 </div>
 </div>
 </div>
 </section>
-<section class="wallet-soon">
+
+<!-- Wallet Section -->
+<section class="section">
 <div class="container">
-<div class="soon-box">
-<div class="soon-icon">💼</div>
-<h2>WALLET APP</h2>
-<p>Professional web wallet application coming soon to this website</p>
-<div class="soon-badge">COMING SOON</div>
+<div class="wallet-coming-soon">
+<div class="wallet-icon">💼</div>
+<h2>WALLET APPLICATION</h2>
+<p>Professional web and mobile wallet coming soon</p>
+<div class="wallet-features">
+<span>✓ Web Interface</span>
+<span>✓ Mobile Apps (iOS/Android)</span>
+<span>✓ Hardware Wallet Support</span>
+<span>✓ Multi-Signature</span>
+</div>
+<div class="coming-soon-badge">COMING SOON</div>
 </div>
 </div>
 </section>
-<section class="support">
+
+<!-- Support Section -->
+<section id="support" class="section section-dark">
 <div class="container">
-<h2>SUPPORT IRIUM</h2>
+<h2 class="section-title">SUPPORT THE PROJECT</h2>
 <div class="support-grid">
-<div class="support-box">
+<div class="support-card">
 <h3>💰 DONATE</h3>
-<p>Irium is built by a solo developer. Your support helps improve the blockchain.</p>
-<p class="donate-text">Donation addresses coming soon</p>
+<p>Help fund development and infrastructure</p>
+<div class="donation-address">
+<p><strong>IRM Address:</strong></p>
+<code>Q5uT1k6DR7WpxqYuiy7sQQXp8pYDx6U4eS</code>
 </div>
-<div class="support-box">
-<h3>🤝 VOLUNTEER</h3>
-<p>Join us as a volunteer developer to make Irium better every day</p>
-<p>We need: Developers, Designers, Writers, Testers, Community Managers</p>
-<div class="contact-links">
-<a href="https://github.com/iriumlabs/irium/discussions" target="_blank" class="btn-small">GitHub Discussions</a>
-<a href="https://t.me/iriumlabs" target="_blank" class="btn-small">Telegram</a>
+<p style="margin-top: 1rem;">Your donations support:</p>
+<ul>
+<li>Infrastructure costs (VPS, domains)</li>
+<li>Development resources</li>
+<li>Security audits</li>
+<li>Community growth</li>
+</ul>
+</div>
+<div class="support-card">
+<h3>👨‍💻 VOLUNTEER DEVELOPERS</h3>
+<p>Join our team of contributors</p>
+<div class="volunteer-areas">
+<p><strong>We need help with:</strong></p>
+<ul>
+<li>Mobile wallet development</li>
+<li>Mining pool software</li>
+<li>Block explorer UI</li>
+<li>Documentation</li>
+<li>Testing and QA</li>
+<li>Community management</li>
+</ul>
+</div>
+<a href="https://github.com/iriumlabs/irium" class="btn btn-secondary" target="_blank">VIEW ON GITHUB</a>
 </div>
 </div>
+<div class="contact-info">
+<p><strong>Contact:</strong> <a href="mailto:dev@iriumlabs.org">dev@iriumlabs.org</a></p>
+<p>Join our <a href="https://t.me/iriumlabs" target="_blank">Telegram</a> for collaboration opportunities</p>
 </div>
-<p class="contact">Contact: <a href="mailto:info@iriumlabs.org">info@iriumlabs.org</a></p>
 </div>
 </section>
+
+<!-- Footer -->
 <footer class="footer">
 <div class="container">
 <div class="footer-content">
 <div class="footer-brand">
-<img src="logo.svg" alt="IRM" class="footer-logo">
-<p>IRIUM - Next Generation Blockchain</p>
+<img src="logo.svg" alt="Irium" class="footer-logo">
+<p>True Decentralization</p>
 </div>
 <div class="footer-links">
+<h4>Resources</h4>
+<a href="whitepaper.html" target="_blank">Whitepaper</a>
 <a href="https://github.com/iriumlabs/irium" target="_blank">GitHub</a>
-<a href="https://x.com/GoIrium" target="_blank">X/Twitter</a>
+<a href="#download">Download</a>
+</div>
+<div class="footer-links">
+<h4>Community</h4>
+<a href="https://x.com/GoIrium" target="_blank">X (Twitter)</a>
 <a href="https://t.me/iriumlabs" target="_blank">Telegram</a>
+<a href="mailto:dev@iriumlabs.org">Email</a>
 </div>
 </div>
-<p class="copyright">© 2025 Irium Labs. MIT License.</p>
-<p class="genesis">Genesis: cbdd1b9134adc846b3af5e2128f68214e1d8154912ff8da40685f47700000000</p>
+<div class="footer-bottom">
+<p>&copy; 2025 Irium Labs. Open Source - MIT License</p>
+<p>Built for a decentralized future</p>
+</div>
 </div>
 </footer>
+
+<script src="script.js"></script>
 </body>
 </html>

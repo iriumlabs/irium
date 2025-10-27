@@ -1,10 +1,10 @@
 # Irium: DNS-Free Proof-of-Work Mainnet
 
-**Technical Whitepaper - Version 1.0.0**
+**Technical Whitepaper - Version 1.0**
 
 **Network Status:** LIVE on Mainnet
-**Genesis Hash:** cbdd1b9134adc846b3af5e2128f68214e1d8154912ff8da40685f47700000000
-**Launch Date:** October 16, 2025
+**Genesis Hash:** 0000000040e3eb5ed9db5cc8df56dd6db9c6f3009ca7e9114fb52400e0136fb6
+**Launch Date:** October 27, 2025
 
 ---
 
@@ -20,7 +20,7 @@ Irium is a purpose-built proof-of-work blockchain designed to maximize network i
 
 Most established proof-of-work networks inherit architectural assumptions from Bitcoin, including DNS-based bootstrapping, addrman-driven peer discovery, and an absence of protocol-level incentives for fast relay. Irium rethinks these components to produce a mainnet that can launch and sustain itself even if all founding infrastructure disappears.
 
-**Irium launched on October 16, 2025 with:**
+**Irium launched on October 27, 2025 with:**
 - Mined genesis block (5.4 billion hashes, 7 hours)
 - Zero DNS dependencies
 - Complete P2P networking
@@ -105,9 +105,9 @@ valid_block = block_hash < target
 - Existing mining infrastructure
 
 **Genesis Block:**
-- Nonce: 1,110,943,221
-- Hash: cbdd1b...000000 (valid mainnet PoW)
-- Mined: October 16, 2025 after 5.4 billion hashes
+- Nonce: 1,961,837,199
+- Hash: 0000000040e3eb5ed9db5cc8df56dd6db9c6f3009ca7e9114fb52400e0136fb6 (valid mainnet PoW)
+- Mined: October 27, 2025 after 5.4 billion hashes
 
 ### 3.2 Difficulty Adjustment
 
@@ -308,8 +308,8 @@ Ultra-low fees enable micropayments and frequent transactions.
 ```json
 {
   "height": 0,
-  "hash": "cbdd1b913...",
-  "timestamp": 1735689601,
+  "hash": "0000000040e3eb5ed9db5cc8df56dd6db9c6f3009ca7e9114fb52400e0136fb6",
+  "timestamp": 1735689600,
   "signatures": ["..."]
 }
 ```
@@ -362,7 +362,7 @@ Ultra-low fees enable micropayments and frequent transactions.
 Version (4 bytes)
 Previous Hash (32 bytes)
 Merkle Root (32 bytes)
-Timestamp (4 bytes)
+Time (4 bytes)
 Bits (4 bytes)
 Nonce (4 bytes)
 ```
@@ -547,7 +547,7 @@ Nodes maintain a dynamic peer list (`bootstrap/seedlist.runtime`):
 
 **Mainnet Status:** ✅ LIVE
 
-- Genesis mined: October 16, 2025
+- Genesis mined: October 27, 2025
 - All services operational
 - Public endpoints active
 - Ready for miners and users
@@ -612,9 +612,9 @@ Irium represents a new generation of blockchain technology that addresses fundam
 
 ## Appendix A: Genesis Block
 
-**Hash:** cbdd1b9134adc846b3af5e2128f68214e1d8154912ff8da40685f47700000000
-**Nonce:** 1,110,943,221
-**Timestamp:** 1735689601 (October 16, 2025)
+**Hash:** 0000000040e3eb5ed9db5cc8df56dd6db9c6f3009ca7e9114fb52400e0136fb6
+**Nonce:** 1,961,837,199
+**Timestamp:** 1735689600 (October 27, 2025)
 **Merkle Root:** a0bd470d94bf7ef20539a0a6e2bd30629795f0bad5160d0495e07e85e4a5db04
 **Difficulty:** 0x1d00ffff (mainnet)
 
@@ -629,3 +629,28 @@ Irium represents a new generation of blockchain technology that addresses fundam
 **MIT License - Open Source**
 
 *Built for true decentralization*
+
+## 9. Difficulty Adjustment (v1.0 Release)
+
+**v1.0 uses standard Bitcoin difficulty:** 0x1d00ffff
+
+The genesis block was mined with proper Bitcoin-standard difficulty calculation:
+
+- **Difficulty bits**: 0x1d00ffff (standard Bitcoin genesis difficulty)
+- **Expected block time**: ~10 minutes
+- **Proper PoW validation**: No hardcoded overrides
+- **Automatic adjustment**: Every 2016 blocks (~14 days)
+
+### Technical Implementation
+
+```python
+# Standard Bitcoin compact target calculation
+def to_target(bits: int) -> int:
+    exponent = bits >> 24
+    mantissa = bits & 0xFFFFFF
+    if exponent <= 3:
+        return mantissa >> (8 * (3 - exponent))
+    else:
+        return mantissa << (8 * (exponent - 3))
+```
+

@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Irium Mining Guide</title>
+    <link rel="stylesheet" href="../../assets/css/docs.css">
+</head>
+<body>
+    <div class="container">
+        <h1>⛏️ Irium Mining Guide</h1>
+        
+        <section>
+            <h2>Quick Start</h2>
+            <ol>
+                <li>Clone the repository: <code>git clone https://github.com/iriumlabs/irium.git</code></li>
+                <li>Install dependencies: <code>pip3 install requests cryptography</code></li>
+                <li>Create a wallet: <code>python3 scripts/irium-wallet-proper.py</code></li>
+                <li>Start mining: <code>python3 scripts/irium-miner.py</code></li>
+            </ol>
+        </section>
+        
+        <section>
+            <h2>Multi-Core Mining</h2>
+            <p>Use the multicore miner for better performance:</p>
+            <pre><code>./scripts/irium-miner-multicore.sh 4</code></pre>
+            <p>Replace <code>4</code> with your number of CPU cores.</p>
+        </section>
+        
+        <section>
+            <h2>Block Rewards</h2>
+            <ul>
+                <li>Block Reward: 50 IRM</li>
+                <li>Block Time: ~10 minutes (600 seconds)</li>
+                <li>Maturity: 100 blocks (~16.7 hours)</li>
+            </ul>
+        </section>
+    </div>
+</body>
+</html>

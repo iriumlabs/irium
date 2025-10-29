@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Irium Network Dashboard</title>
+    <link rel="stylesheet" href="../assets/css/dashboard.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📊 Irium Network Dashboard</h1>
+        </header>
+        
+        <div class="dashboard-grid">
+            <div class="card">
+                <h3>Network Height</h3>
+                <div class="metric" id="network-height">Loading...</div>
+            </div>
+            
+            <div class="card">
+                <h3>Total Blocks</h3>
+                <div class="metric" id="total-blocks">Loading...</div>
+            </div>
+            
+            <div class="card">
+                <h3>Total Supply</h3>
+                <div class="metric" id="total-supply">Loading...</div>
+            </div>
+            
+            <div class="card">
+                <h3>Block Time</h3>
+                <div class="metric" id="block-time">Loading...</div>
+            </div>
+        </div>
+        
+        <div class="chart-container">
+            <h2>Block Time History</h2>
+            <canvas id="blockTimeChart"></canvas>
+        </div>
+    </div>
+    
+    <script src="../assets/js/dashboard.js"></script>
+</body>
+</html>

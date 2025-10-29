@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Irium Block Explorer</title>
+    <link rel="stylesheet" href="../assets/css/explorer.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🔍 Irium Block Explorer</h1>
+            <div class="stats-bar" id="stats-bar">
+                <div class="stat">
+                    <span class="label">Height:</span>
+                    <span id="current-height">Loading...</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Total Blocks:</span>
+                    <span id="total-blocks">Loading...</span>
+                </div>
+                <div class="stat">
+                    <span class="label">Total Supply:</span>
+                    <span id="total-supply">Loading...</span>
+                </div>
+            </div>
+        </header>
+        
+        <div class="search-box">
+            <input type="text" id="search-input" placeholder="Search by block height or hash...">
+            <button onclick="searchBlock()">Search</button>
+        </div>
+        
+        <div class="blocks-list" id="blocks-list">
+            <p>Loading blocks...</p>
+        </div>
+    </div>
+    
+    <script src="../assets/js/explorer.js"></script>
+</body>
+</html>

@@ -26,12 +26,28 @@ async function loadStats() {
     const blocksEl = document.getElementById('total-blocks');
     const supplyEl = document.getElementById('total-supply');
     if (heightEl) heightEl.textContent = data.height ?? '0';
-    if (blocksEl) blocksEl.textContent = data.total_blocks ?? '0';
+    if (blocksEl) blocksEl.textContent = data.total_blocks ?? (data.total ?? '0');
     if (supplyEl) supplyEl.textContent = ((data.supply_irm ?? 0)).toFixed(2) + ' IRM';
   } catch (error) {
     console.error('Error loading stats:', error);
-    for (const id of ['current-height','total-blocks','total-supply']) {
-      const el = document.getElementById(id); if (el) el.textContent = 'Error';
+    // Fallback: derive basics from blocks endpoint
+    try {
+      const blocksData = await fetchJson('/blocks?limit=10');
+      const list = blocksData.blocks ?? blocksData ?? [];
+      const height = Array.isArray(list) && list.length ? (list[0].height ?? 0) : 0;
+      const total = blocksData.total ?? (Array.isArray(list) ? list.length : 0);
+      const estSupplyIrm = total * 50; // rough estimate, improves UX if stats is down
+      const heightEl = document.getElementById('current-height');
+      const blocksEl = document.getElementById('total-blocks');
+      const supplyEl = document.getElementById('total-supply');
+      if (heightEl) heightEl.textContent = String(height);
+      if (blocksEl) blocksEl.textContent = String(total);
+      if (supplyEl) supplyEl.textContent = estSupplyIrm.toFixed(2) + ' IRM';
+    } catch (e2) {
+      console.error('Fallback stats failed:', e2);
+      for (const id of ['current-height','total-blocks','total-supply']) {
+        const el = document.getElementById(id); if (el) el.textContent = 'Error';
+      }
     }
   }
 }

@@ -7,66 +7,66 @@ let blockTimeChart;
 console.log('Dashboard JS loaded');
 
 async function loadDashboard() {
-    try {
-        console.log('Loading dashboard data...');
+  try {
+    console.log('Loading dashboard data...');
+    const statsProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/stats`);
+    const statsResponse = await fetch(statsProxyUrl);
+    if (!statsResponse.ok) throw new Error(`HTTP error! status: ${statsResponse.status}`);
+    const stats = await statsResponse.json();
+    console.log('Dashboard stats loaded:', stats);
+    const heightEl = document.getElementById('network-height');
+    const blocksEl = document.getElementById('total-blocks');
+    const supplyEl = document.getElementById('total-supply');
+    if (heightEl) heightEl.textContent = stats.height ?? '0';
+    if (blocksEl) blocksEl.textContent = stats.total_blocks ?? (stats.total ?? '0');
+    if (supplyEl) supplyEl.textContent = ((stats.supply_irm ?? 0)).toFixed(2) + ' IRM';
 
-        // Load stats
-        const statsProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/stats`);
-        const statsResponse = await fetch(statsProxyUrl);
-        
-        if (!statsResponse.ok) {
-            throw new Error(`HTTP error! status: ${statsResponse.status}`);
-        }
-        
-        const stats = await statsResponse.json();
-        console.log('Dashboard stats loaded:', stats);
+    const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=10`);
+    const blocksResponse = await fetch(blocksProxyUrl);
+    if (!blocksResponse.ok) throw new Error(`HTTP error! status: ${blocksResponse.status}`);
+    const blocks = await blocksResponse.json();
+    console.log('Dashboard blocks loaded:', blocks.blocks ? blocks.blocks.length : 0, 'blocks');
 
-        const heightEl = document.getElementById('network-height');
-        const blocksEl = document.getElementById('total-blocks');
-        const supplyEl = document.getElementById('total-supply');
-
-        if (heightEl) heightEl.textContent = stats.height || '0';
-        if (blocksEl) blocksEl.textContent = stats.total_blocks || '0';
-        if (supplyEl) supplyEl.textContent = (stats.supply_irm || 0).toFixed(2) + ' IRM';
-
-        // Load recent blocks for block time calculation
-        const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=10`);
-        const blocksResponse = await fetch(blocksProxyUrl);
-        
-        if (!blocksResponse.ok) {
-            throw new Error(`HTTP error! status: ${blocksResponse.status}`);
-        }
-        
-        const blocks = await blocksResponse.json();
-        console.log('Dashboard blocks loaded:', blocks.blocks ? blocks.blocks.length : 0, 'blocks');
-
-        const blockTimeEl = document.getElementById('block-time');
-
-        if (blocks.blocks && blocks.blocks.length > 1) {
-            const intervals = [];
-            for (let i = 1; i < blocks.blocks.length; i++) {
-                const interval = blocks.blocks[i].time - blocks.blocks[i-1].time;
-                intervals.push(interval / 60); // Convert to minutes
-            }
-            const avgBlockTime = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-            if (blockTimeEl) blockTimeEl.textContent = avgBlockTime.toFixed(2) + ' minutes';
-
-            updateChart(intervals);
-        } else {
-            if (blockTimeEl) blockTimeEl.textContent = 'N/A';
-        }
-    } catch (error) {
-        console.error('Error loading dashboard:', error);
-        const heightEl = document.getElementById('network-height');
-        const blocksEl = document.getElementById('total-blocks');
-        const supplyEl = document.getElementById('total-supply');
-        const blockTimeEl = document.getElementById('block-time');
-
-        if (heightEl) heightEl.textContent = 'Error';
-        if (blocksEl) blocksEl.textContent = 'Error';
-        if (supplyEl) supplyEl.textContent = 'Error';
-        if (blockTimeEl) blockTimeEl.textContent = 'Error';
+    const blockTimeEl = document.getElementById('block-time');
+    if (blocks.blocks && blocks.blocks.length > 1) {
+      const intervals = [];
+      for (let i = 1; i < blocks.blocks.length; i++) {
+        const t2 = blocks.blocks[i].time ?? blocks.blocks[i].timestamp ?? 0;
+        const t1 = blocks.blocks[i-1].time ?? blocks.blocks[i-1].timestamp ?? 0;
+        intervals.push((t2 - t1) / 60);
+      }
+      const avg = intervals.reduce((a,b)=>a+b,0) / intervals.length;
+      if (blockTimeEl) blockTimeEl.textContent = avg.toFixed(2) + ' minutes';
+      updateChart(intervals);
+    } else {
+      if (blockTimeEl) blockTimeEl.textContent = 'N/A';
     }
+  } catch (error) {
+    console.error('Error loading dashboard:', error);
+    // Fallback: derive basics from blocks
+    try {
+      const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=10`);
+      const blocksResponse = await fetch(blocksProxyUrl);
+      const blocks = await blocksResponse.json();
+      const list = blocks.blocks ?? blocks ?? [];
+      const height = Array.isArray(list) && list.length ? (list[0].height ?? 0) : 0;
+      const total = blocks.total ?? (Array.isArray(list) ? list.length : 0);
+      const estSupplyIrm = total * 50;
+      const heightEl = document.getElementById('network-height');
+      const blocksEl = document.getElementById('total-blocks');
+      const supplyEl = document.getElementById('total-supply');
+      const blockTimeEl = document.getElementById('block-time');
+      if (heightEl) heightEl.textContent = String(height);
+      if (blocksEl) blocksEl.textContent = String(total);
+      if (supplyEl) supplyEl.textContent = estSupplyIrm.toFixed(2) + ' IRM';
+      if (blockTimeEl) blockTimeEl.textContent = 'N/A';
+    } catch (e2) {
+      console.error('Dashboard fallback failed:', e2);
+      for (const id of ['network-height','total-blocks','total-supply','block-time']) {
+        const el = document.getElementById(id); if (el) el.textContent = 'Error';
+      }
+    }
+  }
 }
 
 function updateChart(intervals) {

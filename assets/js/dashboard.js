@@ -1,5 +1,6 @@
-// Irium Network Dashboard JavaScript
+// Irium Network Dashboard JavaScript with CORS Proxy
 const API_BASE = 'https://api.iriumlabs.org/api';
+const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 
 let blockTimeChart;
 
@@ -10,22 +11,12 @@ async function loadDashboard() {
         console.log('Loading dashboard data...');
 
         // Load stats
-        const statsResponse = await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', `${API_BASE}/stats`, true);
-            xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve({
-                        ok: true,
-                        json: () => Promise.resolve(JSON.parse(xhr.responseText))
-                    });
-                } else {
-                    reject(new Error(`HTTP error! status: ${xhr.status}`));
-                }
-            };
-            xhr.onerror = () => reject(new Error('Network error'));
-            xhr.send();
-        });
+        const statsProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/stats`);
+        const statsResponse = await fetch(statsProxyUrl);
+        
+        if (!statsResponse.ok) {
+            throw new Error(`HTTP error! status: ${statsResponse.status}`);
+        }
         
         const stats = await statsResponse.json();
         console.log('Stats loaded:', stats);
@@ -39,22 +30,12 @@ async function loadDashboard() {
         if (supplyEl) supplyEl.textContent = (stats.supply_irm || 0).toFixed(2) + ' IRM';
 
         // Load recent blocks for block time calculation
-        const blocksResponse = await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', `${API_BASE}/blocks?limit=10`, true);
-            xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve({
-                        ok: true,
-                        json: () => Promise.resolve(JSON.parse(xhr.responseText))
-                    });
-                } else {
-                    reject(new Error(`HTTP error! status: ${xhr.status}`));
-                }
-            };
-            xhr.onerror = () => reject(new Error('Network error'));
-            xhr.send();
-        });
+        const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=10`);
+        const blocksResponse = await fetch(blocksProxyUrl);
+        
+        if (!blocksResponse.ok) {
+            throw new Error(`HTTP error! status: ${blocksResponse.status}`);
+        }
         
         const blocks = await blocksResponse.json();
         console.log('Blocks loaded:', blocks.blocks ? blocks.blocks.length : 0, 'blocks');

@@ -94,7 +94,7 @@ function searchBlock() {
   else alert('Hash search coming soon!');
 }
 
-// Load blocks list - try to get all blocks from genesis
+// Load blocks list - show what's available
 async function loadBlocks(limit = 50) {
   try {
     console.log('Loading blocks...');
@@ -104,12 +104,16 @@ async function loadBlocks(limit = 50) {
     const currentHeight = statsData.height || 0;
     console.log('Current blockchain height:', currentHeight);
     
-    // Try to get blocks with a higher limit to get more history
+    // Try to get blocks with a higher limit
     const data = await fetchJson(`/blocks?limit=${Math.min(limit, currentHeight + 1)}`);
     const list = data.blocks ?? data ?? [];
     console.log('Blocks loaded:', Array.isArray(list) ? list.length : 0);
-    console.log('Block height range:', list.length > 0 ? 
-      `${Math.min(...list.map(b => b.height ?? 0))} to ${Math.max(...list.map(b => b.height ?? 0))}` : 'No blocks');
+    
+    if (Array.isArray(list) && list.length > 0) {
+      const heights = list.map(b => b.height ?? 0).sort((a,b) => a - b);
+      console.log('Available block heights:', heights);
+      console.log('Missing blocks:', Array.from({length: currentHeight + 1}, (_, i) => i).filter(h => !heights.includes(h)));
+    }
 
     const blocksList = document.getElementById('blocks-list');
     if (!blocksList) { console.error('blocks-list element not found'); return; }
@@ -139,6 +143,21 @@ async function loadBlocks(limit = 50) {
   </div>
 </div>`;
       }).join('');
+      
+      // Add a note about missing blocks
+      const missingBlocks = Array.from({length: currentHeight + 1}, (_, i) => i).filter(h => !list.some(b => (b.height ?? 0) === h));
+      if (missingBlocks.length > 0) {
+        blocksList.innerHTML += `
+<div style="background: rgba(255,165,0,0.1); padding: 15px; margin-top: 20px; border-radius: 8px; border-left: 4px solid #ffa500;">
+  <div style="color: #ffa500; font-weight: bold; margin-bottom: 10px;">⚠️ Missing Blocks</div>
+  <div style="color: rgba(255,255,255,0.8); font-size: 14px;">
+    The following blocks are not available in the API: ${missingBlocks.join(', ')}
+  </div>
+  <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-top: 5px;">
+    This may be due to API limitations or blocks not being indexed yet.
+  </div>
+</div>`;
+      }
     } else {
       blocksList.innerHTML = '<p style="color: rgba(255,255,255,0.7);">No blocks found</p>';
     }

@@ -40,20 +40,20 @@ async function loadDashboard() {
       const sortedBlocks = list.slice().sort((a,b)=> (a.height??0) - (b.height??0));
       console.log('Sorted blocks (asc) for time calculation:', sortedBlocks.map(b => ({ height: b.height, time: b.time })));
       
-      const intervals = [];
+      const timeIntervals = [];
       for (let i = 1; i < sortedBlocks.length; i++) {
         const t2 = sortedBlocks[i].time ?? sortedBlocks[i].timestamp ?? 0;
         const t1 = sortedBlocks[i-1].time ?? sortedBlocks[i-1].timestamp ?? 0;
         const m = (t2 - t1) / 60;
-        if (m > 0 && m < 1440) intervals.push(m);
+        if (m > 0 && m < 1440) timeIntervals.push(m);
       }
       
-      console.log('Block time intervals:', intervals);
+      console.log('Block time intervals:', timeIntervals);
       
-      if (intervals.length > 0) {
-        const avgBlockTime = intervals.reduce((a, b) => a + b, 0) / intervals.length;
+      if (timeIntervals.length > 0) {
+        const avgBlockTime = timeIntervals.reduce((a, b) => a + b, 0) / timeIntervals.length;
         if (blockTimeEl) blockTimeEl.textContent = avgBlockTime.toFixed(2) + ' minutes';
-        updateChart(intervals, sortedBlocks.slice(0, Math.min(intervals.length + 1, 10)));
+        updateChart(timeIntervals, sortedBlocks.slice(0, Math.min(timeIntervals.length + 1, 10)));
       } else {
         if (blockTimeEl) blockTimeEl.textContent = 'N/A';
       }

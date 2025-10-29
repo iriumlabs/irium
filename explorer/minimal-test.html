@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Minimal Test</title>
+</head>
+<body>
+    <h1>Minimal JavaScript Test</h1>
+    <div id="current-height">Loading...</div>
+    <div id="total-blocks">Loading...</div>
+    <div id="total-supply">Loading...</div>
+    <div id="blocks-list">Loading...</div>
+    
+    <script>
+        console.log('=== MINIMAL TEST STARTED ===');
+        
+        // Test basic XMLHttpRequest
+        function testAPI() {
+            console.log('Testing API call...');
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', 'https://api.iriumlabs.org/api/stats', true);
+            xhr.onload = function() {
+                console.log('API Response Status:', xhr.status);
+                console.log('API Response Text:', xhr.responseText);
+                
+                if (xhr.status === 200) {
+                    try {
+                        const data = JSON.parse(xhr.responseText);
+                        console.log('Parsed data:', data);
+                        
+                        // Update DOM elements
+                        document.getElementById('current-height').textContent = data.height || '0';
+                        document.getElementById('total-blocks').textContent = data.total_blocks || '0';
+                        document.getElementById('total-supply').textContent = (data.supply_irm || 0).toFixed(2) + ' IRM';
+                        document.getElementById('blocks-list').innerHTML = '<p>API call successful! Data loaded.</p>';
+                        
+                        console.log('DOM updated successfully');
+                    } catch (e) {
+                        console.error('JSON parse error:', e);
+                        document.getElementById('blocks-list').innerHTML = '<p>JSON parse error: ' + e.message + '</p>';
+                    }
+                } else {
+                    console.error('API call failed with status:', xhr.status);
+                    document.getElementById('blocks-list').innerHTML = '<p>API call failed with status: ' + xhr.status + '</p>';
+                }
+            };
+            xhr.onerror = function() {
+                console.error('Network error');
+                document.getElementById('blocks-list').innerHTML = '<p>Network error</p>';
+            };
+            xhr.send();
+        }
+        
+        // Run the test
+        testAPI();
+    </script>
+</body>
+</html>

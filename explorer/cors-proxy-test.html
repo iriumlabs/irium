@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>CORS Proxy Test</title>
+</head>
+<body>
+    <h1>CORS Proxy Test</h1>
+    <div id="result">Testing...</div>
+    
+    <script>
+        console.log('Testing with CORS proxy...');
+        
+        // Try using a CORS proxy
+        const proxyUrl = 'https://api.allorigins.win/raw?url=';
+        const apiUrl = encodeURIComponent('https://api.iriumlabs.org/api/stats');
+        
+        fetch(proxyUrl + apiUrl)
+            .then(response => {
+                console.log('Proxy response status:', response.status);
+                return response.text();
+            })
+            .then(data => {
+                console.log('Proxy response data:', data);
+                try {
+                    const jsonData = JSON.parse(data);
+                    document.getElementById('result').innerHTML = 'SUCCESS with proxy: ' + JSON.stringify(jsonData, null, 2);
+                } catch (e) {
+                    document.getElementById('result').innerHTML = 'Proxy response (not JSON): ' + data;
+                }
+            })
+            .catch(error => {
+                console.error('Proxy error:', error);
+                document.getElementById('result').innerHTML = 'Proxy error: ' + error.message;
+            });
+    </script>
+</body>
+</html>

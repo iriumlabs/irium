@@ -7,28 +7,42 @@ console.log('Explorer JS loaded');
 async function loadStats() {
     try {
         console.log('Loading stats...');
-        const response = await fetch(`${API_BASE}/stats`);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        // Use XMLHttpRequest instead of fetch to avoid CORS preflight
+        const response = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', `${API_BASE}/stats`, true);
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve({
+                        ok: true,
+                        json: () => Promise.resolve(JSON.parse(xhr.responseText))
+                    });
+                } else {
+                    reject(new Error(`HTTP error! status: ${xhr.status}`));
+                }
+            };
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.send();
+        });
+        
         const data = await response.json();
         console.log('Stats loaded:', data);
-        
+
         const heightEl = document.getElementById('current-height');
         const blocksEl = document.getElementById('total-blocks');
         const supplyEl = document.getElementById('total-supply');
-        
+
         if (heightEl) heightEl.textContent = data.height || '0';
         if (blocksEl) blocksEl.textContent = data.total_blocks || '0';
         if (supplyEl) supplyEl.textContent = (data.supply_irm || 0).toFixed(2) + ' IRM';
-        
+
         return data;
     } catch (error) {
         console.error('Error loading stats:', error);
         const heightEl = document.getElementById('current-height');
         const blocksEl = document.getElementById('total-blocks');
         const supplyEl = document.getElementById('total-supply');
-        
+
         if (heightEl) heightEl.textContent = 'Error';
         if (blocksEl) blocksEl.textContent = 'Error';
         if (supplyEl) supplyEl.textContent = 'Error';
@@ -36,16 +50,27 @@ async function loadStats() {
     }
 }
 
-// Format timestamp
 // View block details
 async function viewBlock(height) {
     try {
-        const response = await fetch(`${API_BASE}/block/${height}`);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
+        const response = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', `${API_BASE}/block/${height}`, true);
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve({
+                        ok: true,
+                        json: () => Promise.resolve(JSON.parse(xhr.responseText))
+                    });
+                } else {
+                    reject(new Error(`HTTP error! status: ${xhr.status}`));
+                }
+            };
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.send();
+        });
         
+        const data = await response.json();
         alert(`Block ${height}\nHash: ${data.hash}\nReward: ${(data.reward / 100000000).toFixed(2)} IRM`);
     } catch (error) {
         console.error('Error loading block:', error);
@@ -57,7 +82,7 @@ async function viewBlock(height) {
 function searchBlock() {
     const query = document.getElementById('search-input').value.trim();
     if (!query) return;
-    
+
     if (/^\d+$/.test(query)) {
         viewBlock(parseInt(query));
     } else {
@@ -69,19 +94,32 @@ function searchBlock() {
 async function loadBlocks(limit = 20) {
     try {
         console.log('Loading blocks...');
-        const response = await fetch(`${API_BASE}/blocks?limit=${limit}`);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        const response = await new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('GET', `${API_BASE}/blocks?limit=${limit}`, true);
+            xhr.onload = () => {
+                if (xhr.status >= 200 && xhr.status < 300) {
+                    resolve({
+                        ok: true,
+                        json: () => Promise.resolve(JSON.parse(xhr.responseText))
+                    });
+                } else {
+                    reject(new Error(`HTTP error! status: ${xhr.status}`));
+                }
+            };
+            xhr.onerror = () => reject(new Error('Network error'));
+            xhr.send();
+        });
+        
         const data = await response.json();
         console.log('Blocks loaded:', data.blocks ? data.blocks.length : 0, 'blocks');
-        
+
         const blocksList = document.getElementById('blocks-list');
         if (!blocksList) {
             console.error('blocks-list element not found');
             return;
         }
-        
+
         if (data.blocks && data.blocks.length > 0) {
             blocksList.innerHTML = data.blocks.map(block => `
                 <div style="background: rgba(0,0,0,0.3); padding: 20px; margin-bottom: 15px; border-radius: 8px; cursor: pointer; transition: transform 0.2s;" onclick="viewBlock(${block.height})" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">

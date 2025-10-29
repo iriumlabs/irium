@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Irium Debug Test</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .test { margin: 10px 0; padding: 10px; border: 1px solid #ccc; }
+        .pass { background-color: #d4edda; }
+        .fail { background-color: #f8d7da; }
+    </style>
+</head>
+<body>
+    <h1>Irium JavaScript Debug Test</h1>
+    
+    <div id="test1" class="test">Test 1: Basic JavaScript execution</div>
+    <div id="test2" class="test">Test 2: Explorer.js loading</div>
+    <div id="test3" class="test">Test 3: API connectivity</div>
+    <div id="test4" class="test">Test 4: DOM elements</div>
+    
+    <!-- Required DOM elements for the explorer -->
+    <div id="current-height" style="display:none;">0</div>
+    <div id="total-blocks" style="display:none;">0</div>
+    <div id="total-supply" style="display:none;">0</div>
+    <div id="blocks-list" style="display:none;"></div>
+    
+    <script>
+        console.log('=== DEBUG TEST STARTED ===');
+        
+        // Test 1: Basic JavaScript
+        document.getElementById('test1').textContent = 'PASS: Basic JavaScript works';
+        document.getElementById('test1').className = 'test pass';
+        
+        // Test 2: Load explorer.js
+        const script = document.createElement('script');
+        script.src = 'https://www.iriumlabs.org/assets/js/explorer.js';
+        script.onload = function() {
+            console.log('Explorer.js loaded successfully');
+            document.getElementById('test2').textContent = 'PASS: Explorer.js loaded';
+            document.getElementById('test2').className = 'test pass';
+            
+            // Test if functions exist
+            if (typeof loadStats === 'function') {
+                console.log('loadStats function found');
+            } else {
+                console.log('loadStats function NOT found');
+            }
+            
+            if (typeof loadBlocks === 'function') {
+                console.log('loadBlocks function found');
+            } else {
+                console.log('loadBlocks function NOT found');
+            }
+            
+            // Test 3: API connectivity
+            fetch('https://api.iriumlabs.org/api/stats')
+                .then(response => response.json())
+                .then(data => {
+                    console.log('API test successful:', data);
+                    document.getElementById('test3').textContent = 'PASS: API accessible';
+                    document.getElementById('test3').className = 'test pass';
+                })
+                .catch(error => {
+                    console.error('API test failed:', error);
+                    document.getElementById('test3').textContent = 'FAIL: API error - ' + error.message;
+                    document.getElementById('test3').className = 'test fail';
+                });
+            
+            // Test 4: DOM elements
+            const requiredElements = ['current-height', 'total-blocks', 'total-supply', 'blocks-list'];
+            let allFound = true;
+            requiredElements.forEach(id => {
+                if (!document.getElementById(id)) {
+                    allFound = false;
+                    console.error('Missing element:', id);
+                }
+            });
+            
+            if (allFound) {
+                document.getElementById('test4').textContent = 'PASS: All DOM elements found';
+                document.getElementById('test4').className = 'test pass';
+            } else {
+                document.getElementById('test4').textContent = 'FAIL: Some DOM elements missing';
+                document.getElementById('test4').className = 'test fail';
+            }
+            
+            // Try to call the functions manually
+            console.log('Attempting to call loadStats...');
+            try {
+                loadStats();
+                console.log('loadStats called successfully');
+            } catch (error) {
+                console.error('Error calling loadStats:', error);
+            }
+        };
+        
+        script.onerror = function() {
+            console.error('Failed to load explorer.js');
+            document.getElementById('test2').textContent = 'FAIL: Explorer.js failed to load';
+            document.getElementById('test2').className = 'test fail';
+        };
+        
+        document.head.appendChild(script);
+    </script>
+</body>
+</html>

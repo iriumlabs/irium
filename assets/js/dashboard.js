@@ -25,8 +25,8 @@ async function loadDashboard() {
     if (blocksEl) blocksEl.textContent = stats.total_blocks ?? (stats.total ?? '0');
     if (supplyEl) supplyEl.textContent = ((stats.supply_irm ?? 0)).toFixed(2) + ' IRM';
 
-    // Load recent blocks for block time calculation
-    const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=10`);
+    // Load more blocks for better chart data
+    const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=20`);
     const blocksResponse = await fetch(blocksProxyUrl);
     if (!blocksResponse.ok) throw new Error(`HTTP error! status: ${blocksResponse.status}`);
     const blocks = await blocksResponse.json();
@@ -53,7 +53,7 @@ async function loadDashboard() {
       if (timeIntervals.length > 0) {
         const avgBlockTime = timeIntervals.reduce((a, b) => a + b, 0) / timeIntervals.length;
         if (blockTimeEl) blockTimeEl.textContent = avgBlockTime.toFixed(2) + ' minutes';
-        updateChart(timeIntervals, sortedBlocks.slice(0, Math.min(timeIntervals.length + 1, 10)));
+        updateChart(timeIntervals, sortedBlocks.slice(0, Math.min(timeIntervals.length + 1, 20)));
       } else {
         if (blockTimeEl) blockTimeEl.textContent = 'N/A';
       }
@@ -64,7 +64,7 @@ async function loadDashboard() {
     console.error('Error loading dashboard:', error);
     // Fallback: derive basics from blocks
     try {
-      const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=10`);
+      const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=20`);
       const blocksResponse = await fetch(blocksProxyUrl);
       const blocks = await blocksResponse.json();
       const list = blocks.blocks ?? blocks ?? [];

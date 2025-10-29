@@ -30,24 +30,8 @@ async function loadStats() {
     if (supplyEl) supplyEl.textContent = ((data.supply_irm ?? 0)).toFixed(2) + ' IRM';
   } catch (error) {
     console.error('Error loading stats:', error);
-    // Fallback: derive basics from blocks endpoint
-    try {
-      const blocksData = await fetchJson('/blocks?limit=10');
-      const list = blocksData.blocks ?? blocksData ?? [];
-      const height = Array.isArray(list) && list.length ? (list[0].height ?? 0) : 0;
-      const total = blocksData.total ?? (Array.isArray(list) ? list.length : 0);
-      const estSupplyIrm = total * 50; // rough estimate, improves UX if stats is down
-      const heightEl = document.getElementById('current-height');
-      const blocksEl = document.getElementById('total-blocks');
-      const supplyEl = document.getElementById('total-supply');
-      if (heightEl) heightEl.textContent = String(height);
-      if (blocksEl) blocksEl.textContent = String(total);
-      if (supplyEl) supplyEl.textContent = estSupplyIrm.toFixed(2) + ' IRM';
-    } catch (e2) {
-      console.error('Fallback stats failed:', e2);
-      for (const id of ['current-height','total-blocks','total-supply']) {
-        const el = document.getElementById(id); if (el) el.textContent = 'Error';
-      }
+    for (const id of ['current-height','total-blocks','total-supply']) {
+      const el = document.getElementById(id); if (el) el.textContent = 'Error';
     }
   }
 }
@@ -90,9 +74,7 @@ async function viewBlock(height) {
     if (window.__showBlockModal) {
       window.__showBlockModal(rows);
     } else {
-      alert(`Block ${height}
-Hash: ${hash}
-Reward: ${rewardIrm} IRM`);
+      alert(`Block ${height}\nHash: ${hash}\nReward: ${rewardIrm} IRM`);
     }
   } catch (error) {
     console.error('Error loading block:', error);
@@ -112,19 +94,31 @@ function searchBlock() {
   else alert('Hash search coming soon!');
 }
 
-// Load blocks list
-async function loadBlocks(limit = 20) {
+// Load blocks list - try to get all blocks from genesis
+async function loadBlocks(limit = 50) {
   try {
     console.log('Loading blocks...');
-    const data = await fetchJson(`/blocks?limit=${limit}`);
-    const list = data.blocks ?? data;
+    
+    // First, get the current height from stats
+    const statsData = await fetchJson('/stats');
+    const currentHeight = statsData.height || 0;
+    console.log('Current blockchain height:', currentHeight);
+    
+    // Try to get blocks with a higher limit to get more history
+    const data = await fetchJson(`/blocks?limit=${Math.min(limit, currentHeight + 1)}`);
+    const list = data.blocks ?? data ?? [];
     console.log('Blocks loaded:', Array.isArray(list) ? list.length : 0);
+    console.log('Block height range:', list.length > 0 ? 
+      `${Math.min(...list.map(b => b.height ?? 0))} to ${Math.max(...list.map(b => b.height ?? 0))}` : 'No blocks');
 
     const blocksList = document.getElementById('blocks-list');
     if (!blocksList) { console.error('blocks-list element not found'); return; }
 
     if (Array.isArray(list) && list.length > 0) {
-      blocksList.innerHTML = list.map((blk) => {
+      // Sort by height descending (newest first for display)
+      const sortedBlocks = list.slice().sort((a,b) => (b.height ?? 0) - (a.height ?? 0));
+      
+      blocksList.innerHTML = sortedBlocks.map((blk) => {
         const hash = pick(blk, ['hash','block_hash'], 'N/A');
         const time = pick(blk, ['time','timestamp'], 0);
         const rewardSats = pick(blk, ['reward','subsidy','block_reward'], 0);

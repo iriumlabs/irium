@@ -135,3 +135,9 @@ setInterval(() => {
     console.log('Auto-refreshing dashboard...');
     loadDashboard();
 }, 30000);
+
+// Format timestamp to readable date
+function formatTime(timestamp) {
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleString();
+}

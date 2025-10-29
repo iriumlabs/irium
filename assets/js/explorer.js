@@ -134,3 +134,9 @@ setInterval(() => {
     loadStats();
     loadBlocks();
 }, 30000);
+
+// Format timestamp to readable date
+function formatTime(timestamp) {
+    const date = new Date(timestamp * 1000);
+    return date.toLocaleString();
+}

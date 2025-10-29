@@ -36,25 +36,16 @@ async function loadDashboard() {
     const list = blocks.blocks ?? blocks ?? [];
 
     if (Array.isArray(list) && list.length > 1) {
-      // Sort blocks by height (descending) to ensure proper order
-            // Sort by height ascending (oldest -> newest)
+      // Sort blocks by height ascending (oldest -> newest)
       const sortedBlocks = list.slice().sort((a,b)=> (a.height??0) - (b.height??0));
       console.log('Sorted blocks (asc) for time calculation:', sortedBlocks.map(b => ({ height: b.height, time: b.time })));
+      
       const intervals = [];
       for (let i = 1; i < sortedBlocks.length; i++) {
         const t2 = sortedBlocks[i].time ?? sortedBlocks[i].timestamp ?? 0;
         const t1 = sortedBlocks[i-1].time ?? sortedBlocks[i-1].timestamp ?? 0;
         const m = (t2 - t1) / 60;
         if (m > 0 && m < 1440) intervals.push(m);
-      }
-const intervals = [];
-      for (let i = 1; i < sortedBlocks.length; i++) {
-        const t2 = sortedBlocks[i-1].time ?? sortedBlocks[i-1].timestamp ?? 0;
-        const t1 = sortedBlocks[i].time ?? sortedBlocks[i].timestamp ?? 0;
-        const interval = (t2 - t1) / 60; // Convert to minutes
-        if (interval > 0 && interval < 1440) { // Only include reasonable intervals (0-24 hours)
-          intervals.push(interval);
-        }
       }
       
       console.log('Block time intervals:', intervals);
@@ -116,10 +107,10 @@ function updateChart(intervals, blocks) {
 
     // Create labels based on actual block heights
     const labels = intervals.map((_, i) => {
-      if (blocks && blocks[i + 1]) {
-        return `Block ${blocks[i + 1].height}`;
+      if (blocks && blocks[i+1]) {
+        return `Block ${blocks[i+1].height}`;
       }
-      return `Interval ${i + 1}`;
+      return `Interval ${i+1}`;
     });
 
     blockTimeChart = new Chart(ctx, {

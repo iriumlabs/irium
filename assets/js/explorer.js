@@ -37,11 +37,6 @@ async function loadStats() {
 }
 
 // Format timestamp
-function formatTime(timestamp) {
-    const date = new Date(timestamp * 1000);
-    return date.toLocaleString();
-}
-
 // View block details
 async function viewBlock(height) {
     try {

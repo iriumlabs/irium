@@ -94,7 +94,7 @@ function searchBlock() {
   else alert('Hash search coming soon!');
 }
 
-// Load blocks list - show what's available
+// Load blocks list - fetch all available blocks
 async function loadBlocks(limit = 50) {
   try {
     console.log('Loading blocks...');
@@ -104,23 +104,65 @@ async function loadBlocks(limit = 50) {
     const currentHeight = statsData.height || 0;
     console.log('Current blockchain height:', currentHeight);
     
-    // Try to get blocks with a higher limit
+    // Get blocks from the /blocks endpoint
     const data = await fetchJson(`/blocks?limit=${Math.min(limit, currentHeight + 1)}`);
     const list = data.blocks ?? data ?? [];
-    console.log('Blocks loaded:', Array.isArray(list) ? list.length : 0);
+    console.log('Blocks from /blocks endpoint:', Array.isArray(list) ? list.length : 0);
     
-    if (Array.isArray(list) && list.length > 0) {
-      const heights = list.map(b => b.height ?? 0).sort((a,b) => a - b);
+    // Try to fetch individual blocks that might be missing
+    const allBlocks = [...list];
+    const missingHeights = [];
+    
+    // Check for missing blocks 0-3 (genesis and early blocks)
+    for (let h = 0; h <= Math.min(3, currentHeight); h++) {
+      if (!allBlocks.some(b => (b.height ?? 0) === h)) {
+        missingHeights.push(h);
+      }
+    }
+    
+    // Check for missing blocks 9-11
+    for (let h = 9; h <= Math.min(11, currentHeight); h++) {
+      if (!allBlocks.some(b => (b.height ?? 0) === h)) {
+        missingHeights.push(h);
+      }
+    }
+    
+    console.log('Missing block heights to fetch individually:', missingHeights);
+    
+    // Fetch missing blocks individually
+    for (const height of missingHeights) {
+      try {
+        console.log(`Fetching individual block ${height}...`);
+        const blockData = await fetchJson(`/block/${height}`);
+        if (blockData && blockData.block && !blockData.error) {
+          allBlocks.push(blockData.block);
+          console.log(`Successfully fetched block ${height}`);
+        } else if (blockData && !blockData.error) {
+          allBlocks.push(blockData);
+          console.log(`Successfully fetched block ${height} (flat structure)`);
+        } else {
+          console.log(`Block ${height} not found:`, blockData.error || 'Unknown error');
+        }
+      } catch (error) {
+        console.log(`Failed to fetch block ${height}:`, error.message);
+      }
+    }
+    
+    console.log('Total blocks after individual fetches:', allBlocks.length);
+    
+    if (Array.isArray(allBlocks) && allBlocks.length > 0) {
+      const heights = allBlocks.map(b => b.height ?? 0).sort((a,b) => a - b);
       console.log('Available block heights:', heights);
-      console.log('Missing blocks:', Array.from({length: currentHeight + 1}, (_, i) => i).filter(h => !heights.includes(h)));
+      const missingBlocks = Array.from({length: currentHeight + 1}, (_, i) => i).filter(h => !heights.includes(h));
+      console.log('Still missing blocks:', missingBlocks);
     }
 
     const blocksList = document.getElementById('blocks-list');
     if (!blocksList) { console.error('blocks-list element not found'); return; }
 
-    if (Array.isArray(list) && list.length > 0) {
+    if (Array.isArray(allBlocks) && allBlocks.length > 0) {
       // Sort by height descending (newest first for display)
-      const sortedBlocks = list.slice().sort((a,b) => (b.height ?? 0) - (a.height ?? 0));
+      const sortedBlocks = allBlocks.slice().sort((a,b) => (b.height ?? 0) - (a.height ?? 0));
       
       blocksList.innerHTML = sortedBlocks.map((blk) => {
         const hash = pick(blk, ['hash','block_hash'], 'N/A');
@@ -144,14 +186,14 @@ async function loadBlocks(limit = 50) {
 </div>`;
       }).join('');
       
-      // Add a note about missing blocks
-      const missingBlocks = Array.from({length: currentHeight + 1}, (_, i) => i).filter(h => !list.some(b => (b.height ?? 0) === h));
-      if (missingBlocks.length > 0) {
+      // Add a note about any still missing blocks
+      const stillMissingBlocks = Array.from({length: currentHeight + 1}, (_, i) => i).filter(h => !allBlocks.some(b => (b.height ?? 0) === h));
+      if (stillMissingBlocks.length > 0) {
         blocksList.innerHTML += `
 <div style="background: rgba(255,165,0,0.1); padding: 15px; margin-top: 20px; border-radius: 8px; border-left: 4px solid #ffa500;">
   <div style="color: #ffa500; font-weight: bold; margin-bottom: 10px;">⚠️ Missing Blocks</div>
   <div style="color: rgba(255,255,255,0.8); font-size: 14px;">
-    The following blocks are not available in the API: ${missingBlocks.join(', ')}
+    The following blocks are not available in the API: ${stillMissingBlocks.join(', ')}
   </div>
   <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-top: 5px;">
     This may be due to API limitations or blocks not being indexed yet.

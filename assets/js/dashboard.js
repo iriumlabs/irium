@@ -25,7 +25,7 @@ async function loadDashboard() {
     if (blocksEl) blocksEl.textContent = stats.total_blocks ?? (stats.total ?? '0');
     if (supplyEl) supplyEl.textContent = ((stats.supply_irm ?? 0)).toFixed(2) + ' IRM';
 
-    // Load more blocks for better chart data
+    // Load blocks for chart data - try to get more complete data
     const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=20`);
     const blocksResponse = await fetch(blocksProxyUrl);
     if (!blocksResponse.ok) throw new Error(`HTTP error! status: ${blocksResponse.status}`);
@@ -33,7 +33,39 @@ async function loadDashboard() {
     console.log('Dashboard blocks loaded:', blocks.blocks ? blocks.blocks.length : 0, 'blocks');
 
     const blockTimeEl = document.getElementById('block-time');
-    const list = blocks.blocks ?? blocks ?? [];
+    let list = blocks.blocks ?? blocks ?? [];
+
+    // Try to fetch individual blocks that might be missing for better chart data
+    const allBlocks = [...list];
+    const missingHeights = [];
+    
+    // Check for missing blocks 0-3 (genesis and early blocks)
+    for (let h = 0; h <= Math.min(3, stats.height || 0); h++) {
+      if (!allBlocks.some(b => (b.height ?? 0) === h)) {
+        missingHeights.push(h);
+      }
+    }
+    
+    console.log('Missing block heights to fetch individually for dashboard:', missingHeights);
+    
+    // Fetch missing blocks individually
+    for (const height of missingHeights) {
+      try {
+        console.log(`Fetching individual block ${height} for dashboard...`);
+        const blockData = await fetchJson(`/block/${height}`);
+        if (blockData && blockData.block && !blockData.error) {
+          allBlocks.push(blockData.block);
+          console.log(`Successfully fetched block ${height} for dashboard`);
+        } else if (blockData && !blockData.error) {
+          allBlocks.push(blockData);
+          console.log(`Successfully fetched block ${height} for dashboard (flat structure)`);
+        }
+      } catch (error) {
+        console.log(`Failed to fetch block ${height} for dashboard:`, error.message);
+      }
+    }
+    
+    list = allBlocks;
 
     if (Array.isArray(list) && list.length > 1) {
       // Sort blocks by height ascending (oldest -> newest)

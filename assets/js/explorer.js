@@ -1,5 +1,6 @@
-// Irium Block Explorer JavaScript
+// Irium Block Explorer JavaScript with CORS Proxy
 const API_BASE = 'https://api.iriumlabs.org/api';
+const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
 
 console.log('Explorer JS loaded');
 
@@ -7,23 +8,12 @@ console.log('Explorer JS loaded');
 async function loadStats() {
     try {
         console.log('Loading stats...');
-        // Use XMLHttpRequest instead of fetch to avoid CORS preflight
-        const response = await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', `${API_BASE}/stats`, true);
-            xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve({
-                        ok: true,
-                        json: () => Promise.resolve(JSON.parse(xhr.responseText))
-                    });
-                } else {
-                    reject(new Error(`HTTP error! status: ${xhr.status}`));
-                }
-            };
-            xhr.onerror = () => reject(new Error('Network error'));
-            xhr.send();
-        });
+        const proxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/stats`);
+        const response = await fetch(proxyUrl);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         
         const data = await response.json();
         console.log('Stats loaded:', data);
@@ -53,22 +43,12 @@ async function loadStats() {
 // View block details
 async function viewBlock(height) {
     try {
-        const response = await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', `${API_BASE}/block/${height}`, true);
-            xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve({
-                        ok: true,
-                        json: () => Promise.resolve(JSON.parse(xhr.responseText))
-                    });
-                } else {
-                    reject(new Error(`HTTP error! status: ${xhr.status}`));
-                }
-            };
-            xhr.onerror = () => reject(new Error('Network error'));
-            xhr.send();
-        });
+        const proxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/block/${height}`);
+        const response = await fetch(proxyUrl);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         
         const data = await response.json();
         alert(`Block ${height}\nHash: ${data.hash}\nReward: ${(data.reward / 100000000).toFixed(2)} IRM`);
@@ -94,22 +74,12 @@ function searchBlock() {
 async function loadBlocks(limit = 20) {
     try {
         console.log('Loading blocks...');
-        const response = await new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', `${API_BASE}/blocks?limit=${limit}`, true);
-            xhr.onload = () => {
-                if (xhr.status >= 200 && xhr.status < 300) {
-                    resolve({
-                        ok: true,
-                        json: () => Promise.resolve(JSON.parse(xhr.responseText))
-                    });
-                } else {
-                    reject(new Error(`HTTP error! status: ${xhr.status}`));
-                }
-            };
-            xhr.onerror = () => reject(new Error('Network error'));
-            xhr.send();
-        });
+        const proxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=${limit}`);
+        const response = await fetch(proxyUrl);
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         
         const data = await response.json();
         console.log('Blocks loaded:', data.blocks ? data.blocks.length : 0, 'blocks');

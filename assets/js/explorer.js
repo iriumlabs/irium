@@ -5,15 +5,21 @@ const API_BASE = 'https://api.iriumlabs.org/api';
 async function loadStats() {
     try {
         const response = await fetch(`${API_BASE}/stats`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const data = await response.json();
         
-        document.getElementById('current-height').textContent = data.height;
-        document.getElementById('total-blocks').textContent = data.total_blocks;
-        document.getElementById('total-supply').textContent = data.supply_irm.toFixed(2) + ' IRM';
+        document.getElementById('current-height').textContent = data.height || '0';
+        document.getElementById('total-blocks').textContent = data.total_blocks || '0';
+        document.getElementById('total-supply').textContent = (data.supply_irm || 0).toFixed(2) + ' IRM';
         
         return data;
     } catch (error) {
         console.error('Error loading stats:', error);
+        document.getElementById('current-height').textContent = 'Error';
+        document.getElementById('total-blocks').textContent = 'Error';
+        document.getElementById('total-supply').textContent = 'Error';
         return null;
     }
 }
@@ -28,11 +34,15 @@ function formatTime(timestamp) {
 async function viewBlock(height) {
     try {
         const response = await fetch(`${API_BASE}/block/${height}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const data = await response.json();
         
         alert(`Block ${height}\nHash: ${data.hash}\nReward: ${(data.reward / 100000000).toFixed(2)} IRM`);
     } catch (error) {
         console.error('Error loading block:', error);
+        alert('Error loading block details');
     }
 }
 
@@ -52,6 +62,9 @@ function searchBlock() {
 async function loadBlocks(limit = 20) {
     try {
         const response = await fetch(`${API_BASE}/blocks?limit=${limit}`);
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
         const data = await response.json();
         
         const blocksList = document.getElementById('blocks-list');
@@ -74,13 +87,20 @@ async function loadBlocks(limit = 20) {
         }
     } catch (error) {
         console.error('Error loading blocks:', error);
-        document.getElementById('blocks-list').innerHTML = '<p style="color: rgba(255,255,255,0.7);">Error loading blocks</p>';
+        document.getElementById('blocks-list').innerHTML = '<p style="color: rgba(255,255,255,0.7);">Error loading blocks. Please try again later.</p>';
     }
 }
 
-// Initialize
-loadStats();
-loadBlocks();
+// Initialize when DOM is ready
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => {
+        loadStats();
+        loadBlocks();
+    });
+} else {
+    loadStats();
+    loadBlocks();
+}
 
 // Auto-refresh every 30 seconds
 setInterval(() => {

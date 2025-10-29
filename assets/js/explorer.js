@@ -43,6 +43,7 @@ async function loadStats() {
 // View block details
 async function viewBlock(height) {
     try {
+        console.log('Loading block details for height:', height);
         const proxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/block/${height}`);
         const response = await fetch(proxyUrl);
         
@@ -51,10 +52,20 @@ async function viewBlock(height) {
         }
         
         const data = await response.json();
-        alert(`Block ${height}\nHash: ${data.hash}\nReward: ${(data.reward / 100000000).toFixed(2)} IRM`);
+        console.log('Block data loaded:', data);
+        
+        // Check what properties are available
+        console.log('Block properties:', Object.keys(data));
+        console.log('Block hash:', data.hash);
+        console.log('Block reward:', data.reward);
+        
+        // Format the reward properly
+        const reward = data.reward ? (data.reward / 100000000).toFixed(2) : '0.00';
+        
+        alert(`Block ${height}\nHash: ${data.hash || 'N/A'}\nReward: ${reward} IRM\nTime: ${formatTime(data.time)}\nTransactions: ${data.transactions || 0}`);
     } catch (error) {
         console.error('Error loading block:', error);
-        alert('Error loading block details');
+        alert('Error loading block details: ' + error.message);
     }
 }
 
@@ -83,6 +94,7 @@ async function loadBlocks(limit = 20) {
         
         const data = await response.json();
         console.log('Blocks loaded:', data.blocks ? data.blocks.length : 0, 'blocks');
+        console.log('First block data:', data.blocks && data.blocks[0] ? data.blocks[0] : 'No blocks');
 
         const blocksList = document.getElementById('blocks-list');
         if (!blocksList) {
@@ -91,19 +103,23 @@ async function loadBlocks(limit = 20) {
         }
 
         if (data.blocks && data.blocks.length > 0) {
-            blocksList.innerHTML = data.blocks.map(block => `
-                <div style="background: rgba(0,0,0,0.3); padding: 20px; margin-bottom: 15px; border-radius: 8px; cursor: pointer; transition: transform 0.2s;" onclick="viewBlock(${block.height})" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-                    <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-                        <span style="font-size: 18px; font-weight: bold; color: #0066cc;">Block ${block.height}</span>
-                        <span style="color: rgba(255,255,255,0.7);">${formatTime(block.time)}</span>
+            blocksList.innerHTML = data.blocks.map(block => {
+                console.log('Rendering block:', block.height, block.hash, block.reward);
+                const reward = block.reward ? (block.reward / 100000000).toFixed(2) : '0.00';
+                return `
+                    <div style="background: rgba(0,0,0,0.3); padding: 20px; margin-bottom: 15px; border-radius: 8px; cursor: pointer; transition: transform 0.2s;" onclick="viewBlock(${block.height})" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
+                            <span style="font-size: 18px; font-weight: bold; color: #0066cc;">Block ${block.height}</span>
+                            <span style="color: rgba(255,255,255,0.7);">${formatTime(block.time)}</span>
+                        </div>
+                        <div style="font-family: monospace; font-size: 14px; color: rgba(255,255,255,0.9); word-break: break-all; margin-bottom: 10px;">${block.hash}</div>
+                        <div style="display: flex; gap: 20px; color: rgba(255,255,255,0.7); font-size: 14px;">
+                            <span>Reward: ${reward} IRM</span>
+                            <span>Transactions: ${block.transactions || 0}</span>
+                        </div>
                     </div>
-                    <div style="font-family: monospace; font-size: 14px; color: rgba(255,255,255,0.9); word-break: break-all; margin-bottom: 10px;">${block.hash}</div>
-                    <div style="display: flex; gap: 20px; color: rgba(255,255,255,0.7); font-size: 14px;">
-                        <span>Reward: ${(block.reward / 100000000).toFixed(2)} IRM</span>
-                        <span>Transactions: ${block.transactions}</span>
-                    </div>
-                </div>
-            `).join('');
+                `;
+            }).join('');
         } else {
             blocksList.innerHTML = '<p style="color: rgba(255,255,255,0.7);">No blocks found</p>';
         }

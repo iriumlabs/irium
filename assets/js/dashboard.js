@@ -19,7 +19,7 @@ async function loadDashboard() {
         }
         
         const stats = await statsResponse.json();
-        console.log('Stats loaded:', stats);
+        console.log('Dashboard stats loaded:', stats);
 
         const heightEl = document.getElementById('network-height');
         const blocksEl = document.getElementById('total-blocks');
@@ -38,7 +38,7 @@ async function loadDashboard() {
         }
         
         const blocks = await blocksResponse.json();
-        console.log('Blocks loaded:', blocks.blocks ? blocks.blocks.length : 0, 'blocks');
+        console.log('Dashboard blocks loaded:', blocks.blocks ? blocks.blocks.length : 0, 'blocks');
 
         const blockTimeEl = document.getElementById('block-time');
 

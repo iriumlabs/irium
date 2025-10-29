@@ -117,7 +117,38 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=6"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=8"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
+<!-- Block Details Modal -->
+<div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
+  <div id="block-modal-content" style="background:#10131a; color:#fff; width:90%; max-width:720px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 10px 25px rgba(0,0,0,0.5);">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.1);">
+      <h3 style="margin:0; font-size:18px;">Block Details</h3>
+      <button id="block-modal-close" aria-label="Close" style="background:transparent; color:#fff; border:none; font-size:20px; cursor:pointer;">×</button>
+    </div>
+    <div id="block-modal-body" style="padding:20px; line-height:1.5; font-size:14px;"></div>
+  </div>
+</div>
+<script>
+  (function(){
+    const modal = document.getElementById('block-modal');
+    const body = document.getElementById('block-modal-body');
+    const closeBtn = document.getElementById('block-modal-close');
+    function close() { modal.style.display = 'none'; body.innerHTML=''; }
+    if (modal && closeBtn) {
+      closeBtn.addEventListener('click', close);
+      modal.addEventListener('click', (e)=>{ if (e.target === modal) close(); });
+      window.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') close(); });
+      window.__showBlockModal = function(contentHtml){
+        body.innerHTML = contentHtml;
+        modal.style.display = 'flex';
+      };
+      window.__showBlockError = function(message){
+        body.innerHTML = '<div style="color:#ff6b6b;">' + (message||'Unknown error') + '</div>';
+        modal.style.display = 'flex';
+      };
+    }
+  })();
+</script>
 </body>
 </html>

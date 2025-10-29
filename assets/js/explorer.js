@@ -57,19 +57,50 @@ async function viewBlock(height) {
   try {
     console.log('Loading block details for height:', height);
     const raw = await fetchJson(`/block/${height}`);
-    const b = raw.block ?? raw;
-    console.log('Block data loaded:', b);
+    const b = (raw && raw.block) ? raw.block : raw || {};
+    const hash = b.hash ?? b.block_hash ?? 'N/A';
+    const time = b.time ?? b.timestamp ?? 0;
+    const txs  = b.transactions ?? b.tx_count ?? 0;
+    const rewardSats = b.reward ?? b.subsidy ?? b.block_reward ?? 0;
+    const rewardIrm = rewardSats ? (rewardSats/1e8).toFixed(2) : '0.00';
+    const prev = b.prev_hash ?? b.previous_block ?? 'N/A';
+    const mr   = b.merkle_root ?? 'N/A';
+    const nonce = b.nonce ?? 'N/A';
+    const bits  = b.bits ?? 'N/A';
+    const miner = b.miner_address ?? b.miner ?? 'N/A';
 
-    const hash = pick(b, ['hash','block_hash'], 'N/A');
-    const time = pick(b, ['time','timestamp'], 0);
-    const txs = pick(b, ['transactions','tx_count'], 0);
-    const rewardSats = pick(b, ['reward','subsidy','block_reward'], 0);
-    const reward = rewardSats ? (rewardSats / 1e8).toFixed(2) : '0.00';
+    const rows = [
+      ['Height', String(height)],
+      ['Hash', hash],
+      ['Prev Hash', prev],
+      ['Merkle Root', mr],
+      ['Time', formatTime(time)],
+      ['Reward', rewardIrm + ' IRM'],
+      ['Transactions', String(txs)],
+      ['Bits', String(bits)],
+      ['Nonce', String(nonce)],
+      ['Miner', miner]
+    ].map(([k,v])=>(
+      '<div style="display:flex; gap:12px; margin:6px 0;">' +
+      '<div style="width:130px; color:rgba(255,255,255,0.7)">' + k + '</div>' +
+      '<div style="font-family:monospace; word-break:break-all;">' + v + '</div>' +
+      '</div>'
+    )).join('');
 
-    alert(`Block ${height}\nHash: ${hash}\nReward: ${reward} IRM\nTime: ${formatTime(time)}\nTransactions: ${txs}`);
+    if (window.__showBlockModal) {
+      window.__showBlockModal(rows);
+    } else {
+      alert(`Block ${height}
+Hash: ${hash}
+Reward: ${rewardIrm} IRM`);
+    }
   } catch (error) {
     console.error('Error loading block:', error);
-    alert('Error loading block details: ' + error.message);
+    if (window.__showBlockError) {
+      window.__showBlockError(error.message || 'Error loading block details');
+    } else {
+      alert('Error loading block details: ' + (error.message||'Unknown error'));
+    }
   }
 }
 

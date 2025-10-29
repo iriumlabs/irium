@@ -37,10 +37,17 @@ async function loadDashboard() {
 
     if (Array.isArray(list) && list.length > 1) {
       // Sort blocks by height (descending) to ensure proper order
-      const sortedBlocks = list.sort((a, b) => (b.height ?? 0) - (a.height ?? 0));
-      console.log('Sorted blocks for time calculation:', sortedBlocks.map(b => ({ height: b.height, time: b.time })));
-      
+            // Sort by height ascending (oldest -> newest)
+      const sortedBlocks = list.slice().sort((a,b)=> (a.height??0) - (b.height??0));
+      console.log('Sorted blocks (asc) for time calculation:', sortedBlocks.map(b => ({ height: b.height, time: b.time })));
       const intervals = [];
+      for (let i = 1; i < sortedBlocks.length; i++) {
+        const t2 = sortedBlocks[i].time ?? sortedBlocks[i].timestamp ?? 0;
+        const t1 = sortedBlocks[i-1].time ?? sortedBlocks[i-1].timestamp ?? 0;
+        const m = (t2 - t1) / 60;
+        if (m > 0 && m < 1440) intervals.push(m);
+      }
+const intervals = [];
       for (let i = 1; i < sortedBlocks.length; i++) {
         const t2 = sortedBlocks[i-1].time ?? sortedBlocks[i-1].timestamp ?? 0;
         const t1 = sortedBlocks[i].time ?? sortedBlocks[i].timestamp ?? 0;

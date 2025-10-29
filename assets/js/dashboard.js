@@ -3,18 +3,27 @@ const API_BASE = 'https://api.iriumlabs.org/api';
 
 let blockTimeChart;
 
+console.log('Dashboard JS loaded');
+
 async function loadDashboard() {
     try {
+        console.log('Loading dashboard data...');
+        
         // Load stats
         const statsResponse = await fetch(`${API_BASE}/stats`);
         if (!statsResponse.ok) {
             throw new Error(`HTTP error! status: ${statsResponse.status}`);
         }
         const stats = await statsResponse.json();
+        console.log('Stats loaded:', stats);
         
-        document.getElementById('network-height').textContent = stats.height || '0';
-        document.getElementById('total-blocks').textContent = stats.total_blocks || '0';
-        document.getElementById('total-supply').textContent = (stats.supply_irm || 0).toFixed(2) + ' IRM';
+        const heightEl = document.getElementById('network-height');
+        const blocksEl = document.getElementById('total-blocks');
+        const supplyEl = document.getElementById('total-supply');
+        
+        if (heightEl) heightEl.textContent = stats.height || '0';
+        if (blocksEl) blocksEl.textContent = stats.total_blocks || '0';
+        if (supplyEl) supplyEl.textContent = (stats.supply_irm || 0).toFixed(2) + ' IRM';
         
         // Load recent blocks for block time calculation
         const blocksResponse = await fetch(`${API_BASE}/blocks?limit=10`);
@@ -22,6 +31,9 @@ async function loadDashboard() {
             throw new Error(`HTTP error! status: ${blocksResponse.status}`);
         }
         const blocks = await blocksResponse.json();
+        console.log('Blocks loaded:', blocks.blocks ? blocks.blocks.length : 0, 'blocks');
+        
+        const blockTimeEl = document.getElementById('block-time');
         
         if (blocks.blocks && blocks.blocks.length > 1) {
             const intervals = [];
@@ -30,18 +42,23 @@ async function loadDashboard() {
                 intervals.push(interval / 60); // Convert to minutes
             }
             const avgBlockTime = intervals.reduce((a, b) => a + b, 0) / intervals.length;
-            document.getElementById('block-time').textContent = avgBlockTime.toFixed(2) + ' minutes';
+            if (blockTimeEl) blockTimeEl.textContent = avgBlockTime.toFixed(2) + ' minutes';
             
             updateChart(intervals);
         } else {
-            document.getElementById('block-time').textContent = 'N/A';
+            if (blockTimeEl) blockTimeEl.textContent = 'N/A';
         }
     } catch (error) {
         console.error('Error loading dashboard:', error);
-        document.getElementById('network-height').textContent = 'Error';
-        document.getElementById('total-blocks').textContent = 'Error';
-        document.getElementById('total-supply').textContent = 'Error';
-        document.getElementById('block-time').textContent = 'Error';
+        const heightEl = document.getElementById('network-height');
+        const blocksEl = document.getElementById('total-blocks');
+        const supplyEl = document.getElementById('total-supply');
+        const blockTimeEl = document.getElementById('block-time');
+        
+        if (heightEl) heightEl.textContent = 'Error';
+        if (blocksEl) blocksEl.textContent = 'Error';
+        if (supplyEl) supplyEl.textContent = 'Error';
+        if (blockTimeEl) blockTimeEl.textContent = 'Error';
     }
 }
 
@@ -53,6 +70,11 @@ function updateChart(intervals) {
     }
     
     try {
+        if (typeof Chart === 'undefined') {
+            console.error('Chart.js not loaded');
+            return;
+        }
+        
         if (blockTimeChart) {
             blockTimeChart.destroy();
         }
@@ -79,21 +101,37 @@ function updateChart(intervals) {
                 }
             }
         });
+        console.log('Chart updated successfully');
     } catch (error) {
         console.error('Error updating chart:', error);
     }
 }
 
+// Initialize function
+function initDashboard() {
+    console.log('Initializing Dashboard...');
+    loadDashboard();
+}
+
+// Wait for Chart.js to load if needed
+function waitForChart() {
+    if (typeof Chart !== 'undefined') {
+        initDashboard();
+    } else {
+        console.log('Waiting for Chart.js...');
+        setTimeout(waitForChart, 100);
+    }
+}
+
 // Initialize when DOM is ready
 if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', () => {
-        loadDashboard();
-    });
+    document.addEventListener('DOMContentLoaded', waitForChart);
 } else {
-    loadDashboard();
+    waitForChart();
 }
 
 // Auto-refresh every 30 seconds
 setInterval(() => {
+    console.log('Auto-refreshing dashboard...');
     loadDashboard();
 }, 30000);

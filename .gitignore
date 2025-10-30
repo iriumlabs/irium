@@ -1,0 +1,3 @@
+# Local env and logs
+.env
+*.log

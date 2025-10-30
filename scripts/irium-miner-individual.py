@@ -9,7 +9,8 @@ import json
 import time
 import argparse
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Add the irium-test directory to Python path
+sys.path.insert(0, '/home/irium/irium-test')
 
 from irium.wallet import Wallet
 from irium.chain import ChainParams, ChainState
@@ -105,9 +106,9 @@ def main():
     
     # Determine wallet file
     if args.wallet:
-        wallet_file = args.wallet
+        wallet_file = os.path.expanduser(args.wallet)
     elif args.miner_id:
-        wallet_file = f"~/.irium-miners/{args.miner_id}/irium-wallet.json"
+        wallet_file = os.path.expanduser(f"~/.irium-miners/{args.miner_id}/irium-wallet.json")
     else:
         wallet_file = None
     

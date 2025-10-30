@@ -1,3 +1,21 @@
 # Local env and logs
 .env
 *.log
+# Python caches
+__pycache__/
+*.pyc
+
+# HTML test/debug artifacts
+*test*.html
+debug-*.html
+minimal-*.html
+cors-*.html
+
+# Backups
+*.backup*
+*.bak
+*~
+
+# OS/editor junk
+.DS_Store
+Thumbs.db

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard Blocks Test</title>
+    <style>
+        body { background: #000; color: #fff; font-family: Arial, sans-serif; padding: 20px; }
+        .block { background: rgba(0,0,0,0.3); padding: 15px; margin: 10px 0; border-radius: 8px; }
+        .error { color: #ff6b6b; }
+        .success { color: #51cf66; }
+    </style>
+</head>
+<body>
+    <h1>Dashboard Blocks Test</h1>
+    <div id="results"></div>
+
+    <script>
+    const API_BASE = 'https://api.iriumlabs.org/api';
+    const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+
+    async function fetchJson(path) {
+        const url = CORS_PROXY + encodeURIComponent(`${API_BASE}${path}`);
+        console.log('Fetching:', url);
+        const res = await fetch(url);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+    }
+
+    async function testDashboardBlocks() {
+        const results = document.getElementById('results');
+        results.innerHTML = '<p>Testing dashboard block fetching...</p>';
+
+        try {
+            // Get stats
+            const stats = await fetchJson('/stats');
+            results.innerHTML += `<div class="block success">✅ Stats: Height ${stats.height}, Total ${stats.total_blocks}</div>`;
+
+            // Get blocks from /blocks endpoint
+            const blocks = await fetchJson('/blocks?limit=20');
+            const list = blocks.blocks ?? blocks ?? [];
+            results.innerHTML += `<div class="block success">✅ /blocks endpoint: ${list.length} blocks (heights: ${list.map(b => b.height).join(', ')})</div>`;
+
+            // Check for missing blocks 0-3
+            const allBlocks = [...list];
+            const missingHeights = [];
+            
+            for (let h = 0; h <= Math.min(3, stats.height || 0); h++) {
+                if (!allBlocks.some(b => (b.height ?? 0) === h)) {
+                    missingHeights.push(h);
+                }
+            }
+            
+            results.innerHTML += `<div class="block success">✅ Missing heights to fetch: ${missingHeights.join(', ')}</div>`;
+
+            // Fetch missing blocks individually
+            for (const height of missingHeights) {
+                try {
+                    console.log(`Fetching individual block ${height}...`);
+                    const blockData = await fetchJson(`/block/${height}`);
+                    console.log(`Block ${height} response:`, blockData);
+                    
+                    if (blockData && blockData.block && !blockData.error) {
+                        allBlocks.push(blockData.block);
+                        results.innerHTML += `<div class="block success">✅ Block ${height}: ${blockData.block.hash}</div>`;
+                    } else if (blockData && !blockData.error) {
+                        allBlocks.push(blockData);
+                        results.innerHTML += `<div class="block success">✅ Block ${height}: ${blockData.hash}</div>`;
+                    } else {
+                        results.innerHTML += `<div class="block error">❌ Block ${height}: ${blockData.error || 'Unknown error'}</div>`;
+                    }
+                } catch (error) {
+                    console.error(`Error fetching block ${height}:`, error);
+                    results.innerHTML += `<div class="block error">❌ Block ${height}: ${error.message}</div>`;
+                }
+            }
+
+            // Show final result
+            const finalHeights = allBlocks.map(b => b.height ?? 0).sort((a,b) => a - b);
+            results.innerHTML += `<div class="block success">✅ Final result: ${allBlocks.length} blocks (heights: ${finalHeights.join(', ')})</div>`;
+
+        } catch (error) {
+            console.error('Error in test:', error);
+            results.innerHTML += `<div class="block error">❌ Test failed: ${error.message}</div>`;
+        }
+    }
+
+    // Run the test
+    testDashboardBlocks();
+    </script>
+</body>
+</html>

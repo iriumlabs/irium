@@ -109,19 +109,14 @@ async function loadBlocks(limit = 50) {
     const list = data.blocks ?? data ?? [];
     console.log('Blocks from /blocks endpoint:', Array.isArray(list) ? list.length : 0);
     
-    // Try to fetch individual blocks that might be missing
+    // Start with blocks from /blocks endpoint
     const allBlocks = [...list];
+    
+    // Try to fetch individual blocks that might be missing
     const missingHeights = [];
     
     // Check for missing blocks 0-3 (genesis and early blocks)
     for (let h = 0; h <= Math.min(3, currentHeight); h++) {
-      if (!allBlocks.some(b => (b.height ?? 0) === h)) {
-        missingHeights.push(h);
-      }
-    }
-    
-    // Check for missing blocks 9-11
-    for (let h = 9; h <= Math.min(11, currentHeight); h++) {
       if (!allBlocks.some(b => (b.height ?? 0) === h)) {
         missingHeights.push(h);
       }
@@ -134,12 +129,14 @@ async function loadBlocks(limit = 50) {
       try {
         console.log(`Fetching individual block ${height}...`);
         const blockData = await fetchJson(`/block/${height}`);
+        console.log(`Block ${height} response:`, blockData);
+        
         if (blockData && blockData.block && !blockData.error) {
           allBlocks.push(blockData.block);
-          console.log(`Successfully fetched block ${height}`);
+          console.log(`Successfully fetched block ${height}:`, blockData.block.hash);
         } else if (blockData && !blockData.error) {
           allBlocks.push(blockData);
-          console.log(`Successfully fetched block ${height} (flat structure)`);
+          console.log(`Successfully fetched block ${height} (flat structure):`, blockData.hash);
         } else {
           console.log(`Block ${height} not found:`, blockData.error || 'Unknown error');
         }

@@ -6,15 +6,19 @@ let blockTimeChart;
 
 console.log('Dashboard JS loaded');
 
+async function fetchJson(path) {
+  const url = CORS_PROXY + encodeURIComponent(`${API_BASE}${path}`);
+  const res = await fetch(url);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return await res.json();
+}
+
 async function loadDashboard() {
   try {
     console.log('Loading dashboard data...');
     
     // Load stats
-    const statsProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/stats`);
-    const statsResponse = await fetch(statsProxyUrl);
-    if (!statsResponse.ok) throw new Error(`HTTP error! status: ${statsResponse.status}`);
-    const stats = await statsResponse.json();
+    const stats = await fetchJson('/stats');
     console.log('Dashboard stats loaded:', stats);
     
     const heightEl = document.getElementById('network-height');
@@ -26,10 +30,7 @@ async function loadDashboard() {
     if (supplyEl) supplyEl.textContent = ((stats.supply_irm ?? 0)).toFixed(2) + ' IRM';
 
     // Load blocks for chart data - try to get more complete data
-    const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=20`);
-    const blocksResponse = await fetch(blocksProxyUrl);
-    if (!blocksResponse.ok) throw new Error(`HTTP error! status: ${blocksResponse.status}`);
-    const blocks = await blocksResponse.json();
+    const blocks = await fetchJson('/blocks?limit=20');
     console.log('Dashboard blocks loaded:', blocks.blocks ? blocks.blocks.length : 0, 'blocks');
 
     const blockTimeEl = document.getElementById('block-time');
@@ -53,12 +54,14 @@ async function loadDashboard() {
       try {
         console.log(`Fetching individual block ${height} for dashboard...`);
         const blockData = await fetchJson(`/block/${height}`);
+        console.log(`Block ${height} response:`, blockData);
+        
         if (blockData && blockData.block && !blockData.error) {
           allBlocks.push(blockData.block);
-          console.log(`Successfully fetched block ${height} for dashboard`);
+          console.log(`Successfully fetched block ${height} for dashboard:`, blockData.block.hash);
         } else if (blockData && !blockData.error) {
           allBlocks.push(blockData);
-          console.log(`Successfully fetched block ${height} for dashboard (flat structure)`);
+          console.log(`Successfully fetched block ${height} for dashboard (flat structure):`, blockData.hash);
         }
       } catch (error) {
         console.log(`Failed to fetch block ${height} for dashboard:`, error.message);
@@ -96,9 +99,7 @@ async function loadDashboard() {
     console.error('Error loading dashboard:', error);
     // Fallback: derive basics from blocks
     try {
-      const blocksProxyUrl = CORS_PROXY + encodeURIComponent(`${API_BASE}/blocks?limit=20`);
-      const blocksResponse = await fetch(blocksProxyUrl);
-      const blocks = await blocksResponse.json();
+      const blocks = await fetchJson('/blocks?limit=20');
       const list = blocks.blocks ?? blocks ?? [];
       const height = Array.isArray(list) && list.length ? (list[0].height ?? 0) : 0;
       const total = blocks.total ?? (Array.isArray(list) ? list.length : 0);

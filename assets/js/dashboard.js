@@ -69,6 +69,7 @@ async function loadDashboard() {
     }
     
     list = allBlocks;
+    console.log('Final dashboard blocks list:', list.length, 'blocks (heights:', list.map(b => b.height).join(', '), ')');
 
     if (Array.isArray(list) && list.length > 1) {
       // Sort blocks by height ascending (oldest -> newest)

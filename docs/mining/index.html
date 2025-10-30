@@ -1,210 +1,105 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Irium Mining Guide</title>
-    <link rel="stylesheet" href="https://www.iriumlabs.org/style.css">
-    <style>
-        .mining-container {
-            max-width: 1000px;
-            margin: 0 auto;
-            padding: 2rem;
-        }
-        .warning-box {
-            background: rgba(255, 165, 0, 0.1);
-            border: 2px solid #ffa500;
-            border-radius: 10px;
-            padding: 1.5rem;
-            margin: 2rem 0;
-        }
-        .warning-box h3 {
-            color: #ffa500;
-            margin-top: 0;
-        }
-        .code-block {
-            background: rgba(0,0,0,0.5);
-            padding: 1rem;
-            border-radius: 5px;
-            font-family: monospace;
-            margin: 1rem 0;
-            overflow-x: auto;
-        }
-        .step {
-            background: rgba(0,0,0,0.3);
-            padding: 1.5rem;
-            margin: 1rem 0;
-            border-radius: 10px;
-            border-left: 4px solid #0066cc;
-        }
-        .step h4 {
-            color: #0066cc;
-            margin-top: 0;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Irium Mining (v1.0)</title>
+  <link rel="stylesheet" href="https://www.iriumlabs.org/style.css">
+  <link rel="icon" type="image/svg+xml" href="https://www.iriumlabs.org/logo.svg">
+  <style>
+    .container{max-width:980px;margin:0 auto;padding:24px}
+    pre{background:#0e1116;color:#e6edf3;padding:12px;border-radius:8px;overflow:auto}
+    code{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .badge{display:inline-block;margin-right:8px}
+    .grid{display:grid;grid-template-columns:1fr;gap:16px}
+    @media (min-width: 920px){.grid{grid-template-columns:1fr 1fr}}
+    .muted{opacity:.8}
+    .section{margin:24px 0}
+    h1,h2,h3{margin:16px 0 8px}
+    a { color:#5bb1ff; text-decoration:none }
+    a:hover { text-decoration:underline }
+  </style>
 </head>
 <body>
-    <nav class="nav">
-        <div class="nav-container">
-            <a href="https://www.iriumlabs.org/" class="nav-logo">
-                <img src="https://www.iriumlabs.org/logo.svg" alt="Irium" class="nav-logo-img">
-            </a>
-            <ul class="nav-menu">
-                <li class="nav-item"><a href="https://www.iriumlabs.org/" class="nav-link">HOME</a></li>
-                <li class="nav-item"><a href="https://www.iriumlabs.org/about.html" class="nav-link">ABOUT</a></li>
-                <li class="nav-item"><a href="https://www.iriumlabs.org/features.html" class="nav-link">FEATURES</a></li>
-                <li class="nav-item"><a href="https://www.iriumlabs.org/specs.html" class="nav-link">SPECS</a></li>
-                <li class="nav-item"><a href="https://www.iriumlabs.org/whitepaper.html" class="nav-link">WHITEPAPER</a></li>
-                <li class="nav-item"><a href="https://www.iriumlabs.org/explorer/" class="nav-link">EXPLORER</a></li>
-                <li class="nav-item"><a href="https://www.iriumlabs.org/dashboard/" class="nav-link">DASHBOARD</a></li>
-                <li class="nav-item"><a href="https://www.iriumlabs.org/wallet/" class="nav-link">WALLET</a></li>
-                <li class="nav-item"><a href="https://www.iriumlabs.org/support.html" class="nav-link">SUPPORT</a></li>
-            </ul>
-        </div>
-    </nav>
+  <div class="container">
+    <header>
+      <img src="https://www.iriumlabs.org/logo.svg" alt="Irium" style="height:48px;vertical-align:middle" />
+      <span class="badge"><a href="https://github.com/iriumlabs/irium/releases/tag/v1.0">v1.0</a></span>
+      <span class="badge">SHA-256d</span>
+      <span class="badge">Mainnet LIVE</span>
+      <h1>Irium Mining Guide (v1.0)</h1>
+      <p class="muted">Full P2P miner (single and multicore). No hardcoded wallets — miners use their own wallet via env/CLI.</p>
+      <p>
+        <a href="https://github.com/iriumlabs/irium/blob/main/MINING.md" target="_blank" rel="noopener">Full MINING.md</a> ·
+        <a href="https://github.com/iriumlabs/irium/blob/main/QUICKSTART.md" target="_blank" rel="noopener">Quickstart</a> ·
+        <a href="https://github.com/iriumlabs/irium/releases/tag/v1.0" target="_blank" rel="noopener">Release v1.0</a>
+      </p>
+    </header>
 
-    <div class="mining-container">
-        <h1>⛏️ Irium Mining Guide</h1>
-        
-        <div class="warning-box">
-            <h3>⚠️ Important: Individual Mining Setup Required</h3>
-            <p><strong>Current Issue:</strong> All miners are using the same wallet address, meaning all mining rewards go to one address instead of individual miners.</p>
-            <p><strong>Solution:</strong> Each miner must use their own individual wallet to receive their own mining rewards.</p>
-        </div>
+    <section class="section">
+      <h2>Install Dependencies</h2>
+      <pre><code>pip3 install --user pycryptodome qrcode pillow</code></pre>
+    </section>
 
-        <div class="step">
-            <h4>Step 1: Fix Current Mining Setup</h4>
-            <p>If you're currently mining, stop the old miners and set up individual wallets:</p>
-            <div class="code-block">
-# Stop current miners
-pkill -f irium-simple-miner.py
+    <section class="section">
+      <h2>Create Wallet</h2>
+      <pre><code>python3 scripts/irium-wallet-proper.py create
+python3 scripts/irium-wallet-proper.py new-address</code></pre>
+      <p class="muted">The miner pays coinbase to the address in your wallet file.</p>
+    </section>
 
-# Run the migration script
-./scripts/fix-mining-setup.sh
-            </div>
-        </div>
+    <section class="section">
+      <h2>Start Node</h2>
+      <pre><code>nohup python3 -u scripts/irium-node.py 38291 > /tmp/node.log 2>&1 &</code></pre>
+      <pre><code>sudo systemctl start irium-node
+sudo systemctl enable irium-node
+sudo journalctl -u irium-node -f</code></pre>
+    </section>
 
-        <div class="step">
-            <h4>Step 2: Create Your Individual Miner</h4>
-            <p>Create a new miner with your own wallet:</p>
-            <div class="code-block">
-# Create a new miner wallet
-./scripts/setup-miner.sh my-miner-$(whoami)
+    <section class="section">
+      <h2>Single Miner (Full P2P)</h2>
+      <pre><code>export IRIUM_WALLET_FILE="$HOME/.irium/irium-wallet.json"
+nohup python3 -u scripts/irium-node.py 38291 > /tmp/node.log 2>&1 &
+python3 scripts/irium-miner.py 38292</code></pre>
+    </section>
 
-# This will create:
-# - ~/.irium-miners/my-miner-$(whoami)/irium-wallet.json
-# - Your unique mining address
-# - Miner configuration
-            </div>
-        </div>
+    <section class="section">
+      <h2>Multicore (Full P2P)</h2>
+      <pre><code>export IRIUM_WALLET_FILE="$HOME/.irium/irium-wallet.json"
+nohup python3 -u scripts/irium-node.py 38291 > /tmp/node.log 2>&1 &
+bash scripts/irium-miner-multicore.sh 4
+./scripts/tail-mining-logs.sh 4 38292</code></pre>
+    </section>
 
-        <div class="step">
-            <h4>Step 3: Start Mining with Your Wallet</h4>
-            <p>Start mining using your individual wallet:</p>
-            <div class="code-block">
-# Method 1: Using wallet file
-python3 scripts/irium-miner-individual.py --wallet ~/.irium-miners/my-miner-$(whoami)/irium-wallet.json
+    <section class="section grid">
+      <div>
+        <h3>Status</h3>
+        <pre><code>sudo journalctl -u irium-node -n 20
+ls ~/.irium/blocks/ | wc -l</code></pre>
+      </div>
+      <div>
+        <h3>Change Address</h3>
+        <pre><code>python3 scripts/irium-wallet-proper.py new-address
+sudo systemctl restart irium-miner.service</code></pre>
+      </div>
+    </section>
 
-# Method 2: Using miner ID
-python3 scripts/irium-miner-individual.py --miner-id my-miner-$(whoami)
-            </div>
-        </div>
+    <section class="section">
+      <h2>APIs</h2>
+      <p>Base: <a href="https://api.iriumlabs.org/" target="_blank" rel="noopener">https://api.iriumlabs.org/</a></p>
+      <pre><code>curl https://api.iriumlabs.org/api/stats
+curl https://api.iriumlabs.org/api/block/1
+curl "https://api.iriumlabs.org/api/blocks?limit=10"</code></pre>
+    </section>
 
-        <div class="step">
-            <h4>Step 4: Verify Your Mining Address</h4>
-            <p>Check that you're mining to your own address:</p>
-            <div class="code-block">
-# Check your mining address
-cat ~/.irium-miners/my-miner-$(whoami)/irium-wallet.json | grep -A 1 "addresses"
-            </div>
-        </div>
-
-        <h2>🔧 Advanced Configuration</h2>
-        
-        <div class="step">
-            <h4>Multiple Miners on Same Machine</h4>
-            <p>If running multiple miners on the same machine, use different ports:</p>
-            <div class="code-block">
-# Miner 1
-python3 scripts/irium-miner-individual.py --miner-id miner-1 --port 38292
-
-# Miner 2  
-python3 scripts/irium-miner-individual.py --miner-id miner-2 --port 38293
-            </div>
-        </div>
-
-        <div class="step">
-            <h4>Mining Pool Setup</h4>
-            <p>For mining pools, each pool participant should have their own wallet:</p>
-            <div class="code-block">
-# Pool participant 1
-./scripts/setup-miner.sh pool-participant-1
-python3 scripts/irium-miner-individual.py --miner-id pool-participant-1
-
-# Pool participant 2
-./scripts/setup-miner.sh pool-participant-2  
-python3 scripts/irium-miner-individual.py --miner-id pool-participant-2
-            </div>
-        </div>
-
-        <h2>✅ Benefits of Individual Mining</h2>
-        <ul>
-            <li>✅ <strong>Fair Rewards:</strong> Each miner gets their own mining rewards</li>
-            <li>✅ <strong>Security:</strong> No shared wallet files</li>
-            <li>✅ <strong>Decentralization:</strong> Better distribution of mining power</li>
-            <li>✅ <strong>Transparency:</strong> Clear ownership of mining rewards</li>
-            <li>✅ <strong>Scalability:</strong> Easy to add new miners</li>
-        </ul>
-
-        <h2>🚨 Troubleshooting</h2>
-        
-        <div class="step">
-            <h4>Wallet file not found</h4>
-            <p>Make sure you ran the setup script first:</p>
-            <div class="code-block">./scripts/setup-miner.sh my-miner-name</div>
-        </div>
-
-        <div class="step">
-            <h4>Permission denied</h4>
-            <p>Make sure scripts are executable:</p>
-            <div class="code-block">
-chmod +x scripts/setup-miner.sh
-chmod +x scripts/irium-miner-individual.py
-chmod +x scripts/fix-mining-setup.sh
-            </div>
-        </div>
-
-        <div class="step">
-            <h4>Still mining to wrong address</h4>
-            <p>Check your wallet file and restart the miner:</p>
-            <div class="code-block">
-# Check wallet content
-cat ~/.irium-miners/my-miner-*/irium-wallet.json
-
-# Restart miner
-pkill -f irium-miner-individual.py
-python3 scripts/irium-miner-individual.py --miner-id my-miner-name
-            </div>
-        </div>
-    </div>
-
-    <footer class="footer">
-        <div class="footer-container">
-            <div class="footer-content">
-                <div class="footer-section">
-                    <h4>Irium</h4>
-                    <p>Next-generation DNS-free blockchain</p>
-                </div>
-                <div class="footer-section">
-                    <h4>Quick Links</h4>
-                    <ul>
-                        <li><a href="https://www.iriumlabs.org/explorer/">Block Explorer</a></li>
-                        <li><a href="https://www.iriumlabs.org/dashboard/">Network Dashboard</a></li>
-                        <li><a href="https://www.iriumlabs.org/wallet/">Web Wallet</a></li>
-                    </ul>
-                </div>
-            </div>
-        </div>
+    <footer class="section">
+      <p class="muted">
+        Need help? <a href="https://github.com/iriumlabs/irium/discussions" target="_blank" rel="noopener">Discussions</a> ·
+        <a href="https://github.com/iriumlabs/irium/issues" target="_blank" rel="noopener">Issues</a> ·
+        <a href="mailto:info@iriumlabs.org">info@iriumlabs.org</a>
+      </p>
+      <p class="muted">© 2025 Irium Labs · <a href="https://github.com/iriumlabs/irium/blob/main/README.md" target="_blank" rel="noopener">README</a></p>
     </footer>
+  </div>
 </body>
 </html>

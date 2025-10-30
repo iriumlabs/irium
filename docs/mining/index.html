@@ -188,7 +188,43 @@ python3 scripts/irium-miner-individual.py --miner-id my-miner-name
         </div>
     </div>
 
-    <footer class="footer">
+      <section class="section" style="padding:60px 0 20px;">
+    <div class="container">
+      <h2 class="section-title">Quick Mining (v1.0)</h2>
+      <p class="muted">Full P2P miner (single and multicore). No hardcoded wallets — miners use their own wallet via env/CLI.</p>
+      <h3>Install Dependencies</h3>
+      <pre><code>pip3 install --user pycryptodome qrcode pillow</code></pre>
+      <h3>Create Wallet</h3>
+      <pre><code>python3 scripts/irium-wallet-proper.py create
+python3 scripts/irium-wallet-proper.py new-address</code></pre>
+      <h3>Start Node</h3>
+      <pre><code>nohup python3 -u scripts/irium-node.py 38291 > /tmp/node.log 2>&1 &</code></pre>
+      <pre><code>sudo systemctl start irium-node
+sudo systemctl enable irium-node
+sudo journalctl -u irium-node -f</code></pre>
+      <h3>Single Miner (Full P2P)</h3>
+      <pre><code>export IRIUM_WALLET_FILE="/.irium/irium-wallet.json"
+nohup python3 -u scripts/irium-node.py 38291 > /tmp/node.log 2>&1 &
+python3 scripts/irium-miner.py 38292</code></pre>
+      <h3>Multicore (Full P2P)</h3>
+      <pre><code>export IRIUM_WALLET_FILE="/.irium/irium-wallet.json"
+nohup python3 -u scripts/irium-node.py 38291 > /tmp/node.log 2>&1 &
+bash scripts/irium-miner-multicore.sh 4
+./scripts/tail-mining-logs.sh 4 38292</code></pre>
+      <h3>APIs</h3>
+      <p>Base: <a href="https://api.iriumlabs.org/" target="_blank" rel="noopener">https://api.iriumlabs.org/</a></p>
+      <pre><code>curl https://api.iriumlabs.org/api/stats
+curl https://api.iriumlabs.org/api/block/1
+curl "https://api.iriumlabs.org/api/blocks?limit=10"</code></pre>
+      <p style="margin-top:12px" class="muted">
+        Docs: <a href="https://github.com/iriumlabs/irium/blob/main/QUICKSTART.md" target="_blank" rel="noopener">Quickstart</a> ·
+        <a href="https://github.com/iriumlabs/irium/blob/main/MINING.md" target="_blank" rel="noopener">Mining</a> ·
+        <a href="https://github.com/iriumlabs/irium/releases/tag/v1.0" target="_blank" rel="noopener">Release v1.0</a>
+      </p>
+    </div>
+  </section>
+
+<footer class="footer">
         <div class="footer-container">
             <div class="footer-content">
                 <div class="footer-section">

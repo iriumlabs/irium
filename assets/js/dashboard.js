@@ -1,16 +1,43 @@
 // Irium Network Dashboard JavaScript with CORS Proxy
-const API_BASE = 'https://api.iriumlabs.org/api';
-const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+const DEFAULT_API_BASE = 'https://api.iriumlabs.org/api';
+const CORS_PROXIES = ['', 'https://api.allorigins.win/raw?url='];
+
+function getApiBases() {
+  const bases = [];
+  if (window.IRIUM_API_BASE) bases.push(window.IRIUM_API_BASE);
+  const docBase = document.documentElement.dataset.apiBase || (document.body && document.body.dataset && document.body.dataset.apiBase);
+  if (docBase) bases.push(docBase);
+  if (location && location.origin) bases.push(location.origin + '/api');
+  bases.push(DEFAULT_API_BASE);
+  const deduped = [];
+  for (const base of bases) {
+    const norm = base.replace(/\/+$/, '');
+    if (!deduped.includes(norm)) deduped.push(norm);
+  }
+  return deduped;
+}
 
 let blockTimeChart;
 
 console.log('Dashboard JS loaded');
 
 async function fetchJson(path) {
-  const url = CORS_PROXY + encodeURIComponent(`${API_BASE}${path}`);
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return await res.json();
+  const bases = getApiBases();
+  const errors = [];
+  for (const base of bases) {
+    const url = base + path;
+    for (const proxy of CORS_PROXIES) {
+      const target = proxy ? proxy + encodeURIComponent(url) : url;
+      try {
+        const res = await fetch(target, { cache: 'no-store' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } catch (err) {
+        errors.push(err.message || String(err));
+      }
+    }
+  }
+  throw new Error(errors[0] || 'Fetch failed');
 }
 
 async function loadDashboard() {

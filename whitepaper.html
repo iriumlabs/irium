@@ -110,31 +110,31 @@
 <h2>2. System Architecture</h2>
 <p>Irium separates responsibilities into modular subsystems:</p>
 
-<h3>2.1 Core Modules (irium/ package)</h3>
+<h3>2.1 Core Modules (irium-node-rs/src)</h3>
 <ul>
-<li><strong>block.py</strong> - Block and BlockHeader structures</li>
-<li><strong>chain.py</strong> - ChainState, ChainParams, consensus validation</li>
-<li><strong>tx.py</strong> - Transaction, TxInput, TxOutput classes</li>
-<li><strong>wallet.py</strong> - Key management, signing, WIF format</li>
-<li><strong>pow.py</strong> - SHA-256d hashing, Target difficulty</li>
-<li><strong>network.py</strong> - PeerDirectory, SeedlistManager</li>
-<li><strong>protocol.py</strong> - P2P binary message protocol</li>
-<li><strong>p2p.py</strong> - P2P node with peer management</li>
-<li><strong>mempool.py</strong> - Transaction pool with fee prioritization</li>
-<li><strong>uptime.py</strong> - Peer reputation and uptime proofs</li>
-<li><strong>sybil.py</strong> - Sybil-resistant handshake protocol</li>
-<li><strong>relay.py</strong> - Relay reward calculation and tracking</li>
-<li><strong>anchors.py</strong> - Checkpoint verification, eclipse protection</li>
-<li><strong>spv.py</strong> - SPV client with NiPoPoW support</li>
+<li><strong>block.rs</strong> - Block and BlockHeader structures</li>
+<li><strong>chain.rs</strong> - ChainState, ChainParams, consensus validation</li>
+<li><strong>tx.rs</strong> - Transaction, TxInput, TxOutput classes</li>
+<li><strong>wallet.rs</strong> - Key management, signing, WIF format</li>
+<li><strong>pow.rs</strong> - SHA-256d hashing, Target difficulty</li>
+<li><strong>network.rs</strong> - PeerDirectory, SeedlistManager</li>
+<li><strong>protocol.rs</strong> - P2P binary message protocol</li>
+<li><strong>p2p.rs</strong> - P2P node with peer management</li>
+<li><strong>mempool.rs</strong> - Transaction pool with fee prioritization</li>
+<li><strong>reputation.rs</strong> - Peer reputation and uptime proofs</li>
+<li><strong>sybil.rs</strong> - Sybil-resistant handshake protocol</li>
+<li><strong>relay.rs</strong> - Relay reward calculation and tracking</li>
+<li><strong>anchors.rs</strong> - Checkpoint verification, eclipse protection</li>
+<li><strong>spv.rs</strong> - SPV client with NiPoPoW support</li>
 </ul>
 
-<h3>2.2 Executable Scripts</h3>
+<h3>2.2 Rust Binaries</h3>
 <ul>
-<li><strong>irium-node.py</strong> - Full node with P2P networking</li>
-<li><strong>irium-miner.py</strong> - PoW miner with block broadcasting</li>
-<li><strong>irium-wallet-api-ssl.py</strong> - Wallet REST API server (100% portable)</li>
-<li><strong>irium-explorer-api.py</strong> - Blockchain explorer API (zero dependencies)</li>
-<li><strong>mine-genesis.py</strong> - Genesis block mining tool</li>
+<li><strong>iriumd</strong> - Full node with P2P networking</li>
+<li><strong>irium-miner</strong> - PoW miner with block broadcasting</li>
+<li><strong>irium-wallet-api</strong> - Wallet REST API server (100% portable)</li>
+<li><strong>irium-explorer</strong> - Blockchain explorer API (zero dependencies)</li>
+<li><strong>irium-genesis</strong> - Genesis block mining tool</li>
 </ul>
 </div>
 
@@ -231,7 +231,7 @@ valid_block = block_hash &lt; target</div>
 <li>Network 'remembers' reliable peers</li>
 <li>seedlist.runtime updated automatically</li>
 </ul>
-<p><strong>Status:</strong> <span class="checkmark">✅ Implemented (irium/uptime.py, irium/network.py)</span></p>
+<p><strong>Status:</strong> <span class="checkmark">✅ Implemented (src/reputation.rs, src/network.rs)</span></p>
 
 <h3>5.3 Genesis Vesting with On-chain CLTV</h3>
 <p><strong>Problem:</strong> Founder allocations often lack transparency or enforcement.</p>
@@ -255,7 +255,7 @@ valid_block = block_hash &lt; target</div>
 <li>Included in coinbase transaction</li>
 <li>No supply inflation (comes from tx fees)</li>
 </ul>
-<p><strong>Status:</strong> <span class="checkmark">✅ Implemented (irium/relay.py)</span></p>
+<p><strong>Status:</strong> <span class="checkmark">✅ Implemented (src/relay.rs)</span></p>
 
 <h3>5.5 Sybil-Resistant P2P Handshake</h3>
 <p><strong>Problem:</strong> Botnets can saturate networks with fake peers.</p>
@@ -267,7 +267,7 @@ valid_block = block_hash &lt; target</div>
 <li>Configurable difficulty (default: 8 bits)</li>
 <li>Trivial for legitimate nodes, prohibitive for bots</li>
 </ul>
-<p><strong>Status:</strong> <span class="checkmark">✅ Implemented (irium/sybil.py)</span></p>
+<p><strong>Status:</strong> <span class="checkmark">✅ Implemented (src/sybil.rs)</span></p>
 
 <h3>5.6 Anchor-File Consensus</h3>
 <p><strong>Problem:</strong> Eclipse attacks can feed new nodes false chains.</p>
@@ -278,7 +278,7 @@ valid_block = block_hash &lt; target</div>
 <li>New nodes verify chain against anchors</li>
 <li>Protects even if all peers are malicious</li>
 </ul>
-<p><strong>Status:</strong> <span class="checkmark">✅ Implemented (irium/anchors.py)</span></p>
+<p><strong>Status:</strong> <span class="checkmark">✅ Implemented (src/anchors.rs)</span></p>
 
 <h3>5.7 Light Client First (SPV + NiPoPoW)</h3>
 <p><strong>Problem:</strong> Mobile devices can't store full blockchain.</p>
@@ -290,7 +290,7 @@ valid_block = block_hash &lt; target</div>
 <li>Merkle proof verification</li>
 <li>Superblock proofs for ultra-light clients</li>
 </ul>
-<p><strong>Status:</strong> <span class="checkmark">✅ Implemented (irium/spv.py)</span></p>
+<p><strong>Status:</strong> <span class="checkmark">✅ Implemented (src/spv.rs)</span></p>
 
 <h3>5.8 On-chain Metadata Commitments</h3>
 <p><strong>Problem:</strong> No native way to timestamp documents.</p>

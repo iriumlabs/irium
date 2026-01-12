@@ -92,29 +92,31 @@
     <h2 class="section-title">Quick Mining (v1.0)</h2>
     <p class="muted">Full P2P miner (single and multicore). No hardcoded wallets — miners use their own wallet via env/CLI.</p>
 
-    <h3>Install Dependencies</h3>
-    <pre><code>pip3 install --user pycryptodome qrcode pillow</code></pre>
+    <h3>Build from Source</h3>
+    <pre><code>git clone https://github.com/iriumlabs/irium.git
+cd irium
+source ~/.cargo/env
+cargo build --release</code></pre>
 
     <h3>Create Wallet</h3>
-    <pre><code>python3 scripts/irium-wallet-proper.py create
-python3 scripts/irium-wallet-proper.py new-address</code></pre>
+    <pre><code>./target/release/irium-wallet init
+./target/release/irium-wallet new-address
+./target/release/irium-wallet list-addresses</code></pre>
 
     <h3>Start Node</h3>
-    <pre><code>nohup python3 -u scripts/irium-node.py 38291 > /tmp/node.log 2>&1 &</code></pre>
-    <pre><code>sudo systemctl start irium-node
-sudo systemctl enable irium-node
-sudo journalctl -u irium-node -f</code></pre>
+    <pre><code>./target/release/iriumd</code></pre>
+    <pre><code>sudo systemctl enable --now iriumd
+sudo journalctl -u iriumd -f</code></pre>
 
-    <h3>Single Miner (Full P2P)</h3>
-    <pre><code>export IRIUM_WALLET_FILE="$HOME/.irium/irium-wallet.json"
-nohup python3 -u scripts/irium-node.py 38291 > /tmp/node.log 2>&1 &
-python3 scripts/irium-miner.py 38292</code></pre>
+    <h3>Single Miner</h3>
+    <pre><code>export IRIUM_MINER_ADDRESS=<YOUR_IRIUM_ADDRESS>
+./target/release/irium-miner --threads 1</code></pre>
 
-    <h3>Multicore (Full P2P)</h3>
-    <pre><code>export IRIUM_WALLET_FILE="$HOME/.irium/irium-wallet.json"
-nohup python3 -u scripts/irium-node.py 38291 > /tmp/node.log 2>&1 &
-bash scripts/irium-miner-multicore.sh 4
-./scripts/tail-mining-logs.sh 4 38292</code></pre>
+    <h3>Multicore Miner</h3>
+    <pre><code>export IRIUM_MINER_ADDRESS=<YOUR_IRIUM_ADDRESS>
+./target/release/irium-miner --threads 4</code></pre>
+    <pre><code>sudo systemctl enable --now irium-miner
+sudo journalctl -u irium-miner -f</code></pre>
 
     <h3>APIs</h3>
     <p>Base: <a href="https://api.iriumlabs.org/" target="_blank" rel="noopener">https://api.iriumlabs.org/</a></p>

@@ -40,6 +40,15 @@ async function fetchJson(path) {
   throw new Error(errors[0] || 'Fetch failed');
 }
 
+function getHeader(block) {
+  return (block && block.header) ? block.header : (block || {});
+}
+
+function getBlockTime(block) {
+  const header = getHeader(block);
+  return header.time ?? header.timestamp ?? block.time ?? block.timestamp ?? 0;
+}
+
 async function loadDashboard() {
   try {
     console.log('Loading dashboard data...');
@@ -101,12 +110,12 @@ async function loadDashboard() {
     if (Array.isArray(list) && list.length > 1) {
       // Sort blocks by height ascending (oldest -> newest)
       const sortedBlocks = list.slice().sort((a,b)=> (a.height??0) - (b.height??0));
-      console.log('Sorted blocks (asc) for time calculation:', sortedBlocks.map(b => ({ height: b.height, time: b.time })));
+      console.log('Sorted blocks (asc) for time calculation:', sortedBlocks.map(b => ({ height: b.height, time: getBlockTime(b) })));
       
       const timeIntervals = [];
       for (let i = 1; i < sortedBlocks.length; i++) {
-        const t2 = sortedBlocks[i].time ?? sortedBlocks[i].timestamp ?? 0;
-        const t1 = sortedBlocks[i-1].time ?? sortedBlocks[i-1].timestamp ?? 0;
+        const t2 = getBlockTime(sortedBlocks[i]);
+        const t1 = getBlockTime(sortedBlocks[i-1]);
         const m = (t2 - t1) / 60;
         if (m > 0 && m < 1440) timeIntervals.push(m);
       }

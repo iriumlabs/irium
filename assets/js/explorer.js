@@ -24,6 +24,20 @@ function pick(obj, keys, def = undefined) {
   return def;
 }
 
+function getHeader(block) {
+  return (block && block.header) ? block.header : (block || {});
+}
+
+function blockRewardIrm(height) {
+  if (!height) return 0;
+  const halvingInterval = 210000;
+  const initial = 50;
+  const halvings = Math.floor((height - 1) / halvingInterval);
+  if (halvings >= 64) return 0;
+  return initial / Math.pow(2, halvings);
+}
+
+
 async function fetchJson(path) {
   const bases = getApiBases();
   const errors = [];
@@ -69,15 +83,16 @@ async function viewBlock(height) {
     console.log('Loading block details for height:', height);
     const raw = await fetchJson(`/block/${height}`);
     const b = (raw && raw.block) ? raw.block : raw || {};
-    const hash = b.hash ?? b.block_hash ?? 'N/A';
-    const time = b.time ?? b.timestamp ?? 0;
-    const txs  = b.transactions ?? b.tx_count ?? 0;
+    const header = getHeader(b);
+    const hash = header.hash ?? b.hash ?? b.block_hash ?? 'N/A';
+    const time = header.time ?? header.timestamp ?? b.time ?? b.timestamp ?? 0;
+    const txs = Array.isArray(b.tx_hex) ? b.tx_hex.length : (b.transactions ?? b.tx_count ?? 0);
     const rewardSats = b.reward ?? b.subsidy ?? b.block_reward ?? 0;
-    const rewardIrm = rewardSats ? (rewardSats/1e8).toFixed(2) : '0.00';
-    const prev = b.prev_hash ?? b.previous_block ?? 'N/A';
-    const mr   = b.merkle_root ?? 'N/A';
-    const nonce = b.nonce ?? 'N/A';
-    const bits  = b.bits ?? 'N/A';
+    const rewardIrm = rewardSats ? (rewardSats / 1e8).toFixed(2) : blockRewardIrm(height).toFixed(2);
+    const prev = header.prev_hash ?? b.prev_hash ?? b.previous_block ?? 'N/A';
+    const mr = header.merkle_root ?? b.merkle_root ?? 'N/A';
+    const nonce = header.nonce ?? b.nonce ?? 'N/A';
+    const bits = header.bits ?? b.bits ?? 'N/A';
     const miner = b.miner_address ?? b.miner ?? 'N/A';
 
     const rows = [
@@ -101,7 +116,9 @@ async function viewBlock(height) {
     if (window.__showBlockModal) {
       window.__showBlockModal(rows);
     } else {
-      alert(`Block ${height}\nHash: ${hash}\nReward: ${rewardIrm} IRM`);
+      alert(`Block ${height}
+Hash: ${hash}
+Reward: ${rewardIrm} IRM`);
     }
   } catch (error) {
     console.error('Error loading block:', error);
@@ -189,15 +206,16 @@ async function loadBlocks(limit = 50) {
       const sortedBlocks = allBlocks.slice().sort((a,b) => (b.height ?? 0) - (a.height ?? 0));
       
       blocksList.innerHTML = sortedBlocks.map((blk) => {
-        const hash = pick(blk, ['hash','block_hash'], 'N/A');
-        const time = pick(blk, ['time','timestamp'], 0);
-        const rewardSats = pick(blk, ['reward','subsidy','block_reward'], 0);
-        const reward = rewardSats ? (rewardSats / 1e8).toFixed(2) : '0.00';
-        const txs = pick(blk, ['transactions','tx_count'], 0);
-        const height = pick(blk, ['height'], 0);
-        return `
+        const header = getHeader(blk);
+        const hash = header.hash ?? blk.hash ?? blk.block_hash ?? 'N/A';
+        const time = header.time ?? header.timestamp ?? blk.time ?? blk.timestamp ?? 0;
+        const rewardSats = blk.reward ?? blk.subsidy ?? blk.block_reward ?? 0;
+        const heightVal = blk.height ?? 0;
+        const reward = rewardSats ? (rewardSats / 1e8).toFixed(2) : blockRewardIrm(heightVal).toFixed(2);
+        const txs = Array.isArray(blk.tx_hex) ? blk.tx_hex.length : (blk.transactions ?? blk.tx_count ?? 0);
+return `
 <div style="background: rgba(0,0,0,0.3); padding: 20px; margin-bottom: 15px; border-radius: 8px; cursor: pointer; transition: transform 0.2s;"
-     onclick="viewBlock(${height})" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
+     onclick="viewBlock(${heightVal})" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
   <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
     <span style="font-size: 18px; font-weight: bold; color: #0066cc;">Block ${height}</span>
     <span style="color: rgba(255,255,255,0.7);">${formatTime(time)}</span>

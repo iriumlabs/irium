@@ -738,3 +738,162 @@ body {
     border-radius: 50% !important;
     object-fit: cover;
 }
+
+
+/* Whitepaper */
+.whitepaper-page .hero-whitepaper {
+    min-height: auto;
+    padding: 120px 0 80px;
+    background: radial-gradient(ellipse at top, rgba(99, 102, 241, 0.18) 0%, rgba(5, 5, 15, 0.95) 70%);
+}
+
+.whitepaper-page .wp-title {
+    font-size: 3.2rem;
+    margin-bottom: 2.5rem;
+    text-shadow: 0 0 24px rgba(99, 102, 241, 0.6);
+}
+
+.whitepaper-page .wp-shell {
+    background: linear-gradient(180deg, rgba(7, 7, 20, 0.92), rgba(5, 5, 15, 0.98));
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 16px;
+    padding: 48px;
+    max-width: 1100px;
+    margin: 0 auto;
+    text-align: left;
+    box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px);
+}
+
+.whitepaper-page .wp-body {
+    display: flex;
+    flex-direction: column;
+    gap: 2rem;
+    color: rgba(255, 255, 255, 0.9);
+}
+
+.whitepaper-page .wp-header h1 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2.6rem;
+    letter-spacing: 1px;
+    margin-bottom: 0.4rem;
+}
+
+.whitepaper-page .wp-subtitle {
+    color: rgba(255, 255, 255, 0.65);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    font-size: 0.95rem;
+}
+
+.whitepaper-page .wp-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 1.2rem;
+}
+
+.whitepaper-page .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    background: rgba(15, 15, 35, 0.6);
+    font-size: 0.85rem;
+    letter-spacing: 0.5px;
+}
+
+.whitepaper-page .wp-section {
+    padding-top: 1.5rem;
+    border-top: 1px solid rgba(99, 102, 241, 0.12);
+}
+
+.whitepaper-page .wp-section:first-of-type {
+    border-top: none;
+    padding-top: 0;
+}
+
+.whitepaper-page .wp-section h2 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.6rem;
+    margin-bottom: 0.75rem;
+}
+
+.whitepaper-page .wp-section h3 {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.1rem;
+    margin-top: 1rem;
+    color: var(--secondary);
+}
+
+.whitepaper-page .wp-section p {
+    color: rgba(255, 255, 255, 0.85);
+    line-height: 1.75;
+}
+
+.whitepaper-page .wp-section ul,
+.whitepaper-page .wp-section ol {
+    margin-left: 1.25rem;
+}
+
+.whitepaper-page .wp-section li {
+    margin: 0.4rem 0;
+}
+
+.whitepaper-page .wp-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1.2rem 0;
+    font-size: 0.95rem;
+    background: rgba(10, 10, 25, 0.6);
+    border: 1px solid rgba(99, 102, 241, 0.15);
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+.whitepaper-page .wp-table th,
+.whitepaper-page .wp-table td {
+    padding: 0.75rem 0.9rem;
+    border-bottom: 1px solid rgba(99, 102, 241, 0.12);
+}
+
+.whitepaper-page .wp-table th {
+    text-align: left;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.85);
+    background: rgba(99, 102, 241, 0.08);
+}
+
+.whitepaper-page .wp-table tr:last-child td {
+    border-bottom: none;
+}
+
+.whitepaper-page .code-block {
+    font-family: "Courier New", monospace;
+    background: rgba(8, 8, 20, 0.9);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    padding: 0.85rem;
+    border-radius: 10px;
+    overflow-wrap: anywhere;
+    color: #dbeafe;
+}
+
+.whitepaper-page .checkmark {
+    color: #4ade80;
+    font-weight: 700;
+}
+
+@media (max-width: 900px) {
+    .whitepaper-page .wp-shell {
+        padding: 32px;
+    }
+
+    .whitepaper-page .wp-title {
+        font-size: 2.4rem;
+    }
+
+    .whitepaper-page .wp-header h1 {
+        font-size: 2rem;
+    }
+}

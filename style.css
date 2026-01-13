@@ -749,6 +749,14 @@ body {
     text-align: left;
 }
 
+
+.whitepaper-page .hero-whitepaper .container {
+    text-align: center;
+}
+
+.whitepaper-page .wp-title {
+    text-align: center;
+}
 .whitepaper-page .wp-title {
     font-size: 3.2rem;
     margin-bottom: 2.5rem;

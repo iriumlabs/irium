@@ -932,3 +932,10 @@ body {
         font-size: 2rem;
     }
 }
+
+/* Hide legacy section labels if cached HTML still includes them */
+#about > .container > h1.glitch,
+#features > .container > h1.glitch,
+#specs > .container > h1.glitch {
+    display: none;
+}

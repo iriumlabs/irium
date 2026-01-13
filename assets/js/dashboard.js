@@ -113,21 +113,31 @@ async function loadDashboard() {
       console.log('Sorted blocks (asc) for time calculation:', sortedBlocks.map(b => ({ height: b.height, time: getBlockTime(b) })));
       
       const timeIntervals = [];
+      const intervalBlocks = [];
+      const avgIntervals = [];
       for (let i = 1; i < sortedBlocks.length; i++) {
         const t2 = getBlockTime(sortedBlocks[i]);
         const t1 = getBlockTime(sortedBlocks[i-1]);
         const m = (t2 - t1) / 60;
-        if (m > 0 && m < 1440) timeIntervals.push(m);
+        intervalBlocks.push(sortedBlocks[i]);
+        if (m > 0) {
+          timeIntervals.push(m <= 1440 ? m : null);
+          if (m < 1440) avgIntervals.push(m);
+        } else {
+          timeIntervals.push(null);
+        }
       }
       
       console.log('Block time intervals:', timeIntervals);
       
-      if (timeIntervals.length > 0) {
-        const avgBlockTime = timeIntervals.reduce((a, b) => a + b, 0) / timeIntervals.length;
+      if (avgIntervals.length > 0) {
+        const avgBlockTime = avgIntervals.reduce((a, b) => a + b, 0) / avgIntervals.length;
         if (blockTimeEl) blockTimeEl.textContent = avgBlockTime.toFixed(2) + ' minutes';
-        updateChart(timeIntervals, sortedBlocks.slice(0, Math.min(timeIntervals.length + 1, 20)));
       } else {
         if (blockTimeEl) blockTimeEl.textContent = 'N/A';
+      }
+      if (timeIntervals.length > 0) {
+        updateChart(timeIntervals, intervalBlocks);
       }
     } else {
       if (blockTimeEl) blockTimeEl.textContent = 'N/A';
@@ -177,8 +187,8 @@ function updateChart(intervals, blocks) {
 
     // Create labels based on actual block heights
     const labels = intervals.map((_, i) => {
-      if (blocks && blocks[i+1]) {
-        return `Block ${blocks[i+1].height}`;
+      if (blocks && blocks[i]) {
+        return `Block ${blocks[i].height}`;
       }
       return `Interval ${i+1}`;
     });

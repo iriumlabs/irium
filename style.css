@@ -755,6 +755,19 @@ body {
     text-shadow: 0 0 24px rgba(99, 102, 241, 0.6);
 }
 
+@keyframes wp-glow {
+    0%, 100% {
+        text-shadow: 0 0 12px rgba(99, 102, 241, 0.35), 0 0 28px rgba(99, 102, 241, 0.6);
+    }
+    50% {
+        text-shadow: 0 0 18px rgba(99, 102, 241, 0.6), 0 0 42px rgba(14, 165, 233, 0.55);
+    }
+}
+
+.whitepaper-page .wp-header h1 {
+    animation: wp-glow 3.5s ease-in-out infinite;
+}
+
 .whitepaper-page .wp-shell {
     background: linear-gradient(180deg, rgba(7, 7, 20, 0.92), rgba(5, 5, 15, 0.98));
     border: 1px solid rgba(99, 102, 241, 0.25);

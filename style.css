@@ -528,6 +528,7 @@ body {
     display: flex;
     justify-content: center;
     flex-wrap: wrap;
+    justify-content: flex-start;
     gap: 2rem;
     margin: 2rem 0;
 }
@@ -745,6 +746,7 @@ body {
     min-height: auto;
     padding: 120px 0 80px;
     background: radial-gradient(ellipse at top, rgba(99, 102, 241, 0.18) 0%, rgba(5, 5, 15, 0.95) 70%);
+    text-align: left;
 }
 
 .whitepaper-page .wp-title {
@@ -770,6 +772,7 @@ body {
     flex-direction: column;
     gap: 2rem;
     color: rgba(255, 255, 255, 0.9);
+    text-align: left;
 }
 
 .whitepaper-page .wp-header h1 {
@@ -789,6 +792,7 @@ body {
 .whitepaper-page .wp-badges {
     display: flex;
     flex-wrap: wrap;
+    justify-content: flex-start;
     gap: 0.6rem;
     margin-top: 1.2rem;
 }

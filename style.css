@@ -890,6 +890,16 @@ body {
     background: rgba(99, 102, 241, 0.08);
 }
 
+
+.whitepaper-page .wp-link {
+    color: var(--secondary);
+    font-weight: 600;
+}
+
+.whitepaper-page .wp-link:hover {
+    color: #7dd3fc;
+}
+
 .whitepaper-page .wp-table tr:last-child td {
     border-bottom: none;
 }

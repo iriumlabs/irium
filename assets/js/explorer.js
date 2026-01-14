@@ -228,19 +228,20 @@ return `
 </div>`;
       }).join('');
       
-      // Add a note about any still missing blocks
-      const stillMissingBlocks = Array.from({length: currentHeight + 1}, (_, i) => i).filter(h => !allBlocks.some(b => (b.height ?? 0) === h));
-      if (stillMissingBlocks.length > 0) {
-        blocksList.innerHTML += `
-<div style="background: rgba(255,165,0,0.1); padding: 15px; margin-top: 20px; border-radius: 8px; border-left: 4px solid #ffa500;">
-  <div style="color: #ffa500; font-weight: bold; margin-bottom: 10px;">⚠️ Missing Blocks</div>
-  <div style="color: rgba(255,255,255,0.8); font-size: 14px;">
-    The following blocks are not available in the API: ${stillMissingBlocks.join(', ')}
-  </div>
-  <div style="color: rgba(255,255,255,0.6); font-size: 12px; margin-top: 5px;">
-    This may be due to API limitations or blocks not being indexed yet.
-  </div>
-</div>`;
+      // Warn only for gaps within the displayed window.
+      const windowSize = Math.min(limit, currentHeight + 1);
+      const windowStart = Math.max(0, currentHeight - windowSize + 1);
+      const expectedWindow = Array.from({length: windowSize}, (_, i) => windowStart + i);
+      const missingWindow = expectedWindow.filter(h => !allBlocks.some(b => (b.height ?? 0) === h));
+      if (missingWindow.length > 0) {
+        const preview = missingWindow.slice(0, 20).join(", ");
+        const suffix = missingWindow.length > 20 ? " … (+" + (missingWindow.length - 20) + " more)" : "";
+        blocksList.innerHTML +=
+          "<div style=\"background: rgba(255,165,0,0.1); padding: 15px; margin-top: 20px; border-radius: 8px; border-left: 4px solid #ffa500;\">" +
+          "<div style=\"color: #ffa500; font-weight: bold; margin-bottom: 10px;\">⚠️ Missing Blocks</div>" +
+          "<div style=\"color: rgba(255,255,255,0.8); font-size: 14px;\">Missing blocks in the latest window (" + windowStart + "-" + currentHeight + "): " + preview + suffix + "</div>" +
+          "<div style=\"color: rgba(255,255,255,0.6); font-size: 12px; margin-top: 5px;\">This may be due to API pagination or indexing delay.</div>" +
+          "</div>";
       }
     } else {
       blocksList.innerHTML = '<p style="color: rgba(255,255,255,0.7);">No blocks found</p>';

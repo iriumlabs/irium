@@ -93,7 +93,7 @@ async function viewBlock(height) {
     const mr = header.merkle_root ?? b.merkle_root ?? 'N/A';
     const nonce = header.nonce ?? b.nonce ?? 'N/A';
     const bits = header.bits ?? b.bits ?? 'N/A';
-    const miner = b.miner_address ?? b.miner ?? 'N/A';
+        const miner = blk.miner_address ?? blk.miner ?? N/A;
 
     const rows = [
       ['Height', String(height)],
@@ -213,6 +213,7 @@ async function loadBlocks(limit = 50) {
         const heightVal = blk.height ?? 0;
         const reward = rewardSats ? (rewardSats / 1e8).toFixed(2) : blockRewardIrm(heightVal).toFixed(2);
         const txs = Array.isArray(blk.tx_hex) ? blk.tx_hex.length : (blk.transactions ?? blk.tx_count ?? 0);
+        const miner = blk.miner_address ?? blk.miner ?? "N/A";
 return `
 <div style="background: rgba(0,0,0,0.3); padding: 20px; margin-bottom: 15px; border-radius: 8px; cursor: pointer; transition: transform 0.2s;"
      onclick="viewBlock(${heightVal})" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
@@ -224,6 +225,9 @@ return `
   <div style="display: flex; gap: 20px; color: rgba(255,255,255,0.7); font-size: 14px;">
     <span>Reward: ${reward} IRM</span>
     <span>Transactions: ${txs}</span>
+  </div>
+  <div style="margin-top: 8px; color: rgba(255,255,255,0.7); font-size: 13px;">
+    Miner: <span style="font-family: monospace; word-break: break-all;">${miner}</span>
   </div>
 </div>`;
       }).join('');

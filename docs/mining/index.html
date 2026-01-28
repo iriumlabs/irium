@@ -118,8 +118,8 @@ sudo journalctl -u iriumd -f</code></pre>
 
     <h3>6) Start mining</h3>
     <pre><code>export IRIUM_MINER_ADDRESS=&lt;YOUR_IRIUM_ADDRESS&gt;
-./target/release/irium-miner --threads 4</code></pre>
-    <p class="muted">Tip: the miner auto-loads <code>/etc/irium/miner.env</code> if it exists. Shell exports override the file.</p>
+./target/release/irium-miner --threads <CORES></code></pre>
+    <p class="muted">Tip: set <code>--threads</code> to the number of CPU cores you want (multicore mining). The miner auto-loads <code>/etc/irium/miner.env</code> if it exists. Shell exports override the file.</p>
 
     <h3>7) Check balance</h3>
     <pre><code>./target/release/irium-wallet balance &lt;YOUR_IRIUM_ADDRESS&gt;</code></pre>

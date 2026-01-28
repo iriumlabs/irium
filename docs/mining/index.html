@@ -86,52 +86,72 @@
 
 <section class="section">
   <div class="container">
-    <h2 class="section-title">Mining (Beginner Friendly)</h2>
-    <p class="muted">Run the node first, then the miner. Use your own wallet address for rewards.</p>
+    <h2 class="section-title">Start Mining (Simple Steps)</h2>
+    <p class="muted">You need the node running before the miner. Mining on a node that is still syncing can cause stale blocks.</p>
 
-    <h3>1) Build</h3>
+    <h3>1) Install Rust (one time)</h3>
+    <p class="muted">Go to <a href="https://rustup.rs" target="_blank" rel="noopener">rustup.rs</a> and install. Open a new terminal.</p>
+
+    <h3>2) Download + build</h3>
     <pre><code>git clone https://github.com/iriumlabs/irium.git
 cd irium
 source ~/.cargo/env
 cargo build --release</code></pre>
 
-    <h3>2) Start the node (leave running)</h3>
+    <h3>3) Start the node (leave running)</h3>
     <pre><code>./target/release/iriumd</code></pre>
     <pre><code>sudo systemctl enable --now iriumd
 sudo journalctl -u iriumd -f</code></pre>
 
-    <h3>3) Create a wallet address</h3>
+    <h3>4) Wait for sync</h3>
+    <pre><code>curl -k https://127.0.0.1:38300/status</code></pre>
+    <ul class="muted">
+      <li>If you see no peers: wait a few minutes, make sure outbound TCP 38291 is allowed, and confirm <code>bootstrap/seedlist.txt</code> exists. NAT can show 0 inbound peers even when syncing.</li>
+      <li>If height stays 0: check your internet, then restart the node.</li>
+    </ul>
+
+    <h3>5) Create a wallet address</h3>
     <pre><code>./target/release/irium-wallet init
 ./target/release/irium-wallet new-address
 ./target/release/irium-wallet list-addresses</code></pre>
+    <p class="muted">Use the address that starts with <code>Q</code>.</p>
 
-    <h3>4) Start mining</h3>
+    <h3>6) Start mining</h3>
     <pre><code>export IRIUM_MINER_ADDRESS=&lt;YOUR_IRIUM_ADDRESS&gt;
-./target/release/irium-miner --threads 2</code></pre>
+./target/release/irium-miner --threads 4</code></pre>
     <p class="muted">Tip: the miner auto-loads <code>/etc/irium/miner.env</code> if it exists. Shell exports override the file.</p>
+
+    <h3>7) Check balance</h3>
+    <pre><code>./target/release/irium-wallet balance &lt;YOUR_IRIUM_ADDRESS&gt;</code></pre>
+
+    <h3>If the miner starts at height 0</h3>
+    <ul class="muted">
+      <li>The node is still syncing or the miner cannot reach RPC.</li>
+      <li>Check: <code>curl -k https://127.0.0.1:38300/status</code></li>
+      <li>Make sure <code>IRIUM_NODE_RPC</code> is correct if mining remotely.</li>
+    </ul>
 
     <h3>Optional: set an RPC token (fixes HTTP 429)</h3>
     <pre><code>export IRIUM_RPC_TOKEN=$(openssl rand -hex 24)
 # use the same token for node + miner</code></pre>
 
-    <h3>Remote node (miner only)</h3>
+    <h3>Remote mining (miner only)</h3>
     <pre><code>export IRIUM_NODE_RPC=http://&lt;node-ip&gt;:38300</code></pre>
+
+    <h3>Mobile / Termux notes</h3>
+    <ul class="muted">
+      <li>Builds are slow and phones throttle. Keep the session in the foreground or use <code>tmux</code>.</li>
+      <li>Many mobile networks block inbound peers, but outbound sync can still work.</li>
+    </ul>
 
     <h3>Common fixes</h3>
     <ul class="muted">
-      <li>Miner starts at height 1 → the node is not running or the RPC URL is wrong.</li>
-      <li>HTTP 401 → token mismatch. Use the same <code>IRIUM_RPC_TOKEN</code> in node and miner.</li>
+      <li>HTTP 401 → token mismatch. Use the same <code>IRIUM_RPC_TOKEN</code> in node + miner.</li>
       <li>HTTP 429 → set a token or raise <code>IRIUM_RATE_LIMIT_PER_MIN</code> on the node.</li>
     </ul>
 
     <h3>Check logs</h3>
     <pre><code>sudo journalctl -u irium-miner -f</code></pre>
-
-    <h3>API examples</h3>
-    <p>Base: <a href="https://api.iriumlabs.org/" target="_blank" rel="noopener">https://api.iriumlabs.org/</a></p>
-    <pre><code>curl https://api.iriumlabs.org/api/stats
-curl https://api.iriumlabs.org/api/block/1
-curl "https://api.iriumlabs.org/api/blocks?limit=10"</code></pre>
 
     <p style="margin-top:12px" class="muted">
       Docs: <a href="https://github.com/iriumlabs/irium/blob/main/QUICKSTART.md" target="_blank" rel="noopener">Quickstart</a>

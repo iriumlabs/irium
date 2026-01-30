@@ -99,7 +99,7 @@ source ~/.cargo/env
 cargo build --release</code></pre>
 
     <h3>3) Start the node (leave running)</h3>
-    <pre><code>./target/release/iriumd</code></pre>
+    <pre><code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code></pre>
     <pre><code>sudo systemctl enable --now iriumd
 sudo journalctl -u iriumd -f</code></pre>
 
@@ -107,7 +107,7 @@ sudo journalctl -u iriumd -f</code></pre>
     <pre><code>curl -k https://127.0.0.1:38300/status</code></pre>
     <ul class="muted">
       <li>If you see no peers: wait a few minutes, make sure outbound TCP 38291 is allowed, and confirm <code>bootstrap/seedlist.txt</code> exists. NAT can show 0 inbound peers even when syncing.</li>
-      <li>If height stays 0: check your internet, then restart the node.</li>
+      <li>If height stays 0: start the node with <code>IRIUM_NODE_CONFIG=configs/node.json</code> (loads seeds), then restart.</li>
     </ul>
 
     <h3>5) Create a wallet address</h3>

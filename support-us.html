@@ -20,6 +20,20 @@
         border-radius: 10px;
         border: 1px solid rgba(255,255,255,0.1);
     }
+    .faq-section {
+        margin-top: 3rem;
+    }
+    .faq-item {
+        background: rgba(0,0,0,0.25);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 8px;
+        padding: 1.2rem;
+        margin-bottom: 1rem;
+    }
+    .faq-item h4 {
+        margin-bottom: 0.5rem;
+        color: var(--secondary);
+    }
     @media (max-width: 768px) {
         .support-grid {
             grid-template-columns: 1fr;
@@ -117,6 +131,35 @@
 <a href="https://github.com/iriumlabs/irium" class="btn btn-secondary" target="_blank" style="margin-top: 1.5rem;">VIEW ON GITHUB</a>
 </div>
 </div>
+
+<div class="faq-section">
+<h3>FAQ</h3>
+<div class="faq-item">
+<h4>My node stays at height 0 / peers = 0. What should I do?</h4>
+<p>Start with the config so seed peers load: <code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code>. Keep port 38291 open and allow outbound connections.</p>
+</div>
+<div class="faq-item">
+<h4>The miner starts at height 0/1 and never moves.</h4>
+<p>The miner needs a running node for templates. Start <code>iriumd</code> first, set <code>IRIUM_MINER_ADDRESS</code>, and ensure the miner can reach the node RPC (default http://127.0.0.1:38300).</p>
+</div>
+<div class="faq-item">
+<h4>What is IRIUM_RPC_TOKEN? I get 401 or 429 errors.</h4>
+<p>IRIUM_RPC_TOKEN protects the node RPC. Use the same token in the miner or wallet env. A 401 means missing/incorrect token. A 429 means the node is rate-limiting; wait or reduce request frequency.</p>
+</div>
+<div class="faq-item">
+<h4>Why do I see "unknown parent" or orphan blocks?</h4>
+<p>This can happen during normal sync or when peers are on different tips. The node will request headers and fill missing parents; keep it running until it catches up.</p>
+</div>
+<div class="faq-item">
+<h4>Anchors verification failed on startup.</h4>
+<p>Make sure you are using an unmodified official release. The files <code>bootstrap/anchors.json</code> and <code>bootstrap/trust/allowed_signers</code> must be present and match their signatures.</p>
+</div>
+<div class="faq-item">
+<h4>Can I run only the miner?</h4>
+<p>The miner needs a node RPC. You can run a local node or point the miner to a trusted remote node using <code>IRIUM_NODE_RPC</code>.</p>
+</div>
+</div>
+
 <div class="contact-info">
 <p><strong>Contact:</strong> <a href="mailto:info@iriumlabs.org">info@iriumlabs.org</a></p>
 <p>Join our <a href="https://t.me/iriumlabs" target="_blank">Telegram</a> for collaboration opportunities</p>

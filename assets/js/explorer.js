@@ -151,7 +151,7 @@ function searchBlock() {
 }
 
 // Load blocks list - fetch all available blocks
-async function loadBlocks(limit = 20) {
+async function loadBlocks(limit = 10) {
   try {
     console.log('Loading blocks...');
     

@@ -78,7 +78,7 @@ async function loadDashboard() {
     if (supplyEl) supplyEl.textContent = ((stats.supply_irm ?? 0)).toFixed(2) + ' IRM';
 
     // Load blocks for chart data - try to get more complete data
-    const blocks = await fetchJson('/blocks?limit=20');
+    const blocks = await fetchJson('/blocks?limit=10');
     console.log('Dashboard blocks loaded:', blocks.blocks ? blocks.blocks.length : 0, 'blocks');
 
     const blockTimeEl = document.getElementById('block-time');
@@ -158,7 +158,7 @@ async function loadDashboard() {
     console.error('Error loading dashboard:', error);
     // Fallback: derive basics from blocks
     try {
-      const blocks = await fetchJson('/blocks?limit=20');
+      const blocks = await fetchJson('/blocks?limit=10');
       const list = blocks.blocks ?? blocks ?? [];
       const height = Array.isArray(list) && list.length ? (list[0].height ?? 0) : 0;
       const total = blocks.total ?? (Array.isArray(list) ? list.length : 0);

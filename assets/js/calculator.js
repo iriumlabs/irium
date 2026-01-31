@@ -3,14 +3,26 @@ const BLOCK_REWARD = 50; // IRM per block
 const BLOCK_TIME = 600; // seconds (10 minutes)
 const DEFAULT_API_BASE = 'https://api.iriumlabs.org/api';
 const CORS_PROXIES = ['', 'https://api.allorigins.win/raw?url='];
+const FETCH_TIMEOUT_MS = 8000;
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 
 function getApiBases() {
   const bases = [];
   if (window.IRIUM_API_BASE) bases.push(window.IRIUM_API_BASE);
   const docBase = document.documentElement.dataset.apiBase || (document.body && document.body.dataset && document.body.dataset.apiBase);
   if (docBase) bases.push(docBase);
-  if (location && location.origin) bases.push(location.origin + '/api');
   bases.push(DEFAULT_API_BASE);
+  if (location && location.origin) bases.push(location.origin + '/api');
   const deduped = [];
   for (const base of bases) {
     const norm = base.replace(/\/+$/, '');
@@ -27,7 +39,7 @@ async function fetchJson(path) {
     for (const proxy of CORS_PROXIES) {
       const target = proxy ? proxy + encodeURIComponent(url) : url;
       try {
-        const res = await fetch(target, { cache: 'no-store' });
+        const res = await fetchWithTimeout(target, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return await res.json();
       } catch (err) {

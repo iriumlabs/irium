@@ -1,7 +1,7 @@
 // Irium Block Explorer JavaScript with CORS Proxy
 const DEFAULT_API_BASE = 'https://api.iriumlabs.org/api';
 const CORS_PROXIES = ['', 'https://api.allorigins.win/raw?url='];
-const FETCH_TIMEOUT_MS = 8000;
+const FETCH_TIMEOUT_MS = 15000;
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -151,7 +151,7 @@ function searchBlock() {
 }
 
 // Load blocks list - fetch all available blocks
-async function loadBlocks(limit = 50) {
+async function loadBlocks(limit = 20) {
   try {
     console.log('Loading blocks...');
     

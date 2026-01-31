@@ -133,42 +133,48 @@
 </div>
 
 <div class="faq-section">
-<h3>FAQ</h3>
-<div class="faq-item">
-<h4>My node stays at height 0 / peers = 0. What should I do?</h4>
-<p>Start with the config so seed peers load: <code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code>. Keep port 38291 open and allow outbound connections.</p>
+<h3>Frequently Asked Questions</h3>
 
-</div>
 <div class="faq-item">
-<h4>Getting banned / 0 peers / not syncing</h4>
-<p>Try this checklist:</p>
+<h4>Node shows height 0 or peers = 0</h4>
+<p>Start the node with the config so seed peers load:</p>
+<p><code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code></p>
+<p>Make sure TCP 38291 is open inbound and outbound.</p>
+</div>
+
+<div class="faq-item">
+<h4>Getting banned or frequent disconnects</h4>
+<p>Verify your clock, clear peer reputation, and restart:</p>
 <ul>
-<li>Start with config: <code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code></li>
-<li>Open TCP 38291 inbound and allow outbound.</li>
-<li>Verify clock: <code>timedatectl status</code></li>
-<li>Clear peer reputation (safe): <code>rm -f ~/.irium/peer_reputation.json</code></li>
-<li>Restart the node and wait for peers.</li>
+<li><code>timedatectl status</code></li>
+<li><code>rm -f ~/.irium/peer_reputation.json</code></li>
 </ul>
+<p>This does not affect your blocks or balance.</p>
 </div>
+
 <div class="faq-item">
-<h4>The miner starts at height 0/1 and never moves.</h4>
-<p>The miner needs a running node for templates. Start <code>iriumd</code> first, set <code>IRIUM_MINER_ADDRESS</code>, and ensure the miner can reach the node RPC (default http://127.0.0.1:38300).</p>
+<h4>Miner starts at height 0/1 and does not move</h4>
+<p>The miner requires a synced node RPC. Start <code>iriumd</code> first, set <code>IRIUM_MINER_ADDRESS</code>, and ensure RPC is reachable (default <code>http://127.0.0.1:38300</code>).</p>
 </div>
+
 <div class="faq-item">
-<h4>What is IRIUM_RPC_TOKEN? I get 401 or 429 errors.</h4>
-<p>IRIUM_RPC_TOKEN protects the node RPC. Use the same token in the miner or wallet env. A 401 means missing/incorrect token. A 429 means the node is rate-limiting; wait or reduce request frequency.</p>
+<h4>What is IRIUM_RPC_TOKEN?</h4>
+<p>If RPC auth is enabled, set the same <code>IRIUM_RPC_TOKEN</code> for the node and miner or wallet. A 401 means missing or incorrect token. A 429 means the node is rate-limiting requests.</p>
 </div>
+
 <div class="faq-item">
-<h4>Why do I see "unknown parent" or orphan blocks?</h4>
-<p>This can happen during normal sync or when peers are on different tips. The node will request headers and fill missing parents; keep it running until it catches up.</p>
+<h4>Unknown parent or orphan blocks</h4>
+<p>This is normal during sync or when peers are on different tips. Keep the node running so it can request headers and fill missing parents.</p>
 </div>
+
 <div class="faq-item">
-<h4>Anchors verification failed on startup.</h4>
-<p>Make sure you are using an unmodified official release. The files <code>bootstrap/anchors.json</code> and <code>bootstrap/trust/allowed_signers</code> must be present and match their signatures.</p>
+<h4>Anchors verification failed on startup</h4>
+<p>Use the official release files. Ensure <code>bootstrap/anchors.json</code> and <code>bootstrap/trust/allowed_signers</code> are present and unchanged.</p>
 </div>
+
 <div class="faq-item">
 <h4>Can I run only the miner?</h4>
-<p>The miner needs a node RPC. You can run a local node or point the miner to a trusted remote node using <code>IRIUM_NODE_RPC</code>.</p>
+<p>The miner needs a node RPC. Run a local node or point to a trusted remote node using <code>IRIUM_NODE_RPC</code>.</p>
 </div>
 </div>
 

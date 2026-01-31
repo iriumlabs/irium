@@ -137,6 +137,18 @@
 <div class="faq-item">
 <h4>My node stays at height 0 / peers = 0. What should I do?</h4>
 <p>Start with the config so seed peers load: <code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code>. Keep port 38291 open and allow outbound connections.</p>
+
+</div>
+<div class="faq-item">
+<h4>Getting banned / 0 peers / not syncing</h4>
+<p>Try this checklist:</p>
+<ul>
+<li>Start with config: <code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code></li>
+<li>Open TCP 38291 inbound and allow outbound.</li>
+<li>Verify clock: <code>timedatectl status</code></li>
+<li>Clear peer reputation (safe): <code>rm -f ~/.irium/peer_reputation.json</code></li>
+<li>Restart the node and wait for peers.</li>
+</ul>
 </div>
 <div class="faq-item">
 <h4>The miner starts at height 0/1 and never moves.</h4>

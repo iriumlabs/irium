@@ -42,6 +42,31 @@
     }
     code { color: #eaf1ff; }
     a { color: #5bb1ff; }
+
+    .step-grid, .info-grid { display: grid; gap: 16px; }
+    @media (min-width: 900px) {
+      .step-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    .step-card, .info-card {
+      background: rgba(0,0,0,0.22);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      padding: 18px;
+      box-shadow: inset 0 0 18px rgba(0,0,0,0.2);
+    }
+    .step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+    .step-num {
+      width: 28px; height: 28px; border-radius: 999px;
+      background: rgba(99,102,241,0.2);
+      border: 1px solid rgba(99,102,241,0.45);
+      color: #dbe4ff; font-weight: 600;
+      display: inline-flex; align-items: center; justify-content: center;
+    }
+    .step-title { font-size: 16px; font-weight: 600; }
+    .section-subtitle { margin: 28px 0 12px; font-size: 18px; color: #fff; }
+    .info-title { font-weight: 600; margin-bottom: 8px; }
+    .info-card pre { margin-top: 8px; }
   </style>
 </head>
 <body>
@@ -137,74 +162,108 @@
     <h2 id="start-mining" class="section-title">Start Mining (Simple Steps)</h2>
     <p class="muted">You need the node running before the miner. Mining on a node that is still syncing can cause stale blocks.</p>
 
-    <h3>1) Install Rust (one time)</h3>
-    <p class="muted">Go to <a href="https://rustup.rs" target="_blank" rel="noopener">rustup.rs</a> and install. Open a new terminal.</p>
 
-    <h3>2) Download + build</h3>
-    <pre><code>git clone https://github.com/iriumlabs/irium.git
+    <div class="step-grid">
+      <div class="step-card">
+        <div class="step-head"><span class="step-num">1</span><span class="step-title">Install Rust (one time)</span></div>
+        <p class="muted">Go to <a href="https://rustup.rs" target="_blank" rel="noopener">rustup.rs</a> and install. Open a new terminal.</p>
+      </div>
+
+      <div class="step-card">
+        <div class="step-head"><span class="step-num">2</span><span class="step-title">Download + build</span></div>
+        <pre><code>git clone https://github.com/iriumlabs/irium.git
 cd irium
 source ~/.cargo/env
 cargo build --release</code></pre>
+      </div>
 
-    <h3>3) Start the node (leave running)</h3>
-    <pre><code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code></pre>
-    <pre><code>sudo systemctl enable --now iriumd
+      <div class="step-card">
+        <div class="step-head"><span class="step-num">3</span><span class="step-title">Start the node (leave running)</span></div>
+        <pre><code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code></pre>
+        <pre><code>sudo systemctl enable --now iriumd
 sudo journalctl -u iriumd -f</code></pre>
+      </div>
 
-    <h3>4) Wait for sync</h3>
-    <pre><code>curl -k https://127.0.0.1:38300/status</code></pre>
-    <ul class="muted">
-      <li>If you see no peers: wait a few minutes, make sure outbound TCP 38291 is allowed, and confirm <code>bootstrap/seedlist.txt</code> exists. NAT can show 0 inbound peers even when syncing.</li>
-      <li>If height stays 0: start the node with <code>IRIUM_NODE_CONFIG=configs/node.json</code> (loads seeds), then restart.</li>
-    </ul>
+      <div class="step-card">
+        <div class="step-head"><span class="step-num">4</span><span class="step-title">Wait for sync</span></div>
+        <pre><code>curl -k https://127.0.0.1:38300/status</code></pre>
+        <ul class="muted">
+          <li>If you see no peers: wait a few minutes, make sure outbound TCP 38291 is allowed, and confirm <code>bootstrap/seedlist.txt</code> exists. NAT can show 0 inbound peers even when syncing.</li>
+          <li>If height stays 0: start the node with <code>IRIUM_NODE_CONFIG=configs/node.json</code> (loads seeds), then restart.</li>
+        </ul>
+      </div>
 
-    <h3>5) Create a wallet address</h3>
-    <pre><code>./target/release/irium-wallet init
+      <div class="step-card">
+        <div class="step-head"><span class="step-num">5</span><span class="step-title">Create a wallet address</span></div>
+        <pre><code>./target/release/irium-wallet init
 ./target/release/irium-wallet new-address
 ./target/release/irium-wallet list-addresses</code></pre>
-    <p class="muted">Use the address that starts with <code>Q</code>.</p>
+        <p class="muted">Use the address that starts with <code>Q</code>.</p>
+      </div>
 
-    <h3>6) Start mining</h3>
-    <pre><code>export IRIUM_MINER_ADDRESS=&lt;YOUR_IRIUM_ADDRESS&gt;
+      <div class="step-card">
+        <div class="step-head"><span class="step-num">6</span><span class="step-title">Start mining</span></div>
+        <pre><code>export IRIUM_MINER_ADDRESS=&lt;YOUR_IRIUM_ADDRESS&gt;
 ./target/release/irium-miner --threads <CORES></code></pre>
-    <p class="muted">Tip: set <code>--threads</code> to the number of CPU cores you want (multicore mining). The miner auto-loads <code>/etc/irium/miner.env</code> if it exists. Shell exports override the file.</p>
+        <p class="muted">Tip: set <code>--threads</code> to the number of CPU cores you want (multicore mining). The miner auto-loads <code>/etc/irium/miner.env</code> if it exists. Shell exports override the file.</p>
+      </div>
 
-    <h3>7) Check balance</h3>
-    <pre><code>./target/release/irium-wallet balance &lt;YOUR_IRIUM_ADDRESS&gt;</code></pre>
+      <div class="step-card">
+        <div class="step-head"><span class="step-num">7</span><span class="step-title">Check balance</span></div>
+        <pre><code>./target/release/irium-wallet balance &lt;YOUR_IRIUM_ADDRESS&gt;</code></pre>
+      </div>
+    </div>
 
-    <h3>If the miner starts at height 0</h3>
-    <ul class="muted">
-      <li>The node is still syncing or the miner cannot reach RPC.</li>
-      <li>Check: <code>curl -k https://127.0.0.1:38300/status</code></li>
-      <li>Make sure <code>IRIUM_NODE_RPC</code> is correct if mining remotely.</li>
-    </ul>
+    <h3 class="section-subtitle">Troubleshooting &amp; advanced</h3>
+    <div class="info-grid">
+      <div class="info-card">
+        <div class="info-title">If the miner starts at height 0</div>
+        <ul class="muted">
+          <li>The node is still syncing or the miner cannot reach RPC.</li>
+          <li>Check: <code>curl -k https://127.0.0.1:38300/status</code></li>
+          <li>Make sure <code>IRIUM_NODE_RPC</code> is correct if mining remotely.</li>
+        </ul>
+      </div>
 
-    <h3>Optional: set an RPC token (fixes HTTP 429)</h3>
-    <pre><code>export IRIUM_RPC_TOKEN=$(openssl rand -hex 24)
+      <div class="info-card">
+        <div class="info-title">Optional: set an RPC token (fixes HTTP 429)</div>
+        <pre><code>export IRIUM_RPC_TOKEN=$(openssl rand -hex 24)
 # use the same token for node + miner</code></pre>
+      </div>
 
-    <h3>Remote mining (miner only)</h3>
-    <pre><code>export IRIUM_NODE_RPC=http://&lt;node-ip&gt;:38300</code></pre>
+      <div class="info-card">
+        <div class="info-title">Remote mining (miner only)</div>
+        <pre><code>export IRIUM_NODE_RPC=http://&lt;node-ip&gt;:38300</code></pre>
+      </div>
 
-    <h3>Mobile / Termux notes</h3>
-    <ul class="muted">
-      <li>Builds are slow and phones throttle. Keep the session in the foreground or use <code>tmux</code>.</li>
-      <li>Many mobile networks block inbound peers, but outbound sync can still work.</li>
-    </ul>
+      <div class="info-card">
+        <div class="info-title">Mobile / Termux notes</div>
+        <ul class="muted">
+          <li>Builds are slow and phones throttle. Keep the session in the foreground or use <code>tmux</code>.</li>
+          <li>Many mobile networks block inbound peers, but outbound sync can still work.</li>
+        </ul>
+      </div>
 
-    <h3>Common fixes</h3>
-    <ul class="muted">
-      <li>HTTP 401 → token mismatch. Use the same <code>IRIUM_RPC_TOKEN</code> in node + miner.</li>
-      <li>HTTP 429 → set a token or raise <code>IRIUM_RATE_LIMIT_PER_MIN</code> on the node.</li>
-    </ul>
+      <div class="info-card">
+        <div class="info-title">Common fixes</div>
+        <ul class="muted">
+          <li>HTTP 401 → token mismatch. Use the same <code>IRIUM_RPC_TOKEN</code> in node + miner.</li>
+          <li>HTTP 429 → set a token or raise <code>IRIUM_RATE_LIMIT_PER_MIN</code> on the node.</li>
+        </ul>
+      </div>
 
-    <h3>Check logs</h3>
-    <pre><code>sudo journalctl -u irium-miner -f</code></pre>
+      <div class="info-card">
+        <div class="info-title">Check logs</div>
+        <pre><code>sudo journalctl -u irium-miner -f</code></pre>
+      </div>
 
-    <h3>Network hashrate (estimate)</h3>
-    <pre><code>curl http://127.0.0.1:38300/rpc/network_hashrate
+      <div class="info-card">
+        <div class="info-title">Network hashrate (estimate)</div>
+        <pre><code>curl http://127.0.0.1:38300/rpc/network_hashrate
 curl http://127.0.0.1:38300/rpc/network_hashrate?window=120</code></pre>
-    <p class="muted">Returns an estimate using recent blocks: hashrate, difficulty, avg block time, window, sample blocks, and tip height.</p>
+        <p class="muted">Returns an estimate using recent blocks: hashrate, difficulty, avg block time, window, sample blocks, and tip height.</p>
+      </div>
+    </div>
 
     <p style="margin-top:12px" class="muted">
       Docs: <a href="https://github.com/iriumlabs/irium/blob/main/QUICKSTART.md" target="_blank" rel="noopener">Quickstart</a>

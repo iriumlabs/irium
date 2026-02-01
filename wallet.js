@@ -16,6 +16,8 @@ const ui = {
   rpcToken: document.getElementById('rpcToken'),
   saveNode: document.getElementById('saveNode'),
   useDefaultNode: document.getElementById('useDefaultNode'),
+  nodeAdvancedToggle: document.getElementById('nodeAdvancedToggle'),
+  nodeAdvanced: document.getElementById('nodeAdvanced'),
   nodeStatus: document.getElementById('nodeStatus'),
   createPassword: document.getElementById('createPassword'),
   createPasswordConfirm: document.getElementById('createPasswordConfirm'),
@@ -40,6 +42,8 @@ const ui = {
   sendForm: document.getElementById('sendForm'),
   sendTo: document.getElementById('sendTo'),
   sendAmount: document.getElementById('sendAmount'),
+  sendAdvancedToggle: document.getElementById('sendAdvancedToggle'),
+  sendAdvanced: document.getElementById('sendAdvanced'),
   feeOverride: document.getElementById('feeOverride'),
   coinSelect: document.getElementById('coinSelect'),
   previewTx: document.getElementById('previewTx'),
@@ -64,6 +68,15 @@ const state = {
 function setStatus(el, msg, kind) {
   el.textContent = msg;
   el.className = `wallet-status${kind ? ` status-${kind}` : ''}`;
+}
+
+function toggleAdvanced(section, button) {
+  if (!section || !button) {
+    return;
+  }
+  const hidden = section.classList.contains('is-hidden');
+  section.classList.toggle('is-hidden');
+  button.textContent = hidden ? 'Hide Advanced' : 'Advanced';
 }
 
 function normalizeNodeUrl(raw) {
@@ -944,6 +957,9 @@ function setupEvents() {
     saveNodeSettings();
     await testNodeConnection();
   });
+  ui.nodeAdvancedToggle.addEventListener('click', () => {
+    toggleAdvanced(ui.nodeAdvanced, ui.nodeAdvancedToggle);
+  });
   ui.createWallet.addEventListener('click', createWallet);
   ui.importWallet.addEventListener('click', importWallet);
   ui.unlockWallet.addEventListener('click', async () => {
@@ -978,6 +994,9 @@ function setupEvents() {
   });
   ui.previewTx.addEventListener('click', async () => {
     await handleSend(true);
+  });
+  ui.sendAdvancedToggle.addEventListener('click', () => {
+    toggleAdvanced(ui.sendAdvanced, ui.sendAdvancedToggle);
   });
 }
 

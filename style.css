@@ -1084,3 +1084,25 @@ body {
 .is-hidden {
     display: none;
 }
+
+.wallet-help {
+    font-size: 0.9rem;
+    color: #c7d2fe;
+    margin-bottom: 0.8rem;
+}
+
+.wallet-subtitle {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #9aa7ff;
+    margin: 0.4rem 0 0.6rem;
+}
+
+.wallet-advanced {
+    margin-top: 0.6rem;
+}
+
+.wallet-card-wide {
+    grid-column: 1 / -1;
+}

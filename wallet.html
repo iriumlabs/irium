@@ -35,7 +35,7 @@
 <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
 </a>
 <a href="https://t.me/iriumlabs" target="_blank" title="Telegram">
-<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196.006.128.832.941z"/></svg>
+<svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg>
 </a>
 </div>
 </div>
@@ -44,9 +44,9 @@
 <section class="hero wallet-hero">
 <div class="container">
 <h2 class="section-title">IRIUM WEB WALLET</h2>
-<p class="section-subtitle">Fully client-side. No custody. Keys never leave your browser.</p>
+<p class="section-subtitle">Three steps. Fully client-side. Keys never leave your browser.</p>
 <div class="highlight-box">
-<strong>Security Note:</strong> This wallet is experimental. Use small amounts and keep backups of your seed/private key.
+<strong>Security Note:</strong> This wallet is experimental. Use small amounts and keep backups of your private key.
 </div>
 </div>
 </section>
@@ -54,27 +54,35 @@
 <section class="section">
 <div class="container">
 <div class="wallet-grid">
+
 <div class="wallet-card">
-<h3>NODE CONNECTION</h3>
+<h3>1. CONNECT NODE</h3>
+<p class="wallet-help">Point the wallet to any Irium node you trust.</p>
 <div class="wallet-field">
 <label for="nodeUrl">Node RPC URL</label>
 <input id="nodeUrl" class="wallet-input" type="text" placeholder="https://your-node:38300">
 </div>
+<div class="wallet-actions">
+<button id="saveNode" class="btn btn-primary">Save & Test</button>
+<button id="useDefaultNode" class="btn btn-secondary">Use Default</button>
+<button id="nodeAdvancedToggle" class="btn btn-secondary">Advanced</button>
+</div>
+<div id="nodeAdvanced" class="wallet-advanced is-hidden">
 <div class="wallet-field">
 <label for="rpcToken">RPC Token (optional)</label>
 <input id="rpcToken" class="wallet-input" type="password" placeholder="Bearer token if required">
 </div>
-<div class="wallet-actions">
-<button id="saveNode" class="btn btn-primary">Save & Test</button>
-<button id="useDefaultNode" class="btn btn-secondary">Use Default</button>
 </div>
 <div id="nodeStatus" class="wallet-status">Not connected</div>
 <p class="wallet-note">Your node must allow CORS for browser access. Set <code>IRIUM_CORS_ORIGINS=*</code> on the node.</p>
 </div>
 
 <div class="wallet-card">
-<h3>WALLET VAULT</h3>
+<h3>2. CREATE OR IMPORT</h3>
+<p class="wallet-help">Create a new wallet or import your existing private key.</p>
+
 <div id="walletEmpty" class="wallet-panel">
+<div class="wallet-subtitle">Create New Wallet</div>
 <div class="wallet-field">
 <label for="createPassword">Create Password</label>
 <input id="createPassword" class="wallet-input" type="password" placeholder="Strong password">
@@ -84,11 +92,14 @@
 <input id="createPasswordConfirm" class="wallet-input" type="password" placeholder="Repeat password">
 </div>
 <div class="wallet-actions">
-<button id="createWallet" class="btn btn-primary">Create New Wallet</button>
+<button id="createWallet" class="btn btn-primary">Create Wallet</button>
 </div>
+
 <hr class="wallet-divider">
+
+<div class="wallet-subtitle">Import Existing Wallet</div>
 <div class="wallet-field">
-<label for="importPrivkey">Import Private Key (64 hex)</label>
+<label for="importPrivkey">Private Key (64 hex)</label>
 <input id="importPrivkey" class="wallet-input" type="text" placeholder="e.g. 3f...">
 </div>
 <div class="wallet-field">
@@ -132,8 +143,8 @@
 </div>
 </div>
 
-<div class="wallet-card">
-<h3>BALANCE & UTXOS</h3>
+<div class="wallet-card wallet-card-wide">
+<h3>3. BALANCE & SEND</h3>
 <div class="wallet-row">
 <div>
 <div class="wallet-label">Balance</div>
@@ -142,10 +153,9 @@
 <button id="refreshBalance" class="btn btn-primary">Refresh</button>
 </div>
 <div id="utxoList" class="wallet-rows"></div>
-</div>
 
-<div class="wallet-card">
-<h3>SEND IRM</h3>
+<hr class="wallet-divider">
+
 <form id="sendForm">
 <div class="wallet-field">
 <label for="sendTo">Recipient Address</label>
@@ -155,6 +165,11 @@
 <label for="sendAmount">Amount (IRM)</label>
 <input id="sendAmount" class="wallet-input" type="text" placeholder="0.0">
 </div>
+<div class="wallet-actions">
+<button type="submit" class="btn btn-primary">Send IRM</button>
+<button id="sendAdvancedToggle" type="button" class="btn btn-secondary">Advanced</button>
+</div>
+<div id="sendAdvanced" class="wallet-advanced is-hidden">
 <div class="wallet-field">
 <label for="feeOverride">Fee (IRM, optional)</label>
 <input id="feeOverride" class="wallet-input" type="text" placeholder="auto">
@@ -167,13 +182,15 @@
 </select>
 </div>
 <div class="wallet-actions">
-<button type="submit" class="btn btn-primary">Sign & Broadcast</button>
 <button id="previewTx" type="button" class="btn btn-secondary">Preview Raw TX</button>
 </div>
-</form>
-<div id="sendStatus" class="wallet-status"></div>
 <textarea id="rawTx" class="wallet-textarea" rows="6" readonly placeholder="Raw transaction will appear here"></textarea>
 </div>
+</form>
+
+<div id="sendStatus" class="wallet-status"></div>
+</div>
+
 </div>
 </div>
 </section>

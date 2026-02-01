@@ -153,6 +153,11 @@ sudo journalctl -u iriumd -f</code></pre>
     <h3>Check logs</h3>
     <pre><code>sudo journalctl -u irium-miner -f</code></pre>
 
+    <h3>Network hashrate (estimate)</h3>
+    <pre><code>curl http://127.0.0.1:38300/rpc/network_hashrate
+curl http://127.0.0.1:38300/rpc/network_hashrate?window=120</code></pre>
+    <p class="muted">Returns an estimate using recent blocks: hashrate, difficulty, avg block time, window, sample blocks, and tip height.</p>
+
     <p style="margin-top:12px" class="muted">
       Docs: <a href="https://github.com/iriumlabs/irium/blob/main/QUICKSTART.md" target="_blank" rel="noopener">Quickstart</a>
     </p>

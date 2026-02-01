@@ -32,6 +32,26 @@
       50%     { box-shadow: 0 0 40px rgba(99,102,241,0.28), inset 0 0 26px rgba(99,102,241,0.12); }
     }
     .section-title, h3 { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
+
+    .glow-title {
+      position: relative;
+      display: inline-block;
+      font-size: 2.4rem;
+      letter-spacing: 0.02em;
+      text-shadow: 0 0 18px rgba(99,102,241,0.55), 0 0 38px rgba(99,102,241,0.35);
+    }
+    .glow-title::after {
+      content: attr(data-text);
+      position: absolute;
+      left: 0;
+      top: 0;
+      width: 100%;
+      color: transparent;
+      text-shadow: 0 0 28px rgba(91,177,255,0.6), 0 0 60px rgba(91,177,255,0.45);
+      opacity: 0.85;
+      pointer-events: none;
+      mix-blend-mode: screen;
+    }
     .muted { color: rgba(230,237,243,0.9); }
     pre {
       background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.04));
@@ -158,17 +178,11 @@
   </div>
 </nav>
 
-<section class="hero" style="min-height:auto; padding: 100px 0 50px;">
-  <div class="container">
-    <h1 class="glitch" data-text="MINING" style="font-size:3rem; margin-bottom: 40px;">MINING</h1>
-  </div>
-</section>
-
 
 
 <section class="section">
   <div class="container">
-    <h2 class="section-title">Why Mine Irium?</h2>
+    <h2 class="section-title glow-title" data-text="Why Mine Irium?">Why Mine Irium?</h2>
     <p class="muted"><strong>Irium (IRM)</strong> is an independent proof-of-work blockchain built with a <strong>mainnet-first</strong> philosophy.</p>
     <ul class="muted">
       <li>No ICO</li>
@@ -215,7 +229,7 @@
 
 <section class="section">
   <div class="container">
-    <h2 id="start-mining" class="section-title">Start Mining (Simple Steps)</h2>
+    <h2 id="start-mining" class="section-title glow-title" data-text="Start Mining (Simple Steps)">Start Mining (Simple Steps)</h2>
     <p class="muted">You need the node running before the miner. Mining on a node that is still syncing can cause stale blocks.</p>
 
 

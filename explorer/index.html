@@ -63,9 +63,19 @@
 </div>
 </div>
 
-<div style="margin-bottom: 20px;">
-<input type="text" id="search-input" placeholder="Search by block height or hash..." style="width: 70%; padding: 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 5px; color: white; font-size: 16px;">
-<button onclick="searchBlock()" style="width: 25%; padding: 12px; background: #0066cc; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; margin-left: 5%;">Search</button>
+<div style="display: grid; gap: 12px; margin-bottom: 20px;">
+  <div style="display: grid; grid-template-columns: 1fr auto; gap: 10px;">
+    <input type="text" id="block-search-input" placeholder="Block height or hash..." style="padding: 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 5px; color: white; font-size: 16px;">
+    <button onclick="searchBlock()" style="min-width: 110px; padding: 12px; background: #0066cc; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer;">Block</button>
+  </div>
+  <div style="display: grid; grid-template-columns: 1fr auto; gap: 10px;">
+    <input type="text" id="tx-search-input" placeholder="Transaction ID (txid)..." style="padding: 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 5px; color: white; font-size: 16px;">
+    <button onclick="searchTx()" style="min-width: 110px; padding: 12px; background: #0066cc; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer;">Tx</button>
+  </div>
+  <div style="display: grid; grid-template-columns: 1fr auto; gap: 10px;">
+    <input type="text" id="address-search-input" placeholder="Address..." style="padding: 12px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); border-radius: 5px; color: white; font-size: 16px;">
+    <button onclick="searchAddress()" style="min-width: 110px; padding: 12px; background: #0066cc; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer;">Address</button>
+  </div>
 </div>
 
 <div id="blocks-list" style="margin-top: 30px; color: rgba(255,255,255,0.9);">
@@ -114,13 +124,13 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=17"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=18"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
 <!-- Block Details Modal -->
 <div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
   <div id="block-modal-content" style="background:#10131a; color:#fff; width:90%; max-width:720px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 10px 25px rgba(0,0,0,0.5);">
     <div style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.1);">
-      <h3 style="margin:0; font-size:18px;">Block Details</h3>
+      <h3 style="margin:0; font-size:18px;">Lookup Details</h3>
       <button id="block-modal-close" aria-label="Close" style="background:transparent; color:#fff; border:none; font-size:20px; cursor:pointer;">×</button>
     </div>
     <div id="block-modal-body" style="padding:20px; line-height:1.5; font-size:14px;"></div>

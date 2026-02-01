@@ -89,49 +89,60 @@ async function loadStats() {
   }
 }
 
+
+function rowsToHtml(rows) {
+  return rows.map(([k, v]) => (
+    '<div style="display:flex; gap:12px; margin:6px 0;">' +
+    '<div style="width:130px; color:rgba(255,255,255,0.7)">' + k + '</div>' +
+    '<div style="font-family:monospace; word-break:break-all;">' + v + '</div>' +
+    '</div>'
+  )).join('');
+}
+
+function renderBlockDetails(height, raw) {
+  const b = (raw && raw.block) ? raw.block : raw || {};
+  const header = getHeader(b);
+  const heightVal = (height !== undefined && height !== null) ? height : (b.height ?? 0);
+  const hash = header.hash ?? b.hash ?? b.block_hash ?? 'N/A';
+  const time = header.time ?? header.timestamp ?? b.time ?? b.timestamp ?? 0;
+  const txs = Array.isArray(b.tx_hex) ? b.tx_hex.length : (b.transactions ?? b.tx_count ?? 0);
+  const rewardSats = b.reward ?? b.subsidy ?? b.block_reward ?? 0;
+  const rewardIrm = rewardSats ? (rewardSats / 1e8).toFixed(2) : blockRewardIrm(heightVal).toFixed(2);
+  const prev = header.prev_hash ?? b.prev_hash ?? b.previous_block ?? 'N/A';
+  const mr = header.merkle_root ?? b.merkle_root ?? 'N/A';
+  const nonce = header.nonce ?? b.nonce ?? 'N/A';
+  const bits = header.bits ?? b.bits ?? 'N/A';
+  const miner = b.miner_address ?? b.miner ?? 'N/A';
+
+  const rows = [
+    ['Height', String(heightVal)],
+    ['Hash', hash],
+    ['Prev Hash', prev],
+    ['Merkle Root', mr],
+    ['Time', formatTime(time)],
+    ['Reward', rewardIrm + ' IRM'],
+    ['Transactions', String(txs)],
+    ['Bits', String(bits)],
+    ['Nonce', String(nonce)],
+    ['Miner', miner]
+  ];
+
+  if (window.__showBlockModal) {
+    window.__showBlockModal(rowsToHtml(rows));
+  } else {
+    alert(`Block ${heightVal}
+Hash: ${hash}
+Reward: ${rewardIrm} IRM`);
+  }
+}
+
+
 // View block details
 async function viewBlock(height) {
   try {
     console.log('Loading block details for height:', height);
     const raw = await fetchJson(`/block/${height}`);
-    const b = (raw && raw.block) ? raw.block : raw || {};
-    const header = getHeader(b);
-    const hash = header.hash ?? b.hash ?? b.block_hash ?? 'N/A';
-    const time = header.time ?? header.timestamp ?? b.time ?? b.timestamp ?? 0;
-    const txs = Array.isArray(b.tx_hex) ? b.tx_hex.length : (b.transactions ?? b.tx_count ?? 0);
-    const rewardSats = b.reward ?? b.subsidy ?? b.block_reward ?? 0;
-    const rewardIrm = rewardSats ? (rewardSats / 1e8).toFixed(2) : blockRewardIrm(height).toFixed(2);
-    const prev = header.prev_hash ?? b.prev_hash ?? b.previous_block ?? 'N/A';
-    const mr = header.merkle_root ?? b.merkle_root ?? 'N/A';
-    const nonce = header.nonce ?? b.nonce ?? 'N/A';
-    const bits = header.bits ?? b.bits ?? 'N/A';
-        const miner = b.miner_address ?? b.miner ?? 'N/A';
-
-    const rows = [
-      ['Height', String(height)],
-      ['Hash', hash],
-      ['Prev Hash', prev],
-      ['Merkle Root', mr],
-      ['Time', formatTime(time)],
-      ['Reward', rewardIrm + ' IRM'],
-      ['Transactions', String(txs)],
-      ['Bits', String(bits)],
-      ['Nonce', String(nonce)],
-      ['Miner', miner]
-    ].map(([k,v])=>(
-      '<div style="display:flex; gap:12px; margin:6px 0;">' +
-      '<div style="width:130px; color:rgba(255,255,255,0.7)">' + k + '</div>' +
-      '<div style="font-family:monospace; word-break:break-all;">' + v + '</div>' +
-      '</div>'
-    )).join('');
-
-    if (window.__showBlockModal) {
-      window.__showBlockModal(rows);
-    } else {
-      alert(`Block ${height}
-Hash: ${hash}
-Reward: ${rewardIrm} IRM`);
-    }
+    renderBlockDetails(height, raw);
   } catch (error) {
     console.error('Error loading block:', error);
     if (window.__showBlockError) {
@@ -142,12 +153,127 @@ Reward: ${rewardIrm} IRM`);
   }
 }
 
+async function viewBlockByHash(hash) {
+  try {
+    console.log('Loading block details for hash:', hash);
+    const raw = await fetchJson(`/blockhash/${hash}`);
+    const heightVal = raw && raw.height ? raw.height : undefined;
+    renderBlockDetails(heightVal, raw);
+  } catch (error) {
+    console.error('Error loading block by hash:', error);
+    if (window.__showBlockError) {
+      window.__showBlockError(error.message || 'Error loading block details');
+    } else {
+      alert('Error loading block details: ' + (error.message||'Unknown error'));
+    }
+  }
+}
+
+async function viewTx(txid) {
+  try {
+    console.log('Loading tx details for txid:', txid);
+    const tx = await fetchJson(`/tx/${txid}`);
+    const outputIrm = tx.output_value ? (tx.output_value / 1e8).toFixed(8) : '0.00000000';
+    const rows = [
+      ['TxID', tx.txid ?? txid],
+      ['Block Height', String(tx.height ?? 'N/A')],
+      ['Block Hash', tx.block_hash ?? 'N/A'],
+      ['Index', String(tx.index ?? 'N/A')],
+      ['Inputs', String(tx.inputs ?? 'N/A')],
+      ['Outputs', String(tx.outputs ?? 'N/A')],
+      ['Output Value', outputIrm + ' IRM'],
+      ['Coinbase', String(tx.is_coinbase ?? false)],
+      ['Raw Tx', tx.tx_hex ?? 'N/A']
+    ];
+    if (window.__showBlockModal) {
+      window.__showBlockModal(rowsToHtml(rows));
+    } else {
+      alert(`Tx ${txid}
+Height: ${tx.height ?? 'N/A'}`);
+    }
+  } catch (error) {
+    console.error('Error loading tx:', error);
+    if (window.__showBlockError) {
+      window.__showBlockError(error.message || 'Error loading transaction');
+    } else {
+      alert('Error loading transaction: ' + (error.message||'Unknown error'));
+    }
+  }
+}
+
+async function viewAddress(address) {
+  try {
+    console.log('Loading address details:', address);
+    const payload = await fetchJson(`/address/${address}`);
+    const balance = payload.balance || {};
+    const utxos = (payload.utxos && payload.utxos.utxos) ? payload.utxos.utxos : [];
+    const history = (payload.history && payload.history.txs) ? payload.history.txs : [];
+    const balIrm = balance.balance ? (balance.balance / 1e8).toFixed(8) : '0.00000000';
+    const minedIrm = balance.mined_balance ? (balance.mined_balance / 1e8).toFixed(8) : '0.00000000';
+
+    const rows = [
+      ['Address', address],
+      ['Balance', balIrm + ' IRM'],
+      ['Mined Balance', minedIrm + ' IRM'],
+      ['UTXOs', String(balance.utxo_count ?? utxos.length)],
+      ['Mined Blocks', String(balance.mined_blocks ?? '0')],
+      ['Height', String(balance.height ?? 'N/A')]
+    ];
+
+    let extra = '';
+    if (history.length > 0) {
+      const recent = history.slice(0, 6).map((tx) => {
+        const netIrm = (tx.net ?? 0) / 1e8;
+        const dir = netIrm >= 0 ? '+' : '';
+        return '<div style="font-family:monospace; font-size:12px; margin:6px 0;">' +
+          (tx.txid ?? 'N/A') + ' (' + dir + netIrm.toFixed(8) + ' IRM)</div>';
+      }).join('');
+      extra = '<div style="margin-top:12px; color:rgba(255,255,255,0.7);">Recent Activity</div>' + recent;
+    }
+
+    if (window.__showBlockModal) {
+      window.__showBlockModal(rowsToHtml(rows) + extra);
+    } else {
+      alert(`Address ${address}
+Balance: ${balIrm} IRM`);
+    }
+  } catch (error) {
+    console.error('Error loading address:', error);
+    if (window.__showBlockError) {
+      window.__showBlockError(error.message || 'Error loading address');
+    } else {
+      alert('Error loading address: ' + (error.message||'Unknown error'));
+    }
+  }
+}
+
 // Search block
+
 function searchBlock() {
-  const query = document.getElementById('search-input').value.trim();
+  const input = document.getElementById('block-search-input');
+  const query = input ? input.value.trim() : '';
   if (!query) return;
-  if (/^\d+$/.test(query)) viewBlock(parseInt(query));
-  else alert('Hash search coming soon!');
+  if (/^\d+$/.test(query)) return viewBlock(parseInt(query, 10));
+  if (/^[0-9a-fA-F]{64}$/.test(query)) return viewBlockByHash(query.toLowerCase());
+  alert('Enter a block height or 64-character hash.');
+}
+
+function searchTx() {
+  const input = document.getElementById('tx-search-input');
+  const query = input ? input.value.trim() : '';
+  if (!query) return;
+  if (!/^[0-9a-fA-F]{64}$/.test(query)) {
+    alert('Enter a 64-character transaction ID.');
+    return;
+  }
+  viewTx(query.toLowerCase());
+}
+
+function searchAddress() {
+  const input = document.getElementById('address-search-input');
+  const query = input ? input.value.trim() : '';
+  if (!query) return;
+  viewAddress(query);
 }
 
 // Load blocks list - fetch all available blocks

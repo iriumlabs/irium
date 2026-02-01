@@ -624,7 +624,7 @@ Irium represents a new generation of blockchain technology that addresses fundam
 
 ---
 
-**Irium Blockchain © 2025**
+**Irium Blockchain © 2026**
 **MIT License - Open Source**
 
 *Built for true decentralization*

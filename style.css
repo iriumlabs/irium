@@ -1106,3 +1106,36 @@ body {
 .wallet-card-wide {
     grid-column: 1 / -1;
 }
+
+.wallet-download {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+    background: rgba(10, 12, 28, 0.7);
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 16px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1.6rem;
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.3);
+}
+
+.wallet-download .btn {
+    padding: 0.8rem 1.6rem;
+    font-size: 1rem;
+}
+
+.wallet-link {
+    color: #93c5fd;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.wallet-link:hover {
+    color: #ffffff;
+}
+
+.wallet-download .wallet-note {
+    flex-basis: 100%;
+    margin-top: 0;
+}

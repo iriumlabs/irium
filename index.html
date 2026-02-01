@@ -19,6 +19,35 @@
 
 <link rel="stylesheet" href="style.css?v=3">
 <link rel="icon" type="image/svg+xml" href="logo.svg">
+
+<style>
+  .feature-card { cursor: pointer; }
+  .feature-card:focus { outline: 2px solid rgba(91,177,255,0.6); outline-offset: 4px; }
+  .feature-modal {
+    position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.7); z-index: 9999; padding: 20px;
+  }
+  .feature-modal.is-open { display: flex; }
+  .feature-modal-card {
+    width: min(720px, 92vw); background: rgba(12,16,26,0.95); color: #fff;
+    border-radius: 14px; border: 1px solid rgba(255,255,255,0.12);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.45);
+  }
+  .feature-modal-head {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.08);
+  }
+  .feature-modal-title {
+    display: flex; align-items: center; gap: 10px; font-size: 18px; margin: 0;
+  }
+  .feature-modal-icon { font-size: 22px; }
+  .feature-modal-body { padding: 18px 20px; color: rgba(230,237,243,0.95); }
+  .feature-modal-body ul { margin: 0 0 0 18px; }
+  .feature-close {
+    background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer;
+  }
+</style>
+
 </head>
 <body>
 
@@ -104,42 +133,42 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
 <h2 class="section-title">8 CORE INNOVATIONS</h2>
 <p class="section-subtitle">Revolutionary features built into the protocol</p>
 <div class="features-grid">
-<div class="feature-card">
+<div class="feature-card" role="button" tabindex="0" data-title="Zero-DNS Bootstrap" data-icon="🌐" data-detail="Seedlist is signed and verified against allowed signers.|Nodes bootstrap from signed IPs and anchors, not DNS.|Runtime peers are learned and cached for resiliency.">
 <div class="feature-icon">🌐</div>
 <h3>Zero-DNS Bootstrap</h3>
 <p>No DNS dependencies. Network bootstraps from signed IP lists and checkpoints. Works anywhere, forever.</p>
 </div>
-<div class="feature-card">
+<div class="feature-card" role="button" tabindex="0" data-title="Self-Healing Peers" data-icon="🔄" data-detail="Peers are scored by uptime and behavior.|Only long-lived, reliable nodes are promoted to runtime seeds.|Offline peers decay and are removed automatically.">
 <div class="feature-icon">🔄</div>
 <h3>Self-Healing Peers</h3>
 <p>Network automatically discovers and promotes reliable nodes. Uptime proofs ensure only quality peers survive.</p>
 </div>
-<div class="feature-card">
+<div class="feature-card" role="button" tabindex="0" data-title="Genesis Vesting (CLTV)" data-icon="🔒" data-detail="Founder allocation is timelocked at genesis (CLTV).|Vesting is enforced by consensus, not policy.|Unlocks happen on-chain and are auditable.">
 <div class="feature-icon">🔒</div>
 <h3>Genesis Vesting (CLTV)</h3>
 <p>3.5M IRM locked with on-chain timelocks. Transparent, consensus-enforced, irreversible. No trust needed.</p>
 </div>
-<div class="feature-card">
+<div class="feature-card" role="button" tabindex="0" data-title="Relay Rewards" data-icon="⚡" data-detail="Relayers earn a share of transaction fees.|Incentivizes fast propagation without inflating supply.|Miners still receive the majority of fees.">
 <div class="feature-icon">⚡</div>
 <h3>Relay Rewards</h3>
 <p>Transaction relays earn 10% of fees. Incentivizes fast propagation without supply inflation.</p>
 </div>
-<div class="feature-card">
+<div class="feature-card" role="button" tabindex="0" data-title="Sybil-Resistant P2P" data-icon="🛡️" data-detail="Handshake requires PoW to connect.|Rate limits and reputation reduce spam and botnets.|Raises the cost of large-scale Sybil attacks.">
 <div class="feature-icon">🛡️</div>
 <h3>Sybil-Resistant P2P</h3>
 <p>Proof-of-work handshake prevents botnet attacks. Only legitimate nodes can connect.</p>
 </div>
-<div class="feature-card">
+<div class="feature-card" role="button" tabindex="0" data-title="Anchor Checkpoints" data-icon="⚓" data-detail="Signed anchors protect new nodes from eclipse or reorg traps.|Nodes verify anchors against trusted signers.|Adds a safety net while staying decentralized.">
 <div class="feature-icon">⚓</div>
 <h3>Anchor Checkpoints</h3>
 <p>Signed chain anchors protect against eclipse attacks. New nodes verify against trusted checkpoints.</p>
 </div>
-<div class="feature-card">
+<div class="feature-card" role="button" tabindex="0" data-title="Light Client Ready" data-icon="📱" data-detail="SPV proofs and header-only sync.|NiPoPoW support for logarithmic proofs.|Optimized for mobile and low-resource clients.">
 <div class="feature-icon">📱</div>
 <h3>Light Client Ready</h3>
 <p>SPV + NiPoPoW support from genesis. Mobile wallets with header-only sync and logarithmic proofs.</p>
 </div>
-<div class="feature-card">
+<div class="feature-card" role="button" tabindex="0" data-title="On-Chain Metadata" data-icon="📝" data-detail="Optional metadata embedding for timestamping.|Create proof-of-existence for documents.|Immutable audit trail on the chain.">
 <div class="feature-icon">📝</div>
 <h3>On-Chain Metadata</h3>
 <p>Timestamp any document on the blockchain. Immutable proof of existence for any data.</p>
@@ -229,5 +258,48 @@ Email
 </footer>
 
 <script src="script.js"></script>
+
+<script>
+  (function(){
+    const modal = document.getElementById('feature-modal');
+    const closeBtn = document.getElementById('feature-modal-close');
+    const icon = document.getElementById('feature-modal-icon');
+    const title = document.getElementById('feature-modal-text');
+    const body = document.getElementById('feature-modal-body');
+
+    function openModal(card){
+      const t = card.getAttribute('data-title') || '';
+      const i = card.getAttribute('data-icon') || '';
+      const detail = (card.getAttribute('data-detail') || '').split('|').map(s => s.trim()).filter(Boolean);
+      icon.textContent = i;
+      title.textContent = t;
+      body.innerHTML = detail.length ? '<ul>' + detail.map(d => '<li>' + d + '</li>').join('') + '</ul>' : '';
+      modal.classList.add('is-open');
+      modal.setAttribute('aria-hidden', 'false');
+    }
+
+    function closeModal(){
+      modal.classList.remove('is-open');
+      modal.setAttribute('aria-hidden', 'true');
+    }
+
+    document.querySelectorAll('.feature-card').forEach(card => {
+      card.addEventListener('click', () => openModal(card));
+      card.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          openModal(card);
+        }
+      });
+    });
+
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (modal) {
+      modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    }
+    window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+  })();
+</script>
+
 </body>
 </html>

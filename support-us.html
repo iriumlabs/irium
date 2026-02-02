@@ -44,7 +44,9 @@
             grid-template-columns: 1fr;
         }
     }
-    </style>
+      .glow-title { position: relative; display: inline-block; color: #fff; font-size: 2.4rem; letter-spacing: 0.02em; text-shadow: 0 0 18px rgba(99,102,241,0.55), 0 0 38px rgba(99,102,241,0.35); }
+  .glow-title::after { content: attr(data-text); position: absolute; left: 0; top: 0; width: 100%; color: transparent; text-shadow: 0 0 28px rgba(91,177,255,0.6), 0 0 60px rgba(91,177,255,0.45); opacity: 0.85; pointer-events: none; mix-blend-mode: screen; }
+</style>
 
 </head>
 <body>

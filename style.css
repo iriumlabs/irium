@@ -554,154 +554,54 @@ body {
 /* Support Section */
 .support-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 2.5rem;
-    margin-top: 2.5rem;
-    align-items: start;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 3rem;
+    margin-top: 3rem;
 }
 
 .support-card {
-    background: linear-gradient(180deg, rgba(12, 12, 24, 0.85), rgba(8, 8, 18, 0.6));
-    border: 1px solid rgba(99, 102, 241, 0.25);
-    border-radius: 14px;
-    padding: 2.8rem;
-    box-shadow: 0 30px 60px rgba(0, 0, 0, 0.35);
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 12px;
+    padding: 3rem;
 }
 
 .support-card h3 {
-    font-family: "Orbitron", sans-serif;
-    font-size: 1.6rem;
-    letter-spacing: 0.04em;
-    margin-bottom: 0.8rem;
-}
-
-.support-card p {
-    color: rgba(255, 255, 255, 0.78);
-}
-
-.support-eyebrow {
-    text-transform: uppercase;
-    letter-spacing: 0.28em;
-    font-size: 0.7rem;
-    color: rgba(255, 255, 255, 0.55);
-    margin-bottom: 0.6rem;
-}
-
-.support-lede {
-    margin-bottom: 1.6rem;
-    color: rgba(255, 255, 255, 0.7);
-}
-
-.support-subtitle {
-    color: var(--secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 0.85rem;
-    margin: 1.4rem 0 0.6rem;
-}
-
-.support-label {
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.6);
-    margin: 1.6rem 0 0.5rem;
+    font-family: 'Orbitron', sans-serif;
+    font-size: 2rem;
+    margin-bottom: 1.5rem;
 }
 
 .donation-address {
-    background: rgba(6, 8, 16, 0.7);
-    border: 1px solid rgba(99, 102, 241, 0.25);
-    border-radius: 10px;
-    padding: 1.2rem 1.4rem;
-    margin: 1.2rem 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.02);
-}
-
-.donation-meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 1rem;
-}
-
-.donation-asset {
-    font-weight: 700;
-    letter-spacing: 0.02em;
-}
-
-.donation-status {
-    font-size: 0.65rem;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    padding: 0.2rem 0.6rem;
-    border-radius: 999px;
-    border: 1px solid transparent;
-}
-
-.donation-status.is-live {
-    color: #10b981;
-    border-color: rgba(16, 185, 129, 0.5);
-    background: rgba(16, 185, 129, 0.12);
-}
-
-.donation-status.is-soon {
-    color: #94a3b8;
-    border-color: rgba(148, 163, 184, 0.35);
-    background: rgba(148, 163, 184, 0.1);
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin: 1.5rem 0;
 }
 
 .donation-address code {
-    font-family: "Courier New", monospace;
+    font-family: 'Courier New', monospace;
     color: var(--secondary);
     word-break: break-all;
-    display: block;
-    padding: 0.6rem 0.8rem;
-    border-radius: 6px;
-    background: rgba(0, 0, 0, 0.4);
-    font-size: 0.88rem;
-}
-
-.donation-note {
-    margin: 0;
-    font-size: 0.82rem;
-    color: rgba(255, 255, 255, 0.65);
 }
 
 .support-card ul {
     list-style: none;
     padding-left: 0;
-    margin: 0.5rem 0 0;
 }
 
 .support-card ul li {
-    padding: 0.4rem 0;
-    padding-left: 1.2rem;
+    padding: 0.5rem 0;
+    padding-left: 1.5rem;
     position: relative;
 }
 
 .support-card ul li::before {
-    content: ">";
+    content: '▸';
     position: absolute;
     left: 0;
-    color: rgba(255, 255, 255, 0.55);
-}
-
-.volunteer-list {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    gap: 0.35rem 1.2rem;
-}
-
-.support-callout {
-    margin-top: 2rem;
-    padding: 1rem 1.2rem;
-    background: rgba(99, 102, 241, 0.08);
-    border-radius: 8px;
-    border-left: 3px solid var(--primary);
-    color: rgba(255, 255, 255, 0.78);
+    color: var(--primary);
 }
 
 .contact-info {
@@ -720,6 +620,7 @@ body {
 .contact-info a:hover {
     text-decoration: underline;
 }
+
 /* Footer */
 .footer {
     background: rgba(5, 5, 15, 0.8);

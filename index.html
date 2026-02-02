@@ -218,6 +218,17 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
 </section>
 
 
+
+<div id="feature-modal" class="feature-modal" aria-hidden="true">
+  <div class="feature-modal-card" role="dialog" aria-modal="true" aria-labelledby="feature-modal-title">
+    <div class="feature-modal-head">
+      <h3 id="feature-modal-title" class="feature-modal-title"><span id="feature-modal-icon" class="feature-modal-icon"></span><span id="feature-modal-text"></span></h3>
+      <button class="feature-close" id="feature-modal-close" aria-label="Close">×</button>
+    </div>
+    <div id="feature-modal-body" class="feature-modal-body"></div>
+  </div>
+</div>
+
 <footer class="footer">
 <div class="container">
 <div class="footer-content">
@@ -266,6 +277,7 @@ Email
     const icon = document.getElementById('feature-modal-icon');
     const title = document.getElementById('feature-modal-text');
     const body = document.getElementById('feature-modal-body');
+    if (!modal || !body) { return; }
 
     function openModal(card){
       const t = card.getAttribute('data-title') || '';

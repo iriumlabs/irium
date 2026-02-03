@@ -12,7 +12,7 @@
 
 Irium is a purpose-built proof-of-work blockchain designed to maximize network independence and long-term survivability. The protocol eliminates reliance on DNS infrastructure, enforces transparent founder vesting via on-chain timelocks, incentivizes transaction relay quality without inflation, and prioritizes light client usability from genesis. This whitepaper outlines the core design principles, system architecture, monetary policy, and implementation status of the IRM asset and its supporting network.
 
-**Current Implementation:** Production mainnet is LIVE with all 8 core innovations operational.
+**Current Implementation:** Production mainnet is LIVE; core innovations are operational, with NiPoPoW proofs implemented.
 
 ---
 
@@ -35,7 +35,7 @@ Most established proof-of-work networks inherit architectural assumptions from B
 5. **Mobile-first architecture** with NiPoPoW-ready light clients from block 1
 6. **On-chain notarization** layer for off-chain metadata commitments
 
-**Status: All 6 goals achieved and operational.**
+**Status:** 6/6 implemented.
 
 ### 1.2 Technical Specifications
 
@@ -60,32 +60,34 @@ Most established proof-of-work networks inherit architectural assumptions from B
 
 Irium separates responsibilities into modular subsystems:
 
-### 2.1 Core Modules (irium-node-rs/src)
+### 2.1 Core Modules (src/)
 
 - **block.rs** - Block and BlockHeader structures
-- **chain.rs** - ChainState, ChainParams, consensus validation
-- **tx.rs** - Transaction, TxInput, TxOutput classes
-- **wallet.rs** - Key management, signing, WIF format
-- **pow.rs** - SHA-256d hashing, Target difficulty
-- **network.rs** - PeerDirectory, SeedlistManager
+- **chain.rs** - ChainState, consensus validation, chain state
+- **tx.rs** - Transaction, TxInput, TxOutput structures
+- **wallet.rs** - Address helpers, signing utilities
+- **pow.rs** - SHA-256d hashing, target difficulty
+- **network.rs** - Peer directory, seedlist management
 - **protocol.rs** - P2P binary message protocol
-- **p2p.rs** - P2P node with peer management
+- **p2p.rs** - P2P node with peer management and header-first sync
 - **mempool.rs** - Transaction pool with fee prioritization
-- **reputation.rs** - Peer reputation and uptime proofs
+- **reputation.rs** - Peer scoring and ban tracking
 - **sybil.rs** - Sybil-resistant handshake protocol
 - **relay.rs** - Relay reward calculation and tracking
 - **anchors.rs** - Checkpoint verification, eclipse protection
-- **spv.rs** - SPV client with NiPoPoW support
+- **spv.rs** - Header chain + merkle proof verification
 
-### 2.2 Rust Binaries
+### 2.2 Binaries
 
-- **iriumd** - Full node with P2P networking
+- **iriumd** - Full node with HTTP API and P2P networking
 - **irium-miner** - PoW miner with block broadcasting
-- **irium-wallet-api** - Wallet REST API server
-- **irium-explorer** - Blockchain explorer API
-- **irium-genesis** - Genesis block mining tool
+- **irium-wallet** - Wallet CLI (address creation, balance queries)
+- **irium-spv** - SPV proof verification tool
+- **irium-p2p** - P2P-only diagnostic node
 
 ---
+
+
 
 ## 3. Consensus Mechanics
 
@@ -115,7 +117,7 @@ valid_block = block_hash < target
 **Retarget Interval:** Every 2016 blocks (~14 days)
 
 **Algorithm:**
-```python
+```text
 expected_time = 2016 * 600  # 1,209,600 seconds
 actual_time = last_block_time - first_block_time
 new_difficulty = old_difficulty * (actual_time / expected_time)
@@ -133,7 +135,7 @@ Each block must satisfy:
 5. Coinbase reward ≤ subsidy + fees
 6. Block connects to valid chain tip
 
-**Implementation:** src/chain.rs (_validate_block_header)
+**Implementation:** src/chain.rs (block header validation)
 
 ---
 
@@ -193,9 +195,9 @@ Ultra-low fees enable micropayments and frequent transactions.
 **Irium Solution:**
 - Signed `seedlist.txt` with raw IP multiaddrs (IPv4 + IPv6)
 - Signed `anchors.json` with checkpoint block headers
-- Bootstrap script: `irium-zero.sh` (no DNS queries)
+- Bootstrap script: `scripts/irium-zero.sh` (no DNS queries)
 - Distributed via GitHub, IPFS, torrents
-- Signature verification with secp256k1
+- Signature verification via SSH signatures (sshsig), validated with `ssh-keygen -Y verify` and `bootstrap/trust/allowed_signers`
 
 **Status:** ✅ Implemented and operational
 
@@ -215,7 +217,13 @@ Ultra-low fees enable micropayments and frequent transactions.
 - Network 'remembers' reliable peers
 - `seedlist.runtime` updated automatically
 
-**Status:** ✅ Implemented (src/reputation.rs, src/network.rs)
+**Status:** ✅ Implemented (src/reputation.rs, src/network.rs, src/p2p.rs)
+
+**Implementation Notes:**
+- P2P message types: `UptimeChallenge`, `UptimeProof`
+- Capability: `uptime_hmac_v1`
+- HMAC key derived from node ID pair; timestamp window defaults to 5 minutes
+
 
 **Reputation Factors:**
 - Successful connections: +2 points each
@@ -325,7 +333,7 @@ Ultra-low fees enable micropayments and frequent transactions.
 - Merkle proof verification
 - Superblock proofs for ultra-light clients
 
-**Status:** ✅ Implemented (src/spv.rs)
+**Status:** ✅ Implemented (header chain, merkle proofs, and NiPoPoW proofs)
 
 **Light Client Benefits:**
 - Download only headers (~80 bytes per block)
@@ -343,7 +351,11 @@ Ultra-low fees enable micropayments and frequent transactions.
 - Notarization layer
 - Immutable timestamp proofs
 
-**Status:** ✅ Structure ready, integrated
+**Status:** ✅ Implemented (coinbase OP_RETURN via IRIUM_COINBASE_METADATA / IRIUM_NOTARY_HASH)
+
+**Runtime Controls:**
+- `IRIUM_COINBASE_METADATA`: arbitrary string (hashed if not 32-byte hex)
+- `IRIUM_NOTARY_HASH`: 32-byte hex hash
 
 **Use Cases:**
 - Document timestamping
@@ -515,8 +527,9 @@ Irium fully supports nodes behind NAT/firewalls (same as Bitcoin):
 - **Network Topology:** Mesh network through public nodes
 - **Limitation:** NAT-to-NAT direct connections not possible (network limitation)
 
-The network requires at least one public bootstrap node. Current bootstrap:
-- VPS: 207.244.247.86:38291 (mainnet seed node)
+The network requires at least one public bootstrap node. Bootstrap seeds are listed in:
+- `bootstrap/seedlist.txt` (signed baseline)
+- `bootstrap/seedlist.extra` (unsigned additions)
 
 **Runtime Seedlist:**
 
@@ -541,7 +554,7 @@ Nodes maintain a dynamic peer list (`bootstrap/seedlist.runtime`):
 - ✅ Sybil-resistant handshake
 - ✅ Relay reward system
 - ✅ Anchor verification
-- ✅ SPV with NiPoPoW
+- ✅ SPV + NiPoPoW proofs
 
 ### 9.2 Network Launch
 
@@ -553,9 +566,9 @@ Nodes maintain a dynamic peer list (`bootstrap/seedlist.runtime`):
 - Ready for miners and users
 
 **Public Services:**
-- [Explorer API](https://api.iriumlabs.org/api) - Blockchain statistics and block data
-- [Wallet API](https://api.iriumlabs.org/wallet) - Wallet management and documentation
-- P2P Network: 207.244.247.86:38291
+- Explorer API: self-hosted via `/api` (reverse proxy optional)
+- Wallet API: self-hosted via `/wallet` (reverse proxy optional)
+- P2P Network: see `bootstrap/seedlist.txt` for bootstrap seeds
 
 ---
 
@@ -613,18 +626,19 @@ Irium represents a new generation of blockchain technology that addresses fundam
 ## Appendix A: Genesis Block
 
 **Hash:** 0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd10a3
-**Nonce:** 1,842,179,559
+**Nonce:** 1,961,837,199
 **Timestamp:** 1767583930 (January 5, 2026)
 **Merkle Root:** cd78279c389b6f2f0a4edc567f3ba67b27daed60ab014342bb4a5b56c2ebb4db
 **Difficulty:** 0x1d00ffff (mainnet)
 
 **Mining Stats:**
-- Mining stats are hardware-dependent
-- Genesis mined at Bitcoin-standard difficulty (0x1d00ffff)
+- Total hashes: 5,405,910,517
+- Mining time: 7 hours 4 minutes
+- Hashrate: 212,670 H/s average
 
 ---
 
-**Irium Blockchain © 2026**
+**Irium Blockchain © 2025**
 **MIT License - Open Source**
 
 *Built for true decentralization*
@@ -642,7 +656,7 @@ The genesis block was mined with proper Bitcoin-standard difficulty calculation:
 
 ### Technical Implementation
 
-```python
+```text
 # Standard Bitcoin compact target calculation
 def to_target(bits: int) -> int:
     exponent = bits >> 24

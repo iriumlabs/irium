@@ -7,106 +7,237 @@
 <link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=3">
 <link rel="icon" type="image/svg+xml" href="https://www.iriumlabs.org/logo.svg">
 
-<style>
-  /* Mining metrics cards (explorer page only) */
-  .hero-stats { gap: 14px; }
-  .hero-stats .stat {
-    background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18));
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 14px;
-    padding: 14px 16px;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 24px rgba(0,0,0,0.28);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-  }
-  .hero-stats .stat-value { letter-spacing: 0.01em; }
-  .hero-stats .stat-label { letter-spacing: 0.18em; font-size: 11px; }
-  @media (max-width: 900px) {
-    .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  }
-</style>
+
+
+
 
 <style>
-  /* Explorer page layout */
+  /* Explorer v2 */
   :root {
-    --panel-bg: rgba(0,0,0,0.32);
-    --panel-border: rgba(255,255,255,0.12);
-    --accent: #0066cc;
-    --accent2: rgba(91,177,255,0.85);
+    --x-panel-bg: rgba(0,0,0,0.34);
+    --x-panel-border: rgba(255,255,255,0.12);
+    --x-glow: rgba(91,177,255,0.22);
+    --x-accent: #0066cc;
+    --x-accent2: rgba(91,177,255,0.9);
+    --x-text: rgba(255,255,255,0.92);
+    --x-muted: rgba(230,237,243,0.86);
   }
-  .muted { color: rgba(230,237,243,0.86); }
-  .explorer-head { margin-bottom: 18px; }
-  .explorer-grid { display: grid; grid-template-columns: 420px 1fr; gap: 18px; align-items: start; }
-  @media (max-width: 980px) { .explorer-grid { grid-template-columns: 1fr; } }
 
-  .explorer-panel {
-    background: var(--panel-bg);
-    border: 1px solid var(--panel-border);
-    border-radius: 14px;
+  .x-muted { color: var(--x-muted); }
+
+  .x-explorer-head { margin-bottom: 18px; }
+  .x-explorer-sub { max-width: 860px; line-height: 1.6; }
+
+  .x-grid {
+    display: grid;
+    grid-template-columns: 440px 1fr;
+    gap: 18px;
+    align-items: start;
+  }
+  @media (max-width: 1040px) { .x-grid { grid-template-columns: 1fr; } }
+
+  .x-panel {
+    background: var(--x-panel-bg);
+    border: 1px solid var(--x-panel-border);
+    border-radius: 16px;
     padding: 18px;
-    box-shadow: 0 10px 28px rgba(0,0,0,0.35);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
+    box-shadow: 0 14px 34px rgba(0,0,0,0.38);
+    backdrop-filter: blur(7px);
+    -webkit-backdrop-filter: blur(7px);
+    position: relative;
+    overflow: hidden;
+  }
+  .x-panel::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    background: radial-gradient(600px 180px at 20% 0%, rgba(91,177,255,0.14), transparent 55%),
+                radial-gradient(520px 220px at 90% 15%, rgba(0,102,204,0.10), transparent 60%);
+    pointer-events: none;
+    opacity: 0.95;
+  }
+  .x-panel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(180deg, rgba(255,255,255,0.04), transparent 22%, rgba(255,255,255,0.02));
+    pointer-events: none;
   }
 
-  .panel-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-bottom: 12px; }
-  .panel-title { font-weight: 700; letter-spacing: 0.08em; font-size: 12px; color: rgba(255,255,255,0.9); text-transform: uppercase; }
-  .panel-meta { color: rgba(255,255,255,0.65); font-size: 12px; }
+  .x-panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 14px;
+    position: relative;
+    z-index: 1;
+  }
+  .x-title {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 800;
+    letter-spacing: 0.12em;
+    font-size: 12px;
+    color: rgba(255,255,255,0.9);
+    text-transform: uppercase;
+  }
+  .x-meta {
+    color: rgba(255,255,255,0.65);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
 
-  .explorer-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
-  @media (min-width: 980px) { .explorer-cards { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+  .x-tech {
+    width: 18px;
+    height: 18px;
+    color: var(--x-accent2);
+    filter: drop-shadow(0 0 14px rgba(91,177,255,0.35));
+    animation: xFloat 4.6s ease-in-out infinite;
+  }
+  @keyframes xFloat {
+    0%,100% { transform: translateY(0); opacity: 0.95; }
+    50% { transform: translateY(-2px); opacity: 1; }
+  }
 
-  .explorer-cards .stat {
-    background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18));
-    border: 1px solid rgba(255,255,255,0.14);
+  .x-stats {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    position: relative;
+    z-index: 1;
+  }
+  @media (min-width: 1040px) { .x-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+
+  .x-card {
     border-radius: 14px;
     padding: 14px 14px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: linear-gradient(180deg, rgba(255,255,255,0.07), rgba(0,0,0,0.18));
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 20px rgba(0,0,0,0.22);
+    transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    position: relative;
+    overflow: hidden;
   }
-  .explorer-cards .stat-value { font-size: 18px; font-weight: 800; letter-spacing: 0.01em; }
-  .explorer-cards .stat-label { letter-spacing: 0.18em; font-size: 11px; }
+  .x-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(91,177,255,0.30);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 18px 34px rgba(0,0,0,0.35);
+  }
+  .x-card::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(520px 140px at 20% 0%, rgba(91,177,255,0.10), transparent 60%);
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.22s ease;
+  }
+  .x-card:hover::after { opacity: 1; }
 
-  .explorer-search { display: grid; gap: 10px; }
-  .search-row { display: grid; grid-template-columns: 92px 1fr 110px; gap: 10px; align-items: center; }
-  @media (max-width: 540px) { .search-row { grid-template-columns: 1fr; } }
-  .search-label { color: rgba(255,255,255,0.75); font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; }
-  .search-input {
+  .x-card-top {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  .x-icon {
+    width: 18px;
+    height: 18px;
+    color: rgba(255,255,255,0.9);
+    opacity: 0.92;
+  }
+  .x-label {
+    letter-spacing: 0.18em;
+    font-size: 11px;
+    color: rgba(255,255,255,0.72);
+    text-transform: uppercase;
+  }
+  .x-value {
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: 0.01em;
+    color: var(--x-text);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.2;
+    overflow-wrap: anywhere;
+  }
+
+  .x-search {
+    display: grid;
+    gap: 10px;
+    margin-top: 14px;
+    position: relative;
+    z-index: 1;
+  }
+  .x-row {
+    display: grid;
+    grid-template-columns: 96px 1fr 120px;
+    gap: 10px;
+    align-items: center;
+  }
+  @media (max-width: 560px) { .x-row { grid-template-columns: 1fr; } }
+  .x-row label {
+    color: rgba(255,255,255,0.75);
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+  .x-input {
     padding: 12px;
     background: rgba(255,255,255,0.08);
     border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 10px;
+    border-radius: 12px;
     color: #fff;
     font-size: 15px;
     outline: none;
   }
-  .search-input:focus { border-color: rgba(91,177,255,0.55); box-shadow: 0 0 0 4px rgba(0,102,204,0.18); }
-  .search-btn {
+  .x-input:focus { border-color: rgba(91,177,255,0.55); box-shadow: 0 0 0 4px rgba(0,102,204,0.18); }
+  .x-btn {
     padding: 12px;
-    background: linear-gradient(180deg, rgba(0,102,204,1), rgba(0,102,204,0.75));
+    background: linear-gradient(180deg, rgba(0,102,204,1), rgba(0,102,204,0.76));
     color: white;
     border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 10px;
+    border-radius: 12px;
     font-size: 14px;
     cursor: pointer;
-    font-weight: 700;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    transition: transform 0.16s ease, filter 0.16s ease;
   }
-  .search-btn:hover { filter: brightness(1.05); }
+  .x-btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
 
-  .blocks-list { display: grid; gap: 10px; }
-  .block-card {
-    background: rgba(0,0,0,0.24);
+  .x-list { display: grid; gap: 10px; position: relative; z-index: 1; }
+  .x-block {
+    background: rgba(0,0,0,0.22);
     border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 12px;
+    border-radius: 14px;
     padding: 14px;
     cursor: pointer;
-    transition: transform 0.18s ease, border-color 0.18s ease;
+    transition: transform 0.16s ease, border-color 0.16s ease;
+    animation: xRise 0.38s ease both;
   }
-  .block-card:hover { transform: translateY(-2px); border-color: rgba(91,177,255,0.35); }
-  .block-top { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-  .block-h { font-weight: 800; color: var(--accent2); }
-  .block-time { color: rgba(255,255,255,0.65); font-size: 12px; }
-  .block-hash { font-family: monospace; font-size: 12px; color: rgba(255,255,255,0.85); word-break: break-all; }
-  .block-meta { display: flex; flex-wrap: wrap; gap: 16px; color: rgba(255,255,255,0.7); font-size: 12px; margin-top: 10px; }
+  .x-block:hover { transform: translateY(-2px); border-color: rgba(91,177,255,0.34); }
+  @keyframes xRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+
+  .x-block-top { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+  .x-block-h { font-weight: 900; color: var(--x-accent2); }
+  .x-block-time { color: rgba(255,255,255,0.65); font-size: 12px; }
+  .x-block-hash { font-family: monospace; font-size: 12px; color: rgba(255,255,255,0.86); word-break: break-all; }
+  .x-block-meta { display: flex; flex-wrap: wrap; gap: 14px; color: rgba(255,255,255,0.72); font-size: 12px; margin-top: 10px; }
+
+  /* Ambient scanline for alive feel */
+  .x-scan {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    opacity: 0.28;
+    background: linear-gradient(180deg, transparent 0%, rgba(91,177,255,0.16) 48%, transparent 100%);
+    transform: translateY(-30%);
+    animation: xScan 5.5s linear infinite;
+  }
+  @keyframes xScan { 0% { transform: translateY(-40%); } 100% { transform: translateY(140%); } }
 </style>
 </head>
 <body>
@@ -145,80 +276,112 @@
 </nav>
 
 <!-- Explorer Content -->
-<section class="hero" style="min-height: auto; padding: 110px 0 60px;">
+
+<section class="hero" style="min-height: auto; padding: 112px 0 64px;">
 <div class="container">
-  <div class="explorer-head">
+  <div class="x-explorer-head">
     <h1 class="glitch" data-text="BLOCK EXPLORER" style="font-size: 3rem; margin-bottom: 10px;">BLOCK EXPLORER</h1>
-    <div class="muted" style="max-width: 820px; line-height: 1.6;">Search blocks, transactions, and addresses. Live network stats update every 30 seconds.</div>
+    <div class="x-muted x-explorer-sub">Track blocks, transactions, and addresses. Live network metrics refresh automatically.</div>
   </div>
 
-  <div class="explorer-grid">
-    <div class="explorer-panel">
-      <div class="panel-head">
-        <div class="panel-title">Network</div>
-        <div class="panel-meta" id="stats-updated">Loading...</div>
+  <div class="x-grid">
+    <div class="x-panel">
+      <div class="x-scan"></div>
+      <div class="x-panel-head">
+        <div class="x-title">
+          <svg class="x-tech" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 2h10v2h2v4h-2V6H7v2H5V4h2V2zm10 20H7v-2H5v-4h2v2h10v-2h2v4h-2v2zM9 8h6v8H9V8zm2 2v4h2v-4h-2z"/></svg>
+          Network
+        </div>
+        <div class="x-meta" id="stats-updated">Loading...</div>
       </div>
 
-      <div class="explorer-cards">
-        <div class="stat">
-          <span class="stat-value" id="current-height">Loading...</span>
-          <span class="stat-label">HEIGHT</span>
+      <div class="x-stats">
+        <div class="x-card">
+          <div class="x-card-top">
+            <svg class="x-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16v16H4V4zm2 2v12h12V6H6zm2 2h8v2H8V8zm0 4h8v2H8v-2z"/></svg>
+            <div class="x-label">Height</div>
+          </div>
+          <div class="x-value" id="current-height">Loading...</div>
         </div>
-        <div class="stat">
-          <span class="stat-value" id="total-blocks">Loading...</span>
-          <span class="stat-label">TOTAL BLOCKS</span>
+
+        <div class="x-card">
+          <div class="x-card-top">
+            <svg class="x-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M4 7h16v3H4V7zm0 5h16v3H4v-3zm0 5h16v2H4v-2z"/></svg>
+            <div class="x-label">Total Blocks</div>
+          </div>
+          <div class="x-value" id="total-blocks">Loading...</div>
         </div>
-        <div class="stat">
-          <span class="stat-value" id="total-supply">Loading...</span>
-          <span class="stat-label">TOTAL SUPPLY</span>
+
+        <div class="x-card">
+          <div class="x-card-top">
+            <svg class="x-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 100 20 10 10 0 000-20zm1 5v2.1c1.7.4 3 1.9 3 3.8 0 2.2-1.8 4-4 4H9v-2h3c1.1 0 2-.9 2-2 0-.9-.6-1.7-1.5-1.9L10.5 11A4 4 0 0113 7zm-2 10h1c.6 0 1-.4 1-1v-1.2c-.3.1-.7.2-1 .2h-1v2z"/></svg>
+            <div class="x-label">Supply</div>
+          </div>
+          <div class="x-value" id="total-supply">Loading...</div>
         </div>
-        <div class="stat">
-          <span class="stat-value" id="net-hashrate">Loading...</span>
-          <span class="stat-label">NET HASHRATE</span>
+
+        <div class="x-card">
+          <div class="x-card-top">
+            <svg class="x-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M4 12a8 8 0 1116 0c0 4.4-3.6 8-8 8S4 16.4 4 12zm8-6a6 6 0 100 12 6 6 0 000-12zm-1 2h2v5h-2V8zm0 6h2v2h-2v-2z"/></svg>
+            <div class="x-label">Net Hashrate</div>
+          </div>
+          <div class="x-value" id="net-hashrate">Loading...</div>
         </div>
-        <div class="stat">
-          <span class="stat-value" id="net-difficulty">Loading...</span>
-          <span class="stat-label">DIFFICULTY</span>
+
+        <div class="x-card">
+          <div class="x-card-top">
+            <svg class="x-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 7-4 13L8 9l4-7zm0 5.2L10.2 9h3.6L12 7.2z"/></svg>
+            <div class="x-label">Difficulty</div>
+          </div>
+          <div class="x-value" id="net-difficulty">Loading...</div>
         </div>
-        <div class="stat">
-          <span class="stat-value" id="diff-growth">Loading...</span>
-          <span class="stat-label">DIFF Δ (1H / 24H)</span>
+
+        <div class="x-card">
+          <div class="x-card-top">
+            <svg class="x-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17h4v-7H3v7zm7 0h4V7h-4v10zm7 0h4v-4h-4v4z"/></svg>
+            <div class="x-label">Diff Δ (1H / 24H)</div>
+          </div>
+          <div class="x-value" id="diff-growth">Loading...</div>
         </div>
       </div>
 
-      <div class="explorer-search">
-        <div class="search-row">
-          <label class="search-label" for="block-search-input">Block</label>
-          <input type="text" id="block-search-input" placeholder="Block height or hash" class="search-input">
-          <button onclick="searchBlock()" class="search-btn">Search</button>
+      <div class="x-search">
+        <div class="x-row">
+          <label for="block-search-input">Block</label>
+          <input type="text" id="block-search-input" placeholder="Height or hash" class="x-input">
+          <button onclick="searchBlock()" class="x-btn">Search</button>
         </div>
-
-        <div class="search-row">
-          <label class="search-label" for="tx-search-input">Transaction</label>
-          <input type="text" id="tx-search-input" placeholder="Transaction ID (txid)" class="search-input">
-          <button onclick="searchTx()" class="search-btn">Search</button>
+        <div class="x-row">
+          <label for="tx-search-input">Tx</label>
+          <input type="text" id="tx-search-input" placeholder="Transaction ID (txid)" class="x-input">
+          <button onclick="searchTx()" class="x-btn">Search</button>
         </div>
-
-        <div class="search-row">
-          <label class="search-label" for="address-search-input">Address</label>
-          <input type="text" id="address-search-input" placeholder="Address" class="search-input">
-          <button onclick="searchAddress()" class="search-btn">Search</button>
+        <div class="x-row">
+          <label for="address-search-input">Address</label>
+          <input type="text" id="address-search-input" placeholder="Address" class="x-input">
+          <button onclick="searchAddress()" class="x-btn">Search</button>
         </div>
       </div>
     </div>
 
-    <div class="explorer-panel">
-      <div class="panel-head">
-        <div class="panel-title">Latest Blocks</div>
-        <div class="panel-meta" id="blocks-updated">Loading...</div>
+    <div class="x-panel">
+      <div class="x-scan"></div>
+      <div class="x-panel-head">
+        <div class="x-title">
+          <svg class="x-tech" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v14H3V5zm2 2v10h14V7H5zm2 2h6v2H7V9zm0 4h10v2H7v-2z"/></svg>
+          Blocks
+        </div>
+        <div class="x-meta" id="blocks-updated">Loading...</div>
       </div>
-      <div id="blocks-list" class="blocks-list">
-        <div class="muted">Loading blocks...</div>
+
+      <div id="blocks-list" class="x-list">
+        <div class="x-muted">Loading blocks...</div>
       </div>
     </div>
   </div>
 </div>
 </section>
+
 
 <footer class="footer">
 <div class="container">
@@ -259,7 +422,7 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=23"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=25"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
 <!-- Block Details Modal -->
 <div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">

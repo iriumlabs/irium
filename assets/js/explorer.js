@@ -141,7 +141,7 @@ async function loadMiningMetrics() {
     const g1 = (m.difficulty_change_1h_pct != null) ? fmtPct(m.difficulty_change_1h_pct) : 'N/A';
     const g24 = (m.difficulty_change_24h_pct != null) ? fmtPct(m.difficulty_change_24h_pct) : 'N/A';
     const stable = (g1 === '+0.00%' || g1 === '0.00%') && (g24 === '+0.00%' || g24 === '0.00%');
-    if (elGrowth) elGrowth.textContent = stable ? (g1 + ' / ' + g24 + ' (stable)') : (g1 + ' / ' + g24);
+    if (elGrowth) elGrowth.textContent = stable ? 'Stable' : (g1 + ' / ' + g24);
     const su = document.getElementById('stats-updated');
     if (su) su.textContent = 'Updated ' + new Date().toLocaleTimeString();
   } catch (error) {
@@ -426,16 +426,16 @@ async function loadBlocksPage(limit = 30, startHeight = null, append = false) {
         const txs = Array.isArray(blk.tx_hex) ? blk.tx_hex.length : (blk.transactions ?? blk.tx_count ?? 0);
         const miner = blk.miner_address ?? blk.miner ?? 'N/A';
 return `
-<div class="block-card" onclick="viewBlock(${heightVal})">
-  <div class="block-top">
-    <div class="block-h">Block ${heightVal}</div>
-    <div class="block-time">${formatTime(time)}</div>
+<div class="x-block" onclick="viewBlock(${heightVal})">
+  <div class="x-block-top">
+    <div class="x-block-h">Block ${heightVal}</div>
+    <div class="x-block-time">${formatTime(time)}</div>
   </div>
-  <div class="block-hash">${hash}</div>
-  <div class="block-meta">
+  <div class="x-block-hash">${hash}</div>
+  <div class="x-block-meta">
     <span>Reward: ${reward} IRM</span>
     <span>Tx: ${txs}</span>
-    <span>Miner: <span class="block-hash">${miner}</span></span>
+    <span>Miner: <span class="x-block-hash">${miner}</span></span>
   </div>
 </div>`;
       }).join('');

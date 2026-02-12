@@ -81,13 +81,15 @@ async function loadStats() {
     if (heightEl) heightEl.textContent = data.height ?? '0';
     if (blocksEl) blocksEl.textContent = data.total_blocks ?? (data.total ?? '0');
     if (supplyEl) supplyEl.textContent = ((data.supply_irm ?? 0)).toFixed(2) + ' IRM';
+    const su = document.getElementById('stats-updated');
+    if (su) su.textContent = 'Updated ' + new Date().toLocaleTimeString();
   } catch (error) {
     console.error('Error loading stats:', error);
     for (const id of ['current-height','total-blocks','total-supply']) {
       const el = document.getElementById(id); if (el) el.textContent = 'Error';
     }
   }
-
+}
 
 function fmtNum(v, digits = 2) {
   const n = Number(v);
@@ -128,14 +130,14 @@ async function loadMiningMetrics() {
     const g1 = (m.difficulty_change_1h_pct != null) ? fmtPct(m.difficulty_change_1h_pct) : 'N/A';
     const g24 = (m.difficulty_change_24h_pct != null) ? fmtPct(m.difficulty_change_24h_pct) : 'N/A';
     if (elGrowth) elGrowth.textContent = g1 + ' / ' + g24;
+    const su = document.getElementById('stats-updated');
+    if (su) su.textContent = 'Updated ' + new Date().toLocaleTimeString();
   } catch (error) {
     console.error('Error loading mining metrics:', error);
     if (elHash) elHash.textContent = 'Error';
     if (elDiff) elDiff.textContent = 'Error';
     if (elGrowth) elGrowth.textContent = 'Error';
   }
-}
-
 }
 
 
@@ -402,19 +404,16 @@ async function loadBlocks(limit = 10) {
         const txs = Array.isArray(blk.tx_hex) ? blk.tx_hex.length : (blk.transactions ?? blk.tx_count ?? 0);
         const miner = blk.miner_address ?? blk.miner ?? 'N/A';
 return `
-<div style="background: rgba(0,0,0,0.3); padding: 20px; margin-bottom: 15px; border-radius: 8px; cursor: pointer; transition: transform 0.2s;"
-     onclick="viewBlock(${heightVal})" onmouseover="this.style.transform='translateY(-2px)'" onmouseout="this.style.transform='translateY(0)'">
-  <div style="display: flex; justify-content: space-between; margin-bottom: 10px;">
-    <span style="font-size: 18px; font-weight: bold; color: #0066cc;">Block ${heightVal}</span>
-    <span style="color: rgba(255,255,255,0.7);">${formatTime(time)}</span>
+<div class="block-card" onclick="viewBlock(${heightVal})">
+  <div class="block-top">
+    <div class="block-h">Block ${heightVal}</div>
+    <div class="block-time">${formatTime(time)}</div>
   </div>
-  <div style="font-family: monospace; font-size: 14px; color: rgba(255,255,255,0.9); word-break: break-all; margin-bottom: 10px;">${hash}</div>
-  <div style="display: flex; gap: 20px; color: rgba(255,255,255,0.7); font-size: 14px;">
+  <div class="block-hash">${hash}</div>
+  <div class="block-meta">
     <span>Reward: ${reward} IRM</span>
-    <span>Transactions: ${txs}</span>
-  </div>
-  <div style="margin-top: 8px; color: rgba(255,255,255,0.7); font-size: 13px;">
-    Miner: <span style="font-family: monospace; word-break: break-all;">${miner}</span>
+    <span>Tx: ${txs}</span>
+    <span>Miner: <span class="block-hash">${miner}</span></span>
   </div>
 </div>`;
       }).join('');

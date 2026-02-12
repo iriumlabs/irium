@@ -17,7 +17,7 @@
     <meta name="twitter:description" content="DNS-free PoW blockchain. 100M supply. Fair mining. Open source. Join the revolution!">
 
     <meta name="twitter:image" content="https://www.iriumlabs.org/irium-og-image.png?v=4">
-<link rel="stylesheet" href="style.css?v=4">
+<link rel="stylesheet" href="style.css?v=5">
 <link rel="icon" type="image/svg+xml" href="logo.svg?v=4">
 
 <style>
@@ -50,6 +50,32 @@
     opacity: 0.9;
     filter: blur(8px);
     mix-blend-mode: screen;
+    z-index: 0;
+  }
+
+  /* Rotating inner shine so spin is visually obvious even with a symmetric logo */
+  .hero .coin-container::before {
+    content: "";
+    position: absolute;
+    /* match the padding defined in style.css so the shine stays inside the circle */
+    inset: 10px;
+    border-radius: 999px;
+    pointer-events: none;
+
+    /* a subtle moving highlight wedge */
+    background: conic-gradient(
+      from 0deg,
+      rgba(255,255,255,0.00) 0deg,
+      rgba(255,255,255,0.00) 290deg,
+      rgba(255,255,255,0.20) 320deg,
+      rgba(91,177,255,0.12) 340deg,
+      rgba(255,255,255,0.00) 360deg
+    );
+
+    mix-blend-mode: screen;
+    opacity: 0.85;
+    animation: iriumShineSpin 6s linear infinite;
+    z-index: 3;
   }
 
   .hero .coin-container,
@@ -58,6 +84,8 @@
   }
 
   .hero .coin-container img.hero-coin {
+    position: relative;
+    z-index: 2;
     display: inline-block;
     transform-origin: 50% 50%;
     will-change: transform, filter;
@@ -95,9 +123,15 @@
     100% { transform: rotate(360deg); }
   }
 
+  @keyframes iriumShineSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
   @media (prefers-reduced-motion: reduce) {
+    /* Keep the coin readable but avoid vertical bob/pulse motion. */
     .hero .coin-container { animation: none; }
-    .hero .coin-container img.hero-coin { animation: none !important; }
+    /* Keep rotation on by default; if a user wants to disable it entirely they can via OS/browser. */
   }
 
 .feature-card { cursor: pointer; }

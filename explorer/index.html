@@ -14,7 +14,7 @@
 <style>
   /* Explorer v4 */
   :root {
-    --x-bg: rgba(0,0,0,0.34);
+    --x-bg: rgba(0,0,0,0.26);
     --x-border: rgba(255,255,255,0.12);
     --x-accent: #0066cc;
     --x-accent2: rgba(91,177,255,0.92);
@@ -42,16 +42,17 @@
   .x-page-title {
     font-weight: 1000;
     text-transform: uppercase;
-    letter-spacing: 0.18em;
-    color: rgba(255,255,255,0.96);
-    font-size: 34px;
-    line-height: 1.05;
+    letter-spacing: 0.20em;
+    color: rgba(255,255,255,0.98);
+    font-size: 48px;
+    line-height: 1.02;
     text-shadow:
-      0 0 18px rgba(91,177,255,0.22),
-      0 0 38px rgba(0,102,204,0.22);
-    animation: xGlow 2.8s ease-in-out infinite;
+      0 0 10px rgba(255,255,255,0.18),
+      0 0 22px rgba(91,177,255,0.30),
+      0 0 54px rgba(0,102,204,0.28);
+    animation: xGlow 2.6s ease-in-out infinite;
   }
-  @media (max-width: 560px) { .x-page-title { font-size: 26px; letter-spacing: 0.14em; } }
+  @media (max-width: 560px) { .x-page-title { font-size: 32px; letter-spacing: 0.16em; } }
 
   @keyframes xGlow {
     0%, 100% { filter: brightness(1); }
@@ -87,8 +88,8 @@
   }
 
   .x-techpill svg {
-    width: 16px;
-    height: 16px;
+    width: 20px;
+    height: 20px;
     color: rgba(91,177,255,0.92);
     filter: drop-shadow(0 0 12px rgba(91,177,255,0.25));
   }
@@ -108,13 +109,16 @@
     display: grid;
     grid-template-columns: 0.9fr 1.1fr;
     gap: 18px;
-    align-items: start;
+    align-items: stretch;
     margin-bottom: 18px;
   }
   @media (max-width: 1040px) { .x-hero { grid-template-columns: 1fr; } }
 
   .x-card {
     background: var(--x-bg);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
     border: 1px solid var(--x-border);
     border-radius: 18px;
     padding: 18px;
@@ -177,7 +181,7 @@
   }
   .x-meta { color: rgba(255,255,255,0.65); font-size: 12px; font-variant-numeric: tabular-nums; }
 
-  .x-ico { width: 18px; height: 18px; color: var(--x-accent2); filter: drop-shadow(0 0 14px rgba(91,177,255,0.38)); }
+  .x-ico { width: 22px; height: 22px; color: var(--x-accent2); filter: drop-shadow(0 0 14px rgba(91,177,255,0.38)); }
   .x-ico.spin { animation: xSpin 7s linear infinite; }
   .x-ico.pulse { animation: xPulse 1.8s ease-in-out infinite; }
   .x-ico.float { animation: xFloat 4.2s ease-in-out infinite; }
@@ -185,7 +189,7 @@
   @keyframes xPulse { 0%,100% { transform: scale(1); opacity: 0.95; } 50% { transform: scale(1.08); opacity: 1; } }
   @keyframes xFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
 
-  .x-search { position: relative; z-index: 1; display: grid; gap: 10px; }
+  .x-search { position: relative; z-index: 1; display: grid; gap: 10px; flex: 1; align-content: start; }
   .x-row { display: grid; grid-template-columns: 1fr 128px; gap: 10px; align-items: center; }
   @media (max-width: 560px) { .x-row { grid-template-columns: 1fr; } }
 
@@ -195,7 +199,7 @@
   .x-btn { padding: 9px 10px; background: linear-gradient(180deg, rgba(0,102,204,1), rgba(0,102,204,0.76)); color: #fff; border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; font-size: 12px; cursor: pointer; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; transition: transform 0.16s ease, filter 0.16s ease; }
   .x-btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
 
-  .x-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+  .x-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; flex: 1; align-content: start; }
   @media (max-width: 900px) { .x-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
   .x-stat { border-radius: 16px; padding: 14px; border: 1px solid rgba(255,255,255,0.14); background: linear-gradient(180deg, rgba(255,255,255,0.075), rgba(0,0,0,0.18)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 22px rgba(0,0,0,0.24); transition: transform 0.18s ease, border-color 0.18s ease; min-height: 84px; }
@@ -208,7 +212,7 @@
   .x-main { display: grid; grid-template-columns: 1fr; gap: 18px; }
 
   .x-list { display: grid; gap: 10px; }
-  .x-block { background: rgba(0,0,0,0.22); border: 1px solid rgba(255,255,255,0.10); border-radius: 16px; padding: 14px; cursor: pointer; transition: transform 0.16s ease, border-color 0.16s ease; animation: xRise 0.38s ease both; }
+  .x-block { background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.10); border-radius: 16px; padding: 14px; cursor: pointer; transition: transform 0.16s ease, border-color 0.16s ease; animation: xRise 0.38s ease both; }
   .x-block:hover { transform: translateY(-2px); border-color: rgba(91,177,255,0.34); }
   @keyframes xRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
 

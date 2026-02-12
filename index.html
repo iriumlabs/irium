@@ -17,40 +17,92 @@
     <meta name="twitter:description" content="DNS-free PoW blockchain. 100M supply. Fair mining. Open source. Join the revolution!">
 
     <meta name="twitter:image" content="https://www.iriumlabs.org/irium-og-image.png?v=4">
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 <link rel="icon" type="image/svg+xml" href="logo.svg?v=4">
 
 <style>
 
   /* Homepage: animated IRIUM coin glow */
-  .hero-coin {
+
+  /*
+    Note: `style.css` defines `.hero-coin` twice and `.coin-container` clips children.
+    To make the glow always visible, we glow the container (box-shadow) and animate
+    the coin image with a high-specificity selector + !important.
+  */
+
+  .hero .coin-container {
+    position: relative;
+    /* keep its existing sizing/padding/background from style.css */
+    box-shadow:
+      0 0 0 rgba(0,0,0,0),
+      0 0 18px rgba(91,177,255,0.18),
+      0 0 46px rgba(99,102,241,0.22);
+    animation: iriumHaloPulse 2.8s ease-in-out infinite;
+  }
+
+  .hero .coin-container::after {
+    content: "";
+    position: absolute;
+    inset: -18px;
+    border-radius: 999px;
+    pointer-events: none;
+    background: radial-gradient(circle at 50% 50%, rgba(91,177,255,0.22), rgba(99,102,241,0.10), transparent 70%);
+    opacity: 0.9;
+    filter: blur(8px);
+    mix-blend-mode: screen;
+  }
+
+  .hero .coin-container,
+  .hero .coin-container::after {
+    will-change: box-shadow, opacity, transform;
+  }
+
+  .hero .coin-container img.hero-coin {
     display: inline-block;
     transform-origin: 50% 50%;
     will-change: transform, filter;
+    /* keep a strong, always-on glow on the coin itself */
     filter:
-      drop-shadow(0 0 10px rgba(91,177,255,0.22))
-      drop-shadow(0 0 24px rgba(99,102,241,0.18));
-    animation: iriumCoinGlow 3.8s ease-in-out infinite;
-  }
-  @keyframes iriumCoinGlow {
-    0%, 100% {
-      transform: translateY(0) rotate(-1.5deg) scale(1);
-      filter:
-        drop-shadow(0 0 10px rgba(91,177,255,0.22))
-        drop-shadow(0 0 24px rgba(99,102,241,0.18));
-    }
-    50% {
-      transform: translateY(-6px) rotate(1.5deg) scale(1.03);
-      filter:
-        drop-shadow(0 0 16px rgba(91,177,255,0.38))
-        drop-shadow(0 0 42px rgba(99,102,241,0.28));
-    }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .hero-coin { animation: none; }
+      drop-shadow(0 0 14px rgba(91,177,255,0.35))
+      drop-shadow(0 0 46px rgba(99,102,241,0.30)) !important;
+
+    /* override any `style.css` animation definitions */
+    animation:
+      iriumCoinBob 3.4s ease-in-out infinite,
+      iriumCoinSpin 14s linear infinite !important;
   }
 
-  .feature-card { cursor: pointer; }
+  @keyframes iriumHaloPulse {
+    0%, 100% {
+      box-shadow:
+        0 0 0 rgba(0,0,0,0),
+        0 0 18px rgba(91,177,255,0.18),
+        0 0 46px rgba(99,102,241,0.22);
+    }
+    50% {
+      box-shadow:
+        0 0 0 rgba(0,0,0,0),
+        0 0 26px rgba(91,177,255,0.30),
+        0 0 70px rgba(99,102,241,0.34);
+    }
+  }
+
+  @keyframes iriumCoinBob {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-10px) scale(1.035); }
+  }
+
+  @keyframes iriumCoinSpin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .hero .coin-container { animation: none; }
+    .hero .coin-container img.hero-coin { animation: none !important; }
+  }
+
+.feature-card { cursor: pointer; }
   .feature-card:focus { outline: 2px solid rgba(91,177,255,0.6); outline-offset: 4px; }
   .feature-modal {
     position: fixed; inset: 0; display: none; align-items: center; justify-content: center;

@@ -3,6 +3,9 @@ const DEFAULT_API_BASE = 'https://api.iriumlabs.org/api';
 const CORS_PROXIES = ['', 'https://api.allorigins.win/raw?url='];
 const FETCH_TIMEOUT_MS = 15000;
 
+let __blocksCursor = null;
+let __blocksLoading = false;
+
 async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -97,6 +100,14 @@ function fmtNum(v, digits = 2) {
   return n.toFixed(digits);
 }
 
+function fmtDifficulty(d) {
+  const n = Number(d);
+  if (!isFinite(n)) return 'N/A';
+  // show 2 decimals with grouping
+  return n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+
 function fmtPct(v) {
   const n = Number(v);
   if (!isFinite(n)) return 'N/A';
@@ -125,11 +136,12 @@ async function loadMiningMetrics() {
   try {
     const m = await fetchJson('/mining?window=120&series=240');
     if (elHash) elHash.textContent = fmtHashrate(m.hashrate);
-    if (elDiff) elDiff.textContent = fmtNum(m.difficulty, 2);
+    if (elDiff) elDiff.textContent = fmtDifficulty(m.difficulty);
 
     const g1 = (m.difficulty_change_1h_pct != null) ? fmtPct(m.difficulty_change_1h_pct) : 'N/A';
     const g24 = (m.difficulty_change_24h_pct != null) ? fmtPct(m.difficulty_change_24h_pct) : 'N/A';
-    if (elGrowth) elGrowth.textContent = g1 + ' / ' + g24;
+    const stable = (g1 === '+0.00%' || g1 === '0.00%') && (g24 === '+0.00%' || g24 === '0.00%');
+    if (elGrowth) elGrowth.textContent = stable ? (g1 + ' / ' + g24 + ' (stable)') : (g1 + ' / ' + g24);
     const su = document.getElementById('stats-updated');
     if (su) su.textContent = 'Updated ' + new Date().toLocaleTimeString();
   } catch (error) {
@@ -328,7 +340,7 @@ function searchAddress() {
 }
 
 // Load blocks list - fetch all available blocks
-async function loadBlocks(limit = 10) {
+async function loadBlocksPage(limit = 30, startHeight = null, append = false) {
   try {
     console.log('Loading blocks...');
     
@@ -338,7 +350,11 @@ async function loadBlocks(limit = 10) {
     console.log('Current blockchain height:', currentHeight);
     
     // Get blocks from the /blocks endpoint
-    const data = await fetchJson(`/blocks?limit=${Math.min(limit, currentHeight + 1)}`);
+    let path = `/blocks?limit=${Math.min(limit, currentHeight + 1)}`;
+    if (startHeight !== null && startHeight !== undefined) {
+      path += `&start=${startHeight}`;
+    }
+    const data = await fetchJson(path);
     const list = data.blocks ?? data ?? [];
     console.log('Blocks from /blocks endpoint:', Array.isArray(list) ? list.length : 0);
     
@@ -393,8 +409,14 @@ async function loadBlocks(limit = 10) {
     if (Array.isArray(allBlocks) && allBlocks.length > 0) {
       // Sort by height descending (newest first for display)
       const sortedBlocks = allBlocks.slice().sort((a,b) => (b.height ?? 0) - (a.height ?? 0));
+
+      if (sortedBlocks.length > 0) {
+        const minH = sortedBlocks.reduce((m, b) => Math.min(m, (b.height ?? 0)), Number.POSITIVE_INFINITY);
+        __blocksCursor = (isFinite(minH) && minH > 0) ? (minH - 1) : 0;
+      }
+
       
-      blocksList.innerHTML = sortedBlocks.map((blk) => {
+      const html = sortedBlocks.map((blk) => {
         const header = getHeader(blk);
         const hash = header.hash ?? blk.hash ?? blk.block_hash ?? 'N/A';
         const time = header.time ?? header.timestamp ?? blk.time ?? blk.timestamp ?? 0;
@@ -417,6 +439,12 @@ return `
   </div>
 </div>`;
       }).join('');
+
+      if (append) {
+        blocksList.insertAdjacentHTML('beforeend', html);
+      } else {
+        blocksList.innerHTML = html;
+      }
       
       // Warn only for gaps within the displayed window.
       const windowSize = Math.min(limit, currentHeight + 1);
@@ -444,11 +472,41 @@ return `
 }
 
 // Initialize function
+
+
+function ensureLoadMoreButton() {
+  const list = document.getElementById('blocks-list');
+  if (!list) return;
+  if (document.getElementById('load-more-blocks')) return;
+
+  const btn = document.createElement('button');
+  btn.id = 'load-more-blocks';
+  btn.className = 'search-btn';
+  btn.style.width = '100%';
+  btn.style.marginTop = '12px';
+  btn.textContent = 'Load older blocks';
+  btn.addEventListener('click', () => loadMoreBlocks());
+  const parent = list.parentElement || list;
+  parent.appendChild(btn);
+}
+
+async function loadMoreBlocks() {
+  if (__blocksLoading) return;
+  if (__blocksCursor === null) return;
+  if (__blocksCursor <= 0) return;
+  __blocksLoading = true;
+  try {
+    await loadBlocksPage(50, __blocksCursor, true);
+  } finally {
+    __blocksLoading = false;
+  }
+}
 function initExplorer() {
   console.log('Initializing Explorer...');
   loadStats();
   loadMiningMetrics();
-  loadBlocks();
+  loadBlocksPage(30, null, false);
+  ensureLoadMoreButton();
 }
 
 // Initialize when DOM is ready
@@ -463,7 +521,7 @@ setInterval(() => {
   console.log('Auto-refreshing...');
   loadStats();
   loadMiningMetrics();
-  loadBlocks();
+  loadBlocksPage(30, null, false);
 }, 30000);
 
 // Format timestamp to readable date

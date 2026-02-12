@@ -154,12 +154,15 @@ async function loadMiningMetrics() {
 
 
 function rowsToHtml(rows) {
-  return rows.map(([k, v]) => (
-    '<div style="display:flex; gap:12px; margin:6px 0;">' +
-    '<div style="width:130px; color:rgba(255,255,255,0.7)">' + k + '</div>' +
-    '<div style="font-family:monospace; word-break:break-all;">' + v + '</div>' +
-    '</div>'
-  )).join('');
+  return rows.map(([k, v]) => {
+    const vv = (k === 'Reward') ? ('<span class="x-reward">' + v + '</span>') : v;
+    return (
+      '<div style="display:flex; gap:12px; margin:6px 0;">' +
+      '<div style="width:130px; color:rgba(255,255,255,0.7)">' + k + '</div>' +
+      '<div style="font-family:monospace; word-break:break-all;">' + vv + '</div>' +
+      '</div>'
+    );
+  }).join('');
 }
 
 function renderBlockDetails(height, raw) {
@@ -397,7 +400,7 @@ return `
   </div>
   <div class="x-block-hash">${hash}</div>
   <div class="x-block-meta">
-    <span>Reward: ${reward} IRM</span>
+    <span>Reward: <span class="x-reward">${reward} IRM</span></span>
     <span>Tx: ${txs}</span>
     <span>Miner: <span class="x-block-hash">${miner}</span></span>
   </div>

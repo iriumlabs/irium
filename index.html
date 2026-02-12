@@ -37,7 +37,7 @@
       0 0 0 rgba(0,0,0,0),
       0 0 18px rgba(91,177,255,0.18),
       0 0 46px rgba(99,102,241,0.22);
-    animation: iriumHaloPulse 2.8s ease-in-out infinite;
+    animation: iriumHaloPulse 2.8s ease-in-out infinite, iriumCoinBob 3.4s ease-in-out infinite;
   }
 
   .hero .coin-container::after {
@@ -67,9 +67,7 @@
       drop-shadow(0 0 46px rgba(99,102,241,0.30)) !important;
 
     /* override any `style.css` animation definitions */
-    animation:
-      iriumCoinBob 3.4s ease-in-out infinite,
-      iriumCoinSpin 14s linear infinite !important;
+    animation: iriumCoinSpin 14s linear infinite !important;
   }
 
   @keyframes iriumHaloPulse {

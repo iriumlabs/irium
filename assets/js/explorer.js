@@ -358,57 +358,21 @@ async function loadBlocksPage(limit = 30, startHeight = null, append = false) {
     const list = data.blocks ?? data ?? [];
     console.log('Blocks from /blocks endpoint:', Array.isArray(list) ? list.length : 0);
     
-    // Start with blocks from /blocks endpoint
-    const allBlocks = [...list];
-    
-    // Try to fetch individual blocks that might be missing
-    const missingHeights = [];
-    
-    // Check for missing blocks 0-3 (genesis and early blocks)
-    for (let h = 0; h <= Math.min(3, currentHeight); h++) {
-      if (!allBlocks.some(b => (b.height ?? 0) === h)) {
-        missingHeights.push(h);
-      }
-    }
-    
-    console.log('Missing block heights to fetch individually:', missingHeights);
-    
-    // Fetch missing blocks individually
-    for (const height of missingHeights) {
-      try {
-        console.log(`Fetching individual block ${height}...`);
-        const blockData = await fetchJson(`/block/${height}`);
-        console.log(`Block ${height} response:`, blockData);
-        
-        if (blockData && blockData.block && !blockData.error) {
-          allBlocks.push(blockData.block);
-          console.log(`Successfully fetched block ${height}:`, blockData.block.hash);
-        } else if (blockData && !blockData.error) {
-          allBlocks.push(blockData);
-          console.log(`Successfully fetched block ${height} (flat structure):`, blockData.hash);
-        } else {
-          console.log(`Block ${height} not found:`, blockData.error || 'Unknown error');
-        }
-      } catch (error) {
-        console.log(`Failed to fetch block ${height}:`, error.message);
-      }
-    }
-    
-    console.log('Total blocks after individual fetches:', allBlocks.length);
-    
-    if (Array.isArray(allBlocks) && allBlocks.length > 0) {
-      const heights = allBlocks.map(b => b.height ?? 0).sort((a,b) => a - b);
-      console.log('Available block heights:', heights);
-      const missingBlocks = Array.from({length: currentHeight + 1}, (_, i) => i).filter(h => !heights.includes(h));
-      console.log('Still missing blocks:', missingBlocks);
-    }
+    // Use only the paged /blocks endpoint. Loading the full chain in one go will
+    // freeze the browser; older blocks are fetched only when the user clicks.
+    const allBlocks = Array.isArray(list) ? list : [];
 
     const blocksList = document.getElementById('blocks-list');
     if (!blocksList) { console.error('blocks-list element not found'); return; }
 
     if (Array.isArray(allBlocks) && allBlocks.length > 0) {
-      // Sort by height descending (newest first for display)
-      const sortedBlocks = allBlocks.slice().sort((a,b) => (b.height ?? 0) - (a.height ?? 0));
+      const byHeight = new Map();
+      for (const b of allBlocks) {
+        const h = (b && b.height != null) ? b.height : null;
+        if (h == null) continue;
+        if (!byHeight.has(h)) byHeight.set(h, b);
+      }
+      const sortedBlocks = Array.from(byHeight.values()).sort((a,b) => (b.height ?? 0) - (a.height ?? 0));
 
       if (sortedBlocks.length > 0) {
         const minH = sortedBlocks.reduce((m, b) => Math.min(m, (b.height ?? 0)), Number.POSITIVE_INFINITY);
@@ -445,22 +409,16 @@ return `
       } else {
         blocksList.innerHTML = html;
       }
-      
-      // Warn only for gaps within the displayed window.
-      const windowSize = Math.min(limit, currentHeight + 1);
-      const windowStart = Math.max(0, currentHeight - windowSize + 1);
-      const expectedWindow = Array.from({length: windowSize}, (_, i) => windowStart + i);
-      const missingWindow = expectedWindow.filter(h => !allBlocks.some(b => (b.height ?? 0) === h));
-      if (missingWindow.length > 0) {
-        const preview = missingWindow.slice(0, 20).join(", ");
-        const suffix = missingWindow.length > 20 ? " … (+" + (missingWindow.length - 20) + " more)" : "";
-        blocksList.innerHTML +=
-          "<div style=\"background: rgba(255,165,0,0.1); padding: 15px; margin-top: 20px; border-radius: 8px; border-left: 4px solid #ffa500;\">" +
-          "<div style=\"color: #ffa500; font-weight: bold; margin-bottom: 10px;\">⚠️ Missing Blocks</div>" +
-          "<div style=\"color: rgba(255,255,255,0.8); font-size: 14px;\">Missing blocks in the latest window (" + windowStart + "-" + currentHeight + "): " + preview + suffix + "</div>" +
-          "<div style=\"color: rgba(255,255,255,0.6); font-size: 12px; margin-top: 5px;\">This may be due to API pagination or indexing delay.</div>" +
-          "</div>";
+
+      const bp = document.getElementById('blocks-progress');
+      if (bp) {
+        const rendered = blocksList.querySelectorAll('.x-block, .block-card').length;
+        const cursor = (__blocksCursor === null) ? 'n/a' : String(__blocksCursor);
+        bp.textContent = 'Rendered ' + rendered + ' blocks (next start ' + cursor + ')';
       }
+
+      ensureLoadMoreButton();
+      
     } else {
       blocksList.innerHTML = '<p style="color: rgba(255,255,255,0.7);">No blocks found</p>';
     }
@@ -475,20 +433,28 @@ return `
 
 
 function ensureLoadMoreButton() {
+  const wrap = document.getElementById('load-more-wrap');
   const list = document.getElementById('blocks-list');
-  if (!list) return;
-  if (document.getElementById('load-more-blocks')) return;
+  if (!wrap || !list) return;
 
-  const btn = document.createElement('button');
-  btn.id = 'load-more-blocks';
-  btn.className = 'search-btn';
-  btn.style.width = '100%';
-  btn.style.marginTop = '12px';
-  btn.textContent = 'Load older blocks';
-  btn.addEventListener('click', () => loadMoreBlocks());
-  const parent = list.parentElement || list;
-  parent.appendChild(btn);
+  let btn = document.getElementById('load-more-blocks');
+  if (!btn) {
+    btn = document.createElement('button');
+    btn.id = 'load-more-blocks';
+    btn.className = 'x-btn';
+    btn.style.width = '100%';
+    btn.textContent = 'Load older blocks';
+    btn.addEventListener('click', () => loadMoreBlocks());
+    wrap.appendChild(btn);
+  }
+
+  // Disable until we have a cursor.
+  const canLoad = (__blocksCursor !== null && __blocksCursor > 0);
+  btn.disabled = !canLoad;
+  btn.style.opacity = canLoad ? '1' : '0.6';
+  btn.style.cursor = canLoad ? 'pointer' : 'not-allowed';
 }
+
 
 async function loadMoreBlocks() {
   if (__blocksLoading) return;
@@ -503,33 +469,12 @@ async function loadMoreBlocks() {
 }
 
 
-function setupInfiniteScroll() {
-  const sentinelId = 'blocks-sentinel';
-  if (document.getElementById(sentinelId)) return;
-  const wrap = document.getElementById('load-more-wrap');
-  if (!wrap) return;
-  const sentinel = document.createElement('div');
-  sentinel.id = sentinelId;
-  sentinel.style.height = '1px';
-  wrap.appendChild(sentinel);
-
-  const obs = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (e.isIntersecting) {
-        loadMoreBlocks();
-      }
-    }
-  }, { root: null, rootMargin: '600px', threshold: 0.01 });
-
-  obs.observe(sentinel);
-}
 function initExplorer() {
   console.log('Initializing Explorer...');
   loadStats();
   loadMiningMetrics();
   loadBlocksPage(30, null, false);
   ensureLoadMoreButton();
-  setupInfiniteScroll();
 }
 
 // Initialize when DOM is ready

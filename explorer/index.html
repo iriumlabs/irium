@@ -14,7 +14,7 @@
 <style>
   /* Explorer v4 */
   /* Mining-page style panels (scoped to explorer) */
-  .x-explorer .hero .container {
+    .x-explorer .hero .container {
     background: rgba(0,0,0,0.32);
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: 14px;
@@ -23,10 +23,10 @@
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     position: relative;
-    display: grid;
-    grid-template-columns: 1fr;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: stretch !important;
     gap: 18px;
-    align-items: stretch;
   }
   .x-explorer .hero .container:before {
     content: "";
@@ -37,7 +37,10 @@
     box-shadow: 0 0 26px rgba(99,102,241,0.18), inset 0 0 22px rgba(99,102,241,0.08);
     animation: glowPulse 4.5s ease-in-out infinite;
   }
-  .x-explorer .hero .container > * { position: relative; z-index: 1; }
+  .x-explorer .hero .container > * { position: relative; z-index: 1; width: 100%; }
+  .x-explorer .x-pagehead { width: 100%; }
+  .x-explorer .x-hero { width: 100%; }
+  .x-explorer .x-main { width: 100%; }
 
   @media (max-width: 560px) {
     .x-explorer .hero .container { padding: 18px; }
@@ -151,7 +154,7 @@
 
   .x-hero {
     display: grid;
-    grid-template-columns: 0.9fr 1.1fr;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
     gap: 18px;
     align-items: stretch;
     margin-bottom: 18px;
@@ -422,7 +425,7 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=38"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=39"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
 <!-- Block Details Modal -->
 <div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">

@@ -30,9 +30,83 @@
   .x-stagger:nth-child(2) { animation-delay: 0.10s; }
   @keyframes xIn { to { opacity: 1; transform: translateY(0); } }
 
+  .x-pagehead {
+    margin: 0 0 18px;
+    padding: 10px 4px 0;
+    display: grid;
+    gap: 10px;
+    position: relative;
+    z-index: 1;
+  }
+
+  .x-page-title {
+    font-weight: 1000;
+    text-transform: uppercase;
+    letter-spacing: 0.18em;
+    color: rgba(255,255,255,0.96);
+    font-size: 34px;
+    line-height: 1.05;
+    text-shadow:
+      0 0 18px rgba(91,177,255,0.22),
+      0 0 38px rgba(0,102,204,0.22);
+    animation: xGlow 2.8s ease-in-out infinite;
+  }
+  @media (max-width: 560px) { .x-page-title { font-size: 26px; letter-spacing: 0.14em; } }
+
+  @keyframes xGlow {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.16); }
+  }
+
+  .x-page-sub {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    color: rgba(255,255,255,0.72);
+    font-size: 12px;
+  }
+
+  .x-sep { opacity: 0.55; }
+
+  .x-techbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 2px;
+  }
+
+  .x-techpill {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(0,0,0,0.20);
+  }
+
+  .x-techpill svg {
+    width: 16px;
+    height: 16px;
+    color: rgba(91,177,255,0.92);
+    filter: drop-shadow(0 0 12px rgba(91,177,255,0.25));
+  }
+
+  .x-techpill span {
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: rgba(255,255,255,0.78);
+  }
+
+  .x-field { display: grid; gap: 6px; }
+  .x-field-label { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,0.72); }
+
+
   .x-hero {
     display: grid;
-    grid-template-columns: 1.1fr 0.9fr;
+    grid-template-columns: 0.9fr 1.1fr;
     gap: 18px;
     align-items: start;
     margin-bottom: 18px;
@@ -118,7 +192,7 @@
   .x-input { width: 100%; padding: 12px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; color: #fff; font-size: 15px; outline: none; }
   .x-input:focus { border-color: rgba(91,177,255,0.55); box-shadow: 0 0 0 4px rgba(0,102,204,0.18); }
 
-  .x-btn { padding: 12px; background: linear-gradient(180deg, rgba(0,102,204,1), rgba(0,102,204,0.76)); color: #fff; border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; font-size: 14px; cursor: pointer; font-weight: 900; letter-spacing: 0.02em; transition: transform 0.16s ease, filter 0.16s ease; }
+  .x-btn { padding: 9px 10px; background: linear-gradient(180deg, rgba(0,102,204,1), rgba(0,102,204,0.76)); color: #fff; border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; font-size: 12px; cursor: pointer; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; transition: transform 0.16s ease, filter 0.16s ease; }
   .x-btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
 
   .x-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
@@ -190,25 +264,27 @@
 
 <section class="hero" style="min-height: auto; padding: 112px 0 64px;">
 <div class="container">
+
+  <div class="x-pagehead x-stagger">
+    <div class="x-page-title">BLOCK EXPLORER</div>
+    <div class="x-page-sub">
+      <span class="x-chip"><span class="x-dot"></span><span class="x-meta" id="stats-updated">Loading...</span></span>
+      <span class="x-sep">•</span>
+      <span class="x-meta">Search blocks, transactions, and addresses</span>
+    </div>
+    <div class="x-techbar">
+      <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 2h6v2h-1v2h3a2 2 0 012 2v3h2v2h-2v3a2 2 0 01-2 2h-3v2h1v2H9v-2h1v-2H7a2 2 0 01-2-2v-3H3v-2h2V10a2 2 0 012-2h3V4H9V2zm-2 8v8h10v-8H7z"/></svg><span>P2P</span></div>
+      <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 7-4 13L8 9l4-7z"/></svg><span>PoW</span></div>
+      <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1l9 4v6c0 5-3.8 9.7-9 11-5.2-1.3-9-6-9-11V5l9-4zm0 6a3 3 0 00-3 3v2H8v7h8v-7h-1v-2a3 3 0 00-3-3zm1 5h-2v-2a1 1 0 012 0v2z"/></svg><span>Secure</span></div>
+    </div>
+  </div>
+
   <div class="x-hero">
     <div class="x-card x-stagger">
       <div class="x-scan"></div>
       <div class="x-head">
-        <div class="x-title"><svg class="x-ico spin" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 7-4 13L8 9l4-7z"/></svg>Block Explorer</div>
-        <div class="x-chip"><span class="x-dot"></span><span class="x-meta" id="stats-updated">Loading...</span></div>
-      </div>
-      <div class="x-search">
-        <div class="x-row"><input type="text" id="block-search-input" placeholder="Search by block height or hash" class="x-input"><button onclick="searchBlock()" class="x-btn">Block</button></div>
-        <div class="x-row"><input type="text" id="tx-search-input" placeholder="Search by transaction id (txid)" class="x-input"><button onclick="searchTx()" class="x-btn">Tx</button></div>
-        <div class="x-row"><input type="text" id="address-search-input" placeholder="Search by address" class="x-input"><button onclick="searchAddress()" class="x-btn">Address</button></div>
-      </div>
-    </div>
-
-    <div class="x-card x-stagger">
-      <div class="x-scan"></div>
-      <div class="x-head">
         <div class="x-title"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v14H3V5z"/></svg>Network Metrics</div>
-        <div class="x-meta" id="blocks-updated">Loading...</div>
+        <div class="x-meta x-muted">Live</div>
       </div>
 
       <div class="x-stats">
@@ -220,8 +296,20 @@
         <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M4 12a8 8 0 1116 0"/></svg><div class="x-label">Diff Δ</div></div><div class="x-value" id="diff-growth">Loading...</div></div>
       </div>
     </div>
-  </div>
 
+    <div class="x-card x-stagger">
+      <div class="x-scan"></div>
+      <div class="x-head">
+        <div class="x-title"><svg class="x-ico spin" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l9 6-9 6-9-6 9-6z"/></svg>Search</div>
+        <div class="x-meta x-muted">Block / Tx / Address</div>
+      </div>
+      <div class="x-search">
+        <div class="x-field"><div class="x-field-label">Search by block height or hash</div><div class="x-row"><input type="text" id="block-search-input" placeholder="Block height or 64-char hash" class="x-input"><button onclick="searchBlock()" class="x-btn">Block</button></div></div>
+        <div class="x-field"><div class="x-field-label">Search by transaction id (txid)</div><div class="x-row"><input type="text" id="tx-search-input" placeholder="64-char txid" class="x-input"><button onclick="searchTx()" class="x-btn">Tx</button></div></div>
+        <div class="x-field"><div class="x-field-label">Search by address</div><div class="x-row"><input type="text" id="address-search-input" placeholder="Wallet address" class="x-input"><button onclick="searchAddress()" class="x-btn">Address</button></div></div>
+      </div>
+    </div>
+  </div>
   <div class="x-main">
     <div class="x-card">
       <div class="x-scan"></div>
@@ -276,7 +364,7 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=31"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=32"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
 <!-- Block Details Modal -->
 <div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">

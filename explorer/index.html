@@ -231,7 +231,8 @@
   .x-btn { padding: 9px 10px; background: linear-gradient(180deg, rgba(0,102,204,1), rgba(0,102,204,0.76)); color: #fff; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px; font-size: 12px; cursor: pointer; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; transition: transform 0.16s ease, filter 0.16s ease; }
   .x-btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
 
-  .x-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; flex: 1; align-content: start; }
+  .x-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; flex: 1; align-content: start; }
+  @media (max-width: 1100px) { .x-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
   @media (max-width: 900px) { .x-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 
   .x-stat { border-radius: 16px; padding: 14px; border: 1px solid rgba(255,255,255,0.14); background: linear-gradient(180deg, rgba(255,255,255,0.075), rgba(0,0,0,0.18)); box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 22px rgba(0,0,0,0.24); transition: transform 0.18s ease, border-color 0.18s ease; min-height: 84px; }
@@ -332,6 +333,9 @@
         <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1010 10h-2a8 8 0 11-8-8V2zm1 5h-2v7l6 3 1-1.7-5-2.3V7z"/></svg><div class="x-label">Net Hashrate</div></div><div class="x-value" id="net-hashrate">Loading...</div></div>
         <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 6 7 1-5 4 1 7-6-3-6 3 1-7-5-4 7-1 3-6z"/></svg><div class="x-label">Difficulty</div></div><div class="x-value" id="net-difficulty">Loading...</div></div>
         <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17l6-6 4 4 7-7 1 1-8 8-4-4-5 5H3z"/></svg><div class="x-label">Diff Δ</div></div><div class="x-value" id="diff-growth">Loading...</div></div>
+        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 5a3 3 0 110 6 3 3 0 010-6zm-7 14c0-3 3.1-5 7-5s7 2 7 5v1H5v-1z"/></svg><div class="x-label">Peers</div></div><div class="x-value" id="live-peers">Loading...</div></div>
+        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M6 2h12v6h-2V4H8v4H6V2zm-2 8h16v10H4V10zm3 3v4h2v-4H7zm4 0v4h2v-4h-2zm4 0v4h2v-4h-2z"/></svg><div class="x-label">Active Miners</div></div><div class="x-value" id="live-miners">Loading...</div></div>
+</div>
       </div>
     </div>
 
@@ -402,7 +406,7 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=34"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=35"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
 <!-- Block Details Modal -->
 <div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">

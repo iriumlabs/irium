@@ -84,6 +84,14 @@ async function loadStats() {
     if (heightEl) heightEl.textContent = data.height ?? '0';
     if (blocksEl) blocksEl.textContent = data.total_blocks ?? (data.total ?? '0');
     if (supplyEl) supplyEl.textContent = ((data.supply_irm ?? 0)).toFixed(2) + ' IRM';
+    const peersEl = document.getElementById('live-peers');
+    if (peersEl) peersEl.textContent = String(data.peers_connected ?? data.peer_count ?? '0');
+    const minersEl = document.getElementById('live-miners');
+    if (minersEl) {
+      const am = data.active_miners;
+      minersEl.textContent = (am == null) ? 'Loading...' : String(am);
+    }
+
     const su = document.getElementById('stats-updated');
     if (su) su.textContent = 'Updated ' + new Date().toLocaleTimeString();
   } catch (error) {

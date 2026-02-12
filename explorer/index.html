@@ -13,6 +13,32 @@
 
 <style>
   /* Explorer v4 */
+  /* Mining-page style panels (scoped to explorer) */
+  .x-explorer .hero .container {
+    background: rgba(0,0,0,0.32);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 14px;
+    padding: 28px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.35), 0 0 18px rgba(99,102,241,0.22);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    position: relative;
+  }
+  .x-explorer .hero .container:before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 14px;
+    pointer-events: none;
+    box-shadow: 0 0 26px rgba(99,102,241,0.18), inset 0 0 22px rgba(99,102,241,0.08);
+    animation: glowPulse 4.5s ease-in-out infinite;
+  }
+  .x-explorer .hero .container > * { position: relative; z-index: 1; }
+
+  @media (max-width: 560px) {
+    .x-explorer .hero .container { padding: 18px; }
+  }
+
   :root {
     --x-bg: rgba(0,0,0,0.20);
     --x-border: rgba(255,255,255,0.12);
@@ -128,53 +154,38 @@
   }
   @media (max-width: 1040px) { .x-hero { grid-template-columns: 1fr; } }
 
+  
   .x-card {
-    background: var(--x-bg);
+    background: rgba(0,0,0,0.22);
     height: 100%;
     display: flex;
     flex-direction: column;
-    border: 1px solid var(--x-border);
-    border-radius: 14px;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
     padding: 18px;
-    box-shadow: 0 8px 28px rgba(0,0,0,0.35), 0 0 18px rgba(99,102,241,0.22);
-    backdrop-filter: blur(7px);
-    -webkit-backdrop-filter: blur(7px);
+    box-shadow: inset 0 0 18px rgba(0,0,0,0.20);
     position: relative;
     overflow: hidden;
-  }
-  .x-card::before {
-    content: "";
-    position: absolute;
-    inset: -1px;
-    background:
-      radial-gradient(560px 190px at 18% 0%, rgba(91,177,255,0.18), transparent 56%),
-      radial-gradient(520px 220px at 92% 18%, rgba(0,102,204,0.12), transparent 60%);
-    pointer-events: none;
-    opacity: 0.9;
-    box-shadow: 0 0 26px rgba(99,102,241,0.18), inset 0 0 22px rgba(99,102,241,0.08);
-    animation: glowPulse 4.5s ease-in-out infinite;
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
   }
   .x-card::after {
     content: "";
     position: absolute;
     inset: 0;
-    background: linear-gradient(180deg, rgba(255,255,255,0.05), transparent 20%, rgba(255,255,255,0.02));
+    border-radius: 12px;
     pointer-events: none;
+    box-shadow: inset 0 0 0 1px rgba(99,102,241,0.08);
+    opacity: 0;
+    transition: opacity 0.25s ease;
   }
+  .x-card:hover {
+    transform: translateY(-4px);
+    border-color: rgba(99,102,241,0.35);
+    box-shadow: 0 14px 30px rgba(0,0,0,0.35), 0 0 20px rgba(99,102,241,0.25), inset 0 0 18px rgba(0,0,0,0.20);
+  }
+  .x-card:hover::after { opacity: 1; }
 
-  .x-scan {
-    position: absolute;
-    inset: 0;
-    pointer-events: none;
-    opacity: 0.12;
-    background:
-      linear-gradient(180deg, transparent 0%, rgba(91,177,255,0.16) 48%, transparent 100%),
-      repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0, rgba(255,255,255,0.04) 1px, transparent 1px, transparent 24px);
-    transform: translateY(-30%);
-    animation: xScan 8.5s linear infinite;
-    mix-blend-mode: screen;
-  }
-  @keyframes xScan { 0% { transform: translateY(-40%); } 100% { transform: translateY(140%); } }
+  .x-scan { display: none; }
 
   @keyframes glowPulse {
     0%,100% { box-shadow: 0 0 26px rgba(99,102,241,0.18), inset 0 0 22px rgba(99,102,241,0.08); }
@@ -250,7 +261,7 @@
   @keyframes xDot { 0%,100% { transform: scale(1); opacity: 0.75; } 50% { transform: scale(1.4); opacity: 1; } }
 </style>
 </head>
-<body>
+<body class=\"x-explorer\">
 
 <!-- Animated Background -->
 <div class="stars"></div>

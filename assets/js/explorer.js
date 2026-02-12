@@ -87,6 +87,55 @@ async function loadStats() {
       const el = document.getElementById(id); if (el) el.textContent = 'Error';
     }
   }
+
+
+function fmtNum(v, digits = 2) {
+  const n = Number(v);
+  if (!isFinite(n)) return 'N/A';
+  return n.toFixed(digits);
+}
+
+function fmtPct(v) {
+  const n = Number(v);
+  if (!isFinite(n)) return 'N/A';
+  const sign = n > 0 ? '+' : '';
+  return sign + n.toFixed(2) + '%';
+}
+
+function fmtHashrate(hs) {
+  const n = Number(hs);
+  if (!isFinite(n) || n <= 0) return 'N/A';
+  const units = ['H/s','KH/s','MH/s','GH/s','TH/s','PH/s','EH/s'];
+  let v = n;
+  let u = 0;
+  while (v >= 1000 && u < units.length - 1) { v /= 1000; u++; }
+  const digits = v >= 100 ? 0 : v >= 10 ? 1 : 2;
+  return v.toFixed(digits) + ' ' + units[u];
+}
+
+// Load live mining metrics (hashrate + difficulty + difficulty change)
+async function loadMiningMetrics() {
+  const elHash = document.getElementById('net-hashrate');
+  const elDiff = document.getElementById('net-difficulty');
+  const elGrowth = document.getElementById('diff-growth');
+  if (!elHash && !elDiff && !elGrowth) return;
+
+  try {
+    const m = await fetchJson('/mining?window=120&series=240');
+    if (elHash) elHash.textContent = fmtHashrate(m.hashrate);
+    if (elDiff) elDiff.textContent = fmtNum(m.difficulty, 2);
+
+    const g1 = (m.difficulty_change_1h_pct != null) ? fmtPct(m.difficulty_change_1h_pct) : 'N/A';
+    const g24 = (m.difficulty_change_24h_pct != null) ? fmtPct(m.difficulty_change_24h_pct) : 'N/A';
+    if (elGrowth) elGrowth.textContent = g1 + ' / ' + g24;
+  } catch (error) {
+    console.error('Error loading mining metrics:', error);
+    if (elHash) elHash.textContent = 'Error';
+    if (elDiff) elDiff.textContent = 'Error';
+    if (elGrowth) elGrowth.textContent = 'Error';
+  }
+}
+
 }
 
 
@@ -399,6 +448,7 @@ return `
 function initExplorer() {
   console.log('Initializing Explorer...');
   loadStats();
+  loadMiningMetrics();
   loadBlocks();
 }
 
@@ -413,6 +463,7 @@ if (document.readyState === 'loading') {
 setInterval(() => {
   console.log('Auto-refreshing...');
   loadStats();
+  loadMiningMetrics();
   loadBlocks();
 }, 30000);
 

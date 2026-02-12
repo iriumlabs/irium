@@ -213,6 +213,21 @@
     <h3>Network Status</h3>
     <p class="muted">Check the live explorer for the latest height and supply: <a href="https://www.iriumlabs.org/explorer/" target="_blank" rel="noopener">Irium Explorer</a>.</p>
 
+    <div class="hero-stats" style="margin-top: 16px;">
+      <div class="stat">
+        <span class="stat-value" id="net-hashrate">Loading...</span>
+        <span class="stat-label">NET HASHRATE</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="net-difficulty">Loading...</span>
+        <span class="stat-label">DIFFICULTY</span>
+      </div>
+      <div class="stat">
+        <span class="stat-value" id="diff-growth">Loading...</span>
+        <span class="stat-label">DIFF Δ (1H / 24H)</span>
+      </div>
+    </div>
+
     <h3>Start Mining</h3>
     <p class="muted">Ready to mine? Jump to the step-by-step guide below.</p>
     <p class="muted"><a href="#start-mining">Go to Start Mining</a></p>
@@ -365,5 +380,6 @@ curl http://127.0.0.1:38300/rpc/network_hashrate?window=120</code></pre>
   </div>
 </footer>
 
+<script src="https://www.iriumlabs.org/assets/js/mining-status.js?v=1"></script>
 </body>
 </html>

@@ -6,6 +6,25 @@
 <title>Block Explorer - Irium</title>
 <link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=3">
 <link rel="icon" type="image/svg+xml" href="https://www.iriumlabs.org/logo.svg">
+
+<style>
+  /* Mining metrics cards (explorer page only) */
+  .hero-stats { gap: 14px; }
+  .hero-stats .stat {
+    background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(0,0,0,0.18));
+    border: 1px solid rgba(255,255,255,0.14);
+    border-radius: 14px;
+    padding: 14px 16px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 10px 24px rgba(0,0,0,0.28);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+  .hero-stats .stat-value { letter-spacing: 0.01em; }
+  .hero-stats .stat-label { letter-spacing: 0.18em; font-size: 11px; }
+  @media (max-width: 900px) {
+    .hero-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+</style>
 </head>
 <body>
 
@@ -137,7 +156,7 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=18"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=1919"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
 <!-- Block Details Modal -->
 <div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">

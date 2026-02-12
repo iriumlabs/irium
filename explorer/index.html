@@ -14,8 +14,7 @@
 <style>
   /* Explorer v4 */
   /* Mining-page style panels (scoped to explorer) */
-  .x-explorer .explorer-section .container {
-    display: block;
+  .x-explorer .explorer-section .x-frame {
     background: rgba(0,0,0,0.32);
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: 14px;
@@ -25,7 +24,7 @@
     -webkit-backdrop-filter: blur(6px);
     position: relative;
   }
-  .x-explorer .explorer-section .container:before {
+  .x-explorer .explorer-section .x-frame:before {
     content: "";
     position: absolute;
     inset: 0;
@@ -34,7 +33,7 @@
     box-shadow: 0 0 26px rgba(99,102,241,0.18), inset 0 0 22px rgba(99,102,241,0.08);
     animation: glowPulse 4.5s ease-in-out infinite;
   }
-  .x-explorer .explorer-section .container > * { position: relative; z-index: 1; }
+  .x-explorer .explorer-section .x-frame > * { position: relative; z-index: 1; }
 
   .x-shell {
     width: 100%;
@@ -53,7 +52,7 @@
   .x-explorer .x-main { width: 100%; }
 
   @media (max-width: 560px) {
-    .x-explorer .explorer-section .container { padding: 18px; }
+    .x-explorer .explorer-section .x-frame { padding: 18px; }
   }
 
   :root {
@@ -334,6 +333,7 @@
 <section class="section explorer-section" style="min-height: auto; padding: 112px 0 64px;">
 <div class="container">
 
+    <div class="x-frame">
     <div class="x-shell">
 
 <div class="x-pagehead x-stagger">
@@ -398,6 +398,7 @@
   </div>
 
 </div>
+</div>
 </section>
 
 
@@ -440,7 +441,7 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=42"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=43"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
 <!-- Block Details Modal -->
 <div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">

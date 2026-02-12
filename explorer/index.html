@@ -15,6 +15,7 @@
   /* Explorer v4 */
   /* Mining-page style panels (scoped to explorer) */
   .x-explorer .explorer-section .container {
+    display: block;
     background: rgba(0,0,0,0.32);
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: 14px;
@@ -46,6 +47,9 @@
 
   .x-explorer .x-pagehead { width: 100%; }
   .x-explorer .x-hero { width: 100%; }
+
+  .x-metrics-card { grid-area: metrics; }
+  .x-search-card { grid-area: search; }
   .x-explorer .x-main { width: 100%; }
 
   @media (max-width: 560px) {
@@ -161,11 +165,12 @@
   .x-hero {
     display: grid;
     grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    grid-template-areas: "metrics search";
     gap: 18px;
     align-items: stretch;
     margin-bottom: 18px;
   }
-  @media (max-width: 1040px) { .x-hero { grid-template-columns: 1fr; } }
+  @media (max-width: 1040px) { .x-hero { grid-template-columns: 1fr; grid-template-areas: "metrics" "search"; } }
 
   
   .x-card {
@@ -346,7 +351,7 @@
   </div>
 
   <div class="x-hero">
-    <div class="x-card x-stagger">
+    <div class="x-card x-stagger x-metrics-card">
       <div class="x-scan"></div>
       <div class="x-head">
         <div class="x-title"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20V4h2v14h14v2H4zm4-4l3-4 3 3 4-6 2 1-5 7-4-4-3 4-3 0z"/></svg>Network Metrics</div>
@@ -366,7 +371,7 @@
       </div>
     </div>
 
-    <div class="x-card x-stagger">
+    <div class="x-card x-stagger x-search-card">
       <div class="x-scan"></div>
       <div class="x-head">
         <div class="x-title"><svg class="x-ico spin" viewBox="0 0 24 24" fill="currentColor"><path d="M10 2a8 8 0 105.3 14l4.2 4.2 1.4-1.4-4.2-4.2A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>Search</div>
@@ -435,7 +440,7 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=41"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=42"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
 <!-- Block Details Modal -->
 <div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">

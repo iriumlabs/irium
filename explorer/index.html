@@ -133,6 +133,22 @@
 
   .x-sep { opacity: 0.55; }
 
+
+  .x-live { display: inline-flex; align-items: center; gap: 8px; }
+  .x-live-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: rgba(255, 59, 48, 0.95);
+    box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.55), 0 0 18px rgba(255, 59, 48, 0.35);
+    animation: xLivePulse 1.35s ease-in-out infinite;
+  }
+  @keyframes xLivePulse {
+    0%   { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.55), 0 0 18px rgba(255, 59, 48, 0.35); }
+    60%  { transform: scale(1.08); box-shadow: 0 0 0 10px rgba(255, 59, 48, 0.00), 0 0 26px rgba(255, 59, 48, 0.45); }
+    100% { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.00), 0 0 18px rgba(255, 59, 48, 0.35); }
+  }
+
   .x-techbar {
     display: flex;
     flex-wrap: wrap;
@@ -316,7 +332,7 @@
       <div class="x-panel x-panel-metrics x-stagger">
         <div class="x-head">
           <div class="x-title"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20V4h2v14h14v2H4zm4-4l3-4 3 3 4-6 2 1-5 7-4-4-3 4-3 0z"/></svg>Network Metrics</div>
-          <div class="x-meta x-muted">Live</div>
+          <div class="x-meta x-muted x-live"><span class="x-live-dot" aria-hidden="true"></span>Live</div>
         </div>
         <div class="x-note x-muted">Active Miners is an estimate: unique coinbase payout addresses seen in the last 144 blocks. Net Hashrate and Diff Delta are estimates computed from recent blocks. Active Peers is the current number of P2P connections to this node.</div>
 
@@ -397,7 +413,7 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=45"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=46"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
 <!-- Block Details Modal -->
 <div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">

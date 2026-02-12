@@ -14,7 +14,7 @@
 <style>
   /* Explorer v4 */
   :root {
-    --x-bg: rgba(0,0,0,0.26);
+    --x-bg: rgba(0,0,0,0.20);
     --x-border: rgba(255,255,255,0.12);
     --x-accent: #0066cc;
     --x-accent2: rgba(91,177,255,0.92);
@@ -39,20 +39,34 @@
     z-index: 1;
   }
 
-  .x-page-title {
+  .glow-title {
+    position: relative;
+    display: inline-block;
+    text-shadow: 0 0 18px rgba(99,102,241,0.55), 0 0 38px rgba(99,102,241,0.35);
+  }
+  .glow-title::after {
+    content: attr(data-text);
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    color: transparent;
+    text-shadow: 0 0 28px rgba(91,177,255,0.6), 0 0 60px rgba(91,177,255,0.45);
+    opacity: 0.85;
+    pointer-events: none;
+    mix-blend-mode: screen;
+  }
+
+.x-page-title {
     font-weight: 1000;
     text-transform: uppercase;
-    letter-spacing: 0.20em;
+    letter-spacing: 0.04em;
     color: rgba(255,255,255,0.98);
-    font-size: 48px;
-    line-height: 1.02;
-    text-shadow:
-      0 0 10px rgba(255,255,255,0.18),
-      0 0 22px rgba(91,177,255,0.30),
-      0 0 54px rgba(0,102,204,0.28);
-    animation: xGlow 2.6s ease-in-out infinite;
+    font-size: 46px;
+    line-height: 1.05;
+    margin: 0;
   }
-  @media (max-width: 560px) { .x-page-title { font-size: 32px; letter-spacing: 0.16em; } }
+  @media (max-width: 560px) { .x-page-title { font-size: 32px; } }
 
   @keyframes xGlow {
     0%, 100% { filter: brightness(1); }
@@ -88,8 +102,8 @@
   }
 
   .x-techpill svg {
-    width: 20px;
-    height: 20px;
+    width: 24px;
+    height: 24px;
     color: rgba(91,177,255,0.92);
     filter: drop-shadow(0 0 12px rgba(91,177,255,0.25));
   }
@@ -120,9 +134,9 @@
     display: flex;
     flex-direction: column;
     border: 1px solid var(--x-border);
-    border-radius: 18px;
+    border-radius: 14px;
     padding: 18px;
-    box-shadow: 0 16px 36px rgba(0,0,0,0.42);
+    box-shadow: 0 8px 28px rgba(0,0,0,0.35), 0 0 18px rgba(99,102,241,0.22);
     backdrop-filter: blur(7px);
     -webkit-backdrop-filter: blur(7px);
     position: relative;
@@ -137,6 +151,8 @@
       radial-gradient(520px 220px at 92% 18%, rgba(0,102,204,0.12), transparent 60%);
     pointer-events: none;
     opacity: 0.9;
+    box-shadow: 0 0 26px rgba(99,102,241,0.18), inset 0 0 22px rgba(99,102,241,0.08);
+    animation: glowPulse 4.5s ease-in-out infinite;
   }
   .x-card::after {
     content: "";
@@ -150,15 +166,20 @@
     position: absolute;
     inset: 0;
     pointer-events: none;
-    opacity: 0.26;
+    opacity: 0.12;
     background:
       linear-gradient(180deg, transparent 0%, rgba(91,177,255,0.16) 48%, transparent 100%),
       repeating-linear-gradient(90deg, rgba(255,255,255,0.04) 0, rgba(255,255,255,0.04) 1px, transparent 1px, transparent 24px);
     transform: translateY(-30%);
-    animation: xScan 5.8s linear infinite;
+    animation: xScan 8.5s linear infinite;
     mix-blend-mode: screen;
   }
   @keyframes xScan { 0% { transform: translateY(-40%); } 100% { transform: translateY(140%); } }
+
+  @keyframes glowPulse {
+    0%,100% { box-shadow: 0 0 26px rgba(99,102,241,0.18), inset 0 0 22px rgba(99,102,241,0.08); }
+    50%     { box-shadow: 0 0 40px rgba(99,102,241,0.28), inset 0 0 26px rgba(99,102,241,0.12); }
+  }
 
   .x-head {
     position: relative;
@@ -181,7 +202,7 @@
   }
   .x-meta { color: rgba(255,255,255,0.65); font-size: 12px; font-variant-numeric: tabular-nums; }
 
-  .x-ico { width: 22px; height: 22px; color: var(--x-accent2); filter: drop-shadow(0 0 14px rgba(91,177,255,0.38)); }
+  .x-ico { width: 26px; height: 26px; color: var(--x-accent2); filter: drop-shadow(0 0 14px rgba(91,177,255,0.38)); }
   .x-ico.spin { animation: xSpin 7s linear infinite; }
   .x-ico.pulse { animation: xPulse 1.8s ease-in-out infinite; }
   .x-ico.float { animation: xFloat 4.2s ease-in-out infinite; }
@@ -193,10 +214,10 @@
   .x-row { display: grid; grid-template-columns: 1fr 128px; gap: 10px; align-items: center; }
   @media (max-width: 560px) { .x-row { grid-template-columns: 1fr; } }
 
-  .x-input { width: 100%; padding: 12px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); border-radius: 12px; color: #fff; font-size: 15px; outline: none; }
+  .x-input { width: 100%; padding: 12px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; color: #fff; font-size: 15px; outline: none; }
   .x-input:focus { border-color: rgba(91,177,255,0.55); box-shadow: 0 0 0 4px rgba(0,102,204,0.18); }
 
-  .x-btn { padding: 9px 10px; background: linear-gradient(180deg, rgba(0,102,204,1), rgba(0,102,204,0.76)); color: #fff; border: 1px solid rgba(255,255,255,0.10); border-radius: 12px; font-size: 12px; cursor: pointer; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; transition: transform 0.16s ease, filter 0.16s ease; }
+  .x-btn { padding: 9px 10px; background: linear-gradient(180deg, rgba(0,102,204,1), rgba(0,102,204,0.76)); color: #fff; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px; font-size: 12px; cursor: pointer; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; transition: transform 0.16s ease, filter 0.16s ease; }
   .x-btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
 
   .x-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; flex: 1; align-content: start; }
@@ -270,16 +291,16 @@
 <div class="container">
 
   <div class="x-pagehead x-stagger">
-    <div class="x-page-title">BLOCK EXPLORER</div>
+    <h2 class="section-title glow-title x-page-title" data-text="BLOCK EXPLORER">BLOCK EXPLORER</h2>
     <div class="x-page-sub">
       <span class="x-chip"><span class="x-dot"></span><span class="x-meta" id="stats-updated">Loading...</span></span>
       <span class="x-sep">•</span>
       <span class="x-meta">Search blocks, transactions, and addresses</span>
     </div>
     <div class="x-techbar">
-      <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 2h6v2h-1v2h3a2 2 0 012 2v3h2v2h-2v3a2 2 0 01-2 2h-3v2h1v2H9v-2h1v-2H7a2 2 0 01-2-2v-3H3v-2h2V10a2 2 0 012-2h3V4H9V2zm-2 8v8h10v-8H7z"/></svg><span>P2P</span></div>
-      <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 7-4 13L8 9l4-7z"/></svg><span>PoW</span></div>
-      <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 1l9 4v6c0 5-3.8 9.7-9 11-5.2-1.3-9-6-9-11V5l9-4zm0 6a3 3 0 00-3 3v2H8v7h8v-7h-1v-2a3 3 0 00-3-3zm1 5h-2v-2a1 1 0 012 0v2z"/></svg><span>Secure</span></div>
+      <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4a3 3 0 100 6 3 3 0 000-6zm-8 16v-1c0-3 4-5 8-5s8 2 8 5v1H4z"/></svg><span>P2P</span></div>
+      <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 3h12v2H6V3zm4 4h4l1 4h4v2h-4.5l-1.2 6H9.7L8.5 13H4v-2h4l2-4z"/></svg><span>PoW</span></div>
+      <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 4v6c0 6-4 10-8 10S4 18 4 12V6l8-4zm0 6a2 2 0 00-2 2v2H9v6h6v-6h-1v-2a2 2 0 00-2-2z"/></svg><span>Secure</span></div>
     </div>
   </div>
 
@@ -287,24 +308,24 @@
     <div class="x-card x-stagger">
       <div class="x-scan"></div>
       <div class="x-head">
-        <div class="x-title"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v14H3V5z"/></svg>Network Metrics</div>
+        <div class="x-title"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20V4h2v14h14v2H4zm4-4l3-4 3 3 4-6 2 1-5 7-4-4-3 4-3 0z"/></svg>Network Metrics</div>
         <div class="x-meta x-muted">Live</div>
       </div>
 
       <div class="x-stats">
-        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M4 4h16v16H4V4z"/></svg><div class="x-label">Height</div></div><div class="x-value" id="current-height">Loading...</div></div>
-        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M4 7h16v3H4V7z"/></svg><div class="x-label">Total Blocks</div></div><div class="x-value" id="total-blocks">Loading...</div></div>
-        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 100 20 10 10 0 000-20z"/></svg><div class="x-label">Supply</div></div><div class="x-value" id="total-supply">Loading...</div></div>
-        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17h4v-7H3v7z"/></svg><div class="x-label">Net Hashrate</div></div><div class="x-value" id="net-hashrate">Loading...</div></div>
-        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 7-4 13L8 9l4-7z"/></svg><div class="x-label">Difficulty</div></div><div class="x-value" id="net-difficulty">Loading...</div></div>
-        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M4 12a8 8 0 1116 0"/></svg><div class="x-label">Diff Δ</div></div><div class="x-value" id="diff-growth">Loading...</div></div>
+        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l4 4h-3v10h-2V7H8l4-4zm-7 16h14v2H5v-2z"/></svg><div class="x-label">Height</div></div><div class="x-value" id="current-height">Loading...</div></div>
+        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M7 3h10v4H7V3zm-2 6h14v12H5V9zm2 2v8h10v-8H7z"/></svg><div class="x-label">Total Blocks</div></div><div class="x-value" id="total-blocks">Loading...</div></div>
+        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2c2.8 0 5 2.2 5 5s-2.2 5-5 5-5-2.2-5-5 2.2-5 5-5zm-8 20c0-4.4 3.6-8 8-8s8 3.6 8 8H4z"/></svg><div class="x-label">Supply</div></div><div class="x-value" id="total-supply">Loading...</div></div>
+        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a10 10 0 1010 10h-2a8 8 0 11-8-8V2zm1 5h-2v7l6 3 1-1.7-5-2.3V7z"/></svg><div class="x-label">Net Hashrate</div></div><div class="x-value" id="net-hashrate">Loading...</div></div>
+        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3 6 7 1-5 4 1 7-6-3-6 3 1-7-5-4 7-1 3-6z"/></svg><div class="x-label">Difficulty</div></div><div class="x-value" id="net-difficulty">Loading...</div></div>
+        <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M3 17l6-6 4 4 7-7 1 1-8 8-4-4-5 5H3z"/></svg><div class="x-label">Diff Δ</div></div><div class="x-value" id="diff-growth">Loading...</div></div>
       </div>
     </div>
 
     <div class="x-card x-stagger">
       <div class="x-scan"></div>
       <div class="x-head">
-        <div class="x-title"><svg class="x-ico spin" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l9 6-9 6-9-6 9-6z"/></svg>Search</div>
+        <div class="x-title"><svg class="x-ico spin" viewBox="0 0 24 24" fill="currentColor"><path d="M10 2a8 8 0 105.3 14l4.2 4.2 1.4-1.4-4.2-4.2A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>Search</div>
         <div class="x-meta x-muted">Block / Tx / Address</div>
       </div>
       <div class="x-search">
@@ -318,7 +339,7 @@
     <div class="x-card">
       <div class="x-scan"></div>
       <div class="x-head">
-        <div class="x-title"><svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l9 6-9 6-9-6 9-6z"/></svg>Blocks</div>
+        <div class="x-title"><svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M5 4h14v4H5V4zm0 6h14v10H5V10zm2 2v6h10v-6H7z"/></svg>Blocks</div>
         <div class="x-meta x-muted" id="blocks-progress">Loading...</div>
       </div>
       <div id="blocks-list" class="x-list"><div class="x-muted">Loading blocks...</div></div>

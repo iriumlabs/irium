@@ -21,6 +21,35 @@
 <link rel="icon" type="image/svg+xml" href="logo.svg?v=4">
 
 <style>
+
+  /* Homepage: animated IRIUM coin glow */
+  .hero-coin {
+    display: inline-block;
+    transform-origin: 50% 50%;
+    will-change: transform, filter;
+    filter:
+      drop-shadow(0 0 10px rgba(91,177,255,0.22))
+      drop-shadow(0 0 24px rgba(99,102,241,0.18));
+    animation: iriumCoinGlow 3.8s ease-in-out infinite;
+  }
+  @keyframes iriumCoinGlow {
+    0%, 100% {
+      transform: translateY(0) rotate(-1.5deg) scale(1);
+      filter:
+        drop-shadow(0 0 10px rgba(91,177,255,0.22))
+        drop-shadow(0 0 24px rgba(99,102,241,0.18));
+    }
+    50% {
+      transform: translateY(-6px) rotate(1.5deg) scale(1.03);
+      filter:
+        drop-shadow(0 0 16px rgba(91,177,255,0.38))
+        drop-shadow(0 0 42px rgba(99,102,241,0.28));
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .hero-coin { animation: none; }
+  }
+
   .feature-card { cursor: pointer; }
   .feature-card:focus { outline: 2px solid rgba(91,177,255,0.6); outline-offset: 4px; }
   .feature-modal {

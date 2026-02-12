@@ -17,7 +17,7 @@
     <meta name="twitter:description" content="DNS-free PoW blockchain. 100M supply. Fair mining. Open source. Join the revolution!">
 
     <meta name="twitter:image" content="https://www.iriumlabs.org/irium-og-image.png?v=4">
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 <link rel="icon" type="image/svg+xml" href="logo.svg?v=4">
 
 <style>
@@ -484,9 +484,16 @@ Email
   const DPR = Math.min(window.devicePixelRatio || 1, 2);
   let w = 0, h = 0;
 
+  // Mouse parallax (subtle)
+  let mx = 0, my = 0;
+  window.addEventListener('mousemove', (e) => {
+    mx = (e.clientX / window.innerWidth) * 2 - 1;
+    my = (e.clientY / window.innerHeight) * 2 - 1;
+  }, { passive: true });
+
   function resize() {
-    w = Math.floor(window.innerWidth);
-    h = Math.floor(window.innerHeight);
+    w = Math.max(1, Math.floor(window.innerWidth));
+    h = Math.max(1, Math.floor(window.innerHeight));
     canvas.width = Math.floor(w * DPR);
     canvas.height = Math.floor(h * DPR);
     canvas.style.width = w + 'px';
@@ -496,136 +503,119 @@ Email
 
   const isMobile = () => Math.min(window.innerWidth, window.innerHeight) < 720;
 
-  const points = [];
-  function resetPoints() {
-    points.length = 0;
-    const n = isMobile() ? 52 : 86;
+  // Neon tunnel particles in pseudo-3D.
+  const parts = [];
+  function reset() {
+    parts.length = 0;
+    const n = isMobile() ? 240 : 380;
     for (let i = 0; i < n; i++) {
-      points.push({
-        x: (Math.random() * 2 - 1) * 1.2,
-        y: (Math.random() * 2 - 1) * 1.0,
-        z: Math.random() * 1.0,
-        vx: (Math.random() * 2 - 1) * 0.0008,
-        vy: (Math.random() * 2 - 1) * 0.0007,
-        vz: (Math.random() * 2 - 1) * 0.0006,
+      parts.push({
+        a: Math.random() * Math.PI * 2,
+        r: 0.15 + Math.random() * 0.95,
+        z: Math.random(),
+        sp: 0.0007 + Math.random() * 0.0018,
+        hue: 205 + Math.random() * 75,
       });
     }
   }
 
-  function proj(p) {
-    const depth = 0.85 + p.z * 1.6;
-    const sx = (p.x / depth) * (w * 0.52) + (w * 0.5);
-    const sy = (p.y / depth) * (h * 0.45) + (h * 0.48);
-    const r = (1 / depth) * 2.4;
-    return { sx, sy, r, depth };
-  }
-
-  function draw(t) {
+  function frame(t) {
     ctx.clearRect(0, 0, w, h);
 
-    const g = ctx.createRadialGradient(w * 0.5, h * 0.45, 20, w * 0.5, h * 0.45, Math.max(w, h) * 0.7);
-    g.addColorStop(0, 'rgba(99,102,241,0.10)');
-    g.addColorStop(0.45, 'rgba(91,177,255,0.06)');
-    g.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = g;
+    // Background glow.
+    const bg = ctx.createRadialGradient(w*0.5, h*0.45, 20, w*0.5, h*0.45, Math.max(w,h)*0.8);
+    bg.addColorStop(0, 'rgba(99,102,241,0.14)');
+    bg.addColorStop(0.4, 'rgba(91,177,255,0.08)');
+    bg.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, w, h);
 
-    // Subtle perspective grid.
+    // Horizon grid (faint)
     ctx.save();
-    ctx.strokeStyle = 'rgba(91,177,255,0.10)';
+    ctx.strokeStyle = 'rgba(91,177,255,0.08)';
     ctx.lineWidth = 1;
-    const horizon = h * 0.62;
-    for (let i = 0; i < 14; i++) {
-      const k = i / 13;
-      const y = horizon + k * (h * 0.6);
-      const a = 1 - k;
-      ctx.globalAlpha = 0.08 + a * 0.22;
+    const horizon = h * 0.64;
+    for (let i = 0; i < 12; i++) {
+      const k = i / 11;
+      const y = horizon + k * (h * 0.55);
+      ctx.globalAlpha = 0.06 + (1 - k) * 0.14;
       ctx.beginPath();
-      ctx.moveTo(w * 0.1, y);
-      ctx.lineTo(w * 0.9, y);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 0.12;
-    for (let i = -8; i <= 8; i++) {
-      const x = w * 0.5 + i * (w * 0.06);
-      ctx.beginPath();
-      ctx.moveTo(x, h);
-      ctx.lineTo(w * 0.5 + i * (w * 0.014), horizon);
+      ctx.moveTo(w * 0.12, y);
+      ctx.lineTo(w * 0.88, y);
       ctx.stroke();
     }
     ctx.restore();
 
-    // Update + draw points.
     const time = t * 0.001;
-    const rot = time * 0.07;
-    const cr = Math.cos(rot), sr = Math.sin(rot);
+    const spin = time * 0.35;
+    const cr = Math.cos(spin), sr = Math.sin(spin);
 
-    const pp = [];
-    for (const p of points) {
-      p.x += p.vx;
-      p.y += p.vy;
-      p.z += p.vz;
+    // Sort far->near for nicer alpha layering
+    parts.sort((a, b) => b.z - a.z);
 
-      if (p.x < -1.4) p.x = 1.4;
-      if (p.x > 1.4) p.x = -1.4;
-      if (p.y < -1.2) p.y = 1.2;
-      if (p.y > 1.2) p.y = -1.2;
-      if (p.z < 0) p.z = 1.0;
-      if (p.z > 1.0) p.z = 0;
+    const cx = w * 0.5 + mx * (w * 0.03);
+    const cy = h * 0.48 + my * (h * 0.03);
+    const fov = Math.min(w, h) * 0.9;
 
-      const x = p.x * cr - p.y * sr;
-      const y = p.x * sr + p.y * cr;
-      pp.push({ x, y, z: p.z });
-    }
-
-    // Links.
     ctx.save();
-    ctx.lineWidth = 1;
-    for (let i = 0; i < pp.length; i++) {
-      const a = pp[i];
-      const pa = proj(a);
-      for (let j = i + 1; j < pp.length; j++) {
-        const b = pp[j];
-        const dx = a.x - b.x;
-        const dy = a.y - b.y;
-        const dz = a.z - b.z;
-        const d2 = dx*dx + dy*dy + dz*dz;
-        if (d2 > 0.10) continue;
-        const pb = proj(b);
-        const alpha = Math.max(0, 0.14 - d2) * 1.8;
-        ctx.strokeStyle = `rgba(99,102,241,${alpha.toFixed(3)})`;
-        ctx.beginPath();
-        ctx.moveTo(pa.sx, pa.sy);
-        ctx.lineTo(pb.sx, pb.sy);
-        ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+
+    for (const p of parts) {
+      // Move towards the viewer
+      p.z -= p.sp;
+      if (p.z < 0.02) {
+        p.z = 1.0;
+        p.a = Math.random() * Math.PI * 2;
+        p.r = 0.15 + Math.random() * 0.95;
+        p.sp = 0.0007 + Math.random() * 0.0018;
+        p.hue = 205 + Math.random() * 75;
       }
+
+      // Helical tunnel shape
+      const a = p.a + time * 0.9;
+      let x = Math.cos(a) * p.r;
+      let y = Math.sin(a) * p.r * 0.62;
+
+      // Slow global spin
+      const rx = x * cr - y * sr;
+      const ry = x * sr + y * cr;
+
+      // Perspective
+      const depth = 0.25 + p.z * 2.3;
+      const sx = cx + (rx / depth) * fov * 0.22;
+      const sy = cy + (ry / depth) * fov * 0.22;
+      const rad = (1 / depth) * 2.2;
+
+      const alpha = Math.max(0.02, 0.30 - p.z * 0.20);
+      ctx.fillStyle = `hsla(${p.hue}, 92%, 62%, ${alpha.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, rad, 0, Math.PI * 2);
+      ctx.fill();
+
+      // A tiny streak to imply motion
+      ctx.strokeStyle = `hsla(${p.hue}, 92%, 62%, ${(alpha*0.65).toFixed(3)})`;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + rx * 8, sy + ry * 8);
+      ctx.stroke();
     }
+
     ctx.restore();
 
-    // Points.
-    for (const a of pp) {
-      const pr = proj(a);
-      const a1 = Math.max(0.10, 0.42 - pr.depth * 0.12);
-      ctx.fillStyle = `rgba(91,177,255,${a1.toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(pr.sx, pr.sy, pr.r, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  function start() {
-    if (reduceMotion) {
-      draw(performance.now());
-      return;
-    }
-    const tick = (t) => { draw(t); requestAnimationFrame(tick); };
-    requestAnimationFrame(tick);
+    if (reduceMotion) return;
+    requestAnimationFrame(frame);
   }
 
   resize();
-  resetPoints();
-  window.addEventListener('resize', () => { resize(); resetPoints(); }, { passive: true });
-  start();
+  reset();
+  window.addEventListener('resize', () => { resize(); reset(); }, { passive: true });
+
+  if (reduceMotion) {
+    frame(performance.now());
+  } else {
+    requestAnimationFrame(frame);
+  }
 })();
 </script>
 

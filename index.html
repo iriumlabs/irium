@@ -24,6 +24,49 @@
 
   /* Homepage: animated IRIUM coin glow */
 
+
+  /* Homepage: lightweight 3D-ish canvas background */
+  #hero3d {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: -3;
+    opacity: 0.65;
+  }
+  .stars { z-index: -2; }
+
+  /* Coin holographic overlay */
+  .hero .coin-container { isolation: isolate; }
+  .hero .coin-container .coin-holo {
+    position: absolute;
+    inset: 10px;
+    border-radius: 999px;
+    pointer-events: none;
+    z-index: 4;
+
+    background:
+      radial-gradient(circle at 30% 25%, rgba(255,255,255,0.22), transparent 40%),
+      linear-gradient(120deg,
+        rgba(91,177,255,0.00) 0%,
+        rgba(91,177,255,0.10) 20%,
+        rgba(99,102,241,0.16) 45%,
+        rgba(255,255,255,0.10) 60%,
+        rgba(91,177,255,0.00) 85%
+      );
+
+    mix-blend-mode: screen;
+    opacity: 0.55;
+    filter: blur(0.2px) saturate(1.05);
+    animation: iriumHoloSweep 3.6s ease-in-out infinite;
+  }
+
+  @keyframes iriumHoloSweep {
+    0%, 100% { transform: translateX(-10px) translateY(6px) rotate(-2deg); opacity: 0.45; }
+    50% { transform: translateX(10px) translateY(-6px) rotate(2deg); opacity: 0.65; }
+  }
+
   /*
     Note: `style.css` defines `.hero-coin` twice and `.coin-container` clips children.
     To make the glow always visible, we glow the container (box-shadow) and animate
@@ -164,6 +207,7 @@
 </head>
 <body>
 
+<canvas id="hero3d" aria-hidden="true"></canvas>
 <div class="stars"></div>
 
 <nav class="nav">
@@ -201,6 +245,7 @@
 <div class="container hero-content">
 <div class="coin-container">
 <img src="assets/img/irium-logo-alt-transparent.png?v=1" alt="Irium Coin" class="hero-coin">
+<span class="coin-holo" aria-hidden="true"></span>
 </div>
 <h1 class="glitch" data-text="IRIUM">IRIUM</h1>
 <p class="hero-subtitle">Next-Generation DNS-Free Blockchain</p>
@@ -424,6 +469,164 @@ Email
     }
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
   })();
+</script>
+
+
+<script>
+(function () {
+  const canvas = document.getElementById('hero3d');
+  if (!canvas) return;
+
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const ctx = canvas.getContext('2d', { alpha: true });
+  if (!ctx) return;
+
+  const DPR = Math.min(window.devicePixelRatio || 1, 2);
+  let w = 0, h = 0;
+
+  function resize() {
+    w = Math.floor(window.innerWidth);
+    h = Math.floor(window.innerHeight);
+    canvas.width = Math.floor(w * DPR);
+    canvas.height = Math.floor(h * DPR);
+    canvas.style.width = w + 'px';
+    canvas.style.height = h + 'px';
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  }
+
+  const isMobile = () => Math.min(window.innerWidth, window.innerHeight) < 720;
+
+  const points = [];
+  function resetPoints() {
+    points.length = 0;
+    const n = isMobile() ? 52 : 86;
+    for (let i = 0; i < n; i++) {
+      points.push({
+        x: (Math.random() * 2 - 1) * 1.2,
+        y: (Math.random() * 2 - 1) * 1.0,
+        z: Math.random() * 1.0,
+        vx: (Math.random() * 2 - 1) * 0.0008,
+        vy: (Math.random() * 2 - 1) * 0.0007,
+        vz: (Math.random() * 2 - 1) * 0.0006,
+      });
+    }
+  }
+
+  function proj(p) {
+    const depth = 0.85 + p.z * 1.6;
+    const sx = (p.x / depth) * (w * 0.52) + (w * 0.5);
+    const sy = (p.y / depth) * (h * 0.45) + (h * 0.48);
+    const r = (1 / depth) * 2.4;
+    return { sx, sy, r, depth };
+  }
+
+  function draw(t) {
+    ctx.clearRect(0, 0, w, h);
+
+    const g = ctx.createRadialGradient(w * 0.5, h * 0.45, 20, w * 0.5, h * 0.45, Math.max(w, h) * 0.7);
+    g.addColorStop(0, 'rgba(99,102,241,0.10)');
+    g.addColorStop(0.45, 'rgba(91,177,255,0.06)');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+
+    // Subtle perspective grid.
+    ctx.save();
+    ctx.strokeStyle = 'rgba(91,177,255,0.10)';
+    ctx.lineWidth = 1;
+    const horizon = h * 0.62;
+    for (let i = 0; i < 14; i++) {
+      const k = i / 13;
+      const y = horizon + k * (h * 0.6);
+      const a = 1 - k;
+      ctx.globalAlpha = 0.08 + a * 0.22;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.1, y);
+      ctx.lineTo(w * 0.9, y);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 0.12;
+    for (let i = -8; i <= 8; i++) {
+      const x = w * 0.5 + i * (w * 0.06);
+      ctx.beginPath();
+      ctx.moveTo(x, h);
+      ctx.lineTo(w * 0.5 + i * (w * 0.014), horizon);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // Update + draw points.
+    const time = t * 0.001;
+    const rot = time * 0.07;
+    const cr = Math.cos(rot), sr = Math.sin(rot);
+
+    const pp = [];
+    for (const p of points) {
+      p.x += p.vx;
+      p.y += p.vy;
+      p.z += p.vz;
+
+      if (p.x < -1.4) p.x = 1.4;
+      if (p.x > 1.4) p.x = -1.4;
+      if (p.y < -1.2) p.y = 1.2;
+      if (p.y > 1.2) p.y = -1.2;
+      if (p.z < 0) p.z = 1.0;
+      if (p.z > 1.0) p.z = 0;
+
+      const x = p.x * cr - p.y * sr;
+      const y = p.x * sr + p.y * cr;
+      pp.push({ x, y, z: p.z });
+    }
+
+    // Links.
+    ctx.save();
+    ctx.lineWidth = 1;
+    for (let i = 0; i < pp.length; i++) {
+      const a = pp[i];
+      const pa = proj(a);
+      for (let j = i + 1; j < pp.length; j++) {
+        const b = pp[j];
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dz = a.z - b.z;
+        const d2 = dx*dx + dy*dy + dz*dz;
+        if (d2 > 0.10) continue;
+        const pb = proj(b);
+        const alpha = Math.max(0, 0.14 - d2) * 1.8;
+        ctx.strokeStyle = `rgba(99,102,241,${alpha.toFixed(3)})`;
+        ctx.beginPath();
+        ctx.moveTo(pa.sx, pa.sy);
+        ctx.lineTo(pb.sx, pb.sy);
+        ctx.stroke();
+      }
+    }
+    ctx.restore();
+
+    // Points.
+    for (const a of pp) {
+      const pr = proj(a);
+      const a1 = Math.max(0.10, 0.42 - pr.depth * 0.12);
+      ctx.fillStyle = `rgba(91,177,255,${a1.toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(pr.sx, pr.sy, pr.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  function start() {
+    if (reduceMotion) {
+      draw(performance.now());
+      return;
+    }
+    const tick = (t) => { draw(t); requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  }
+
+  resize();
+  resetPoints();
+  window.addEventListener('resize', () => { resize(); resetPoints(); }, { passive: true });
+  start();
+})();
 </script>
 
 </body>

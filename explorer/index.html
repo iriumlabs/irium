@@ -23,6 +23,10 @@
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
     position: relative;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 18px;
+    align-items: stretch;
   }
   .x-explorer .hero .container:before {
     content: "";
@@ -418,7 +422,7 @@ Email
 </div>
 </footer>
 
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=36"></script>
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=37"></script>
 <script>console.log("Script tag found - explorer.js should be loaded");</script>
 <!-- Block Details Modal -->
 <div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">

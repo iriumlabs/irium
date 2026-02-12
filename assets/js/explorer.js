@@ -501,12 +501,35 @@ async function loadMoreBlocks() {
     __blocksLoading = false;
   }
 }
+
+
+function setupInfiniteScroll() {
+  const sentinelId = 'blocks-sentinel';
+  if (document.getElementById(sentinelId)) return;
+  const wrap = document.getElementById('load-more-wrap');
+  if (!wrap) return;
+  const sentinel = document.createElement('div');
+  sentinel.id = sentinelId;
+  sentinel.style.height = '1px';
+  wrap.appendChild(sentinel);
+
+  const obs = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (e.isIntersecting) {
+        loadMoreBlocks();
+      }
+    }
+  }, { root: null, rootMargin: '600px', threshold: 0.01 });
+
+  obs.observe(sentinel);
+}
 function initExplorer() {
   console.log('Initializing Explorer...');
   loadStats();
   loadMiningMetrics();
   loadBlocksPage(30, null, false);
   ensureLoadMoreButton();
+  setupInfiniteScroll();
 }
 
 // Initialize when DOM is ready

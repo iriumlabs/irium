@@ -161,6 +161,12 @@
     <p>The miner needs a synced node RPC. Start <code>iriumd</code> first and set <code>IRIUM_MINER_ADDRESS</code>.</p>
   </div>
   <div class="feature-card">
+    <div class="feature-icon">🌐</div>
+    <h3>Miner template error: InvalidContentType</h3>
+    <p>This is an RPC protocol mismatch. If node RPC is HTTP, set <code>IRIUM_NODE_RPC=http://127.0.0.1:38300</code>. If node RPC is HTTPS, keep <code>https://127.0.0.1:38300</code>.</p>
+    <p>Verify both: <code>curl -s http://127.0.0.1:38300/status</code> and <code>curl -sk https://127.0.0.1:38300/status</code>, then restart miner.</p>
+  </div>
+  <div class="feature-card">
     <div class="feature-icon">🔐</div>
     <h3>IRIUM_RPC_TOKEN and RPC errors</h3>
     <p>Use the same token for node + miner or wallet. 401 = bad token, 429 = rate limit.</p>

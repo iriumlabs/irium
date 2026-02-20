@@ -928,15 +928,15 @@
             <tr><th>Endpoint</th><th>Purpose</th><th>Sample</th></tr>
           </thead>
           <tbody>
-            <tr><td><code>/api/stats</code></td><td>Global chain + peer + miner counters</td><td><code>{"height":14391,"peers_connected":29}</code></td></tr>
-            <tr><td><code>/api/mining</code></td><td>Hashrate, difficulty, timing series</td><td><code>{"hashrate":...,"difficulty":...}</code></td></tr>
-            <tr><td><code>/api/blocks?limit=N</code></td><td>Recent block feed with miner addresses</td><td><code>{"blocks":[...]}</code></td></tr>
-            <tr><td><code>/api/block/{height}</code></td><td>Single block detail by height</td><td><code>{"height":...,"header":...}</code></td></tr>
-            <tr><td><code>/api/pool/*</code></td><td>Pool backend telemetry (optional)</td><td><code>May be private/unavailable</code></td></tr>
+            <tr><td><a href="https://api.iriumlabs.org/api/stats" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/stats</code></a></td><td>Global chain + peer + miner counters</td><td><code>{"height":14391,"peers_connected":29}</code></td></tr>
+            <tr><td><a href="https://api.iriumlabs.org/api/mining" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/mining</code></a></td><td>Hashrate, difficulty, timing series</td><td><code>{"hashrate":...,"difficulty":...}</code></td></tr>
+            <tr><td><a href="https://api.iriumlabs.org/api/blocks?limit=20" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/blocks?limit=20</code></a></td><td>Recent block feed with miner addresses</td><td><code>{"blocks":[...]}</code></td></tr>
+            <tr><td><a href="https://api.iriumlabs.org/api/block/14391" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/block/{height}</code></a></td><td>Single block detail by height</td><td><code>{"height":...,"header":...}</code></td></tr>
+            <tr><td><code>https://api.iriumlabs.org/api/pool/*</code></td><td>Pool backend telemetry (optional)</td><td><code>May be private/unavailable</code></td></tr>
           </tbody>
         </table>
       </div>
-      <p class="tiny" style="margin-top:8px;">All public responses are fetched live from <code>https://api.iriumlabs.org</code>. Build monitoring on top of these routes.</p>
+      <p class="tiny" style="margin-top:8px;">All public responses are fetched live from <code>https://api.iriumlabs.org/api</code>. Use the full endpoint URLs above.</p>
     </section>
 
     <section class="panel" style="margin-top:14px;">

@@ -978,8 +978,8 @@
       return `<tr>
         <td>${fmtInt(b.height)}</td>
         <td>${fmtTime(b?.header?.time)}</td>
-        <td class=\"mono\" title=\"${hash}\">${shortHash(hash, 14, 10)}</td>
-        <td class=\"mono\" title=\"${miner}\">${shortHash(miner, 12, 10)}</td>
+        <td class=\"mono mono-wrap\" title=\"${hash}\">${hash}</td>
+        <td class=\"mono mono-wrap\" title=\"${miner}\">${miner}</td>
         <td class=\"green\">${fmtNum(reward, 2)} IRM</td>
         <td>${txCount}</td>
       </tr>`;
@@ -999,10 +999,10 @@
       const ref = b?.header?.hash || "";
       return `<tr>
         <td>${fmtInt(b.height)}</td>
-        <td class=\"mono\" title=\"${miner}\">${shortHash(miner, 14, 12)}</td>
+        <td class=\"mono mono-wrap\" title=\"${miner}\">${miner}</td>
         <td class=\"green\">${fmtNum(reward, 2)}</td>
         <td><span class=\"green\">On-chain</span></td>
-        <td class=\"mono\" title=\"${ref}\">${shortHash(ref, 14, 10)}</td>
+        <td class=\"mono mono-wrap\" title=\"${ref}\">${ref}</td>
       </tr>`;
     }).join("");
   }

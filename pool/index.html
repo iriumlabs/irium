@@ -932,7 +932,9 @@
             <tr><td><a href="https://api.iriumlabs.org/api/mining" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/mining</code></a></td><td>Hashrate, difficulty, timing series</td><td><code>{"hashrate":...,"difficulty":...}</code></td></tr>
             <tr><td><a href="https://api.iriumlabs.org/api/blocks?limit=20" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/blocks?limit=20</code></a></td><td>Recent block feed with miner addresses</td><td><code>{"blocks":[...]}</code></td></tr>
             <tr><td><a href="https://api.iriumlabs.org/api/block/14391" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/block/{height}</code></a></td><td>Single block detail by height</td><td><code>{"height":...,"header":...}</code></td></tr>
-            <tr><td><code>https://api.iriumlabs.org/api/pool/*</code></td><td>Pool backend telemetry (optional)</td><td><code>May be private/unavailable</code></td></tr>
+            <tr><td><a href="https://api.iriumlabs.org/api/pool/stats" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/stats</code></a></td><td>Pool backend telemetry</td><td><code>{"workers_online":8,"difficulty":...}</code></td></tr>
+            <tr><td><a href="https://api.iriumlabs.org/api/pool/payouts?limit=20" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/payouts?limit=20</code></a></td><td>Recent payout ledger</td><td><code>{"payouts":[...]}</code></td></tr>
+            <tr><td><code>https://api.iriumlabs.org/api/pool/account/{address}</code></td><td>Address payout and block summary</td><td><code>{"blocks_found":...}</code></td></tr>
           </tbody>
         </table>
       </div>
@@ -1242,26 +1244,32 @@ pass=x</pre>
     }).join("");
   }
 
-  function renderPayouts(blocks) {
+  function renderPayouts(data) {
     const body = document.getElementById("payouts-body");
     if (!body) return;
-    if (!Array.isArray(blocks) || blocks.length === 0) {
+
+    const payouts = Array.isArray(data?.payouts) ? data.payouts : (Array.isArray(data) ? data : []);
+    if (!payouts.length) {
       body.innerHTML = "<tr><td colspan=\"5\">No payout data</td></tr>";
       return;
     }
-    body.innerHTML = blocks.slice(0, 40).map((b) => {
-      const miner = b?.miner_address || b?.miner || "N/A";
-      const reward = rewardIrm(b);
-      const ref = b?.header?.hash || "";
+
+    body.innerHTML = payouts.slice(0, 40).map((p) => {
+      const miner = p?.address || p?.miner_address || p?.miner || "N/A";
+      const reward = Number(p?.reward_irm ?? p?.reward ?? 0);
+      const ref = p?.hash || p?.block_hash || "";
+      const status = p?.status || "on_chain";
+      const height = Number(p?.height || 0);
       return `<tr>
-        <td>${fmtInt(b.height)}</td>
+        <td>${fmtInt(height)}</td>
         <td class=\"mono mono-wrap\" title=\"${miner}\">${miner}</td>
         <td class=\"reward-value\">${fmtNum(reward, 2)} IRM</td>
-        <td><span class=\"green\">On-chain</span></td>
+        <td><span class=\"green\">${status === "on_chain" ? "On-chain" : status}</span></td>
         <td class=\"mono mono-wrap\" title=\"${ref}\">${ref}</td>
       </tr>`;
     }).join("");
   }
+
 
   function applyKpis(stats, mining) {
     setText("k-height", fmtInt(stats?.height));
@@ -1356,15 +1364,13 @@ pass=x</pre>
 
   async function updateBackendTelemetry() {
     const stats = await fetchOptional('/pool/stats');
-    const miners = await fetchOptional('/miners');
-    const workers = await fetchOptional('/workers');
-    const payouts = await fetchOptional('/payouts');
+    const payouts = await fetchOptional('/pool/payouts?limit=1');
 
-    const hasData = !!(stats || miners || workers || payouts);
-    setText('b-workers', stats?.workers_online ?? workers?.online ?? workers?.count ?? 'N/A');
-    setText('b-accepted', stats?.accepted_shares ?? miners?.accepted_shares ?? 'N/A');
-    setText('b-rejected', stats?.rejected_shares ?? miners?.rejected_shares ?? 'N/A');
-    setText('b-pending', payouts?.pending_count ?? payouts?.pending ?? 'N/A');
+    const hasData = !!stats;
+    setText('b-workers', stats?.workers_online ?? 'N/A');
+    setText('b-accepted', stats?.accepted_shares ?? 'N/A');
+    setText('b-rejected', stats?.rejected_shares ?? 'N/A');
+    setText('b-pending', payouts?.count ?? payouts?.pending_count ?? 'N/A');
 
     const badge = document.getElementById('backend-badge');
     if (badge) {
@@ -1377,10 +1383,11 @@ pass=x</pre>
     const note = document.getElementById('b-note');
     if (note) {
       note.textContent = hasData
-        ? 'Backend telemetry is publicly exposed by API and updated live.'
+        ? 'Backend telemetry is live from /api/pool/stats and /api/pool/payouts.'
         : 'Direct pool backend metrics are not publicly exposed; chain-derived telemetry is shown above.';
     }
   }
+
 
   function updateStatusSignals() {
     const nowSec = Date.now() / 1000;
@@ -1412,35 +1419,54 @@ pass=x</pre>
     }
   }
 
-  function renderAccountPortal() {
+  async function renderAccountPortal() {
     const input = document.getElementById('acct-input');
     const out = document.getElementById('acct-result');
     if (!input || !out) return;
+
     const addr = (input.value || '').trim();
     if (!addr) {
       out.textContent = 'Enter a payout address.';
       return;
     }
 
-    const hits = (blocksCache || []).filter((b) => (b?.miner_address || b?.miner || '') === addr);
-    const total = hits.reduce((a, b) => a + rewardIrm(b), 0);
-    const latest = hits.sort((a,b)=>Number(b.height||0)-Number(a.height||0))[0];
+    out.textContent = 'Loading account...';
+    try {
+      const data = await fetchJson(`/pool/account/${encodeURIComponent(addr)}?window=5000&limit=12`);
+      const rows = Array.isArray(data?.records) ? data.records : [];
+      const latest = data?.last_found;
 
-    out.innerHTML = `
-      <div><b class="mono">${addr}</b></div>
-      <div style="margin-top:6px;">Blocks found in window: <b>${hits.length}</b></div>
-      <div>Total coinbase rewards in window: <b class="green">${fmtNum(total,2)} IRM</b></div>
-      <div>Pending payout: <b>N/A (SOLO direct reward model)</b></div>
-      <div>Last found block: <b>${latest ? fmtInt(latest.height) : 'None in current window'}</b></div>
-    `;
+      let table = '<div style="margin-top:8px;"><b>Recent records</b></div>';
+      if (!rows.length) {
+        table += '<div class="muted" style="margin-top:6px;">No records found in current account window.</div>';
+      } else {
+        table += '<div class="table-wrap" style="margin-top:8px;"><table class="pool-table"><thead><tr><th>Height</th><th>Reward</th><th>Status</th><th>Hash</th></tr></thead><tbody>';
+        table += rows.map((r) => `<tr><td>${fmtInt(r?.height)}</td><td class="reward-value">${fmtNum(Number(r?.reward_irm ?? 0),2)} IRM</td><td>${r?.status || 'on_chain'}</td><td class="mono mono-wrap" title="${r?.hash || ''}">${r?.hash || ''}</td></tr>`).join('');
+        table += '</tbody></table></div>';
+      }
+
+      out.innerHTML = `
+        <div><b class="mono">${data?.address || addr}</b></div>
+        <div style="margin-top:6px;">Blocks found: <b>${fmtInt(data?.blocks_found ?? 0)}</b></div>
+        <div>Total rewards: <b class="green">${fmtNum(Number(data?.total_rewards_irm ?? 0),2)} IRM</b></div>
+        <div>Paid total: <b class="green">${fmtNum(Number(data?.paid_total_irm ?? 0),2)} IRM</b></div>
+        <div>Pending: <b>${data?.pending_balance_irm == null ? 'N/A (solo on-chain)' : `${fmtNum(Number(data?.pending_balance_irm),2)} IRM`}</b></div>
+        <div>Last found block: <b>${latest?.height ? fmtInt(latest.height) : 'None in window'}</b></div>
+        ${table}
+      `;
+    } catch (err) {
+      out.innerHTML = `<span class="muted">Account lookup failed for <span class="mono">${addr}</span>: ${String(err?.message || err)}</span>`;
+    }
   }
+
 
   async function refresh() {
     try {
-      const [stats, mining, blocksResp] = await Promise.all([
+      const [stats, mining, blocksResp, poolPayouts] = await Promise.all([
         fetchJson("/stats"),
         fetchJson("/mining"),
-        fetchJson("/blocks?limit=120")
+        fetchJson("/blocks?limit=120"),
+        fetchOptional("/pool/payouts?limit=80")
       ]);
 
       statsCache = stats;
@@ -1450,7 +1476,7 @@ pass=x</pre>
       applyKpis(statsCache, miningCache);
       applyPerformance(statsCache, miningCache, blocksCache);
       renderBlocks(blocksCache.slice(0, 80));
-      renderPayouts(blocksCache);
+      renderPayouts(poolPayouts || blocksCache);
 
       const hsSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0) ? Number(miningCache?.hashrate || 0) : Number(miningCache?.hashrate || 0));
       const diffSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0));

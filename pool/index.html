@@ -632,15 +632,87 @@
     return res.json();
   }
 
+  function readVarInt(hex, pos) {
+    const prefix = parseInt(hex.slice(pos, pos + 2), 16);
+    if (!Number.isFinite(prefix)) throw new Error("bad varint");
+    if (prefix < 0xfd) return { value: prefix, next: pos + 2 };
+    if (prefix === 0xfd) {
+      const b0 = parseInt(hex.slice(pos + 2, pos + 4), 16);
+      const b1 = parseInt(hex.slice(pos + 4, pos + 6), 16);
+      return { value: (b1 << 8) | b0, next: pos + 6 };
+    }
+    if (prefix === 0xfe) {
+      const bytes = [];
+      for (let i = 0; i < 4; i++) bytes.push(parseInt(hex.slice(pos + 2 + i * 2, pos + 4 + i * 2), 16));
+      const v = bytes[0] + bytes[1] * 256 + bytes[2] * 65536 + bytes[3] * 16777216;
+      return { value: v, next: pos + 10 };
+    }
+    throw new Error("unsupported varint size");
+  }
+
+  function readU64LEAsNumber(hex, pos) {
+    let val = 0;
+    for (let i = 0; i < 8; i++) {
+      const b = parseInt(hex.slice(pos + i * 2, pos + i * 2 + 2), 16);
+      if (!Number.isFinite(b)) throw new Error("bad u64");
+      val += b * Math.pow(256, i);
+    }
+    return val;
+  }
+
+  function coinbaseRewardFromTxHex(txHex) {
+    if (!txHex || typeof txHex !== "string") return null;
+    const hex = txHex.toLowerCase().trim();
+    if (!/^[0-9a-f]+$/.test(hex) || hex.length < 20) return null;
+
+    try {
+      let pos = 0;
+      pos += 8;
+      const vin = readVarInt(hex, pos);
+      pos = vin.next;
+
+      for (let i = 0; i < vin.value; i++) {
+        pos += 64;
+        pos += 8;
+        const script = readVarInt(hex, pos);
+        pos = script.next + script.value * 2;
+        pos += 8;
+      }
+
+      const vout = readVarInt(hex, pos);
+      pos = vout.next;
+
+      let total = 0;
+      for (let i = 0; i < vout.value; i++) {
+        total += readU64LEAsNumber(hex, pos);
+        pos += 16;
+        const pk = readVarInt(hex, pos);
+        pos = pk.next + pk.value * 2;
+      }
+
+      if (!Number.isFinite(total) || total <= 0) return null;
+      return total / 1e8;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function rewardIrm(block) {
     const h = Number(block?.height || 0);
     const raw = Number(block?.reward ?? block?.subsidy ?? block?.block_reward ?? 0);
-    if (!Number.isFinite(raw)) return 0;
-    if (raw > 1e9) return raw / 1e8;
-    if (raw > 1e6) return raw / 1e8;
-    if (raw > 1000) return raw / 1e8;
-    if (raw === 0 && h === 0) return 0;
-    return raw;
+    if (Number.isFinite(raw) && raw > 0) {
+      if (raw > 1e9) return raw / 1e8;
+      if (raw > 1e6) return raw / 1e8;
+      if (raw > 1000) return raw / 1e8;
+      return raw;
+    }
+
+    const txHex = Array.isArray(block?.tx_hex) ? block.tx_hex[0] : null;
+    const fromCoinbase = coinbaseRewardFromTxHex(txHex);
+    if (Number.isFinite(fromCoinbase) && fromCoinbase >= 0) return fromCoinbase;
+
+    if (h === 0) return 0;
+    return 50;
   }
 
   function drawLine(canvasId, points, color, label) {

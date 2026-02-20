@@ -50,6 +50,70 @@
     pointer-events: none;
   }
 
+
+  .portal-hero::after {
+    content: "";
+    position: absolute;
+    right: -34px;
+    top: -34px;
+    width: 180px;
+    height: 180px;
+    background: url("https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1") center/contain no-repeat;
+    opacity: 0.09;
+    transform: rotate(0deg);
+    animation: heroLogoSpin 26s linear infinite;
+    pointer-events: none;
+    filter: drop-shadow(0 0 20px rgba(99,102,241,0.35));
+  }
+
+  @keyframes heroLogoSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+  }
+
+  .hero-brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 8px;
+  }
+
+  .hero-logo {
+    width: 54px;
+    height: 54px;
+    border-radius: 14px;
+    padding: 6px;
+    object-fit: contain;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.06);
+    box-shadow: 0 0 22px rgba(99,102,241,0.35);
+    animation: logoPulse 2.8s ease-in-out infinite;
+  }
+
+  @keyframes logoPulse {
+    0%,100% { transform: scale(1); box-shadow: 0 0 22px rgba(99,102,241,0.35); }
+    50% { transform: scale(1.06); box-shadow: 0 0 30px rgba(99,102,241,0.5); }
+  }
+
+  .kpi, .panel, .endpoint-card {
+    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
+  }
+
+  .kpi:hover, .panel:hover {
+    transform: translateY(-3px);
+    box-shadow: 0 12px 30px rgba(0,0,0,0.36), 0 0 20px rgba(109,134,255,0.18);
+    border-color: rgba(134, 154, 255, 0.45);
+  }
+
+  .endpoint-card:hover {
+    transform: translateY(-2px);
+    border-color: rgba(143,165,255,0.5);
+  }
+
+  .pool-table tbody tr:hover td {
+    background: rgba(96, 126, 255, 0.10);
+  }
+
   .hero-grid {
     display: grid;
     grid-template-columns: 1.25fr 1fr;
@@ -503,7 +567,10 @@
     <section class="portal-hero">
       <div class="hero-grid">
         <div>
-          <div class="hero-eyebrow"><span class="dot"></span> Live Public Stratum Pool</div>
+          <div class="hero-brand">
+            <img class="hero-logo" src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium">
+            <div class="hero-eyebrow"><span class="dot"></span> Live Public Stratum Pool</div>
+          </div>
           <h1 class="hero-title">Irium Stratum Pool Portal</h1>
           <p class="hero-sub">Enterprise-grade interface for endpoint access, mining telemetry, payout visibility, and network diagnostics for Irium solo miners.</p>
 
@@ -514,13 +581,13 @@
               <button class="copy-btn" data-copy="primary-endpoint">Copy</button>
             </div>
             <div class="endpoint-card">
-              <span class="endpoint-label">Backup</span>
-              <div id="backup-endpoint" class="endpoint-main">stratum+tcp://157.173.116.134:3333</div>
-              <button class="copy-btn secondary" data-copy="backup-endpoint">Copy</button>
+              <span class="endpoint-label">Fallback</span>
+              <div class="endpoint-main">Use <span class="mono">pool.iriumlabs.org:3333</span>. Direct host IP is intentionally hidden for network security.</div>
+              <button class="copy-btn secondary" data-copy="primary-endpoint">Copy</button>
             </div>
           </div>
 
-          <div class="hero-note">If DNS is delayed in your region, use the backup IP endpoint directly in your miner.</div>
+          <div class="hero-note">Use the DNS endpoint in your miner. Raw host IP is intentionally not listed to reduce targeted abuse.</div>
         </div>
         <aside class="hero-right">
           <h3>Miner Setup</h3>
@@ -579,7 +646,7 @@
         <p class="panel-sub">Public endpoint diagnostics and miner-side checks.</p>
         <ul class="meta-list">
           <li><span class="key">Stratum Endpoint</span><span class="mono">pool.iriumlabs.org:3333</span></li>
-          <li><span class="key">Direct Backup</span><span class="mono">157.173.116.134:3333</span></li>
+          <li><span class="key">Failover Policy</span><span>DNS endpoint only (raw host IP intentionally not public)</span></li>
           <li><span class="key">Explorer API</span><span id="ops-api">Loading...</span></li>
           <li><span class="key">Last Refresh</span><span id="ops-updated">Loading...</span></li>
           <li><span class="key">Troubleshoot</span><span>Allow outbound TCP 3333, use DNS + backup IP.</span></li>

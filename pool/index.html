@@ -446,10 +446,12 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   }
 
-  .green { color: var(--ok); font-weight: 700; }
+  .green { color: var(--ok) !important; font-weight: 700; }
   .amber { color: var(--warn); font-weight: 700; }
   .red { color: var(--bad); font-weight: 700; }
   .muted { color: var(--muted); }
+  .reward-value { color: var(--ok) !important; font-weight: 800; }
+  .pool-table td .green { color: var(--ok) !important; }
 
   .chart-wrap {
     border: 1px solid rgba(255,255,255,0.10);
@@ -532,6 +534,7 @@
 
   @media (max-width: 820px) {
     .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .footer-content { grid-template-columns: 1fr; gap: 18px; }
     .portal-grid { grid-template-columns: 1fr; }
     .span-2, .span-3 { grid-column: span 1; }
     .meta-list li { grid-template-columns: 1fr; }
@@ -752,6 +755,7 @@
         <a href="https://www.iriumlabs.org/docs/mining/">Mining Guide</a>
         <a href="https://www.iriumlabs.org/explorer/">Explorer</a>
         <a href="https://www.iriumlabs.org/pool/">Pool Portal</a>
+        <a href="https://www.iriumlabs.org/community.html">Community</a>
       </div>
       <div class="footer-links">
         <h4>Community</h4>
@@ -980,7 +984,7 @@
         <td>${fmtTime(b?.header?.time)}</td>
         <td class=\"mono mono-wrap\" title=\"${hash}\">${hash}</td>
         <td class=\"mono mono-wrap\" title=\"${miner}\">${miner}</td>
-        <td class=\"green\">${fmtNum(reward, 2)} IRM</td>
+        <td class=\"reward-value\">${fmtNum(reward, 2)} IRM</td>
         <td>${txCount}</td>
       </tr>`;
     }).join("");
@@ -1000,7 +1004,7 @@
       return `<tr>
         <td>${fmtInt(b.height)}</td>
         <td class=\"mono mono-wrap\" title=\"${miner}\">${miner}</td>
-        <td class=\"green\">${fmtNum(reward, 2)}</td>
+        <td class=\"reward-value\">${fmtNum(reward, 2)} IRM</td>
         <td><span class=\"green\">On-chain</span></td>
         <td class=\"mono mono-wrap\" title=\"${ref}\">${ref}</td>
       </tr>`;

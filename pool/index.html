@@ -3,28 +3,30 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Irium Pool Dashboard | Irium</title>
-  <meta name="description" content="Live Irium mining pool dashboard with Stratum connection info, network metrics, and recent blocks." />
+  <title>Irium Pool Portal | Irium</title>
+  <meta name="description" content="Irium public Stratum mining pool portal with live network stats, block feed, and miner address lookup." />
   <link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=3" />
   <link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" />
   <style>
     :root {
-      --panel-bg: rgba(0,0,0,0.34);
-      --panel-border: rgba(255,255,255,0.12);
-      --good: #2dd4bf;
+      --panel-bg: rgba(0, 0, 0, 0.34);
+      --panel-border: rgba(255, 255, 255, 0.12);
+      --ok: #2dd4bf;
       --warn: #fbbf24;
+      --danger: #f87171;
       --accent: #5bb1ff;
+      --text-soft: rgba(225, 234, 255, 0.85);
     }
     .pool-wrap { padding-top: 94px; }
-    .pool-section { padding: 24px 0; }
+    .pool-section { padding: 20px 0; }
     .pool-panel {
       background: var(--panel-bg);
       border: 1px solid var(--panel-border);
       border-radius: 14px;
-      box-shadow: 0 8px 28px rgba(0,0,0,.35), 0 0 18px rgba(99,102,241,.18);
+      box-shadow: 0 8px 28px rgba(0,0,0,.35), 0 0 18px rgba(99,102,241,.16);
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
-      padding: 24px;
+      padding: 20px;
       position: relative;
       overflow: hidden;
     }
@@ -34,186 +36,198 @@
       inset: 0;
       border-radius: 14px;
       pointer-events: none;
-      box-shadow: inset 0 0 22px rgba(99,102,241,.08);
+      box-shadow: inset 0 0 20px rgba(99,102,241,.08);
     }
-    .pool-hero {
+
+    .portal-head {
       display: grid;
-      grid-template-columns: 1.2fr .8fr;
-      gap: 18px;
+      grid-template-columns: 1.15fr 0.85fr;
+      gap: 14px;
     }
-    .pool-title {
+    .title {
       margin: 0;
-      font-size: 2.05rem;
+      font-size: 2rem;
       font-weight: 800;
+      text-transform: uppercase;
       letter-spacing: .03em;
       color: #fff;
-      text-transform: uppercase;
-      text-shadow: 0 0 18px rgba(91,177,255,.42), 0 0 34px rgba(99,102,241,.28);
+      text-shadow: 0 0 14px rgba(91,177,255,.45), 0 0 30px rgba(99,102,241,.24);
     }
-    .pool-sub {
-      margin-top: 10px;
-      color: rgba(230,237,243,.9);
+    .subtitle {
+      margin-top: 8px;
+      color: var(--text-soft);
       line-height: 1.5;
     }
-    .pool-badges { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
-    .pool-badge {
-      font-size: 12px;
-      border: 1px solid rgba(255,255,255,.18);
+    .chip-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+    .chip {
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.04);
+      color: #ecf3ff;
       border-radius: 999px;
       padding: 6px 10px;
-      background: rgba(255,255,255,.04);
-      color: rgba(238,243,255,.95);
+      font-size: 12px;
     }
-    .pool-connect {
-      background: rgba(10,13,22,.75);
+
+    .connect-box {
       border: 1px solid rgba(91,177,255,.35);
+      background: rgba(10,13,22,.78);
       border-radius: 12px;
       padding: 14px;
-      box-shadow: 0 0 24px rgba(91,177,255,.15);
+      box-shadow: 0 0 20px rgba(91,177,255,.15);
     }
-    .pool-connect h3 {
+    .box-title {
       margin: 0 0 10px;
       color: #fff;
-      font-size: 1rem;
       text-transform: uppercase;
       letter-spacing: .05em;
+      font-size: .95rem;
     }
-    .pool-code {
-      margin: 6px 0;
-      background: rgba(255,255,255,.04);
-      border: 1px solid rgba(255,255,255,.14);
-      border-radius: 10px;
-      padding: 9px 10px;
+    .kv {
       font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      border: 1px solid rgba(255,255,255,.14);
+      background: rgba(255,255,255,.04);
+      border-radius: 10px;
+      padding: 8px 10px;
+      margin: 6px 0;
       color: #f4f7ff;
-      font-size: .9rem;
+      font-size: .88rem;
       word-break: break-all;
     }
-    .pool-help {
-      margin-top: 8px;
-      color: rgba(223,232,255,.78);
-      font-size: .84rem;
-      line-height: 1.4;
-    }
-    .pool-help b { color: var(--warn); }
+    .hint { color: var(--text-soft); font-size: .83rem; line-height: 1.4; margin-top: 8px; }
+    .hint b { color: var(--warn); }
 
-    .pool-metrics {
-      margin-top: 18px;
+    .stats-grid {
+      margin-top: 14px;
       display: grid;
+      gap: 10px;
       grid-template-columns: repeat(6, minmax(0, 1fr));
-      gap: 12px;
     }
-    .metric {
+    .stat-card {
       background: rgba(255,255,255,.04);
       border: 1px solid rgba(255,255,255,.1);
-      border-radius: 12px;
-      padding: 12px;
-      min-height: 90px;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
+      border-radius: 11px;
+      padding: 11px;
+      min-height: 88px;
       transition: transform .2s ease, border-color .2s ease;
     }
-    .metric:hover { transform: translateY(-2px); border-color: rgba(91,177,255,.35); }
-    .metric-label {
-      font-size: .72rem;
-      color: rgba(213,223,245,.85);
-      letter-spacing: .06em;
+    .stat-card:hover { transform: translateY(-2px); border-color: rgba(91,177,255,.34); }
+    .stat-label {
       text-transform: uppercase;
-      margin-bottom: 7px;
+      letter-spacing: .06em;
+      font-size: .72rem;
+      color: rgba(210,220,243,.84);
+      margin-bottom: 6px;
     }
-    .metric-value {
-      font-size: 1.22rem;
+    .stat-value {
       color: #fff;
+      font-size: 1.15rem;
       font-weight: 700;
       line-height: 1.2;
     }
-    .metric-sub {
-      margin-top: 5px;
-      color: rgba(210,220,242,.72);
-      font-size: .76rem;
+    .stat-sub { margin-top: 4px; color: rgba(208,219,243,.7); font-size: .74rem; }
+
+    .portal-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+      margin-top: 14px;
+    }
+    .panel-title {
+      margin: 0 0 10px;
+      color: #fff;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      font-size: 1rem;
     }
 
-    .blocks-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 12px;
-    }
-    .blocks-head h3 {
-      margin: 0;
-      color: #fff;
-      font-size: 1.08rem;
-      text-transform: uppercase;
-      letter-spacing: .06em;
-    }
-    .blocks-updated {
-      color: rgba(204,216,243,.78);
-      font-size: .84rem;
-    }
-    .pool-table-wrap {
-      border: 1px solid rgba(255,255,255,.1);
-      border-radius: 12px;
-      overflow: hidden;
-      background: rgba(0,0,0,.24);
-    }
-    table.pool-table {
-      width: 100%;
-      border-collapse: collapse;
+    .lookup-row { display: flex; gap: 8px; }
+    .lookup-input {
+      flex: 1;
+      min-width: 0;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,.16);
+      background: rgba(255,255,255,.04);
+      color: #f3f8ff;
+      padding: 10px;
       font-size: .9rem;
     }
-    .pool-table th, .pool-table td {
-      border-bottom: 1px solid rgba(255,255,255,.08);
-      padding: 10px 12px;
-      text-align: left;
-      color: #e9efff;
-      vertical-align: middle;
+    .lookup-btn {
+      border: 1px solid rgba(91,177,255,.45);
+      background: rgba(91,177,255,.16);
+      color: #f1f7ff;
+      border-radius: 10px;
+      padding: 0 14px;
+      font-weight: 700;
+      cursor: pointer;
     }
-    .pool-table th {
-      font-size: .75rem;
+    .lookup-btn:hover { filter: brightness(1.07); }
+    .lookup-meta {
+      margin-top: 10px;
+      color: var(--text-soft);
+      font-size: .84rem;
+      line-height: 1.4;
+    }
+    .lookup-result {
+      margin-top: 10px;
+      border: 1px solid rgba(255,255,255,.12);
+      background: rgba(255,255,255,.03);
+      border-radius: 10px;
+      padding: 10px;
+      font-size: .86rem;
+      color: #eaf1ff;
+      min-height: 76px;
+    }
+
+    .feed-wrap {
+      border: 1px solid rgba(255,255,255,.1);
+      border-radius: 10px;
+      overflow: hidden;
+      background: rgba(0,0,0,.22);
+    }
+    .feed {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: .86rem;
+    }
+    .feed th, .feed td {
+      padding: 8px 10px;
+      border-bottom: 1px solid rgba(255,255,255,.08);
+      text-align: left;
+      vertical-align: middle;
+      color: #e8efff;
+    }
+    .feed th {
       text-transform: uppercase;
       letter-spacing: .06em;
-      color: rgba(206,218,245,.88);
+      font-size: .7rem;
+      color: rgba(208,220,245,.84);
       background: rgba(255,255,255,.03);
     }
-    .pool-table tr:last-child td { border-bottom: 0; }
-    .pool-hash {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      color: rgba(173,203,255,.95);
-      font-size: .82rem;
-    }
-    .pool-miner {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      color: rgba(185,214,255,.92);
-      font-size: .82rem;
-    }
-    .pool-reward {
-      color: #69e5b8;
-      font-weight: 700;
-    }
-    .pool-state-good { color: var(--good); font-weight: 700; }
-    .pool-state-warn { color: var(--warn); font-weight: 700; }
+    .feed tr:last-child td { border-bottom: 0; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
+    .reward { color: #6de4ba; font-weight: 700; }
+    .good { color: var(--ok); font-weight: 700; }
+    .warn { color: var(--warn); font-weight: 700; }
+    .bad { color: var(--danger); font-weight: 700; }
 
-    .pool-note {
-      margin-top: 12px;
-      color: rgba(210,220,242,.8);
-      font-size: .84rem;
+    .foot-note {
+      margin-top: 10px;
+      color: rgba(206,218,245,.78);
+      font-size: .82rem;
       line-height: 1.45;
     }
 
-    @media (max-width: 1100px) {
-      .pool-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    @media (max-width: 1080px) {
+      .stats-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     }
     @media (max-width: 860px) {
-      .pool-hero { grid-template-columns: 1fr; }
-      .pool-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .pool-title { font-size: 1.62rem; }
+      .portal-head { grid-template-columns: 1fr; }
+      .portal-grid { grid-template-columns: 1fr; }
+      .title { font-size: 1.6rem; }
     }
     @media (max-width: 560px) {
-      .pool-metrics { grid-template-columns: 1fr; }
-      .pool-panel { padding: 16px; }
-      .pool-table th, .pool-table td { padding: 8px; }
+      .stats-grid { grid-template-columns: 1fr 1fr; }
+      .pool-panel { padding: 14px; }
     }
   </style>
 </head>
@@ -246,60 +260,60 @@
   <main class="pool-wrap">
     <section class="pool-section">
       <div class="container pool-panel">
-        <div class="pool-hero">
+        <div class="portal-head">
           <div>
-            <h1 class="pool-title">Irium Public Pool Dashboard</h1>
-            <p class="pool-sub">
-              Live network mining view with official Stratum connection settings. This is a TCP mining endpoint, not a browser website endpoint.
+            <h1 class="title">Irium Mining Pool Portal</h1>
+            <p class="subtitle">
+              Live dashboard for Irium public Stratum mining. Connect your miner, monitor network state, and look up recent mining activity by IRM address.
             </p>
-            <div class="pool-badges">
-              <span class="pool-badge">Algorithm: SHA-256d</span>
-              <span class="pool-badge">Mode: SOLO</span>
-              <span class="pool-badge">Endpoint: pool.iriumlabs.org:3333</span>
+            <div class="chip-row">
+              <span class="chip">SHA-256d</span>
+              <span class="chip">Stratum v1</span>
+              <span class="chip">Solo payout mode</span>
+              <span class="chip">Endpoint: pool.iriumlabs.org:3333</span>
             </div>
           </div>
-          <div class="pool-connect">
-            <h3>Connect Miner</h3>
-            <div class="pool-code">stratum+tcp://pool.iriumlabs.org:3333</div>
-            <div class="pool-code">Username: IRM_ADDRESS.worker1</div>
-            <div class="pool-code">Password: x</div>
-            <div class="pool-help">
-              Reward is paid to the IRM address in your username.<br />
-              Browser check on <b>pool.iriumlabs.org</b> may fail because Stratum is TCP-only.
-            </div>
+          <div class="connect-box">
+            <h2 class="box-title">Connect Miner</h2>
+            <div class="kv">stratum+tcp://pool.iriumlabs.org:3333</div>
+            <div class="kv">Username: IRM_ADDRESS.worker1</div>
+            <div class="kv">Password: x</div>
+            <p class="hint">
+              <b>Important:</b> <code>pool.iriumlabs.org</code> is Stratum TCP, not an HTTP website. Browsers may show unreachable, miners connect correctly.
+            </p>
           </div>
         </div>
 
-        <div class="pool-metrics">
-          <div class="metric">
-            <div class="metric-label">Network Height</div>
-            <div class="metric-value" id="m-height">Loading...</div>
-            <div class="metric-sub">Current chain tip</div>
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-label">Pool Status</div>
+            <div class="stat-value" id="s-pool-status">Loading...</div>
+            <div class="stat-sub">Based on live API + feed updates</div>
           </div>
-          <div class="metric">
-            <div class="metric-label">Net Hashrate</div>
-            <div class="metric-value" id="m-hashrate">Loading...</div>
-            <div class="metric-sub">Estimated from recent blocks</div>
+          <div class="stat-card">
+            <div class="stat-label">Chain Height</div>
+            <div class="stat-value" id="s-height">Loading...</div>
+            <div class="stat-sub">Current network tip</div>
           </div>
-          <div class="metric">
-            <div class="metric-label">Difficulty</div>
-            <div class="metric-value" id="m-difficulty">Loading...</div>
-            <div class="metric-sub">Current network difficulty</div>
+          <div class="stat-card">
+            <div class="stat-label">Net Hashrate</div>
+            <div class="stat-value" id="s-hashrate">Loading...</div>
+            <div class="stat-sub">Estimated from recent blocks</div>
           </div>
-          <div class="metric">
-            <div class="metric-label">Diff Delta</div>
-            <div class="metric-value" id="m-delta">Loading...</div>
-            <div class="metric-sub">1h / 24h</div>
+          <div class="stat-card">
+            <div class="stat-label">Difficulty</div>
+            <div class="stat-value" id="s-difficulty">Loading...</div>
+            <div class="stat-sub">Current network difficulty</div>
           </div>
-          <div class="metric">
-            <div class="metric-label">Active Peers</div>
-            <div class="metric-value" id="m-peers">Loading...</div>
-            <div class="metric-sub">Live connected peers</div>
+          <div class="stat-card">
+            <div class="stat-label">Active Peers</div>
+            <div class="stat-value" id="s-peers">Loading...</div>
+            <div class="stat-sub">Connected peers</div>
           </div>
-          <div class="metric">
-            <div class="metric-label">Active Miners</div>
-            <div class="metric-value" id="m-miners">Loading...</div>
-            <div class="metric-sub">Unique coinbase addrs (last 144 blocks)</div>
+          <div class="stat-card">
+            <div class="stat-label">Active Miners</div>
+            <div class="stat-value" id="s-miners">Loading...</div>
+            <div class="stat-sub">Unique miner addrs in last 144 blocks</div>
           </div>
         </div>
       </div>
@@ -307,12 +321,37 @@
 
     <section class="pool-section">
       <div class="container pool-panel">
-        <div class="blocks-head">
-          <h3>Recent Network Blocks</h3>
-          <div class="blocks-updated" id="blocks-updated">Updating...</div>
+        <div class="portal-grid">
+          <div>
+            <h2 class="panel-title">Miner Address Lookup</h2>
+            <div class="lookup-row">
+              <input id="lookup-input" class="lookup-input" placeholder="Enter IRM address (example: Q8...)">
+              <button id="lookup-btn" class="lookup-btn">Lookup</button>
+            </div>
+            <div class="lookup-meta">
+              Shows recent mined blocks for this address from the live block feed. This is a quick activity view, not a wallet balance API.
+            </div>
+            <div id="lookup-result" class="lookup-result">Enter an address and click Lookup.</div>
+          </div>
+          <div>
+            <h2 class="panel-title">Pool Connection Notes</h2>
+            <div class="lookup-result">
+              <div><span class="good">Endpoint:</span> stratum+tcp://pool.iriumlabs.org:3333</div>
+              <div style="margin-top:6px;"><span class="good">Username:</span> IRM_ADDRESS.workerName</div>
+              <div style="margin-top:6px;"><span class="good">Password:</span> x</div>
+              <div style="margin-top:10px; color: var(--text-soft);">Use unique worker names per machine to keep your rigs organized.</div>
+              <div style="margin-top:8px; color: var(--text-soft);">If your miner reports connection refused, check outbound port 3333 and DNS resolution for pool.iriumlabs.org.</div>
+            </div>
+          </div>
         </div>
-        <div class="pool-table-wrap">
-          <table class="pool-table">
+      </div>
+    </section>
+
+    <section class="pool-section">
+      <div class="container pool-panel">
+        <h2 class="panel-title">Recent Network Block Feed</h2>
+        <div class="feed-wrap">
+          <table class="feed">
             <thead>
               <tr>
                 <th>Height</th>
@@ -322,14 +361,15 @@
                 <th>Miner</th>
               </tr>
             </thead>
-            <tbody id="blocks-body">
-              <tr><td colspan="5">Loading blocks...</td></tr>
+            <tbody id="feed-body">
+              <tr><td colspan="5">Loading...</td></tr>
             </tbody>
           </table>
         </div>
-        <p class="pool-note">
-          Live values refresh automatically. Net Hashrate and Diff Delta are estimates from recent blocks.
-        </p>
+        <div class="foot-note">
+          Updated: <span id="feed-updated">-</span><br>
+          Diff Delta and Net Hashrate are estimates from recent blocks. “Active Miners” is derived from the last 144 blocks.
+        </div>
       </div>
     </section>
   </main>
@@ -349,169 +389,170 @@
     const DEFAULT_API_BASE = "https://api.iriumlabs.org/api";
     const CORS_PROXIES = ["", "https://api.allorigins.win/raw?url="];
     const FETCH_TIMEOUT_MS = 15000;
+    let latestBlocks = [];
 
-    function formatNumber(v, digits = 2) {
+    const el = (id) => document.getElementById(id);
+
+    function fmtNum(v, digits = 2) {
       const n = Number(v);
       if (!Number.isFinite(n)) return "N/A";
       return n.toLocaleString(undefined, { minimumFractionDigits: digits, maximumFractionDigits: digits });
     }
 
-    function formatPct(v) {
+    function fmtHashrate(hs) {
+      const n = Number(hs);
+      if (!Number.isFinite(n) || n <= 0) return "N/A";
+      const units = ["H/s","KH/s","MH/s","GH/s","TH/s","PH/s","EH/s"];
+      let v = n, u = 0;
+      while (v >= 1000 && u < units.length - 1) { v /= 1000; u++; }
+      const d = v >= 100 ? 0 : v >= 10 ? 1 : 2;
+      return v.toFixed(d) + " " + units[u];
+    }
+
+    function fmtPct(v) {
       const n = Number(v);
       if (!Number.isFinite(n)) return "N/A";
       const sign = n > 0 ? "+" : "";
       return sign + n.toFixed(2) + "%";
     }
 
-    function formatHashrate(hs) {
-      const n = Number(hs);
-      if (!Number.isFinite(n) || n <= 0) return "N/A";
-      const units = ["H/s", "KH/s", "MH/s", "GH/s", "TH/s", "PH/s", "EH/s"];
-      let v = n;
-      let u = 0;
-      while (v >= 1000 && u < units.length - 1) {
-        v /= 1000;
-        u++;
-      }
-      const digits = v >= 100 ? 0 : v >= 10 ? 1 : 2;
-      return v.toFixed(digits) + " " + units[u];
-    }
-
-    function shortHash(h) {
-      if (!h || typeof h !== "string") return "N/A";
-      return h.slice(0, 14) + "..." + h.slice(-10);
+    function short(s, left = 12, right = 10) {
+      if (!s || typeof s !== "string") return "N/A";
+      if (s.length <= left + right + 3) return s;
+      return s.slice(0, left) + "..." + s.slice(-right);
     }
 
     function fmtTime(ts) {
       const d = new Date((Number(ts) || 0) * 1000);
-      if (Number.isNaN(d.getTime())) return "N/A";
-      return d.toLocaleString();
+      return Number.isNaN(d.getTime()) ? "N/A" : d.toLocaleString();
     }
 
     async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const t = setTimeout(() => controller.abort(), timeoutMs);
       try {
         return await fetch(url, { ...options, signal: controller.signal, cache: "no-store" });
       } finally {
-        clearTimeout(timer);
+        clearTimeout(t);
       }
     }
 
-    function getApiBases() {
-      const bases = [DEFAULT_API_BASE];
-      if (location && location.origin) bases.push(location.origin + "/api");
-      const unique = [];
-      for (const b of bases) {
-        const norm = String(b).replace(/\/+$/, "");
-        if (norm && !unique.includes(norm)) unique.push(norm);
-      }
-      return unique;
+    function apiBases() {
+      const out = [DEFAULT_API_BASE];
+      if (location && location.origin) out.push(location.origin + "/api");
+      return [...new Set(out.map(x => String(x).replace(/\/+$/, "")))];
     }
 
     async function fetchJson(path) {
       const errors = [];
-      const bases = getApiBases();
-      for (const base of bases) {
+      for (const base of apiBases()) {
         const url = base + path;
         for (const proxy of CORS_PROXIES) {
           const target = proxy ? proxy + encodeURIComponent(url) : url;
           try {
-            const res = await fetchWithTimeout(target);
-            if (!res.ok) throw new Error("HTTP " + res.status);
-            return await res.json();
-          } catch (err) {
-            errors.push(err && err.message ? err.message : String(err));
+            const r = await fetchWithTimeout(target);
+            if (!r.ok) throw new Error("HTTP " + r.status);
+            return await r.json();
+          } catch (e) {
+            errors.push(e && e.message ? e.message : String(e));
           }
         }
       }
       throw new Error(errors[0] || "fetch failed");
     }
 
-    async function loadMetrics() {
+    function rewardIrm(height, sats) {
+      const s = Number(sats);
+      if (Number.isFinite(s) && s > 0) return (s / 1e8).toFixed(2);
+      const h = Number(height);
+      if (!Number.isFinite(h) || h <= 0) return "0.00";
+      const halvings = Math.floor((h - 1) / 210000);
+      if (halvings >= 64) return "0.00";
+      return (50 / Math.pow(2, halvings)).toFixed(2);
+    }
+
+    async function loadPortal() {
       try {
-        const [stats, mining] = await Promise.all([
+        const [stats, mining, blockResp] = await Promise.all([
           fetchJson("/stats"),
-          fetchJson("/mining?window=120&series=240")
+          fetchJson("/mining?window=120&series=240"),
+          fetchJson("/blocks?limit=20")
         ]);
 
-        document.getElementById("m-height").textContent = String(stats.height ?? "N/A");
-        document.getElementById("m-peers").textContent = String(stats.peers_connected ?? stats.peer_count ?? "N/A");
-        document.getElementById("m-miners").textContent = String(stats.active_miners ?? "N/A");
+        latestBlocks = Array.isArray(blockResp.blocks) ? blockResp.blocks.slice() : [];
 
-        document.getElementById("m-hashrate").textContent = formatHashrate(mining.hashrate);
-        document.getElementById("m-difficulty").textContent = formatNumber(mining.difficulty, 2);
+        el("s-pool-status").innerHTML = "<span class='good'>ONLINE</span>";
+        el("s-height").textContent = String(stats.height ?? "N/A");
+        el("s-hashrate").textContent = fmtHashrate(mining.hashrate);
+        el("s-difficulty").textContent = fmtNum(mining.difficulty, 2);
+        el("s-peers").textContent = String(stats.peers_connected ?? stats.peer_count ?? "N/A");
+        el("s-miners").textContent = String(stats.active_miners ?? "N/A");
 
-        const g1 = mining.difficulty_change_1h_pct;
-        const g24 = mining.difficulty_change_24h_pct;
-        const stable = Number(g1) === 0 && Number(g24) === 0;
-        document.getElementById("m-delta").textContent = stable ? "Stable" : (formatPct(g1) + " / " + formatPct(g24));
-      } catch (err) {
-        ["m-height", "m-peers", "m-miners", "m-hashrate", "m-difficulty", "m-delta"].forEach((id) => {
-          const el = document.getElementById(id);
-          if (el) el.textContent = "Error";
-        });
+        renderFeed(latestBlocks);
+        el("feed-updated").textContent = new Date().toLocaleTimeString();
+      } catch (e) {
+        el("s-pool-status").innerHTML = "<span class='bad'>DEGRADED</span>";
+        ["s-height","s-hashrate","s-difficulty","s-peers","s-miners"].forEach((id)=> el(id).textContent = "Error");
+        el("feed-body").innerHTML = "<tr><td colspan='5'>Error loading feed</td></tr>";
+        el("feed-updated").textContent = new Date().toLocaleTimeString() + " (error)";
       }
     }
 
-    function blockRewardIrm(height) {
-      const h = Number(height);
-      if (!Number.isFinite(h) || h <= 0) return 0;
-      const halvingInterval = 210000;
-      const initial = 50;
-      const halvings = Math.floor((h - 1) / halvingInterval);
-      if (halvings >= 64) return 0;
-      return initial / Math.pow(2, halvings);
+    function renderFeed(list) {
+      const rows = (list || [])
+        .sort((a,b) => (b.height ?? 0) - (a.height ?? 0))
+        .map((blk) => {
+          const h = blk.height ?? "N/A";
+          const header = blk.header || {};
+          const hash = header.hash || blk.hash || "";
+          const ts = header.time || blk.time || 0;
+          const miner = blk.miner_address || blk.miner || "N/A";
+          const reward = rewardIrm(h, blk.reward ?? blk.subsidy ?? blk.block_reward);
+          return "<tr>" +
+            "<td>" + h + "</td>" +
+            "<td>" + fmtTime(ts) + "</td>" +
+            "<td class='mono' title='" + hash + "'>" + short(hash) + "</td>" +
+            "<td class='reward'>" + reward + " IRM</td>" +
+            "<td class='mono' title='" + miner + "'>" + short(miner, 10, 8) + "</td>" +
+          "</tr>";
+        }).join("");
+
+      el("feed-body").innerHTML = rows || "<tr><td colspan='5'>No data</td></tr>";
     }
 
-    async function loadBlocks() {
-      const body = document.getElementById("blocks-body");
-      try {
-        const data = await fetchJson("/blocks?limit=12");
-        const list = Array.isArray(data.blocks) ? data.blocks : [];
-        if (!list.length) {
-          body.innerHTML = "<tr><td colspan='5'>No blocks available</td></tr>";
-          return;
-        }
-
-        const rows = list
-          .sort((a, b) => (b.height ?? 0) - (a.height ?? 0))
-          .map((blk) => {
-            const header = blk.header || {};
-            const h = blk.height ?? "N/A";
-            const ts = header.time ?? blk.time ?? 0;
-            const hash = header.hash ?? blk.hash ?? "";
-            const miner = blk.miner_address ?? blk.miner ?? "N/A";
-            const rewardSats = blk.reward ?? blk.subsidy ?? blk.block_reward ?? 0;
-            const reward = rewardSats ? (rewardSats / 1e8).toFixed(2) : blockRewardIrm(h).toFixed(2);
-            return "<tr>" +
-              "<td>" + h + "</td>" +
-              "<td>" + fmtTime(ts) + "</td>" +
-              "<td class='pool-hash' title='" + hash + "'>" + shortHash(hash) + "</td>" +
-              "<td class='pool-reward'>" + reward + " IRM</td>" +
-              "<td class='pool-miner' title='" + miner + "'>" + shortHash(miner) + "</td>" +
-              "</tr>";
-          })
-          .join("");
-
-        body.innerHTML = rows;
-        document.getElementById("blocks-updated").textContent = "Updated " + new Date().toLocaleTimeString();
-      } catch (err) {
-        body.innerHTML = "<tr><td colspan='5'>Error loading blocks</td></tr>";
+    function lookupMiner() {
+      const addr = (el("lookup-input").value || "").trim();
+      const out = el("lookup-result");
+      if (!addr) {
+        out.textContent = "Please enter an IRM address.";
+        return;
       }
+
+      const hits = latestBlocks.filter((b) => (b.miner_address || b.miner || "") === addr);
+      if (!hits.length) {
+        out.innerHTML = "No mined blocks by this address in current live window (latest " + latestBlocks.length + " blocks loaded).";
+        return;
+      }
+
+      const sorted = hits.sort((a,b)=> (b.height ?? 0) - (a.height ?? 0));
+      const last = sorted[0];
+      const rewards = sorted.reduce((acc,b)=> acc + Number(rewardIrm(b.height, b.reward ?? b.subsidy ?? b.block_reward)), 0);
+      const lines = sorted.slice(0,6).map((b)=> "#" + (b.height ?? "?") + " at " + fmtTime((b.header||{}).time || b.time || 0));
+
+      out.innerHTML =
+        "<div><span class='good'>Address found in recent feed.</span></div>" +
+        "<div style='margin-top:6px;'>Recent blocks found: <b>" + sorted.length + "</b></div>" +
+        "<div>Latest found height: <b>" + (last.height ?? "N/A") + "</b></div>" +
+        "<div>Approx total reward in loaded window: <b>" + rewards.toFixed(2) + " IRM</b></div>" +
+        "<div style='margin-top:8px; color: var(--text-soft);'>" + lines.join("<br>") + "</div>";
     }
 
-    async function refreshAll() {
-      await Promise.all([loadMetrics(), loadBlocks()]);
-    }
-
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", refreshAll);
-    } else {
-      refreshAll();
-    }
-
-    setInterval(refreshAll, 30000);
+    document.addEventListener("DOMContentLoaded", () => {
+      loadPortal();
+      setInterval(loadPortal, 30000);
+      el("lookup-btn").addEventListener("click", lookupMiner);
+      el("lookup-input").addEventListener("keydown", (e) => { if (e.key === "Enter") lookupMiner(); });
+    });
   </script>
 </body>
 </html>

@@ -105,37 +105,66 @@
   }
 
   .hero-right {
-    border: 1px solid rgba(255,255,255,0.14);
+    border: 1px solid rgba(255,255,255,0.16);
     border-radius: 14px;
-    background: rgba(0,0,0,0.28);
+    background: rgba(0,0,0,0.32);
     padding: 14px;
+    box-shadow: inset 0 0 18px rgba(89, 121, 255, 0.14);
   }
 
   .hero-right h3 {
-    margin: 0 0 8px;
+    margin: 0 0 10px;
     font-family: Orbitron, sans-serif;
     font-size: 0.95rem;
     color: #fff;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.07em;
   }
 
-  .pill-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
+  .setup-grid {
     margin: 0;
     padding: 0;
     list-style: none;
+    display: grid;
+    gap: 7px;
   }
 
-  .pill-list li {
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 999px;
-    padding: 6px 10px;
-    color: #d9e6ff;
-    font-size: 0.82rem;
-    background: rgba(255,255,255,0.04);
+  .setup-row {
+    display: grid;
+    grid-template-columns: 128px 1fr;
+    gap: 8px;
+    align-items: center;
+    border: 1px solid rgba(255,255,255,0.09);
+    border-radius: 10px;
+    padding: 7px 10px;
+    background: rgba(255,255,255,0.03);
   }
+
+  .setup-key {
+    color: var(--muted);
+    font-size: 0.74rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .setup-value {
+    color: #e9f1ff;
+    font-size: 0.88rem;
+    font-weight: 600;
+    word-break: break-word;
+  }
+
+  .status-badge {
+    display: inline-block;
+    padding: 5px 10px;
+    border-radius: 999px;
+    border: 1px solid rgba(80, 240, 184, 0.4);
+    background: rgba(80, 240, 184, 0.12);
+    color: #9ff5d7;
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+  }
+
 
   .kpi-grid {
     margin-top: 18px;
@@ -401,17 +430,17 @@
           </div>
         </div>
         <aside class="hero-right">
-          <h3>CONNECTION PROFILE</h3>
-          <ul class="pill-list">
-            <li>Algorithm: SHA-256d</li>
-            <li>Mode: SOLO</li>
-            <li>Worker Login: IRM_ADDRESS.worker</li>
-            <li>Password: x</li>
-            <li>Port: 3333/TCP</li>
-            <li id="pool-live-pill">Pool Status: Loading...</li>
-            <li id="pool-updated-pill">Updated: --:--:--</li>
+          <h3>MINER SETUP</h3>
+          <ul class="setup-grid">
+            <li class="setup-row"><span class="setup-key">Algorithm</span><span class="setup-value">SHA-256d</span></li>
+            <li class="setup-row"><span class="setup-key">Mode</span><span class="setup-value">SOLO</span></li>
+            <li class="setup-row"><span class="setup-key">Username</span><span class="setup-value mono">IRM_ADDRESS.worker</span></li>
+            <li class="setup-row"><span class="setup-key">Password</span><span class="setup-value mono">x</span></li>
+            <li class="setup-row"><span class="setup-key">Port</span><span class="setup-value mono">3333 / TCP</span></li>
+            <li class="setup-row"><span class="setup-key">Status</span><span class="setup-value"><span id="pool-live-pill" class="status-badge">LOADING...</span></span></li>
+            <li class="setup-row"><span class="setup-key">Last Update</span><span id="pool-updated-pill" class="setup-value">--:--:--</span></li>
           </ul>
-          <p class="panel-sub" style="margin-top:12px;">SOLO payouts are direct to the address in your username when a valid block is mined.</p>
+          <p class="panel-sub" style="margin-top:12px;">SOLO payout: when your miner finds a valid block, the coinbase reward is paid directly to your username address.</p>
         </aside>
       </div>
     </section>
@@ -850,7 +879,11 @@
 
   function applyStatus(ok) {
     const pill = document.getElementById("pool-live-pill");
-    if (pill) pill.textContent = ok ? "Pool Status: ONLINE" : "Pool Status: DEGRADED";
+    if (!pill) return;
+    pill.textContent = ok ? "ONLINE" : "DEGRADED";
+    pill.style.borderColor = ok ? "rgba(80, 240, 184, 0.4)" : "rgba(255, 120, 120, 0.45)";
+    pill.style.background = ok ? "rgba(80, 240, 184, 0.12)" : "rgba(255, 120, 120, 0.14)";
+    pill.style.color = ok ? "#9ff5d7" : "#ffd1d1";
   }
 
   function renderMinerLookup() {

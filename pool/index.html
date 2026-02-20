@@ -419,7 +419,6 @@
     text-align: left;
     color: #e8efff;
     vertical-align: middle;
-    white-space: nowrap;
   }
 
   .pool-table th {
@@ -431,6 +430,16 @@
     font-size: 0.68rem;
     letter-spacing: 0.08em;
     z-index: 1;
+    white-space: nowrap;
+  }
+
+  .pool-table td.mono-wrap {
+    white-space: normal;
+    word-break: break-all;
+    overflow-wrap: anywhere;
+    line-height: 1.35;
+    font-size: 0.8rem;
+    max-width: 420px;
   }
 
   .mono {

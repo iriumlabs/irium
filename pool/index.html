@@ -744,13 +744,13 @@
           <ul class="setup-grid">
             <li class="setup-row"><span class="setup-key">Algorithm</span><span class="setup-value">SHA-256d</span></li>
             <li class="setup-row"><span class="setup-key">Mode</span><span class="setup-value">SOLO</span></li>
-            <li class="setup-row"><span class="setup-key">Username</span><span class="setup-value mono">IRM_ADDRESS.worker</span></li>
-            <li class="setup-row"><span class="setup-key">Password</span><span class="setup-value mono">x</span></li>
+            <li class="setup-row"><span class="setup-key">Username</span><span class="setup-value mono">YOUR_IRIUM_WALLET_ADDRESS.worker1</span></li>
+            <li class="setup-row"><span class="setup-key">Password</span><span class="setup-value mono">x (placeholder)</span></li>
             <li class="setup-row"><span class="setup-key">Port</span><span class="setup-value mono">3333 / TCP</span></li>
             <li class="setup-row"><span class="setup-key">Status</span><span class="setup-value"><span id="pool-live-pill" class="status-badge">LOADING...</span></span></li>
             <li class="setup-row"><span class="setup-key">Last Update</span><span id="pool-updated-pill" class="setup-value">--:--:--</span></li>
           </ul>
-          <p class="panel-sub" style="margin-top:12px;">SOLO payout: when your miner finds a valid block, the coinbase reward is paid directly to your username address.</p>
+          <p class="panel-sub" style="margin-top:12px;">SOLO payout: when your miner finds a valid block, the coinbase reward is paid directly to the wallet address in your username.</p>
         </aside>
       </div>
     </section>
@@ -946,21 +946,21 @@
         <div class="cfg-card">
           <h4>Antminer Profile</h4>
           <pre id="cfg-ant">URL: stratum+tcp://pool.iriumlabs.org:3333
-Worker: IRM_ADDRESS.worker1
-Password: x</pre>
+Worker: YOUR_IRIUM_WALLET_ADDRESS.worker11
+Password: x (placeholder)</pre>
           <button class="copy-btn" data-copy="cfg-ant">Copy Config</button>
         </div>
         <div class="cfg-card">
           <h4>Whatsminer Profile</h4>
           <pre id="cfg-whats">Pool 1: stratum+tcp://pool.iriumlabs.org:3333
-Sub-account: IRM_ADDRESS.worker1
-Password: x</pre>
+Sub-account: YOUR_IRIUM_WALLET_ADDRESS.worker11
+Password: x (placeholder)</pre>
           <button class="copy-btn" data-copy="cfg-whats">Copy Config</button>
         </div>
         <div class="cfg-card">
           <h4>Generic Stratum Client</h4>
           <pre id="cfg-generic">stratum+tcp://pool.iriumlabs.org:3333
-user=IRM_ADDRESS.worker1
+user=YOUR_IRIUM_WALLET_ADDRESS.worker11
 pass=x</pre>
           <button class="copy-btn" data-copy="cfg-generic">Copy Config</button>
         </div>

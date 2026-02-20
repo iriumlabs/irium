@@ -525,16 +525,154 @@
     vertical-align: middle;
   }
 
+
+
+  .extended-grid {
+    margin-top: 14px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 14px;
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 0.75rem;
+    letter-spacing: 0.04em;
+    border: 1px solid rgba(255,255,255,0.18);
+    background: rgba(255,255,255,0.06);
+    color: #d5e3ff;
+  }
+
+  .mini-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .mini-stat {
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: 10px;
+    background: rgba(0,0,0,0.22);
+  }
+
+  .mini-stat .k {
+    color: var(--muted);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+  }
+
+  .mini-stat .v {
+    color: #ecf3ff;
+    margin-top: 4px;
+    font-weight: 700;
+  }
+
+  .panel-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: center;
+  }
+
+  .api-docs {
+    margin-top: 14px;
+  }
+
+  .api-docs code {
+    color: #9fd4ff;
+  }
+
+  .tiny {
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+
+  .incident-list {
+    margin: 0;
+    padding-left: 18px;
+    color: #d8e4ff;
+    display: grid;
+    gap: 6px;
+  }
+
+  .connect-grid {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 12px;
+  }
+
+  .cfg-card {
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 12px;
+    padding: 12px;
+    background: rgba(0,0,0,0.24);
+  }
+
+  .cfg-card h4 {
+    margin: 0 0 8px;
+    font-size: 0.88rem;
+    color: #f3f7ff;
+    letter-spacing: 0.04em;
+  }
+
+  .cfg-card pre {
+    margin: 0;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(0,0,0,0.32);
+    color: #dce7ff;
+    font-size: 0.78rem;
+    overflow: auto;
+  }
+
+  .cfg-card .copy-btn {
+    margin-top: 8px;
+    width: 100%;
+  }
+
+  .legal-grid {
+    margin-top: 10px;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+
+  .legal-box {
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 10px;
+    padding: 10px;
+    background: rgba(0,0,0,0.20);
+  }
+
+  .legal-box h5 {
+    margin: 0 0 6px;
+    color: #f2f7ff;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
+  }
+
+  .legal-box p { margin: 0; color: #c9d7f5; font-size: 0.84rem; }
+
   @media (max-width: 1180px) {
     .hero-grid { grid-template-columns: 1fr; }
     .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
     .portal-grid { grid-template-columns: 1fr 1fr; }
+    .extended-grid { grid-template-columns: 1fr 1fr; }
     .span-3 { grid-column: span 2; }
   }
 
   @media (max-width: 820px) {
     .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .footer-content { grid-template-columns: 1fr; gap: 18px; }
+    .extended-grid, .connect-grid, .legal-grid { grid-template-columns: 1fr; }
     .portal-grid { grid-template-columns: 1fr; }
     .span-2, .span-3 { grid-column: span 1; }
     .meta-list li { grid-template-columns: 1fr; }
@@ -738,6 +876,121 @@
         </div>
       </article>
     </section>
+
+    <section class="extended-grid">
+      <article class="panel">
+        <div class="panel-row">
+          <h3>Pool Backend Telemetry</h3>
+          <span id="backend-badge" class="badge">Checking...</span>
+        </div>
+        <p class="panel-sub">Direct pool backend metrics (workers/shares/payout queue) when exposed by API.</p>
+        <div class="mini-grid">
+          <div class="mini-stat"><div class="k">Workers Online</div><div id="b-workers" class="v">N/A</div></div>
+          <div class="mini-stat"><div class="k">Accepted Shares</div><div id="b-accepted" class="v">N/A</div></div>
+          <div class="mini-stat"><div class="k">Rejected Shares</div><div id="b-rejected" class="v">N/A</div></div>
+          <div class="mini-stat"><div class="k">Pending Payouts</div><div id="b-pending" class="v">N/A</div></div>
+        </div>
+        <p id="b-note" class="tiny" style="margin-top:10px;">If unavailable, backend endpoints are private or not enabled yet.</p>
+      </article>
+
+      <article class="panel">
+        <h3>Miner Account Portal</h3>
+        <p class="panel-sub">Address-centric view: recent blocks, reward totals, and payout status.</p>
+        <div class="lookup">
+          <input id="acct-input" type="text" placeholder="Enter payout address (Q...)" aria-label="Account address">
+          <button id="acct-btn" type="button">Open</button>
+        </div>
+        <div id="acct-result" class="lookup-result">No account selected.</div>
+      </article>
+
+      <article class="panel">
+        <h3>Status and Incidents</h3>
+        <p class="panel-sub">Public reliability indicators for pool operators and miners.</p>
+        <ul class="meta-list">
+          <li><span class="key">API Latency</span><span id="s-latency">Checking...</span></li>
+          <li><span class="key">Data Freshness</span><span id="s-freshness">Checking...</span></li>
+          <li><span class="key">Pool Health</span><span id="s-health">Checking...</span></li>
+          <li><span class="key">Uptime Signal</span><span id="s-uptime">Checking...</span></li>
+        </ul>
+        <p class="tiny" style="margin:10px 0 6px;">Incident log (public page)</p>
+        <ul id="incident-list" class="incident-list">
+          <li>No active incidents reported.</li>
+        </ul>
+      </article>
+    </section>
+
+    <section class="panel api-docs" style="margin-top:14px;">
+      <h3>API and Integrations</h3>
+      <p class="panel-sub">Public endpoints for monitoring and ecosystem integrations.</p>
+      <div class="table-wrap">
+        <table class="pool-table">
+          <thead>
+            <tr><th>Endpoint</th><th>Purpose</th><th>Sample</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>/api/stats</code></td><td>Global chain + peer + miner counters</td><td><code>{"height":14391,"peers_connected":29}</code></td></tr>
+            <tr><td><code>/api/mining</code></td><td>Hashrate, difficulty, timing series</td><td><code>{"hashrate":...,"difficulty":...}</code></td></tr>
+            <tr><td><code>/api/blocks?limit=N</code></td><td>Recent block feed with miner addresses</td><td><code>{"blocks":[...]}</code></td></tr>
+            <tr><td><code>/api/block/{height}</code></td><td>Single block detail by height</td><td><code>{"height":...,"header":...}</code></td></tr>
+            <tr><td><code>/api/pool/*</code></td><td>Pool backend telemetry (optional)</td><td><code>May be private/unavailable</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="tiny" style="margin-top:8px;">All public responses are fetched live from <code>https://api.iriumlabs.org</code>. Build monitoring on top of these routes.</p>
+    </section>
+
+    <section class="panel" style="margin-top:14px;">
+      <h3>Miner Config Quickstart</h3>
+      <p class="panel-sub">Ready-to-use profile snippets for common miner UIs.</p>
+      <div class="connect-grid">
+        <div class="cfg-card">
+          <h4>Antminer Profile</h4>
+          <pre id="cfg-ant">URL: stratum+tcp://pool.iriumlabs.org:3333
+Worker: IRM_ADDRESS.worker1
+Password: x</pre>
+          <button class="copy-btn" data-copy="cfg-ant">Copy Config</button>
+        </div>
+        <div class="cfg-card">
+          <h4>Whatsminer Profile</h4>
+          <pre id="cfg-whats">Pool 1: stratum+tcp://pool.iriumlabs.org:3333
+Sub-account: IRM_ADDRESS.worker1
+Password: x</pre>
+          <button class="copy-btn" data-copy="cfg-whats">Copy Config</button>
+        </div>
+        <div class="cfg-card">
+          <h4>Generic Stratum Client</h4>
+          <pre id="cfg-generic">stratum+tcp://pool.iriumlabs.org:3333
+user=IRM_ADDRESS.worker1
+pass=x</pre>
+          <button class="copy-btn" data-copy="cfg-generic">Copy Config</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:14px;">
+      <h3>Compliance and Operations</h3>
+      <p class="panel-sub">Operational policy, security stance, and support channels.</p>
+      <div class="legal-grid">
+        <div class="legal-box">
+          <h5>Risk and Terms</h5>
+          <p>Mining rewards are probabilistic in SOLO mode. Network orphan risk and node maturity rules apply before spendability.</p>
+        </div>
+        <div class="legal-box">
+          <h5>Abuse Policy</h5>
+          <p>Automated abuse, malformed share floods, and endpoint attacks may be rate-limited or blocked to protect pool availability.</p>
+        </div>
+        <div class="legal-box">
+          <h5>Security Posture</h5>
+          <p>Public page exposes DNS endpoint only. Internal node RPC remains non-public and protected.</p>
+        </div>
+        <div class="legal-box">
+          <h5>Support Escalation</h5>
+          <p>Primary support via Telegram and GitHub issues. Include miner model, config, and timestamp when reporting incidents.</p>
+        </div>
+      </div>
+      <p class="tiny" style="margin-top:8px;">Handshake/submit path verified in local testing; ongoing real ASIC validation across hardware models is encouraged.</p>
+    </section>
+
   </div>
 </main>
 
@@ -1087,6 +1340,101 @@
     `;
   }
 
+
+
+  async function fetchOptional(path) {
+    try {
+      const r = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
+      if (!r.ok) return null;
+      const txt = await r.text();
+      if (!txt || !txt.trim()) return null;
+      return JSON.parse(txt);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  async function updateBackendTelemetry() {
+    const stats = await fetchOptional('/pool/stats');
+    const miners = await fetchOptional('/miners');
+    const workers = await fetchOptional('/workers');
+    const payouts = await fetchOptional('/payouts');
+
+    const hasData = !!(stats || miners || workers || payouts);
+    setText('b-workers', stats?.workers_online ?? workers?.online ?? workers?.count ?? 'N/A');
+    setText('b-accepted', stats?.accepted_shares ?? miners?.accepted_shares ?? 'N/A');
+    setText('b-rejected', stats?.rejected_shares ?? miners?.rejected_shares ?? 'N/A');
+    setText('b-pending', payouts?.pending_count ?? payouts?.pending ?? 'N/A');
+
+    const badge = document.getElementById('backend-badge');
+    if (badge) {
+      badge.textContent = hasData ? 'Exposed' : 'Limited';
+      badge.style.borderColor = hasData ? 'rgba(80,240,184,0.45)' : 'rgba(255,199,102,0.45)';
+      badge.style.color = hasData ? '#9ff5d7' : '#ffdca1';
+      badge.style.background = hasData ? 'rgba(80,240,184,0.12)' : 'rgba(255,199,102,0.12)';
+    }
+
+    const note = document.getElementById('b-note');
+    if (note) {
+      note.textContent = hasData
+        ? 'Backend telemetry is publicly exposed by API and updated live.'
+        : 'Direct pool backend metrics are not publicly exposed; chain-derived telemetry is shown above.';
+    }
+  }
+
+  function updateStatusSignals() {
+    const nowSec = Date.now() / 1000;
+    const latestTs = Number(blocksCache?.[0]?.header?.time || 0);
+    const lag = latestTs > 0 ? Math.max(0, nowSec - latestTs) : null;
+
+    setText('s-freshness', lag === null ? 'Unknown' : `${fmtNum(lag, 0)}s behind latest block`);
+    setText('s-health', lag !== null && lag < 1800 ? 'Healthy' : 'Monitor');
+    setText('s-uptime', lag !== null && lag < 1800 ? 'Operational signal: Good' : 'Reduced confidence');
+
+    const incidents = document.getElementById('incident-list');
+    if (incidents && lag !== null) {
+      if (lag < 1800) {
+        incidents.innerHTML = '<li>No active incidents reported.</li>';
+      } else {
+        incidents.innerHTML = `<li>Data freshness lag detected (${fmtNum(lag,0)}s). Investigating upstream/API latency.</li>`;
+      }
+    }
+  }
+
+  async function measureApiLatency() {
+    const t0 = performance.now();
+    try {
+      await fetchJson('/stats');
+      const dt = performance.now() - t0;
+      setText('s-latency', `${fmtNum(dt, 0)} ms`);
+    } catch (_) {
+      setText('s-latency', 'Unavailable');
+    }
+  }
+
+  function renderAccountPortal() {
+    const input = document.getElementById('acct-input');
+    const out = document.getElementById('acct-result');
+    if (!input || !out) return;
+    const addr = (input.value || '').trim();
+    if (!addr) {
+      out.textContent = 'Enter a payout address.';
+      return;
+    }
+
+    const hits = (blocksCache || []).filter((b) => (b?.miner_address || b?.miner || '') === addr);
+    const total = hits.reduce((a, b) => a + rewardIrm(b), 0);
+    const latest = hits.sort((a,b)=>Number(b.height||0)-Number(a.height||0))[0];
+
+    out.innerHTML = `
+      <div><b class="mono">${addr}</b></div>
+      <div style="margin-top:6px;">Blocks found in window: <b>${hits.length}</b></div>
+      <div>Total coinbase rewards in window: <b class="green">${fmtNum(total,2)} IRM</b></div>
+      <div>Pending payout: <b>N/A (SOLO direct reward model)</b></div>
+      <div>Last found block: <b>${latest ? fmtInt(latest.height) : 'None in current window'}</b></div>
+    `;
+  }
+
   async function refresh() {
     try {
       const [stats, mining, blocksResp] = await Promise.all([
@@ -1112,6 +1460,9 @@
       drawLine("chart-difficulty", diffSeries.slice(-80), "#7fffb4", "Difficulty trend");
 
       applyStatus(true);
+      updateStatusSignals();
+      await updateBackendTelemetry();
+      await measureApiLatency();
     } catch (err) {
       console.error("Pool dashboard refresh failed", err);
       applyStatus(false);
@@ -1119,6 +1470,8 @@
       setText("ops-api", "API fetch error");
       setText("ops-updated", `${new Date().toLocaleTimeString()} (error)`);
       setText("pool-updated-pill", `Updated: ${new Date().toLocaleTimeString()} (error)`);
+      setText("s-latency", "Unavailable");
+      setText("s-health", "Degraded");
     }
   }
 
@@ -1144,6 +1497,10 @@
   document.getElementById("miner-btn")?.addEventListener("click", renderMinerLookup);
   document.getElementById("miner-input")?.addEventListener("keydown", (e) => {
     if (e.key === "Enter") renderMinerLookup();
+  });
+  document.getElementById("acct-btn")?.addEventListener("click", renderAccountPortal);
+  document.getElementById("acct-input")?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") renderAccountPortal();
   });
 
   setupCopyButtons();

@@ -939,3 +939,11 @@ body {
 #specs > .container > h1.glitch {
     display: none;
 }
+
+.footer-icon {
+    width: 16px;
+    height: 16px;
+    display: inline-block;
+    margin-right: 8px;
+    vertical-align: middle;
+}

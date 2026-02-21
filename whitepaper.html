@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Whitepaper - Irium</title>
-<link rel="stylesheet" href="style.css?v=5">
+<link rel="stylesheet" href="style.css?v=6">
 <link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
 </head>
 <body class="whitepaper-page">
@@ -594,29 +594,39 @@ Nonce (4 bytes)
 
 </div>
 <div class="wp-section wp-pool-ui">
-<h2>Pool Interface (Public Stratum)</h2>
-<p>Irium runs a public Stratum pool endpoint for solo mining. Miners connect using their IRM payout address as username.</p>
-<div class="wp-pool-grid">
-  <div class="wp-pool-card">
-    <h3>Connection Profile</h3>
-    <ul>
-      <li><strong>Pool URL:</strong> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
-      <li><strong>Worker:</strong> <code>IRM_ADDRESS.worker1</code></li>
-      <li><strong>Password:</strong> <code>x</code></li>
-      <li><strong>Mode:</strong> SOLO (block reward pays to username address)</li>
-      <li><strong>Algorithm:</strong> SHA-256d</li>
-    </ul>
+  <div class="wp-pool-head">
+    <div class="wp-pool-eyebrow"><span class="wp-pool-dot"></span> Live Public Stratum Pool</div>
+    <h2>Pool Interface (Public Stratum)</h2>
+    <p>Real-time pool access layer inside the Irium ecosystem: endpoint, setup profile, and direct actions for miners.</p>
   </div>
-  <div class="wp-pool-card">
-    <h3>Live Access</h3>
-    <div class="wp-pool-actions">
-      <a class="wp-pool-btn" href="https://www.iriumlabs.org/pool/" target="_blank" rel="noopener">Open Pool Portal</a>
-      <a class="wp-pool-btn wp-pool-btn-secondary" href="https://api.iriumlabs.org/api/pool/stats" target="_blank" rel="noopener">Pool API Stats</a>
-      <a class="wp-pool-btn wp-pool-btn-secondary" href="https://www.iriumlabs.org/docs/mining/" target="_blank" rel="noopener">Mining Guide</a>
-    </div>
-    <p class="wp-pool-note">Tip: if your miner supports multiple pools, set Irium pool as primary and keep failover pools configured.</p>
+
+  <div class="wp-pool-grid">
+    <article class="wp-pool-card wp-pool-card-primary">
+      <h3>Connection Profile</h3>
+      <ul>
+        <li><strong>Pool URL:</strong> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
+        <li><strong>Username:</strong> <code>IRM_ADDRESS.worker1</code></li>
+        <li><strong>Password:</strong> <code>x</code></li>
+        <li><strong>Algorithm:</strong> SHA-256d</li>
+        <li><strong>Mode:</strong> SOLO payout to username wallet address</li>
+      </ul>
+      <div class="wp-pool-status-row">
+        <span class="wp-pool-status">ONLINE</span>
+        <span class="wp-pool-updated" id="wp-pool-updated">Updated --:--:--</span>
+      </div>
+    </article>
+
+    <article class="wp-pool-card wp-pool-card-endpoint">
+      <h3>Primary Endpoint</h3>
+      <div class="wp-pool-endpoint">stratum+tcp://pool.iriumlabs.org:3333</div>
+      <p class="wp-pool-note">Use DNS endpoint for resilience. Raw host IP is intentionally not listed for network security.</p>
+      <div class="wp-pool-actions">
+        <a class="wp-pool-btn" href="https://www.iriumlabs.org/pool/" target="_blank" rel="noopener">Open Pool Portal</a>
+        <a class="wp-pool-btn wp-pool-btn-secondary" href="https://api.iriumlabs.org/api/pool/stats" target="_blank" rel="noopener">Pool API Stats</a>
+        <a class="wp-pool-btn wp-pool-btn-secondary" href="https://www.iriumlabs.org/docs/mining/" target="_blank" rel="noopener">Mining Guide</a>
+      </div>
+    </article>
   </div>
-</div>
 </div>
 
 <div class="wp-section"><h2>12. Conclusion</h2>
@@ -711,5 +721,13 @@ GitHub</a>
 
 
 <script src="script.js"></script>
+
+<script>
+(function(){
+  var el=document.getElementById("wp-pool-updated");
+  if(el){el.textContent="Updated " + new Date().toLocaleTimeString();}
+})();
+</script>
+
 </body>
 </html>

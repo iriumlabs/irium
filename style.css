@@ -962,3 +962,75 @@ body {
     margin: 0 !important;
     vertical-align: middle;
 }
+
+
+.whitepaper-page .wp-pool-ui {
+    border: 1px solid rgba(99, 102, 241, 0.25);
+    border-radius: 14px;
+    padding: 1.25rem;
+    background: linear-gradient(180deg, rgba(9, 11, 25, 0.9), rgba(7, 8, 20, 0.95));
+}
+
+.whitepaper-page .wp-pool-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1rem;
+    margin-top: 0.9rem;
+}
+
+.whitepaper-page .wp-pool-card {
+    border: 1px solid rgba(99, 102, 241, 0.22);
+    background: rgba(0, 0, 0, 0.28);
+    border-radius: 12px;
+    padding: 1rem;
+}
+
+.whitepaper-page .wp-pool-card ul {
+    margin-left: 1rem;
+}
+
+.whitepaper-page .wp-pool-card code {
+    color: #dbeafe;
+}
+
+.whitepaper-page .wp-pool-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
+    margin-top: 0.3rem;
+}
+
+.whitepaper-page .wp-pool-btn {
+    text-decoration: none;
+    padding: 0.55rem 0.8rem;
+    border-radius: 10px;
+    border: 1px solid rgba(99, 102, 241, 0.45);
+    background: rgba(99, 102, 241, 0.2);
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.whitepaper-page .wp-pool-btn:hover {
+    background: rgba(99, 102, 241, 0.32);
+}
+
+.whitepaper-page .wp-pool-btn-secondary {
+    border-color: rgba(14, 165, 233, 0.45);
+    background: rgba(14, 165, 233, 0.2);
+}
+
+.whitepaper-page .wp-pool-btn-secondary:hover {
+    background: rgba(14, 165, 233, 0.32);
+}
+
+.whitepaper-page .wp-pool-note {
+    margin-top: 0.8rem;
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 0.92rem;
+}
+
+@media (max-width: 900px) {
+    .whitepaper-page .wp-pool-grid {
+        grid-template-columns: 1fr;
+    }
+}

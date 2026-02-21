@@ -663,8 +663,10 @@ body {
     color: #a0a0a0;
     text-decoration: none;
     transition: color 0.3s;
-    display: flex;
+    display: inline-flex;
     align-items: center;
+    gap: 8px;
+    line-height: 1.25;
 }
 
 .footer-links a:hover {
@@ -943,7 +945,8 @@ body {
 .footer-icon {
     width: 16px;
     height: 16px;
-    display: inline-block;
-    margin-right: 8px;
+    display: block;
+    flex: 0 0 16px;
+    margin: 0;
     vertical-align: middle;
 }

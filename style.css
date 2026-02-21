@@ -942,11 +942,23 @@ body {
     display: none;
 }
 
-.footer-icon {
-    width: 16px;
-    height: 16px;
-    display: block;
-    flex: 0 0 16px;
-    margin: 0;
+.footer .footer-links a {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    line-height: 1.25;
+}
+
+.footer .footer-links a .footer-icon,
+.footer .footer-links a svg.footer-icon {
+    width: 16px !important;
+    height: 16px !important;
+    min-width: 16px !important;
+    min-height: 16px !important;
+    max-width: 16px !important;
+    max-height: 16px !important;
+    display: inline-block !important;
+    flex: 0 0 16px !important;
+    margin: 0 !important;
     vertical-align: middle;
 }

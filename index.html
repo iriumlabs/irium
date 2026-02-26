@@ -170,29 +170,31 @@
     background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer;
   }
 
+
   .otc-float {
     position: fixed;
-    top: 86px;
+    top: 88px;
     left: 50%;
     transform: translateX(-50%);
-    width: min(680px, calc(100vw - 24px));
+    width: min(700px, calc(100vw - 24px));
     z-index: 10020;
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    border-radius: 12px;
-    border: 1px solid rgba(42,171,238,0.45);
-    background: linear-gradient(135deg, rgba(8,16,30,0.96), rgba(12,22,38,0.92));
-    box-shadow: 0 12px 34px rgba(0,0,0,0.35), 0 0 0 1px rgba(42,171,238,0.15) inset;
-    backdrop-filter: blur(6px);
-    animation: otcFloatIn .5s ease, otcFloatPulse 2.8s ease-in-out infinite;
+    gap: 11px;
+    padding: 11px 13px;
+    border-radius: 13px;
+    border: 1px solid rgba(42,171,238,0.5);
+    background: linear-gradient(135deg, rgba(7,15,30,0.96), rgba(11,22,40,0.93));
+    box-shadow: 0 14px 34px rgba(0,0,0,0.35), 0 0 0 1px rgba(42,171,238,0.16) inset;
+    backdrop-filter: blur(8px);
+    animation: otcFloatIn .45s ease, otcFloatPulse 2.8s ease-in-out infinite;
+    transition: width .25s ease, padding .25s ease, left .25s ease, transform .25s ease, right .25s ease;
   }
   .otc-float[hidden] { display: none !important; }
   .otc-float-logo {
-    width: 20px;
-    height: 20px;
-    min-width: 20px;
+    width: 21px;
+    height: 21px;
+    min-width: 21px;
     color: #2AABEE;
   }
   .otc-float-text {
@@ -200,7 +202,7 @@
     min-width: 0;
     color: #eaf2ff;
     font-size: .92rem;
-    line-height: 1.3;
+    line-height: 1.35;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -210,6 +212,14 @@
     font-family: 'Orbitron', sans-serif;
     letter-spacing: .2px;
     margin-right: 6px;
+  }
+  .otc-float-min-label {
+    display: none;
+    color: #9ddfff;
+    font-family: 'Orbitron', sans-serif;
+    font-size: .82rem;
+    letter-spacing: .5px;
+    white-space: nowrap;
   }
   .otc-float-cta {
     display: inline-flex;
@@ -234,20 +244,49 @@
     font-size: 18px;
     line-height: 1;
     padding: 2px 4px;
+    border-radius: 6px;
   }
+  .otc-float-close:hover { background: rgba(255,255,255,0.08); }
+
+  .otc-float.is-minimized {
+    left: auto;
+    right: 16px;
+    top: 88px;
+    transform: none;
+    width: auto;
+    max-width: calc(100vw - 24px);
+    padding: 9px 10px;
+    border-radius: 999px;
+    gap: 8px;
+    cursor: pointer;
+  }
+  .otc-float.is-minimized .otc-float-text,
+  .otc-float.is-minimized .otc-float-cta {
+    display: none;
+  }
+  .otc-float.is-minimized .otc-float-min-label {
+    display: inline;
+  }
+  .otc-float.is-minimized .otc-float-close {
+    font-size: 14px;
+    color: #9ddfff;
+  }
+
   @keyframes otcFloatIn {
     from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
     to { opacity: 1; transform: translateX(-50%) translateY(0); }
   }
   @keyframes otcFloatPulse {
-    0%,100% { box-shadow: 0 12px 34px rgba(0,0,0,0.35), 0 0 0 1px rgba(42,171,238,0.15) inset; }
-    50% { box-shadow: 0 16px 40px rgba(0,0,0,0.42), 0 0 0 1px rgba(42,171,238,0.28) inset; }
+    0%,100% { box-shadow: 0 14px 34px rgba(0,0,0,0.35), 0 0 0 1px rgba(42,171,238,0.16) inset; }
+    50% { box-shadow: 0 18px 42px rgba(0,0,0,0.42), 0 0 0 1px rgba(42,171,238,0.28) inset; }
   }
   @media (max-width: 760px) {
-    .otc-float { top: 72px; padding: 9px 10px; gap: 8px; }
+    .otc-float { top: 74px; padding: 10px; gap: 8px; }
     .otc-float-text { font-size: .84rem; white-space: normal; }
     .otc-float-cta { padding: 6px 9px; font-size: .8rem; }
+    .otc-float.is-minimized { top: 74px; right: 10px; }
   }
+
 
 </style>
 
@@ -285,17 +324,18 @@
 </div>
 </nav>
 
-<div id="otc-float" class="otc-float" role="status" aria-live="polite" hidden>
+
+<div id="otc-float" class="otc-float" role="status" aria-live="polite">
   <span class="otc-float-logo" aria-hidden="true">
     <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
       <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/>
     </svg>
   </span>
+  <span class="otc-float-min-label">OTC LIVE</span>
   <div class="otc-float-text"><b>IRIUM OTC LIVE</b> Trade IRM in our official Telegram OTC group with escrow support.</div>
   <a class="otc-float-cta" href="https://t.me/irium_otc_trading" target="_blank" rel="noopener noreferrer">Open Telegram</a>
-  <button id="otc-float-close" class="otc-float-close" aria-label="Close OTC notice">&times;</button>
+  <button id="otc-float-close" class="otc-float-close" aria-label="Minimize OTC notice">&times;</button>
 </div>
-
 
 <section id="home" class="hero">
 
@@ -549,22 +589,28 @@ GitHub</a>
 <script>
   (function(){
     const bar = document.getElementById('otc-float');
-    const closeBtn = document.getElementById('otc-float-close');
-    if (!bar) return;
-    const KEY = 'irium_otc_float_dismissed_v1';
-    try {
-      if (!localStorage.getItem(KEY)) {
-        bar.hidden = false;
+    const toggleBtn = document.getElementById('otc-float-close');
+    if (!bar || !toggleBtn) return;
+
+    function setMinimized(minimized) {
+      bar.classList.toggle('is-minimized', minimized);
+      toggleBtn.innerHTML = minimized ? '&#9633;' : '&times;';
+      toggleBtn.setAttribute('aria-label', minimized ? 'Expand OTC notice' : 'Minimize OTC notice');
+    }
+
+    setMinimized(false);
+
+    toggleBtn.addEventListener('click', function (e) {
+      e.preventDefault();
+      e.stopPropagation();
+      setMinimized(!bar.classList.contains('is-minimized'));
+    });
+
+    bar.addEventListener('click', function () {
+      if (bar.classList.contains('is-minimized')) {
+        setMinimized(false);
       }
-    } catch (_) {
-      bar.hidden = false;
-    }
-    if (closeBtn) {
-      closeBtn.addEventListener('click', function(){
-        bar.hidden = true;
-        try { localStorage.setItem(KEY, String(Date.now())); } catch (_) {}
-      });
-    }
+    });
   })();
 </script>
 

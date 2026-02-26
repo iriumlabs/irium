@@ -903,6 +903,9 @@
           <div class="mini-stat"><div class="k">Accepted Shares</div><div id="b-accepted" class="v">N/A</div></div>
           <div class="mini-stat"><div class="k">Rejected Shares</div><div id="b-rejected" class="v">N/A</div></div>
           <div class="mini-stat"><div class="k">Pending Payouts</div><div id="b-pending" class="v">N/A</div></div>
+          <div class="mini-stat"><div class="k">Last Template Update</div><div id="b-last-template" class="v">N/A</div></div>
+          <div class="mini-stat"><div class="k">Last Share Accepted</div><div id="b-last-accept" class="v">N/A</div></div>
+          <div class="mini-stat"><div class="k">Last Share Rejected</div><div id="b-last-reject" class="v">N/A</div></div>
         </div>
         <p id="b-note" class="tiny" style="margin-top:10px;">If unavailable, backend endpoints are private or not enabled yet.</p>
       </article>
@@ -924,6 +927,8 @@
           <li><span class="key">API Latency</span><span id="s-latency">Checking...</span></li>
           <li><span class="key">Data Freshness</span><span id="s-freshness">Checking...</span></li>
           <li><span class="key">Pool Health</span><span id="s-health">Checking...</span></li>
+          <li><span class="key">Pool Health API</span><span id="s-health-api">Checking...</span></li>
+          <li><span class="key">Health Reason</span><span id="s-health-reason">Checking...</span></li>
           <li><span class="key">Uptime Signal</span><span id="s-uptime">Checking...</span></li>
         </ul>
         <p class="tiny" style="margin:10px 0 6px;">Incident log (public page)</p>
@@ -1017,6 +1022,7 @@ Password: x</pre>
         </div>
       </div>
       <p class="tiny" style="margin-top:10px;">Important: for pool mining, use the Stratum URL above. Do not point miners at <code>127.0.0.1:38300</code> unless you are running local node-template mining.</p>
+      <p class="tiny" style="margin-top:6px; color:#ffdca1;">Profitability note: SHA-256d pool mining is generally practical on ASIC hardware. CPU/GPU miners are supported for testing/learning but typically have low yield.</p>
 
       <div class="legal-grid" style="margin-top:12px;">
         <div class="legal-box">
@@ -1055,6 +1061,35 @@ Worker: YOUR_IRIUM_WALLET_ADDRESS.worker1
 Password: x</pre>
         </div>
       </div>
+    </section>
+
+
+
+    <section class="panel" style="margin-top:14px;">
+      <h3>Miner Compatibility Matrix</h3>
+      <p class="panel-sub">Known behavior across miner types. If your setup differs, share logs in support for tuning guidance.</p>
+      <div class="table-wrap">
+        <table class="pool-table">
+          <thead><tr><th>Miner Type</th><th>OS</th><th>Status</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Antminer / Whatsminer ASIC</td><td>Embedded Linux</td><td><span class="green">Recommended</span></td><td>Use SHA-256d + Stratum endpoint. Best reliability and economics.</td></tr>
+            <tr><td>CPU software miner</td><td>Windows/Linux/macOS</td><td><span class="amber">Supported</span></td><td>Works for testing and onboarding; usually unprofitable at scale.</td></tr>
+            <tr><td>GPU software miner</td><td>Windows/Linux</td><td><span class="amber">Depends on miner</span></td><td>Use a SHA-256d-capable client; verify accepted shares in miner logs.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:14px;">
+      <h3>Common Share Reject Reasons</h3>
+      <p class="panel-sub">If you see high reject ratio, check these first before changing hardware settings.</p>
+      <ul class="meta-list">
+        <li><span class="key">low_difficulty</span><span>Submitted share hash is above pool share target at current difficulty.</span></li>
+        <li><span class="key">stale share</span><span>Job changed before submit arrived; reduce latency and keep miner clock/network stable.</span></li>
+        <li><span class="key">invalid format</span><span>Non-Stratum or malformed submit payload reached the pool.</span></li>
+        <li><span class="key">wrong algorithm</span><span>Miner not configured for SHA-256d.</span></li>
+        <li><span class="key">bad username</span><span>Use <span class="mono">WALLET_ADDRESS.worker</span> format; wallet address must be valid.</span></li>
+      </ul>
     </section>
 
     <section class="panel" style="margin-top:14px;">
@@ -1460,7 +1495,14 @@ GitHub</a>
     setText('b-workers', stats?.workers_online ?? 'N/A');
     setText('b-accepted', stats?.accepted_shares ?? 'N/A');
     setText('b-rejected', stats?.rejected_shares ?? 'N/A');
+    const tmplTs = stats?.template_updated_at ?? stats?.last_template_update_ts ?? null;
+    const lastAcceptTs = stats?.last_share_accepted_at ?? stats?.last_share_accept_ts ?? null;
+    const lastRejectTs = stats?.last_share_rejected_at ?? stats?.last_share_reject_ts ?? null;
+
     setText('b-pending', pendingCount ?? 'N/A');
+    setText('b-last-template', tmplTs ? fmtTime(tmplTs) : 'N/A');
+    setText('b-last-accept', lastAcceptTs ? fmtTime(lastAcceptTs) : 'N/A');
+    setText('b-last-reject', lastRejectTs ? fmtTime(lastRejectTs) : 'N/A');
 
     const badge = document.getElementById('backend-badge');
     if (badge) {
@@ -1479,7 +1521,7 @@ GitHub</a>
   }
 
 
-  function updateStatusSignals() {
+  async function updateStatusSignals() {
     const nowSec = Date.now() / 1000;
     const latestTs = Number(blocksCache?.[0]?.header?.time || 0);
     const lag = latestTs > 0 ? Math.max(0, nowSec - latestTs) : null;
@@ -1487,6 +1529,12 @@ GitHub</a>
     setText('s-freshness', lag === null ? 'Unknown' : `${fmtNum(lag, 0)}s behind latest block`);
     setText('s-health', lag !== null && lag < 1800 ? 'Healthy' : 'Monitor');
     setText('s-uptime', lag !== null && lag < 1800 ? 'Operational signal: Good' : 'Reduced confidence');
+
+    const health = await fetchOptional('/pool/health');
+    const healthy = health?.healthy === true;
+    const issues = Array.isArray(health?.issues) ? health.issues : [];
+    setText('s-health-api', healthy ? 'Healthy' : (health ? 'Degraded' : 'Unavailable'));
+    setText('s-health-reason', issues.length ? issues.join('; ') : (healthy ? 'No active pool-health issues' : 'No health details'));
 
     const incidents = document.getElementById('incident-list');
     if (incidents && lag !== null) {
@@ -1576,7 +1624,7 @@ GitHub</a>
       drawLine("chart-difficulty", diffSeries.slice(-80), "#7fffb4", "Difficulty trend");
 
       applyStatus(true);
-      updateStatusSignals();
+      await updateStatusSignals();
       await updateBackendTelemetry();
       await measureApiLatency();
     } catch (err) {

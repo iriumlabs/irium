@@ -256,24 +256,29 @@
     transform: none;
     width: auto;
     max-width: calc(100vw - 24px);
-    padding: 9px 10px;
+    padding: 9px 12px;
     border-radius: 999px;
-    gap: 8px;
+    gap: 6px;
     cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: nowrap;
   }
   .otc-float.is-minimized .otc-float-text,
   .otc-float.is-minimized .otc-float-cta {
     display: none;
   }
   .otc-float.is-minimized .otc-float-min-label {
-    display: inline;
-    margin-right: 6px;
+    display: inline-block;
+    margin-right: 4px;
+    line-height: 1;
   }
 
   .otc-float-new-dot {
     display: none;
     width: 10px;
     height: 10px;
+    flex: 0 0 auto;
     border-radius: 999px;
     background: #3dffb3;
     box-shadow: 0 0 8px rgba(61,255,179,0.85);
@@ -282,7 +287,8 @@
   .otc-float.is-minimized .otc-float-new-dot {
     display: inline-block;
     position: static;
-    vertical-align: middle;
+    flex: 0 0 auto;
+    margin-left: 0;
   }
   .otc-float.is-minimized .otc-float-close {
     display: none;

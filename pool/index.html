@@ -970,6 +970,36 @@ pass=x</pre>
       </div>
     </section>
 
+
+    <section class="panel" style="margin-top:14px;">
+      <h3>Start Mining on Any OS</h3>
+      <p class="panel-sub">Use the same pool endpoint on ASIC or software miners. Replace <code>YOUR_IRIUM_WALLET_ADDRESS</code> with your own IRM address.</p>
+      <div class="connect-grid">
+        <div class="cfg-card">
+          <h4>ASIC Miner UI (Antminer / Whatsminer)</h4>
+          <pre id="cfg-asic-ui">Algorithm: SHA-256d
+Pool URL: stratum+tcp://pool.iriumlabs.org:3333
+Worker: YOUR_IRIUM_WALLET_ADDRESS.worker1
+Password: x</pre>
+          <button class="copy-btn" data-copy="cfg-asic-ui">Copy Setup</button>
+        </div>
+        <div class="cfg-card">
+          <h4>Windows (Software Miner)</h4>
+          <pre id="cfg-win-soft">minerd.exe -a sha256d ^
+  -o stratum+tcp://pool.iriumlabs.org:3333 ^
+  -u YOUR_IRIUM_WALLET_ADDRESS.worker1 ^
+  -p x</pre>
+          <button class="copy-btn" data-copy="cfg-win-soft">Copy Command</button>
+        </div>
+        <div class="cfg-card">
+          <h4>Linux / macOS (Software Miner)</h4>
+          <pre id="cfg-unix-soft">./minerd -a sha256d   -o stratum+tcp://pool.iriumlabs.org:3333   -u YOUR_IRIUM_WALLET_ADDRESS.worker1   -p x</pre>
+          <button class="copy-btn" data-copy="cfg-unix-soft">Copy Command</button>
+        </div>
+      </div>
+      <p class="tiny" style="margin-top:10px;">Important: for pool mining, use the Stratum URL above. Do not point miners at <code>127.0.0.1:38300</code> unless you are running local node-template mining.</p>
+    </section>
+
     <section class="panel" style="margin-top:14px;">
       <h3>Compliance and Operations</h3>
       <p class="panel-sub">Operational policy, security stance, and support channels.</p>

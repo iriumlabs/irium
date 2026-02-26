@@ -714,6 +714,113 @@
     .meta-list li { grid-template-columns: 1fr; }
     .endpoint-card { grid-template-columns: 1fr; }
   }
+
+  /* Professional Grid Refinement */
+  .kpi-grid, .portal-grid, .extended-grid, .connect-grid, .legal-grid {
+    gap: 16px;
+  }
+
+  .kpi, .panel, .mini-stat, .cfg-card, .legal-box {
+    border-radius: 14px;
+    border-color: rgba(142, 162, 255, 0.24);
+    background: linear-gradient(165deg, rgba(10,14,34,0.88), rgba(8,11,28,0.88));
+    box-shadow: 0 10px 30px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04);
+  }
+
+  .panel {
+    padding: 17px;
+  }
+
+  .panel h3 {
+    font-size: 0.98rem;
+    letter-spacing: 0.07em;
+    margin-bottom: 2px;
+  }
+
+  .panel-sub {
+    color: #c7d6f5;
+    font-size: 0.86rem;
+    line-height: 1.45;
+  }
+
+  .kpi {
+    padding: 14px;
+    min-height: 86px;
+  }
+
+  .kpi .label {
+    color: #b9c9eb;
+    letter-spacing: 0.1em;
+    font-size: 0.70rem;
+  }
+
+  .kpi .value {
+    margin-top: 6px;
+    font-size: 1.12rem;
+    letter-spacing: 0.01em;
+  }
+
+  .meta-list {
+    gap: 9px;
+  }
+
+  .meta-list li {
+    grid-template-columns: 150px 1fr;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+  }
+
+  .meta-list li:last-child {
+    border-bottom: 0;
+  }
+
+  .meta-list .key {
+    color: #afc1e7;
+    font-size: 0.79rem;
+    letter-spacing: 0.08em;
+  }
+
+  .table-wrap {
+    border-radius: 14px;
+    border-color: rgba(255,255,255,0.12);
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
+  }
+
+  .pool-table th {
+    background: rgba(16, 22, 48, 0.98);
+    color: #c5d3f2;
+  }
+
+  .pool-table td {
+    color: #edf3ff;
+  }
+
+  .lookup input {
+    border-color: rgba(142,162,255,0.32);
+    background: rgba(7,10,25,0.72);
+  }
+
+  .lookup input:focus {
+    outline: none;
+    border-color: rgba(106, 132, 255, 0.72);
+    box-shadow: 0 0 0 4px rgba(106,132,255,0.16);
+  }
+
+  .lookup button,
+  .copy-btn {
+    border-radius: 11px;
+  }
+
+  .mini-stat .k,
+  .tiny {
+    color: #b6c7ea;
+  }
+
+  @media (max-width: 820px) {
+    .panel, .kpi, .cfg-card, .legal-box { border-radius: 12px; }
+    .meta-list li { grid-template-columns: 1fr; }
+  }
+
 </style>
 </head>
 <body>

@@ -1001,6 +1001,44 @@ Password: x</pre>
         </div>
       </div>
       <p class="tiny" style="margin-top:10px;">Important: for pool mining, use the Stratum URL above. Do not point miners at <code>127.0.0.1:38300</code> unless you are running local node-template mining.</p>
+
+      <div class="legal-grid" style="margin-top:12px;">
+        <div class="legal-box">
+          <h5>Windows Setup (CPU/GPU software miner)</h5>
+          <p>1) Download a SHA-256d miner build (example: <a href="https://github.com/JayDDee/cpuminer-opt/releases" target="_blank" rel="noopener">cpuminer-opt releases</a>).</p>
+          <p>2) Extract ZIP and open <code>cmd.exe</code> in that folder.</p>
+          <p>3) Run:</p>
+          <pre>minerd.exe -a sha256d ^
+  -o stratum+tcp://pool.iriumlabs.org:3333 ^
+  -u YOUR_IRIUM_WALLET_ADDRESS.worker1 ^
+  -p x</pre>
+        </div>
+        <div class="legal-box">
+          <h5>Linux Setup (software miner)</h5>
+          <p>1) Install a SHA-256d miner (package or source; example project: <a href="https://github.com/JayDDee/cpuminer-opt" target="_blank" rel="noopener">cpuminer-opt</a>).</p>
+          <p>2) Run:</p>
+          <pre>./minerd -a sha256d \
+  -o stratum+tcp://pool.iriumlabs.org:3333 \
+  -u YOUR_IRIUM_WALLET_ADDRESS.worker1 \
+  -p x</pre>
+          <p>3) Keep firewall allowing outbound TCP 3333.</p>
+        </div>
+        <div class="legal-box">
+          <h5>macOS Setup (software miner)</h5>
+          <p>1) Use a SHA-256d compatible miner binary, or build from source from the same upstream project used on Linux.</p>
+          <p>2) Run the same command as Linux with your wallet address.</p>
+          <p>3) If Gatekeeper blocks execution, allow the binary in macOS Security settings.</p>
+        </div>
+        <div class="legal-box">
+          <h5>ASIC Setup (recommended)</h5>
+          <p>1) Open your ASIC web dashboard (Antminer/Whatsminer/etc.).</p>
+          <p>2) Set algorithm to <code>SHA-256d</code>.</p>
+          <p>3) Use:</p>
+          <pre>Pool URL: stratum+tcp://pool.iriumlabs.org:3333
+Worker: YOUR_IRIUM_WALLET_ADDRESS.worker1
+Password: x</pre>
+        </div>
+      </div>
     </section>
 
     <section class="panel" style="margin-top:14px;">

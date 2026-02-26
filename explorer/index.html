@@ -254,6 +254,56 @@
 
   .x-main { display: grid; grid-template-columns: 1fr; gap: 18px; }
 
+  .x-otc-panel {
+    border: 1px solid rgba(42,171,238,0.36);
+    background: linear-gradient(135deg, rgba(7,20,40,0.84), rgba(8,14,26,0.8));
+    box-shadow: 0 12px 32px rgba(0,0,0,0.34), 0 0 26px rgba(42,171,238,0.16);
+  }
+  .x-otc-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+  .x-otc-left { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+  .x-otc-tele {
+    width: 26px;
+    height: 26px;
+    min-width: 26px;
+    color: #2AABEE;
+    filter: drop-shadow(0 0 10px rgba(42,171,238,0.45));
+  }
+  .x-otc-title {
+    margin: 0 0 6px;
+    font-size: 13px;
+    letter-spacing: .11em;
+    text-transform: uppercase;
+    font-weight: 900;
+    color: rgba(255,255,255,0.96);
+  }
+  .x-otc-text {
+    margin: 0;
+    color: rgba(226,236,248,0.9);
+    line-height: 1.5;
+    font-size: 14px;
+  }
+  .x-otc-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(42,171,238,0.52);
+    text-decoration: none;
+    color: #9edfff;
+    font-weight: 700;
+    white-space: nowrap;
+    transition: transform .16s ease, background .16s ease;
+  }
+  .x-otc-btn:hover { transform: translateY(-1px); background: rgba(42,171,238,0.12); }
+
+
   .x-list { display: grid; gap: 10px; }
   .x-block { background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.10); border-radius: 16px; padding: 14px; cursor: pointer; transition: transform 0.16s ease, border-color 0.16s ease; animation: xRise 0.38s ease both; }
   .x-block:hover { transform: translateY(-2px); border-color: rgba(91,177,255,0.34); }
@@ -358,6 +408,24 @@
           <div class="x-field"><div class="x-field-label">Search by transaction id (txid)</div><div class="x-row"><input type="text" id="tx-search-input" placeholder="64-char txid" class="x-input"><button onclick="searchTx()" class="x-btn">Tx</button></div></div>
           <div class="x-field"><div class="x-field-label">Search by address</div><div class="x-row"><input type="text" id="address-search-input" placeholder="Wallet address" class="x-input"><button onclick="searchAddress()" class="x-btn">Address</button></div></div>
         </div>
+      </div>
+    </div>
+
+
+    <div class="x-panel x-otc-panel x-stagger">
+      <div class="x-otc-row">
+        <div class="x-otc-left">
+          <span class="x-otc-tele" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="currentColor" width="26" height="26">
+              <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/>
+            </svg>
+          </span>
+          <div>
+            <h3 class="x-otc-title">IRIUM OTC Trading Now Available</h3>
+            <p class="x-otc-text">Peer-to-peer IRM OTC trading is now live in our official Telegram group with escrow-supported flow for safer deals.</p>
+          </div>
+        </div>
+        <a class="x-otc-btn" href="https://t.me/irium_otc_trading" target="_blank" rel="noopener noreferrer">Join OTC Telegram</a>
       </div>
     </div>
 

@@ -169,6 +169,86 @@
   .feature-close {
     background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer;
   }
+
+  .otc-float {
+    position: fixed;
+    top: 86px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(680px, calc(100vw - 24px));
+    z-index: 10020;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 12px;
+    border: 1px solid rgba(42,171,238,0.45);
+    background: linear-gradient(135deg, rgba(8,16,30,0.96), rgba(12,22,38,0.92));
+    box-shadow: 0 12px 34px rgba(0,0,0,0.35), 0 0 0 1px rgba(42,171,238,0.15) inset;
+    backdrop-filter: blur(6px);
+    animation: otcFloatIn .5s ease, otcFloatPulse 2.8s ease-in-out infinite;
+  }
+  .otc-float[hidden] { display: none !important; }
+  .otc-float-logo {
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    color: #2AABEE;
+  }
+  .otc-float-text {
+    flex: 1;
+    min-width: 0;
+    color: #eaf2ff;
+    font-size: .92rem;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .otc-float-text b {
+    color: #9ddfff;
+    font-family: 'Orbitron', sans-serif;
+    letter-spacing: .2px;
+    margin-right: 6px;
+  }
+  .otc-float-cta {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 7px 10px;
+    border-radius: 9px;
+    border: 1px solid rgba(42,171,238,0.55);
+    color: #9ddfff;
+    text-decoration: none;
+    font-weight: 600;
+    font-size: .84rem;
+    white-space: nowrap;
+    transition: background .2s ease, transform .2s ease;
+  }
+  .otc-float-cta:hover { background: rgba(42,171,238,0.14); transform: translateY(-1px); }
+  .otc-float-close {
+    border: 0;
+    background: transparent;
+    color: #aac8e8;
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 1;
+    padding: 2px 4px;
+  }
+  @keyframes otcFloatIn {
+    from { opacity: 0; transform: translateX(-50%) translateY(-10px); }
+    to { opacity: 1; transform: translateX(-50%) translateY(0); }
+  }
+  @keyframes otcFloatPulse {
+    0%,100% { box-shadow: 0 12px 34px rgba(0,0,0,0.35), 0 0 0 1px rgba(42,171,238,0.15) inset; }
+    50% { box-shadow: 0 16px 40px rgba(0,0,0,0.42), 0 0 0 1px rgba(42,171,238,0.28) inset; }
+  }
+  @media (max-width: 760px) {
+    .otc-float { top: 72px; padding: 9px 10px; gap: 8px; }
+    .otc-float-text { font-size: .84rem; white-space: normal; }
+    .otc-float-cta { padding: 6px 9px; font-size: .8rem; }
+  }
+
 </style>
 
 </head>
@@ -204,6 +284,18 @@
 </div>
 </div>
 </nav>
+
+<div id="otc-float" class="otc-float" role="status" aria-live="polite" hidden>
+  <span class="otc-float-logo" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+      <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/>
+    </svg>
+  </span>
+  <div class="otc-float-text"><b>IRIUM OTC LIVE</b> Trade IRM in our official Telegram OTC group with escrow support.</div>
+  <a class="otc-float-cta" href="https://t.me/irium_otc_trading" target="_blank" rel="noopener noreferrer">Open Telegram</a>
+  <button id="otc-float-close" class="otc-float-close" aria-label="Close OTC notice">&times;</button>
+</div>
+
 
 <section id="home" class="hero">
 
@@ -453,5 +545,28 @@ GitHub</a>
     window.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
   })();
 </script>
+
+<script>
+  (function(){
+    const bar = document.getElementById('otc-float');
+    const closeBtn = document.getElementById('otc-float-close');
+    if (!bar) return;
+    const KEY = 'irium_otc_float_dismissed_v1';
+    try {
+      if (!localStorage.getItem(KEY)) {
+        bar.hidden = false;
+      }
+    } catch (_) {
+      bar.hidden = false;
+    }
+    if (closeBtn) {
+      closeBtn.addEventListener('click', function(){
+        bar.hidden = true;
+        try { localStorage.setItem(KEY, String(Date.now())); } catch (_) {}
+      });
+    }
+  })();
+</script>
+
 </body>
 </html>

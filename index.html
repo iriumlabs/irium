@@ -282,8 +282,11 @@
     display: inline-block;
     position: absolute;
     top: 7px;
-    right: 30px;
+    right: 10px;
     z-index: 2;
+  }
+  .otc-float.is-minimized .otc-float-close {
+    display: none;
   }
   @keyframes otcNewPulse {
     0% { box-shadow: 0 0 0 0 rgba(61,255,179,0.70); }
@@ -619,7 +622,7 @@ GitHub</a>
 
     function setMinimized(minimized) {
       bar.classList.toggle('is-minimized', minimized);
-      toggleBtn.innerHTML = minimized ? '&#9633;' : '&times;';
+      toggleBtn.innerHTML = '&times;';
       toggleBtn.setAttribute('aria-label', minimized ? 'Expand OTC notice' : 'Minimize OTC notice');
     }
 

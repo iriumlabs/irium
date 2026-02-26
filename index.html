@@ -267,6 +267,25 @@
   .otc-float.is-minimized .otc-float-min-label {
     display: inline;
   }
+
+  .otc-float-new-dot {
+    display: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #42d392;
+    box-shadow: 0 0 0 0 rgba(66,211,146,0.65);
+    animation: otcNewPulse 1.8s ease-out infinite;
+  }
+  .otc-float.is-minimized .otc-float-new-dot {
+    display: inline-block;
+  }
+  @keyframes otcNewPulse {
+    0% { box-shadow: 0 0 0 0 rgba(66,211,146,0.65); }
+    70% { box-shadow: 0 0 0 8px rgba(66,211,146,0); }
+    100% { box-shadow: 0 0 0 0 rgba(66,211,146,0); }
+  }
+
   .otc-float.is-minimized .otc-float-close {
     font-size: 14px;
     color: #9ddfff;
@@ -332,6 +351,7 @@
     </svg>
   </span>
   <span class="otc-float-min-label">OTC LIVE</span>
+  <span class="otc-float-new-dot" aria-hidden="true"></span>
   <div class="otc-float-text"><b>IRIUM OTC LIVE</b> Trade IRM in our official Telegram OTC group with escrow support.</div>
   <a class="otc-float-cta" href="https://t.me/irium_otc_trading" target="_blank" rel="noopener noreferrer">Open Telegram</a>
   <button id="otc-float-close" class="otc-float-close" aria-label="Minimize OTC notice">&times;</button>

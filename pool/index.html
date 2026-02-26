@@ -1450,13 +1450,17 @@ GitHub</a>
 
   async function updateBackendTelemetry() {
     const stats = await fetchOptional('/pool/stats');
-    const payouts = await fetchOptional('/pool/payouts?limit=1');
+    const payouts = await fetchOptional('/pool/payouts?limit=20');
 
     const hasData = !!stats;
+    const pendingCount = Number.isFinite(Number(payouts?.pending_count))
+      ? Number(payouts.pending_count)
+      : null;
+
     setText('b-workers', stats?.workers_online ?? 'N/A');
     setText('b-accepted', stats?.accepted_shares ?? 'N/A');
     setText('b-rejected', stats?.rejected_shares ?? 'N/A');
-    setText('b-pending', payouts?.count ?? payouts?.pending_count ?? 'N/A');
+    setText('b-pending', pendingCount ?? 'N/A');
 
     const badge = document.getElementById('backend-badge');
     if (badge) {
@@ -1469,7 +1473,7 @@ GitHub</a>
     const note = document.getElementById('b-note');
     if (note) {
       note.textContent = hasData
-        ? 'Backend telemetry is live from /api/pool/stats and /api/pool/payouts.'
+        ? 'Backend telemetry is live from /api/pool/stats and /api/pool/payouts. Pending uses pending_count only when backend exposes it.'
         : 'Direct pool backend metrics are not publicly exposed; chain-derived telemetry is shown above.';
     }
   }

@@ -928,6 +928,7 @@
           <li><span class="key">Data Freshness</span><span id="s-freshness">Checking...</span></li>
           <li><span class="key">Pool Health</span><span id="s-health">Checking...</span></li>
           <li><span class="key">Pool Health API</span><span id="s-health-api">Checking...</span></li>
+          <li><span class="key">Watchdog Status</span><span id="s-watchdog">Checking...</span></li>
           <li><span class="key">Health Reason</span><span id="s-health-reason">Checking...</span></li>
           <li><span class="key">Uptime Signal</span><span id="s-uptime">Checking...</span></li>
         </ul>
@@ -1534,6 +1535,7 @@ GitHub</a>
     const healthy = health?.healthy === true;
     const issues = Array.isArray(health?.issues) ? health.issues : [];
     setText('s-health-api', healthy ? 'Healthy' : (health ? 'Degraded' : 'Unavailable'));
+    setText('s-watchdog', healthy ? 'OK (no active alerts)' : (health ? 'Alerting/Investigate' : 'Unavailable'));
     setText('s-health-reason', issues.length ? issues.join('; ') : (healthy ? 'No active pool-health issues' : 'No health details'));
 
     const incidents = document.getElementById('incident-list');
@@ -1636,6 +1638,7 @@ GitHub</a>
       setText("pool-updated-pill", `Updated: ${new Date().toLocaleTimeString()} (error)`);
       setText("s-latency", "Unavailable");
       setText("s-health", "Degraded");
+      setText("s-watchdog", "Unavailable");
     }
   }
 

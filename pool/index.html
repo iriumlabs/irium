@@ -93,6 +93,39 @@
     50% { transform: scale(1.06); box-shadow: 0 0 30px rgba(99,102,241,0.5); }
   }
 
+
+  .live-grid { position: relative; }
+  .live-chip {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 95, 95, 0.45);
+    background: rgba(255, 65, 65, 0.12);
+    color: #ffd6d6;
+    font-size: 0.62rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    z-index: 2;
+  }
+  .live-chip .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: rgba(255, 65, 65, 0.96);
+    box-shadow: 0 0 0 0 rgba(255, 65, 65, 0.55), 0 0 9px rgba(255, 65, 65, 0.45);
+    animation: poolLiveDotPulse 1.5s ease-in-out infinite;
+  }
+  @keyframes poolLiveDotPulse {
+    0%, 100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(255,65,65,0.55), 0 0 9px rgba(255,65,65,0.45); }
+    50% { transform: scale(1.35); opacity: 0.72; box-shadow: 0 0 0 7px rgba(255,65,65,0.00), 0 0 14px rgba(255,65,65,0.65); }
+  }
+
   .kpi, .panel, .endpoint-card {
     transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
   }
@@ -113,26 +146,6 @@
   }
 
 
-  .kpi, .panel, .mini-stat {
-    position: relative;
-  }
-  .kpi::after, .panel::after, .mini-stat::after {
-    content: "";
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: rgba(255, 65, 65, 0.96);
-    box-shadow: 0 0 0 0 rgba(255, 65, 65, 0.55), 0 0 10px rgba(255, 65, 65, 0.45);
-    animation: poolLiveDotPulse 1.5s ease-in-out infinite;
-    pointer-events: none;
-  }
-  @keyframes poolLiveDotPulse {
-    0%, 100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(255,65,65,0.55), 0 0 10px rgba(255,65,65,0.45); }
-    50% { transform: scale(1.35); opacity: 0.72; box-shadow: 0 0 0 8px rgba(255,65,65,0.00), 0 0 16px rgba(255,65,65,0.65); }
-  }
 
   .hero-grid {
     display: grid;
@@ -899,12 +912,18 @@
     </section>
 
     <section class="kpi-grid" aria-label="Top metrics">
-      <article class="kpi"><div class="label">Network Height</div><div id="k-height" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Network Hashrate</div><div id="k-hashrate" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Difficulty</div><div id="k-difficulty" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Active Peers</div><div id="k-peers" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Active Miners (144 blocks)</div><div id="k-miners" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Avg Block Time</div><div id="k-blocktime" class="value">Loading...</div></article>
+      <article class="kpi live-grid">
+        <span class="live-chip"><span class="dot"></span>Live</span><div class="label">Network Height</div><div id="k-height" class="value">Loading...</div></article>
+      <article class="kpi live-grid">
+        <span class="live-chip"><span class="dot"></span>Live</span><div class="label">Network Hashrate</div><div id="k-hashrate" class="value">Loading...</div></article>
+      <article class="kpi live-grid">
+        <span class="live-chip"><span class="dot"></span>Live</span><div class="label">Difficulty</div><div id="k-difficulty" class="value">Loading...</div></article>
+      <article class="kpi live-grid">
+        <span class="live-chip"><span class="dot"></span>Live</span><div class="label">Active Peers</div><div id="k-peers" class="value">Loading...</div></article>
+      <article class="kpi live-grid">
+        <span class="live-chip"><span class="dot"></span>Live</span><div class="label">Active Miners (144 blocks)</div><div id="k-miners" class="value">Loading...</div></article>
+      <article class="kpi live-grid">
+        <span class="live-chip"><span class="dot"></span>Live</span><div class="label">Avg Block Time</div><div id="k-blocktime" class="value">Loading...</div></article>
     </section>
 
     <section class="portal-grid">
@@ -921,7 +940,13 @@
         </ul>
       </article>
 
-      <article class="panel">
+      <article class="panel live-grid">
+        <span class="live-chip"><span class="dot"></span>Live</span>
+        <span class="live-chip"><span class="dot"></span>Live</span>
+        <span class="live-chip"><span class="dot"></span>Live</span>
+        <span class="live-chip"><span class="dot"></span>Live</span>
+        <span class="live-chip"><span class="dot"></span>Live</span>
+        <span class="live-chip"><span class="dot"></span>Live</span>
         <h3>Pool Performance</h3>
         <p class="panel-sub">Recent throughput and expected production based on live chain pace.</p>
         <ul class="meta-list">
@@ -934,7 +959,7 @@
         </ul>
       </article>
 
-      <article class="panel">
+      <article class="panel live-grid">
         <h3>Operational Status</h3>
         <p class="panel-sub">Public endpoint diagnostics and miner-side checks.</p>
         <ul class="meta-list">
@@ -946,19 +971,21 @@
         </ul>
       </article>
 
-      <article class="panel span-2">
+      <article class="panel live-grid span-2">
+        <span class="live-chip"><span class="dot"></span>Live</span>
+        <span class="live-chip"><span class="dot"></span>Live</span>
         <h3>Network Hashrate Trend</h3>
         <p class="panel-sub">Derived from recent block windows from the live API.</p>
         <div class="chart-wrap"><canvas id="chart-hashrate" width="1000" height="180"></canvas></div>
       </article>
 
-      <article class="panel">
+      <article class="panel live-grid">
         <h3>Difficulty Trend</h3>
         <p class="panel-sub">Recent difficulty points from chain telemetry.</p>
         <div class="chart-wrap"><canvas id="chart-difficulty" width="520" height="180"></canvas></div>
       </article>
 
-      <article class="panel span-2">
+      <article class="panel live-grid span-2">
         <h3>Miner Address Dashboard</h3>
         <p class="panel-sub">Lookup recent chain results for a mining payout address.</p>
         <div class="lookup">
@@ -980,7 +1007,9 @@
         </ul>
       </article>
 
-      <article class="panel span-3">
+      <article class="panel live-grid span-3">
+        <span class="live-chip"><span class="dot"></span>Live</span>
+        <span class="live-chip"><span class="dot"></span>Live</span>
         <h3>Recent Found Blocks (Chain Feed)</h3>
         <p class="panel-sub">Latest accepted blocks with miner payout address and reward.</p>
         <div class="table-wrap">
@@ -1000,7 +1029,7 @@
         </div>
       </article>
 
-      <article class="panel span-3">
+      <article class="panel live-grid span-3">
         <h3>Payout Transparency (Coinbase Rewards)</h3>
         <p class="panel-sub">In SOLO mode, this table is your public payout ledger from chain data.</p>
         <div class="table-wrap">
@@ -1021,7 +1050,7 @@
     </section>
 
     <section class="extended-grid">
-      <article class="panel">
+      <article class="panel live-grid">
         <div class="panel-row">
           <h3>Pool Backend Telemetry</h3>
           <span id="backend-badge" class="badge">Checking...</span>
@@ -1039,7 +1068,7 @@
         <p id="b-note" class="tiny" style="margin-top:10px;">If unavailable, backend endpoints are private or not enabled yet.</p>
       </article>
 
-      <article class="panel">
+      <article class="panel live-grid">
         <h3>Miner Account Portal</h3>
         <p class="panel-sub">Address-centric view: recent blocks, reward totals, and payout status.</p>
         <div class="lookup">
@@ -1049,7 +1078,7 @@
         <div id="acct-result" class="lookup-result">No account selected.</div>
       </article>
 
-      <article class="panel">
+      <article class="panel live-grid">
         <h3>Status and Incidents</h3>
         <p class="panel-sub">Public reliability indicators for pool operators and miners.</p>
         <ul class="meta-list">

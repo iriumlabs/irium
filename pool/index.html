@@ -925,6 +925,69 @@
     .kpi .value { font-size: 1.05rem; }
   }
 
+
+  /* Explorer Parity Override: pool grids + steady glow */
+  .kpi,
+  .panel,
+  .cfg-card,
+  .legal-box,
+  .mini-stat,
+  .table-wrap {
+    background: rgba(0,0,0,0.32) !important;
+    border: 1px solid rgba(91,177,255,0.34) !important;
+    border-radius: 14px !important;
+    box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 30px rgba(42,171,238,0.20) !important;
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    position: relative;
+    overflow: hidden;
+    animation: none !important;
+  }
+
+  .kpi::before,
+  .panel::before,
+  .cfg-card::before,
+  .legal-box::before,
+  .mini-stat::before,
+  .table-wrap::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: 0 0 26px rgba(42,171,238,0.20), inset 0 0 18px rgba(42,171,238,0.10);
+    opacity: 0.95;
+    animation: none !important;
+  }
+
+  .kpi > *,
+  .panel > *,
+  .cfg-card > *,
+  .legal-box > *,
+  .mini-stat > *,
+  .table-wrap > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  .kpi .label,
+  .mini-stat .k,
+  .meta-list .key,
+  .tiny,
+  .muted {
+    color: rgba(230,237,243,0.84) !important;
+  }
+
+  .kpi .value,
+  .mini-stat .v,
+  .pool-table td,
+  .pool-table th,
+  .panel h3,
+  .cfg-card h4,
+  .legal-box h5 {
+    color: rgba(255,255,255,0.94) !important;
+  }
+
 </style>
 </head>
 <body>

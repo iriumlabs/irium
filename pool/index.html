@@ -160,19 +160,6 @@
     font-weight: 700;
   }
 
-  .hero-eyebrow .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #41f0b8;
-    box-shadow: 0 0 10px rgba(65,240,184,0.75);
-    animation: pulseLive 1.6s ease-in-out infinite;
-  }
-
-  @keyframes pulseLive {
-    0%, 100% { transform: scale(1); opacity: 1; }
-    50% { transform: scale(1.3); opacity: 0.6; }
-  }
 
   .hero-title {
     font-size: clamp(1.8rem, 3.3vw, 2.4rem);
@@ -994,7 +981,7 @@
         <div>
           <div class="hero-brand">
             <img class="hero-logo" src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium">
-            <div class="hero-eyebrow"><span class="dot"></span> Live Public Stratum Pool</div>
+            <div class="hero-eyebrow">Live Public Stratum Pool</div>
           </div>
           <h1 class="hero-title">Irium Stratum Pool Portal</h1>
           <p class="hero-sub">Enterprise-grade interface for endpoint access, mining telemetry, payout visibility, and network diagnostics for Irium solo miners.</p>
@@ -1020,7 +1007,7 @@
             <li class="setup-row"><span class="setup-key">Algorithm</span><span class="setup-value">SHA-256d</span></li>
             <li class="setup-row"><span class="setup-key">Mode</span><span class="setup-value">SOLO</span></li>
             <li class="setup-row"><span class="setup-key">Username</span><span class="setup-value mono">YOUR_IRIUM_WALLET_ADDRESS.worker1</span></li>
-            <li class="setup-row"><span class="setup-key">Password</span><span class="setup-value mono">x (placeholder)</span></li>
+            <li class="setup-row"><span class="setup-key">Password</span><span class="setup-value mono">x</span></li>
             <li class="setup-row"><span class="setup-key">Port</span><span class="setup-value mono">3333 / TCP</span></li>
             <li class="setup-row"><span class="setup-key">Status</span><span class="setup-value"><span id="pool-live-pill" class="status-badge">LOADING...</span></span></li>
             <li class="setup-row"><span class="setup-key">Last Update</span><span id="pool-updated-pill" class="setup-value">--:--:--</span></li>
@@ -1233,14 +1220,14 @@
           <h4>Antminer Profile</h4>
           <pre id="cfg-ant">URL: stratum+tcp://pool.iriumlabs.org:3333
 Worker: YOUR_IRIUM_WALLET_ADDRESS.worker1
-Password: x (placeholder)</pre>
+Password: x</pre>
           <button class="copy-btn" data-copy="cfg-ant">Copy Config</button>
         </div>
         <div class="cfg-card">
           <h4>Whatsminer Profile</h4>
           <pre id="cfg-whats">Pool 1: stratum+tcp://pool.iriumlabs.org:3333
 Sub-account: YOUR_IRIUM_WALLET_ADDRESS.worker1
-Password: x (placeholder)</pre>
+Password: x</pre>
           <button class="copy-btn" data-copy="cfg-whats">Copy Config</button>
         </div>
         <div class="cfg-card">
@@ -1687,7 +1674,7 @@ GitHub</a>
     setText("perf-diffdelta", diffText);
     setText("perf-api", "Online");
 
-    setText("ops-api", "Explorer API Online");
+    setText("ops-api", "Pool API Online");
     const t = new Date().toLocaleTimeString();
     setText("ops-updated", t);
     setText("pool-updated-pill", `Updated: ${t}`);

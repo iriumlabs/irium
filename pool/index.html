@@ -798,8 +798,8 @@
   }
 
   .pool-table th {
-    background: rgba(16, 22, 48, 0.98);
-    color: #c5d3f2;
+    background: rgba(10, 18, 38, 0.92);
+    color: rgba(255,255,255,0.92);
   }
 
   .pool-table td {
@@ -866,13 +866,50 @@
   .kpi,
   .panel,
   .cfg-card,
-  .legal-box {
-    animation: poolGridGlow 4.8s ease-in-out infinite;
+  .legal-box,
+  .mini-stat,
+  .table-wrap {
+    background: rgba(0,0,0,0.32);
+    border: 1px solid rgba(91,177,255,0.34);
+    box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 30px rgba(42,171,238,0.20);
+    position: relative;
+    overflow: hidden;
+    animation: poolXGridGlow 4.8s ease-in-out infinite;
   }
 
-  @keyframes poolGridGlow {
+  .kpi::before,
+  .panel::before,
+  .cfg-card::before,
+  .legal-box::before,
+  .mini-stat::before,
+  .table-wrap::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    box-shadow: 0 0 26px rgba(42,171,238,0.20), inset 0 0 18px rgba(42,171,238,0.10);
+    animation: poolXGridAura 4.2s ease-in-out infinite;
+  }
+
+  .kpi > *,
+  .panel > *,
+  .cfg-card > *,
+  .legal-box > *,
+  .mini-stat > *,
+  .table-wrap > * {
+    position: relative;
+    z-index: 1;
+  }
+
+  @keyframes poolXGridGlow {
     0%,100% { border-color: rgba(91,177,255,0.32); box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 26px rgba(42,171,238,0.16); }
     50% { border-color: rgba(91,177,255,0.60); box-shadow: 0 16px 42px rgba(0,0,0,0.44), 0 0 40px rgba(42,171,238,0.34); }
+  }
+
+  @keyframes poolXGridAura {
+    0%,100% { opacity: .62; box-shadow: 0 0 20px rgba(42,171,238,0.18), inset 0 0 14px rgba(42,171,238,0.08); }
+    50% { opacity: .95; box-shadow: 0 0 36px rgba(42,171,238,0.34), inset 0 0 24px rgba(42,171,238,0.16); }
   }
 
   .copy-btn,

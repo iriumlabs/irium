@@ -124,6 +124,23 @@
     z-index: 1;
   }
 
+  .hero-grid > * {
+    border: 1px solid rgba(91,177,255,0.30);
+    border-radius: 14px;
+    background: rgba(0,0,0,0.22);
+    box-shadow: 0 10px 26px rgba(0,0,0,0.34), 0 0 20px rgba(42,171,238,0.14);
+    animation: poolTopGridGlow 4.6s ease-in-out infinite;
+  }
+
+  @keyframes poolTopGridGlow {
+    0%,100% { border-color: rgba(91,177,255,0.28); box-shadow: 0 10px 26px rgba(0,0,0,0.34), 0 0 20px rgba(42,171,238,0.14); }
+    50% { border-color: rgba(91,177,255,0.56); box-shadow: 0 14px 34px rgba(0,0,0,0.4), 0 0 34px rgba(42,171,238,0.30); }
+  }
+
+  .hero-grid > div:first-child {
+    padding: 16px;
+  }
+
   .hero-title {
     font-family: Orbitron, sans-serif;
     font-size: clamp(2rem, 4vw, 2.8rem);
@@ -258,7 +275,7 @@
   }
 
   .hero-right {
-    border: 1px solid rgba(255,255,255,0.16);
+    border: 0;
     border-radius: 14px;
     background: rgba(0,0,0,0.32);
     padding: 14px;

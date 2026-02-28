@@ -1136,15 +1136,20 @@
       </article>
 
       <article class="panel">
-        <h3>Worker and Share View</h3>
-        <p class="panel-sub">Public API currently exposes chain-level stats only.</p>
+        <h3>Live Pool Activity</h3>
+        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed.</p>
         <ul class="meta-list">
-          <li><span class="key">Per-worker Hashrate</span><span class="amber">Not public</span></li>
-          <li><span class="key">Accepted Shares</span><span class="amber">Not public</span></li>
-          <li><span class="key">Rejected/Stale</span><span class="amber">Not public</span></li>
-          <li><span class="key">Last Share Time</span><span class="amber">Not public</span></li>
-          <li><span class="key">Live Alternative</span><span>Use miner-side dashboard + chain results below.</span></li>
+          <li><span class="key">Connected Workers (live)</span><span id="live-workers">Checking...</span></li>
+          <li><span class="key">Active Miners (window)</span><span id="live-active-miners">Checking...</span></li>
+          <li><span class="key">Accepted Shares</span><span id="live-accepted">Checking...</span></li>
+          <li><span class="key">Rejected / Stale</span><span id="live-rejected">Checking...</span></li>
+          <li><span class="key">Last Share Accepted</span><span id="live-last-accept">Checking...</span></li>
+          <li><span class="key">Last Share Rejected</span><span id="live-last-reject">Checking...</span></li>
+          <li><span class="key">Backend Link</span><span id="live-backend">Checking...</span></li>
+          <li><span class="key">Tip Alignment</span><span id="live-tip-align">Checking...</span></li>
+          <li><span class="key">Last Found Block</span><span id="live-last-found">Checking...</span></li>
         </ul>
+        <p id="live-trust-note" class="tiny" style="margin-top:10px;">These metrics are pulled directly from <code>/api/pool/*</code> and chain data for independent verification.</p>
       </article>
 
       <article class="panel span-3">
@@ -1783,23 +1788,62 @@ GitHub</a>
   async function updateBackendTelemetry() {
     const stats = await fetchOptional('/pool/stats');
     const payouts = await fetchOptional('/pool/payouts?limit=20');
+    const health = await fetchOptional('/pool/health');
 
     const hasData = !!stats;
     const pendingCount = Number.isFinite(Number(payouts?.pending_count))
       ? Number(payouts.pending_count)
       : null;
 
-    setText('b-workers', stats?.workers_online ?? 'N/A');
-    setText('b-accepted', stats?.accepted_shares ?? 'N/A');
-    setText('b-rejected', stats?.rejected_shares ?? 'N/A');
+    const acceptedShares = stats?.accepted_shares;
+    const rejectedShares = stats?.rejected_shares;
+    const staleShares = stats?.stale_shares;
+
+    const acceptedText = Number.isFinite(Number(acceptedShares)) ? fmtInt(acceptedShares) : 'Not exposed';
+    const rejectedBase = Number.isFinite(Number(rejectedShares)) ? Number(rejectedShares) : null;
+    const staleBase = Number.isFinite(Number(staleShares)) ? Number(staleShares) : null;
+    const rejectedText = rejectedBase === null && staleBase === null
+      ? 'Not exposed'
+      : fmtInt((rejectedBase || 0) + (staleBase || 0));
+
     const tmplTs = stats?.template_updated_at ?? stats?.last_template_update_ts ?? null;
     const lastAcceptTs = stats?.last_share_accepted_at ?? stats?.last_share_accept_ts ?? null;
     const lastRejectTs = stats?.last_share_rejected_at ?? stats?.last_share_reject_ts ?? null;
 
-    setText('b-pending', pendingCount ?? 'N/A');
+    const workersOnline = Number.isFinite(Number(stats?.workers_online)) ? Number(stats.workers_online) : null;
+    const activeMiners = Number.isFinite(Number(stats?.active_miners_as_of_height)) ? Number(stats.active_miners_as_of_height) : null;
+    const activeWindow = Number.isFinite(Number(stats?.active_miners_window_blocks)) ? Number(stats.active_miners_window_blocks) : null;
+
+    const networkHeightPool = Number(stats?.network_height || 0);
+    const networkHeightCore = Number(statsCache?.height || 0);
+    const tipDelta = networkHeightPool && networkHeightCore ? Math.abs(networkHeightPool - networkHeightCore) : null;
+
+    const payoutRows = Array.isArray(payouts?.payouts) ? payouts.payouts : [];
+    const lastFound = payoutRows.length ? payoutRows[0] : null;
+
+    setText('b-workers', workersOnline ?? 'N/A');
+    setText('b-accepted', acceptedText);
+    setText('b-rejected', rejectedText);
+    setText('b-pending', pendingCount === null ? 'N/A (solo on-chain)' : fmtInt(pendingCount));
     setText('b-last-template', tmplTs ? fmtTime(tmplTs) : 'N/A');
     setText('b-last-accept', lastAcceptTs ? fmtTime(lastAcceptTs) : 'N/A');
     setText('b-last-reject', lastRejectTs ? fmtTime(lastRejectTs) : 'N/A');
+
+    setText('live-workers', workersOnline === null ? 'N/A' : `${fmtInt(workersOnline)} workers`);
+    setText('live-active-miners', activeMiners === null
+      ? 'N/A'
+      : `${fmtInt(activeMiners)} addresses / ${fmtInt(activeWindow || 0)} blocks`);
+    setText('live-accepted', acceptedText);
+    setText('live-rejected', rejectedText);
+    setText('live-last-accept', lastAcceptTs ? fmtTime(lastAcceptTs) : 'Not exposed');
+    setText('live-last-reject', lastRejectTs ? fmtTime(lastRejectTs) : 'Not exposed');
+    setText('live-backend', stats?.backend_connected === true ? 'Connected' : (hasData ? 'Partial' : 'Unavailable'));
+    setText('live-tip-align', tipDelta === null
+      ? 'Unknown'
+      : (tipDelta === 0 ? `Aligned @ ${fmtInt(networkHeightCore)}` : `${fmtInt(tipDelta)} blocks drift`));
+    setText('live-last-found', lastFound
+      ? `#${fmtInt(lastFound.height)} • ${fmtTime(lastFound.time)} • ${shortHash(lastFound.address || '', 8, 6)}`
+      : 'No recent payout rows');
 
     const badge = document.getElementById('backend-badge');
     if (badge) {
@@ -1812,8 +1856,16 @@ GitHub</a>
     const note = document.getElementById('b-note');
     if (note) {
       note.textContent = hasData
-        ? 'Backend telemetry is live from /api/pool/stats and /api/pool/payouts. Pending uses pending_count only when backend exposes it.'
+        ? 'Backend telemetry is live from /api/pool/stats and /api/pool/payouts. In SOLO mode pending payouts should usually remain N/A or 0.'
         : 'Direct pool backend metrics are not publicly exposed; chain-derived telemetry is shown above.';
+    }
+
+    const trust = document.getElementById('live-trust-note');
+    if (trust) {
+      const maturity = lastFound?.maturity_remaining;
+      const maturityText = Number.isFinite(Number(maturity)) ? `Coinbase maturity remaining: ${fmtInt(maturity)} blocks.` : 'Coinbase maturity progress available when payout rows expose confirmations.';
+      const healthState = health?.healthy === true ? 'Health API reports healthy.' : (health ? 'Health API reports degraded.' : 'Health API unavailable.');
+      trust.textContent = `Trust check: ${healthState} ${maturityText}`;
     }
   }
 

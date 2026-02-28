@@ -1458,8 +1458,13 @@ GitHub</a>
 
 
 <script>
-  const API_BASE = "https://api.iriumlabs.org/api";
+  const API_BACKENDS = [
+    { name: "api.iriumlabs.org", base: "https://api.iriumlabs.org/api" },
+    { name: "irium-vps", base: "https://207.244.247.86:38310/api" }
+  ];
   const POLL_MS = 15000;
+
+  let ACTIVE_API = API_BACKENDS[0];
 
   let statsCache = null;
   let miningCache = null;
@@ -1507,10 +1512,37 @@ GitHub</a>
     if (e) e.textContent = v;
   }
 
+  async function fetchFromBackends(path, optional = false) {
+    const errors = [];
+    for (const backend of API_BACKENDS) {
+      try {
+        const res = await fetch(`${backend.base}${path}`, { cache: "no-store" });
+        if (!res.ok) {
+          errors.push(`${backend.name}: HTTP ${res.status}`);
+          continue;
+        }
+        const txt = await res.text();
+        if (!txt || !txt.trim()) {
+          if (optional) {
+            ACTIVE_API = backend;
+            return null;
+          }
+          errors.push(`${backend.name}: empty response`);
+          continue;
+        }
+        const data = JSON.parse(txt);
+        ACTIVE_API = backend;
+        return data;
+      } catch (err) {
+        errors.push(`${backend.name}: ${String(err && err.message ? err.message : err)}`);
+      }
+    }
+    if (optional) return null;
+    throw new Error(`All API backends failed for ${path} -> ${errors.join(' | ')}`);
+  }
+
   async function fetchJson(path) {
-    const res = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
-    if (!res.ok) throw new Error(`HTTP ${res.status} ${path}`);
-    return res.json();
+    return fetchFromBackends(path, false);
   }
 
   function readVarInt(hex, pos) {
@@ -1727,7 +1759,7 @@ GitHub</a>
     setText("perf-diffdelta", diffText);
     setText("perf-api", "Online");
 
-    setText("ops-api", "Pool API Online");
+    setText("ops-api", `Pool API Online (${ACTIVE_API.name})`);
     const t = new Date().toLocaleTimeString();
     setText("ops-updated", t);
     setText("pool-updated-pill", `Updated: ${t}`);
@@ -1774,15 +1806,7 @@ GitHub</a>
 
 
   async function fetchOptional(path) {
-    try {
-      const r = await fetch(`${API_BASE}${path}`, { cache: "no-store" });
-      if (!r.ok) return null;
-      const txt = await r.text();
-      if (!txt || !txt.trim()) return null;
-      return JSON.parse(txt);
-    } catch (_) {
-      return null;
-    }
+    return fetchFromBackends(path, true);
   }
 
   async function updateBackendTelemetry() {
@@ -1981,7 +2005,7 @@ GitHub</a>
       console.error("Pool dashboard refresh failed", err);
       applyStatus(false);
       setText("perf-api", "Degraded");
-      setText("ops-api", "API fetch error");
+      setText("ops-api", `API fetch error (${ACTIVE_API.name})`);
       setText("ops-updated", `${new Date().toLocaleTimeString()} (error)`);
       setText("pool-updated-pill", `Updated: ${new Date().toLocaleTimeString()} (error)`);
       setText("s-latency", "Unavailable");

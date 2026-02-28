@@ -1851,8 +1851,8 @@ GitHub</a>
     setText('b-rejected', rejectedText);
     setText('b-pending', pendingCount === null ? 'N/A (solo on-chain)' : fmtInt(pendingCount));
     setText('b-last-template', tmplTs ? fmtTime(tmplTs) : 'N/A');
-    setText('b-last-accept', lastAcceptTs ? fmtTime(lastAcceptTs) : 'N/A');
-    setText('b-last-reject', lastRejectTs ? fmtTime(lastRejectTs) : 'N/A');
+    setText('b-last-accept', (Number.isFinite(Number(lastAcceptTs)) && Number(lastAcceptTs) > 0) ? fmtTime(lastAcceptTs) : 'No accepted share yet');
+    setText('b-last-reject', (Number.isFinite(Number(lastRejectTs)) && Number(lastRejectTs) > 0) ? fmtTime(lastRejectTs) : 'No rejected share yet');
 
     setText('live-workers', tcpSessions === null ? 'N/A' : `${fmtInt(tcpSessions)} sessions`);
     setText('live-active-miners', activeMiners === null
@@ -1860,8 +1860,8 @@ GitHub</a>
       : `${fmtInt(activeMiners)} addresses / ${fmtInt(activeWindow || 0)} blocks`);
     setText('live-accepted', acceptedText);
     setText('live-rejected', rejectedText);
-    setText('live-last-accept', lastAcceptTs ? fmtTime(lastAcceptTs) : 'Not exposed');
-    setText('live-last-reject', lastRejectTs ? fmtTime(lastRejectTs) : 'Not exposed');
+    setText('live-last-accept', (Number.isFinite(Number(lastAcceptTs)) && Number(lastAcceptTs) > 0) ? fmtTime(lastAcceptTs) : 'No accepted share yet');
+    setText('live-last-reject', (Number.isFinite(Number(lastRejectTs)) && Number(lastRejectTs) > 0) ? fmtTime(lastRejectTs) : 'No rejected share yet');
     setText('live-backend', stats?.backend_connected === true ? 'Connected' : (hasData ? 'Partial' : 'Unavailable'));
     setText('live-tip-align', tipDelta === null
       ? 'Unknown'

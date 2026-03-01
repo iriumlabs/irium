@@ -746,6 +746,46 @@
     .otc-float,
     .otc-float-new-dot { animation: none !important; }
   }
+
+  .cursor-orb,
+  .cursor-dot {
+    position: fixed;
+    left: 0;
+    top: 0;
+    pointer-events: none;
+    border-radius: 50%;
+    z-index: 120;
+    transform: translate3d(-100px,-100px,0);
+    transition: opacity .25s ease;
+  }
+
+  .cursor-orb {
+    width: 30px;
+    height: 30px;
+    background: radial-gradient(circle at 35% 35%, rgba(170,236,255,.85), rgba(102,176,255,.28) 58%, rgba(102,176,255,0) 72%);
+    box-shadow: 0 0 18px rgba(111,195,255,.45), 0 0 42px rgba(122,131,255,.25);
+    mix-blend-mode: screen;
+    opacity: .85;
+  }
+
+  .cursor-dot {
+    width: 7px;
+    height: 7px;
+    background: #c8f2ff;
+    box-shadow: 0 0 10px rgba(170,236,255,.8);
+    opacity: .95;
+  }
+
+  .cursor-hidden .cursor-orb,
+  .cursor-hidden .cursor-dot {
+    opacity: 0;
+  }
+
+  @media (hover: none), (pointer: coarse) {
+    .cursor-orb,
+    .cursor-dot { display: none !important; }
+  }
+
 </style>
 
 <script type="application/ld+json">
@@ -1129,6 +1169,43 @@ GitHub</a>
     }, { threshold: 0.14, rootMargin: '0px 0px -8% 0px' });
     sections.forEach(el => io.observe(el));
     window.__irium_reveal_on_scroll_init = true; // reveal-on-scroll-init
+  })();
+</script>
+
+<div class="cursor-orb" id="cursor-orb" aria-hidden="true"></div>
+<div class="cursor-dot" id="cursor-dot" aria-hidden="true"></div>
+
+<script>
+  (function cursorTrail(){
+    if (window.matchMedia('(hover: none), (pointer: coarse)').matches) return;
+    const orb = document.getElementById('cursor-orb');
+    const dot = document.getElementById('cursor-dot');
+    if (!orb || !dot) return;
+
+    let tx = window.innerWidth * 0.5;
+    let ty = window.innerHeight * 0.5;
+    let ox = tx;
+    let oy = ty;
+    let raf = null;
+
+    function frame(){
+      ox += (tx - ox) * 0.16;
+      oy += (ty - oy) * 0.16;
+      orb.style.transform = `translate3d(${ox - 15}px, ${oy - 15}px, 0)`;
+      dot.style.transform = `translate3d(${tx - 3.5}px, ${ty - 3.5}px, 0)`;
+      raf = requestAnimationFrame(frame);
+    }
+
+    function onMove(e){
+      tx = e.clientX;
+      ty = e.clientY;
+      document.body.classList.remove('cursor-hidden');
+      if (!raf) raf = requestAnimationFrame(frame);
+    }
+
+    document.addEventListener('mousemove', onMove, { passive: true });
+    document.addEventListener('mouseleave', () => document.body.classList.add('cursor-hidden'));
+    document.addEventListener('mouseenter', () => document.body.classList.remove('cursor-hidden'));
   })();
 </script>
 

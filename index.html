@@ -710,6 +710,8 @@
   @keyframes holoSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg);} }
   @keyframes coinLift { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-8px);} }
   @keyframes skyShift { from { transform: translateY(0);} to { transform: translateY(-16px);} }
+  @keyframes techGridDrift { from { background-position: 0 0, 0 0; } to { background-position: 0 56px, 56px 0; } }
+  @keyframes techGlowFloat { 0% { transform: translate3d(-1.5%, -1.8%, 0) scale(1); } 100% { transform: translate3d(1.8%, 2.2%, 0) scale(1.04); } }
   @keyframes pulseDot { 0%,100%{opacity:1; transform:scale(1);} 50%{opacity:.5; transform:scale(.76);} }
   @keyframes otcPulse { 0%,100%{box-shadow:0 16px 34px rgba(0,0,0,.36),0 0 0 1px rgba(93,211,255,.14) inset;} 50%{box-shadow:0 16px 34px rgba(0,0,0,.36),0 0 0 1px rgba(93,211,255,.26) inset;} }
   @keyframes otcAppear { from { opacity:0; transform:translateX(-50%) translateY(-8px);} to { opacity:1; transform:translateX(-50%) translateY(0);} }
@@ -743,8 +745,47 @@
     .coin-holo,
     .coin-container,
     .stars,
+    .tech-bg::before,
+    .tech-bg::after,
     .otc-float,
     .otc-float-new-dot { animation: none !important; }
+  }
+
+
+  .tech-bg {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+    overflow: hidden;
+  }
+
+  .tech-bg::before,
+  .tech-bg::after {
+    content: '';
+    position: absolute;
+    inset: -20%;
+  }
+
+  .tech-bg::before {
+    background:
+      linear-gradient(rgba(108, 154, 255, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(108, 154, 255, 0.08) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(circle at center, black 24%, transparent 80%);
+    opacity: .36;
+    transform: perspective(900px) rotateX(62deg) translateY(22%);
+    animation: techGridDrift 24s linear infinite;
+  }
+
+  .tech-bg::after {
+    background:
+      radial-gradient(520px 320px at 20% 25%, rgba(111, 210, 255, 0.20), transparent 70%),
+      radial-gradient(460px 300px at 80% 18%, rgba(141, 125, 255, 0.22), transparent 72%),
+      radial-gradient(400px 280px at 56% 76%, rgba(78, 240, 201, 0.14), transparent 70%);
+    filter: blur(14px);
+    opacity: .9;
+    animation: techGlowFloat 14s ease-in-out infinite alternate;
   }
 
   .cursor-dust-canvas {
@@ -775,6 +816,7 @@
 <body>
 
 <div class="stars"></div>
+<div class="tech-bg" aria-hidden="true"></div>
 
 <nav class="nav">
 <div class="container">

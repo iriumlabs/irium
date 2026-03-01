@@ -700,6 +700,66 @@
     flex-wrap: wrap;
   }
 
+  .hero .hero-content {
+    animation: heroIntro .9s cubic-bezier(.2,.75,.15,1) both;
+  }
+
+  .glitch {
+    background: linear-gradient(120deg, #f4f8ff, #97d7ff 40%, #c5b7ff 72%, #f4f8ff);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    background-size: 220% 100%;
+    animation: titleShine 5s linear infinite;
+  }
+
+  .hero-marquee-wrap {
+    width: min(100%, 820px);
+    margin: 0 auto 1.2rem;
+    border: 1px solid rgba(145,185,241,.3);
+    border-radius: 14px;
+    background: linear-gradient(140deg, rgba(16,24,44,.82), rgba(11,17,33,.82));
+    overflow: hidden;
+    box-shadow: 0 10px 22px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.06);
+  }
+
+  .hero-marquee-track {
+    display: inline-flex;
+    align-items: center;
+    gap: .62rem;
+    padding: .62rem .7rem;
+    white-space: nowrap;
+    min-width: 100%;
+    animation: heroTicker 14s linear infinite;
+  }
+
+  .hero-pill {
+    font-family: 'Sora', sans-serif;
+    font-size: .72rem;
+    letter-spacing: .09em;
+    color: #d7ecff;
+    border: 1px solid rgba(124,192,255,.34);
+    background: rgba(26,41,67,.72);
+    border-radius: 999px;
+    padding: .35rem .72rem;
+  }
+
+  .section {
+    opacity: 0;
+    transform: translateY(24px);
+    transition: opacity .7s ease, transform .7s ease;
+  }
+
+  .section.reveal-in,
+  #home.section,
+  #home.hero {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  @keyframes heroIntro { from { opacity:0; transform:translateY(18px) scale(.985);} to { opacity:1; transform:translateY(0) scale(1);} }
+  @keyframes titleShine { from { background-position: 200% 0; } to { background-position: -20% 0; } }
+  @keyframes heroTicker { from { transform: translateX(0); } to { transform: translateX(-28%); } }
   @keyframes coinSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg);} }
   @keyframes holoSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg);} }
   @keyframes coinLift { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-8px);} }
@@ -715,6 +775,10 @@
   }
 
   @media (max-width: 860px) {
+
+    .hero-marquee-track { animation-duration: 20s; }
+    .hero-pill { font-size: .68rem; padding: .32rem .6rem; }
+
     .hero { padding-top: 9rem; }
     .hero .hero-content { padding: 1.5rem 1rem 1.2rem; border-radius: 20px; }
     .hero-stats { grid-template-columns: 1fr; }
@@ -810,19 +874,14 @@
 <h1 class="glitch" data-text="IRIUM">IRIUM</h1>
 <p class="hero-subtitle">New SHA-256d Mine-Only Proof-of-Work Cryptocurrency</p>
 <p class="hero-tagline">Built from scratch in Rust • Not a Fork • No Premine • Public Stratum Pool</p>
-<div class="hero-stats">
-<div class="stat">
-<span class="stat-value">100M</span>
-<span class="stat-label">MAX SUPPLY</span>
-</div>
-<div class="stat">
-<span class="stat-value">LIVE</span>
-<span class="stat-label">MAINNET</span>
-</div>
-<div class="stat">
-<span class="stat-value">SHA-256d</span>
-<span class="stat-label">ALGORITHM</span>
-</div>
+<div class="hero-marquee-wrap" aria-label="Irium key stats">
+  <div class="hero-marquee-track">
+    <span class="hero-pill">100M MAX SUPPLY</span>
+    <span class="hero-pill">LIVE MAINNET</span>
+    <span class="hero-pill">SHA-256D</span>
+    <span class="hero-pill">MINE-ONLY POW</span>
+    <span class="hero-pill">PUBLIC STRATUM POOL</span>
+  </div>
 </div>
 <div class="hero-cta">
 <a href="https://www.iriumlabs.org/docs/mining/" class="btn btn-primary">START MINING</a>
@@ -1115,6 +1174,26 @@ GitHub</a>
         setMinimized(false);
       }
     });
+  })();
+</script>
+
+
+<script>
+  (function revealOnScroll(){
+    const sections = Array.from(document.querySelectorAll('.section'));
+    sections.forEach(el => {
+      if (el.id !== 'home') el.classList.remove('reveal-in');
+    });
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('reveal-in');
+          io.unobserve(entry.target);
+        }
+      });
+    }, { threshold: 0.14, rootMargin: '0px 0px -8% 0px' });
+    sections.forEach(el => io.observe(el));
+    window.__irium_reveal_on_scroll_init = true; // reveal-on-scroll-init
   })();
 </script>
 

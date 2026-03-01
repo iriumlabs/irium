@@ -754,44 +754,8 @@
     z-index: 119;
   }
 
-  .cursor-orb,
-  .cursor-dot {
-    position: fixed;
-    left: 0;
-    top: 0;
-    pointer-events: none;
-    border-radius: 50%;
-    z-index: 120;
-    transform: translate3d(-100px,-100px,0);
-    transition: opacity .25s ease;
-  }
-
-  .cursor-orb {
-    width: 30px;
-    height: 30px;
-    background: radial-gradient(circle at 35% 35%, rgba(170,236,255,.85), rgba(102,176,255,.28) 58%, rgba(102,176,255,0) 72%);
-    box-shadow: 0 0 18px rgba(111,195,255,.45), 0 0 42px rgba(122,131,255,.25);
-    mix-blend-mode: screen;
-    opacity: .85;
-  }
-
-  .cursor-dot {
-    width: 7px;
-    height: 7px;
-    background: #c8f2ff;
-    box-shadow: 0 0 10px rgba(170,236,255,.8);
-    opacity: .95;
-  }
-
-  .cursor-hidden .cursor-orb,
-  .cursor-hidden .cursor-dot {
-    opacity: 0;
-  }
-
   @media (hover: none), (pointer: coarse) {
-    .cursor-dust-canvas,
-    .cursor-orb,
-    .cursor-dot { display: none !important; }
+    .cursor-dust-canvas { display: none !important; }
   }
 
 </style>
@@ -1181,16 +1145,12 @@ GitHub</a>
 </script>
 
 <canvas class="cursor-dust-canvas" id="cursor-dust-canvas" aria-hidden="true"></canvas>
-<div class="cursor-orb" id="cursor-orb" aria-hidden="true"></div>
-<div class="cursor-dot" id="cursor-dot" aria-hidden="true"></div>
 
 <script>
   (function cursorTrail(){
     if (window.matchMedia('(hover: none), (pointer: coarse)').matches) return;
-    const orb = document.getElementById('cursor-orb');
-    const dot = document.getElementById('cursor-dot');
     const canvas = document.getElementById('cursor-dust-canvas');
-    if (!orb || !dot || !canvas) return;
+    if (!canvas) return;
 
     const ctx = canvas.getContext('2d', { alpha: true });
     if (!ctx) return;
@@ -1263,8 +1223,7 @@ GitHub</a>
     function frame(){
       ox += (tx - ox) * 0.16;
       oy += (ty - oy) * 0.16;
-      orb.style.transform = `translate3d(${ox - 15}px, ${oy - 15}px, 0)`;
-      dot.style.transform = `translate3d(${tx - 3.5}px, ${ty - 3.5}px, 0)`;
+
       drawDust();
       raf = requestAnimationFrame(frame);
     }

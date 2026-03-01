@@ -351,11 +351,36 @@
   }
 
   .hero-route-badge .dot {
+    position: relative;
     width: 8px;
     height: 8px;
     border-radius: 999px;
     background: #4cf0b4;
     box-shadow: 0 0 0 6px rgba(76,240,180,0.15);
+  }
+
+  .hero-route-badge .dot::after {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 999px;
+    border: 2px solid rgba(76,240,180,0.55);
+    animation: routeLivePulse 1.6s ease-out infinite;
+  }
+
+  @keyframes routeLivePulse {
+    0% {
+      transform: scale(0.6);
+      opacity: 0.9;
+    }
+    70% {
+      transform: scale(1.45);
+      opacity: 0;
+    }
+    100% {
+      transform: scale(1.45);
+      opacity: 0;
+    }
   }
 
 

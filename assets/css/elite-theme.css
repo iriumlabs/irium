@@ -210,7 +210,23 @@ button {
 
 
 /* Whitepaper + Mining flattening: avoid grid-inside-grid visual nesting */
-.whitepaper-page .wp-shell,
+.whitepaper-page .hero-whitepaper {
+  min-height: auto !important;
+  padding: 108px 0 56px !important;
+}
+
+.whitepaper-page .hero-whitepaper > .container {
+  width: min(1100px, 94vw) !important;
+}
+
+.whitepaper-page .wp-shell {
+  background: linear-gradient(165deg, rgba(14,22,40,.88), rgba(10,16,30,.84)) !important;
+  border: 1px solid rgba(147,176,226,.26) !important;
+  border-radius: 18px !important;
+  box-shadow: 0 22px 50px rgba(0,0,0,.34), inset 0 1px 0 rgba(255,255,255,.05) !important;
+  padding: 28px 30px !important;
+}
+
 .whitepaper-page .wp-content,
 .whitepaper-page .wp-body {
   background: transparent !important;
@@ -220,21 +236,86 @@ button {
   padding: 0 !important;
 }
 
+.whitepaper-page .wp-header {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 0 14px !important;
+  margin-bottom: 10px !important;
+  border-bottom: 1px solid rgba(149, 177, 226, 0.18) !important;
+}
+
+.whitepaper-page .wp-header h1 {
+  font-size: clamp(1.45rem, 2.5vw, 2rem) !important;
+  letter-spacing: .02em !important;
+}
+
+.whitepaper-page .wp-subtitle {
+  color: #b8c9e6 !important;
+}
+
+.whitepaper-page .wp-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.whitepaper-page .wp-badges .badge {
+  background: rgba(108,142,255,.16) !important;
+  border: 1px solid rgba(147,176,226,.28) !important;
+  border-radius: 999px !important;
+}
+
 .whitepaper-page .wp-section {
   background: transparent !important;
   border: 0 !important;
   border-radius: 0 !important;
   box-shadow: none !important;
-  border-bottom: 1px solid rgba(149, 177, 226, 0.18) !important;
-  padding: 1.1rem 0 !important;
+  border-bottom: 1px solid rgba(149, 177, 226, 0.14) !important;
+  padding: 18px 0 !important;
   margin: 0 !important;
 }
 
-.whitepaper-page .wp-header,
+.whitepaper-page .wp-section:last-child {
+  border-bottom: 0 !important;
+}
+
+.whitepaper-page .wp-section h2 {
+  margin: 0 0 10px !important;
+  font-size: 1.3rem !important;
+}
+
+.whitepaper-page .wp-section h3 {
+  margin: 12px 0 8px !important;
+  font-size: 1.06rem !important;
+  color: #c6dcff !important;
+}
+
+.whitepaper-page .wp-section p,
+.whitepaper-page .wp-section li {
+  color: #d5e1f6 !important;
+  line-height: 1.68 !important;
+}
+
 .whitepaper-page .wp-table {
-  background: rgba(12, 18, 33, 0.45) !important;
-  border: 1px solid rgba(147,176,226,.22) !important;
-  border-radius: 12px !important;
+  background: transparent !important;
+  border: 1px solid rgba(149, 177, 226, 0.24) !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+}
+
+.whitepaper-page .wp-table th,
+.whitepaper-page .wp-table td {
+  background: transparent !important;
+}
+
+.whitepaper-page pre,
+.whitepaper-page .code-block {
+  background: rgba(9,14,26,.65) !important;
+  border: 1px solid rgba(149, 177, 226, 0.18) !important;
+  border-radius: 8px !important;
+  box-shadow: none !important;
 }
 
 .mining-page .section .container {

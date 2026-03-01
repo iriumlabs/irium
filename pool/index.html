@@ -720,7 +720,7 @@
     .extended-grid, .connect-grid, .legal-grid { grid-template-columns: 1fr; }
     .portal-grid { grid-template-columns: 1fr; }
     .span-2, .span-3 { grid-column: span 1; }
-    .meta-list li { grid-template-columns: 1fr; }
+    .meta-list li { grid-template-columns: 1fr; gap: 4px; }
     .endpoint-card { grid-template-columns: 1fr; }
   }
 
@@ -791,6 +791,19 @@
     letter-spacing: 0.08em;
   }
 
+  .meta-list li span:last-child {
+    min-width: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    line-height: 1.4;
+  }
+
+  #ops-api,
+  #ops-updated {
+    display: inline-block;
+  }
+
   .table-wrap {
     border-radius: 14px;
     border-color: rgba(255,255,255,0.12);
@@ -829,7 +842,7 @@
 
   @media (max-width: 820px) {
     .panel, .kpi, .cfg-card, .legal-box { border-radius: 12px; }
-    .meta-list li { grid-template-columns: 1fr; }
+    .meta-list li { grid-template-columns: 1fr; gap: 4px; }
   }
 
 

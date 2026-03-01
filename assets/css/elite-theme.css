@@ -207,3 +207,50 @@ button {
 @media (hover: none), (pointer: coarse) {
   .cursor-dust-canvas { display: none !important; }
 }
+
+
+/* Whitepaper + Mining flattening: avoid grid-inside-grid visual nesting */
+.whitepaper-page .wp-shell,
+.whitepaper-page .wp-content,
+.whitepaper-page .wp-body {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.whitepaper-page .wp-section {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  border-bottom: 1px solid rgba(149, 177, 226, 0.18) !important;
+  padding: 1.1rem 0 !important;
+  margin: 0 !important;
+}
+
+.whitepaper-page .wp-header,
+.whitepaper-page .wp-table {
+  background: rgba(12, 18, 33, 0.45) !important;
+  border: 1px solid rgba(147,176,226,.22) !important;
+  border-radius: 12px !important;
+}
+
+.mining-page .section .container {
+  background: transparent !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.mining-page .step-grid,
+.mining-page .info-grid {
+  display: block !important;
+}
+
+.mining-page .step-card,
+.mining-page .info-card {
+  margin: 0 0 14px !important;
+}

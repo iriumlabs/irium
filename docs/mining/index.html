@@ -4,151 +4,231 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Mining - Irium</title>
-<link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=4">
-<link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
-  <style>
-    /* Mining page readability (theme-aligned) */
-    :root { --panel-bg: rgba(0,0,0,0.32); --panel-border: rgba(255,255,255,0.12); }
-    .section .container {
-      background: var(--panel-bg);
-      border: 1px solid var(--panel-border);
-      border-radius: 14px;
-      padding: 28px;
-      box-shadow: 0 8px 28px rgba(0,0,0,0.35), 0 0 18px rgba(99,102,241,0.22);
-      backdrop-filter: blur(6px);
-      -webkit-backdrop-filter: blur(6px);
-      position: relative;
-    }
-    .section .container:before {
-      content: "";
-      position: absolute; inset: 0;
-      border-radius: 14px;
-      pointer-events: none;
-      box-shadow: 0 0 26px rgba(99,102,241,0.18), inset 0 0 22px rgba(99,102,241,0.08);
-      animation: glowPulse 4.5s ease-in-out infinite;
-    }
-    @keyframes glowPulse {
-      0%,100% { box-shadow: 0 0 26px rgba(99,102,241,0.18), inset 0 0 22px rgba(99,102,241,0.08); }
-      50%     { box-shadow: 0 0 40px rgba(99,102,241,0.28), inset 0 0 26px rgba(99,102,241,0.12); }
-    }
-    .section-title, h3 { color: #fff; text-shadow: 0 1px 2px rgba(0,0,0,0.35); }
-
-    .glow-title {
-      position: relative;
-      display: inline-block;
-      font-size: 2.4rem;
-      letter-spacing: 0.02em;
-      text-shadow: 0 0 18px rgba(99,102,241,0.55), 0 0 38px rgba(99,102,241,0.35);
-    }
-    .glow-title::after {
-      content: attr(data-text);
-      position: absolute;
-      left: 0;
-      top: 0;
-      width: 100%;
-      color: transparent;
-      text-shadow: 0 0 28px rgba(91,177,255,0.6), 0 0 60px rgba(91,177,255,0.45);
-      opacity: 0.85;
-      pointer-events: none;
-      mix-blend-mode: screen;
-    }
-    .muted { color: rgba(230,237,243,0.9); }
-    pre {
-      background: linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.04));
-      color: #eaf1ff;
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 12px;
-      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 8px 22px rgba(0,0,0,0.28);
-    }
-    code { color: #eaf1ff; }
-    a { color: #5bb1ff; }
-
-    .step-grid, .info-grid { display: grid; gap: 16px; }
-    @media (min-width: 900px) {
-      .step-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .info-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    }
-    .step-card, .info-card {
-      background: rgba(0,0,0,0.22);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 12px;
-      padding: 18px;
-      box-shadow: inset 0 0 18px rgba(0,0,0,0.2);
-    }
-    .step-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
-    .step-num {
-      width: 28px; height: 28px; border-radius: 999px;
-      background: rgba(99,102,241,0.2);
-      border: 1px solid rgba(99,102,241,0.45);
-      color: #dbe4ff; font-weight: 600;
-      display: inline-flex; align-items: center; justify-content: center;
-    }
-    .step-title { font-size: 16px; font-weight: 600; }
-    .section-subtitle { margin: 28px 0 12px; font-size: 18px; color: #fff; }
-
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-weight: 600;
-      margin-bottom: 8px;
-    }
-    .info-card pre { margin-top: 8px; }
-
-    .step-card, .info-card {
-      position: relative;
-      overflow: hidden;
-      transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
-      opacity: 0;
-      transform: translateY(10px);
-      animation: rise 0.6s ease forwards;
-    }
-    .step-card::after, .info-card::after {
-      content: "";
-      position: absolute;
-      inset: 0;
-      border-radius: 12px;
-      pointer-events: none;
-      box-shadow: inset 0 0 0 1px rgba(99,102,241,0.08);
-      opacity: 0;
-      transition: opacity 0.25s ease;
-    }
-    .step-card:hover, .info-card:hover {
-      transform: translateY(-4px);
-      border-color: rgba(99,102,241,0.35);
-      box-shadow: 0 14px 30px rgba(0,0,0,0.35), 0 0 20px rgba(99,102,241,0.25);
-    }
-    .step-card:hover::after, .info-card:hover::after { opacity: 1; }
-    .step-grid .step-card:nth-child(1) { animation-delay: 0.05s; }
-    .step-grid .step-card:nth-child(2) { animation-delay: 0.12s; }
-    .step-grid .step-card:nth-child(3) { animation-delay: 0.19s; }
-    .step-grid .step-card:nth-child(4) { animation-delay: 0.26s; }
-    .step-grid .step-card:nth-child(5) { animation-delay: 0.33s; }
-    .step-grid .step-card:nth-child(6) { animation-delay: 0.40s; }
-    .step-grid .step-card:nth-child(7) { animation-delay: 0.47s; }
-    .info-grid .info-card:nth-child(1) { animation-delay: 0.10s; }
-    .info-grid .info-card:nth-child(2) { animation-delay: 0.16s; }
-    .info-grid .info-card:nth-child(3) { animation-delay: 0.22s; }
-    .info-grid .info-card:nth-child(4) { animation-delay: 0.28s; }
-    .info-grid .info-card:nth-child(5) { animation-delay: 0.34s; }
-    .info-grid .info-card:nth-child(6) { animation-delay: 0.40s; }
-    .info-grid .info-card:nth-child(7) { animation-delay: 0.46s; }
-    .info-grid .step-card:nth-child(1) { animation-delay: 0.10s; }
-    .info-grid .step-card:nth-child(2) { animation-delay: 0.16s; }
-    .info-grid .step-card:nth-child(3) { animation-delay: 0.22s; }
-    .info-grid .step-card:nth-child(4) { animation-delay: 0.28s; }
-    .info-grid .step-card:nth-child(5) { animation-delay: 0.34s; }
-    .info-grid .step-card:nth-child(6) { animation-delay: 0.40s; }
-    .info-grid .step-card:nth-child(7) { animation-delay: 0.46s; }
-    @keyframes rise {
-      from { opacity: 0; transform: translateY(12px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-  </style>
+<link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=8">
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
+<link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
+<style>
+  .mining-page-wrap {
+    width: min(1180px, 94vw);
+    margin: 110px auto 46px;
+    display: grid;
+    gap: 18px;
+  }
+
+  .mining-panel {
+    border: 1px solid rgba(136, 173, 232, 0.26);
+    border-radius: 16px;
+    background: linear-gradient(155deg, rgba(16, 23, 39, 0.82), rgba(10, 16, 29, 0.88));
+    box-shadow: 0 12px 26px rgba(0, 0, 0, 0.32), inset 0 1px 0 rgba(255,255,255,0.04);
+    padding: 18px;
+    overflow: hidden;
+  }
+
+  .mining-title {
+    margin: 0 0 10px;
+    font-size: clamp(1.7rem, 3.6vw, 2.45rem);
+    letter-spacing: .04em;
+    text-transform: uppercase;
+    color: #f5f8ff;
+    text-shadow: 0 0 26px rgba(102, 171, 255, .35);
+  }
+
+  .mining-subtitle {
+    margin: 0 0 12px;
+    color: #d8e7ff;
+    font-size: 1.16rem;
+    letter-spacing: .02em;
+  }
+
+  .muted {
+    color: #bfd0eb;
+    line-height: 1.62;
+  }
+
+  .stack-list {
+    margin: 10px 0 0;
+    padding-left: 18px;
+    color: #d2e3ff;
+    line-height: 1.66;
+  }
+
+  .split {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: 1fr;
+  }
+
+  .mini-card {
+    border: 1px solid rgba(136, 173, 232, 0.24);
+    border-radius: 13px;
+    background: rgba(8, 14, 25, 0.58);
+    padding: 14px;
+  }
+
+  .mini-card h3 {
+    margin: 0 0 8px;
+    color: #e8f1ff;
+    font-size: 1.04rem;
+    letter-spacing: .01em;
+  }
+
+  .overview-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .overview-item {
+    border: 1px solid rgba(136, 173, 232, 0.22);
+    border-radius: 12px;
+    background: rgba(12, 19, 33, 0.58);
+    padding: 10px 12px;
+    color: #d8e8ff;
+    overflow-wrap: anywhere;
+  }
+
+  .overview-item b {
+    color: #f0f6ff;
+  }
+
+  .hero-stats {
+    margin-top: 12px;
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .stat {
+    border: 1px solid rgba(136, 173, 232, 0.22);
+    border-radius: 12px;
+    background: rgba(9, 15, 27, 0.6);
+    padding: 12px;
+    text-align: center;
+  }
+
+  .stat-value {
+    display: block;
+    font-weight: 700;
+    color: #f2f8ff;
+    font-size: 1.18rem;
+    line-height: 1.2;
+  }
+
+  .stat-label {
+    display: block;
+    margin-top: 6px;
+    font-size: .75rem;
+    letter-spacing: .12em;
+    color: #9fb4d4;
+  }
+
+  .actions {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .actions a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(148, 186, 240, .34);
+    color: #d9ebff;
+    background: rgba(18, 29, 48, 0.58);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: .9rem;
+  }
+
+  .actions a:hover {
+    color: #fff;
+    border-color: rgba(109, 196, 255, .65);
+  }
+
+  .step-list {
+    display: grid;
+    gap: 12px;
+  }
+
+  .step-card {
+    border: 1px solid rgba(136, 173, 232, 0.24);
+    border-radius: 12px;
+    background: rgba(9, 14, 26, 0.6);
+    padding: 13px;
+    overflow-wrap: anywhere;
+  }
+
+  .step-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+  }
+
+  .step-num {
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    background: rgba(95, 145, 255, 0.24);
+    border: 1px solid rgba(95, 145, 255, 0.52);
+    color: #eaf3ff;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: .9rem;
+    flex-shrink: 0;
+  }
+
+  .step-title {
+    font-size: 1rem;
+    color: #ebf3ff;
+    font-weight: 650;
+  }
+
+  .cmd {
+    margin: 8px 0 0;
+    padding: 11px;
+    border: 1px solid rgba(148, 186, 240, .25);
+    border-radius: 10px;
+    background: rgba(7, 12, 22, 0.82);
+    color: #e6efff;
+    overflow-x: auto;
+  }
+
+  code {
+    color: #e9f1ff;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
+  .pool-highlight {
+    border: 1px solid rgba(109, 196, 255, .45);
+    box-shadow: 0 0 26px rgba(79, 163, 255, .22);
+  }
+
+  @media (min-width: 980px) {
+    .split {
+      grid-template-columns: 1.2fr .8fr;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .hero-stats,
+    .overview-grid {
+      grid-template-columns: 1fr;
+    }
+  }
+</style>
 </head>
 <body class="mining-page">
 
 <div class="stars"></div>
+<div class="tech-bg" aria-hidden="true"></div>
 
 <nav class="nav">
   <div class="container">
@@ -157,14 +237,14 @@
       <span>IRIUM</span>
     </div>
     <ul class="nav-links">
-<li><a href="https://www.iriumlabs.org/">HOME</a></li>
-<li><a href="https://www.iriumlabs.org/whitepaper.html">WHITEPAPER</a></li>
-<li><a href="https://www.iriumlabs.org/explorer/">EXPLORER</a></li>
-<li><a href="https://www.iriumlabs.org/docs/mining/">MINING</a></li>
+      <li><a href="https://www.iriumlabs.org/">HOME</a></li>
+      <li><a href="https://www.iriumlabs.org/whitepaper.html">WHITEPAPER</a></li>
+      <li><a href="https://www.iriumlabs.org/explorer/">EXPLORER</a></li>
+      <li><a href="https://www.iriumlabs.org/docs/mining/">MINING</a></li>
       <li><a href="https://www.iriumlabs.org/pool/">POOL</a></li>
       <li><a href="https://www.iriumlabs.org/calculator/">CALCULATOR</a></li>
       <li><a href="https://www.iriumlabs.org/support-us.html">SUPPORT US</a></li>
-</ul>
+    </ul>
     <div class="nav-socials">
       <a href="https://github.com/iriumlabs/irium" target="_blank" title="GitHub">
         <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
@@ -179,232 +259,234 @@
   </div>
 </nav>
 
+<main class="mining-page-wrap">
+  <section class="mining-panel">
+    <h1 class="mining-title">Why Mine Irium?</h1>
+    <p class="mining-subtitle">Irium (IRM) is an independent proof-of-work blockchain built with a mainnet-first philosophy.</p>
 
+    <div class="split">
+      <article class="mini-card">
+        <h3>100% Mine-Only Distribution</h3>
+        <ul class="stack-list">
+          <li>No ICO</li>
+          <li>No presale</li>
+          <li>No VC allocations</li>
+          <li>100% mine-only distribution</li>
+        </ul>
 
-<section class="section">
-  <div class="container">
-    <h2 class="section-title glow-title" data-text="Why Mine Irium?">Why Mine Irium?</h2>
-    <p class="muted"><strong>Irium (IRM)</strong> is an independent proof-of-work blockchain built with a <strong>mainnet-first</strong> philosophy.</p>
-    <ul class="muted">
-      <li>No ICO</li>
-      <li>No presale</li>
-      <li>No VC allocations</li>
-      <li>100% mine-only distribution</li>
-    </ul>
+        <h3 style="margin-top:14px;">What Makes Irium Different?</h3>
+        <ul class="stack-list">
+          <li><b>Pure Proof-of-Work (SHA-256d)</b> — no staking, no validators; security comes from hash power.</li>
+          <li><b>Mainnet only</b> — the chain you mine is the real chain.</li>
+          <li><b>No DNS seeds</b> — bootstrap is cryptographically anchored, not dependent on central services.</li>
+          <li><b>Founder coins locked on-chain</b> — vesting enforced by consensus rules.</li>
+          <li><b>Open-source &amp; community-driven</b> — MIT-licensed Rust implementation.</li>
+        </ul>
+      </article>
 
-    <h3>What makes Irium different?</h3>
-    <ul class="muted">
-      <li><strong>Pure Proof-of-Work (SHA-256d)</strong> — no staking, no validators; security comes from hash power.</li>
-      <li><strong>Mainnet only</strong> — the chain you mine is the real chain.</li>
-      <li><strong>No DNS seeds</strong> — bootstrap is cryptographically anchored, not dependent on central services.</li>
-      <li><strong>Founder coins locked on-chain</strong> — vesting enforced by consensus rules.</li>
-      <li><strong>Open-source & community-driven</strong> — MIT-licensed Rust implementation.</li>
-    </ul>
+      <article class="mini-card">
+        <h3>Mining Overview</h3>
+        <div class="overview-grid">
+          <div class="overview-item"><b>Algorithm:</b> SHA-256d</div>
+          <div class="overview-item"><b>Block time:</b> 600 seconds</div>
+          <div class="overview-item"><b>Block reward:</b> 50 IRM</div>
+          <div class="overview-item"><b>Halving:</b> Every 210,000 blocks</div>
+          <div class="overview-item"><b>Coinbase maturity:</b> 100 blocks</div>
+          <div class="overview-item"><b>Max supply:</b> 100,000,000 IRM</div>
+        </div>
 
-    <h3>Mining Overview</h3>
-    <ul class="muted">
-      <li><strong>Algorithm:</strong> SHA-256d</li>
-      <li><strong>Block time:</strong> 600 seconds</li>
-      <li><strong>Block reward:</strong> 50 IRM</li>
-      <li><strong>Halving:</strong> Every 210,000 blocks</li>
-      <li><strong>Coinbase maturity:</strong> 100 blocks</li>
-      <li><strong>Max supply:</strong> 100,000,000 IRM</li>
-    </ul>
+        <h3 style="margin-top:14px;">Network Status</h3>
+        <p class="muted">Check the live explorer for the latest height and supply: <a href="https://www.iriumlabs.org/explorer/" target="_blank" rel="noopener">Irium Explorer</a>.</p>
 
-    <h3>Network Status</h3>
-    <p class="muted">Check the live explorer for the latest height and supply: <a href="https://www.iriumlabs.org/explorer/" target="_blank" rel="noopener">Irium Explorer</a>.</p>
-
-    <div class="hero-stats" style="margin-top: 16px;">
-      <div class="stat">
-        <span class="stat-value" id="net-hashrate">Loading...</span>
-        <span class="stat-label">NET HASHRATE</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value" id="net-difficulty">Loading...</span>
-        <span class="stat-label">DIFFICULTY</span>
-      </div>
-      <div class="stat">
-        <span class="stat-value" id="diff-growth">Loading...</span>
-        <span class="stat-label">DIFF Δ (1H / 24H)</span>
-      </div>
+        <div class="hero-stats">
+          <div class="stat">
+            <span class="stat-value" id="net-hashrate">572 MH/s</span>
+            <span class="stat-label">NET HASHRATE</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="net-difficulty">174.21</span>
+            <span class="stat-label">DIFFICULTY</span>
+          </div>
+          <div class="stat">
+            <span class="stat-value" id="diff-growth">0.00% / 0.00%</span>
+            <span class="stat-label">DIFF Δ (1H / 24H)</span>
+          </div>
+        </div>
+      </article>
     </div>
 
-    <h3>Start Mining</h3>
+    <h3 style="margin-top:14px;">Start Mining</h3>
     <p class="muted">Ready to mine? Jump to the step-by-step guide below.</p>
-    <p class="muted"><a href="#start-mining">Go to Start Mining</a></p>
+    <div class="actions">
+      <a href="#start-mining">Go to Start Mining</a>
+      <a href="https://www.iriumlabs.org/whitepaper.html" target="_blank" rel="noopener">Whitepaper</a>
+      <a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://www.iriumlabs.org/explorer/" target="_blank" rel="noopener">Explorer</a>
+      <a href="https://github.com/iriumlabs/irium/blob/main/QUICKSTART.md" target="_blank" rel="noopener">Quickstart</a>
+    </div>
+  </section>
 
-    <h3>Useful links</h3>
-    <ul class="muted">
-      <li><a href="https://www.iriumlabs.org/whitepaper.html" target="_blank" rel="noopener">Whitepaper</a>
-</li>
-      <li><a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener">GitHub</a></li>
-      <li><a href="https://www.iriumlabs.org/explorer/" target="_blank" rel="noopener">Explorer</a></li>
-      <li><a href="https://github.com/iriumlabs/irium/blob/main/QUICKSTART.md" target="_blank" rel="noopener">Quickstart</a></li>
-    </ul>
-  </div>
-</section>
-
-<section class="section">
-  <div class="container">
-    <h2 id="start-mining" class="section-title glow-title" data-text="Start Mining (Simple Steps)">Start Mining (Simple Steps)</h2>
+  <section class="mining-panel" id="start-mining">
+    <h2 class="mining-title">Start Mining (Simple Steps)</h2>
     <p class="muted">You need the node running before the miner. Mining on a node that is still syncing can cause stale blocks.</p>
 
-
-    <div class="step-grid">
-      <div class="step-card">
+    <div class="step-list">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">1</span><span class="step-title">Install Rust (one time)</span></div>
         <p class="muted">Go to <a href="https://rustup.rs" target="_blank" rel="noopener">rustup.rs</a> and install. Open a new terminal.</p>
-      </div>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">2</span><span class="step-title">Download + build</span></div>
-        <pre><code>git clone https://github.com/iriumlabs/irium.git
+        <pre class="cmd"><code>git clone https://github.com/iriumlabs/irium.git
 cd irium
 source ~/.cargo/env
 cargo build --release</code></pre>
-      </div>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">3</span><span class="step-title">Start the node (leave running)</span></div>
-        <pre><code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code></pre>
-        <pre><code>sudo systemctl enable --now iriumd
+        <pre class="cmd"><code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd
+sudo systemctl enable --now iriumd
 sudo journalctl -u iriumd -f</code></pre>
-      </div>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">4</span><span class="step-title">Wait for sync</span></div>
-        <pre><code>curl -k https://127.0.0.1:38300/status</code></pre>
-        <ul class="muted">
+        <pre class="cmd"><code>curl -k https://127.0.0.1:38300/status</code></pre>
+        <ul class="stack-list">
           <li>If you see no peers: wait a few minutes, make sure outbound TCP 38291 is allowed, and confirm <code>bootstrap/seedlist.txt</code> exists. NAT can show 0 inbound peers even when syncing.</li>
           <li>If height stays 0: start the node with <code>IRIUM_NODE_CONFIG=configs/node.json</code> (loads seeds), then restart.</li>
         </ul>
-      </div>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">5</span><span class="step-title">Create a wallet address</span></div>
-        <pre><code>./target/release/irium-wallet init
+        <pre class="cmd"><code>./target/release/irium-wallet init
 ./target/release/irium-wallet new-address
 ./target/release/irium-wallet list-addresses</code></pre>
         <p class="muted">Use the address that starts with <code>Q</code>.</p>
-      </div>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">6</span><span class="step-title">Start mining</span></div>
-        <pre><code>export IRIUM_MINER_ADDRESS=&lt;YOUR_IRIUM_ADDRESS&gt;
-./target/release/irium-miner --threads <CORES></code></pre>
+        <pre class="cmd"><code>export IRIUM_MINER_ADDRESS=&lt;YOUR_IRIUM_ADDRESS&gt;
+./target/release/irium-miner --threads &lt;CORES&gt;</code></pre>
         <p class="muted">Tip: set <code>--threads</code> to the number of CPU cores you want (multicore mining). The miner auto-loads <code>/etc/irium/miner.env</code> if it exists. Shell exports override the file.</p>
-      </div>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">7</span><span class="step-title">Check balance</span></div>
-        <pre><code>./target/release/irium-wallet balance &lt;YOUR_IRIUM_ADDRESS&gt;</code></pre>
-      </div>
-    </div>
+        <pre class="cmd"><code>./target/release/irium-wallet balance &lt;YOUR_IRIUM_ADDRESS&gt;</code></pre>
+      </article>
 
-    <h3 class="section-subtitle">Public Stratum Pool</h3>
-    <div class="step-card">
-      <div class="step-head"><span class="step-num">★</span><span class="step-title">Mine via Irium Public Pool (SOLO)</span></div>
-      <ul class="muted">
-        <li><strong>Pool URL:</strong> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
-        <li><strong>Username:</strong> <code>IRM_ADDRESS.worker1</code></li>
-        <li><strong>Password:</strong> <code>x</code></li>
-        <li><strong>Mode:</strong> SOLO (if a block is found, reward pays to the IRM address in the username).</li>
-      </ul>
-    </div>
-
-    <h3 class="section-subtitle">Troubleshooting &amp; advanced</h3>
-    <div class="info-grid">
-      <div class="step-card">
-        <div class="step-head"><span class="step-num">1</span><span class="step-title">If the miner starts at height 0</span></div>
-        <ul class="muted">
-          <li>The node is still syncing or the miner cannot reach RPC.</li>
-          <li>Check: <code>curl -k https://127.0.0.1:38300/status</code></li>
-          <li>Make sure <code>IRIUM_NODE_RPC</code> is correct if mining remotely.</li>
+      <article class="step-card pool-highlight">
+        <div class="step-head"><span class="step-num">★</span><span class="step-title">Mine via Irium Public Pool (SOLO)</span></div>
+        <ul class="stack-list">
+          <li><b>Pool URL:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
+          <li><b>Username:</b> <code>IRM_ADDRESS.worker1</code></li>
+          <li><b>Password:</b> <code>x</code></li>
+          <li><b>Mode:</b> SOLO (if a block is found, reward pays to the IRM address in the username).</li>
         </ul>
-      </div>
+      </article>
+    </div>
+  </section>
 
-      <div class="step-card">
+  <section class="mining-panel">
+    <h2 class="mining-title">Troubleshooting &amp; Advanced</h2>
+
+    <div class="step-list">
+      <article class="step-card">
+        <div class="step-head"><span class="step-num">1</span><span class="step-title">If the miner starts at height 0</span></div>
+        <p class="muted">The node is still syncing or the miner cannot reach RPC.</p>
+        <pre class="cmd"><code>curl -k https://127.0.0.1:38300/status</code></pre>
+        <p class="muted">Make sure <code>IRIUM_NODE_RPC</code> is correct if mining remotely.</p>
+      </article>
+
+      <article class="step-card">
         <div class="step-head"><span class="step-num">2</span><span class="step-title">Optional: set an RPC token (fixes HTTP 429)</span></div>
-        <pre><code>export IRIUM_RPC_TOKEN=$(openssl rand -hex 24)
+        <pre class="cmd"><code>export IRIUM_RPC_TOKEN=$(openssl rand -hex 24)
 # use the same token for node + miner</code></pre>
-      </div>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">3</span><span class="step-title">Remote mining (miner only)</span></div>
-        <pre><code>export IRIUM_NODE_RPC=http://&lt;node-ip&gt;:38300</code></pre>
-      </div>
+        <pre class="cmd"><code>export IRIUM_NODE_RPC=http://&lt;node-ip&gt;:38300</code></pre>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">4</span><span class="step-title">Mobile / Termux notes</span></div>
-        <ul class="muted">
+        <ul class="stack-list">
           <li>Builds are slow and phones throttle. Keep the session in the foreground or use <code>tmux</code>.</li>
           <li>Many mobile networks block inbound peers, but outbound sync can still work.</li>
         </ul>
-      </div>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">5</span><span class="step-title">Common fixes</span></div>
-        <ul class="muted">
+        <ul class="stack-list">
           <li>HTTP 401 → token mismatch. Use the same <code>IRIUM_RPC_TOKEN</code> in node + miner.</li>
           <li>HTTP 429 → set a token or raise <code>IRIUM_RATE_LIMIT_PER_MIN</code> on the node.</li>
         </ul>
-      </div>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">6</span><span class="step-title">Check logs</span></div>
-        <pre><code>sudo journalctl -u irium-miner -f</code></pre>
-      </div>
+        <pre class="cmd"><code>sudo journalctl -u irium-miner -f</code></pre>
+      </article>
 
-      <div class="step-card">
+      <article class="step-card">
         <div class="step-head"><span class="step-num">7</span><span class="step-title">Network hashrate (estimate)</span></div>
-        <pre><code>curl http://127.0.0.1:38300/rpc/network_hashrate
+        <pre class="cmd"><code>curl http://127.0.0.1:38300/rpc/network_hashrate
 curl http://127.0.0.1:38300/rpc/network_hashrate?window=120</code></pre>
         <p class="muted">Returns an estimate using recent blocks: hashrate, difficulty, avg block time, window, sample blocks, and tip height.</p>
-      </div>
+      </article>
     </div>
 
-    <p style="margin-top:12px" class="muted">
-      Docs: <a href="https://github.com/iriumlabs/irium/blob/main/QUICKSTART.md" target="_blank" rel="noopener">Quickstart</a>
-    </p>
-  </div>
-</section>
-
+    <div class="actions">
+      <a href="https://github.com/iriumlabs/irium/blob/main/QUICKSTART.md" target="_blank" rel="noopener">Docs: Quickstart</a>
+      <a href="https://www.iriumlabs.org/pool/" target="_blank" rel="noopener">Open Pool Portal</a>
+    </div>
+  </section>
+</main>
 
 <footer class="footer">
-<div class="container">
-<div class="footer-content">
-<div class="footer-brand">
-<img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="footer-logo">
-<h4 style="font-family: Orbitron, sans-serif; color: var(--primary); margin: 0.2rem 0 0;">Irium</h4>
-<p>True Decentralization</p>
-</div>
-<div class="footer-links">
-<h4>Resources</h4>
-<a href="https://www.iriumlabs.org/whitepaper.html">Whitepaper</a>
-<a href="https://www.iriumlabs.org/docs/mining/">Mining Guide</a>
-<a href="https://www.iriumlabs.org/explorer/">Explorer</a>
-<a href="https://www.iriumlabs.org/pool/">Pool Portal</a>
-</div>
-<div class="footer-links">
-<h4>Community</h4>
-<a href="https://x.com/GoIrium" target="_blank" rel="noopener">
-<svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-X (Twitter)</a>
-<a href="https://t.me/iriumlabs" target="_blank" rel="noopener">
-<svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg>
-Telegram</a>
-<a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener">
-<svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-GitHub</a>
-</div>
-</div>
-<div class="footer-bottom">
-<p>&copy; 2026 Irium Labs. Open Source - MIT License</p>
-<p>Built for a decentralized future</p>
-</div>
-</div>
+  <div class="container">
+    <div class="footer-content">
+      <div class="footer-brand">
+        <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="footer-logo">
+        <h4 style="font-family: Orbitron, sans-serif; color: var(--primary); margin: 0.2rem 0 0;">Irium</h4>
+        <p>True Decentralization</p>
+      </div>
+      <div class="footer-links">
+        <h4>Resources</h4>
+        <a href="https://www.iriumlabs.org/whitepaper.html">Whitepaper</a>
+        <a href="https://www.iriumlabs.org/docs/mining/">Mining Guide</a>
+        <a href="https://www.iriumlabs.org/explorer/">Explorer</a>
+        <a href="https://www.iriumlabs.org/pool/">Pool Portal</a>
+      </div>
+      <div class="footer-links">
+        <h4>Community</h4>
+        <a href="https://x.com/GoIrium" target="_blank" rel="noopener">
+          <svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+          X (Twitter)
+        </a>
+        <a href="https://t.me/iriumlabs" target="_blank" rel="noopener">
+          <svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg>
+          Telegram
+        </a>
+        <a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener">
+          <svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+          GitHub
+        </a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; 2026 Irium Labs. Open Source - MIT License</p>
+      <p>Built for a decentralized future</p>
+    </div>
+  </div>
 </footer>
-
 
 <script src="https://www.iriumlabs.org/assets/js/mining-status.js?v=22"></script>
 <script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>

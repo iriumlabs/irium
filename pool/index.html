@@ -335,6 +335,29 @@
     letter-spacing: 0.04em;
   }
 
+  .hero-route-badge {
+    margin-top: 10px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(130, 150, 255, 0.35);
+    background: rgba(82, 108, 255, 0.14);
+    color: #dce8ff;
+    font-size: 0.78rem;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+
+  .hero-route-badge .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: #4cf0b4;
+    box-shadow: 0 0 0 6px rgba(76,240,180,0.15);
+  }
+
 
   .kpi-grid {
     margin-top: 18px;
@@ -1061,6 +1084,7 @@
           </div>
 
           <div class="hero-note">Use the DNS endpoint in your miner. Raw host IP is intentionally not listed to reduce targeted abuse.</div>
+          <div id="hero-route-badge" class="hero-route-badge"><span class="dot"></span><span id="hero-route-text">Active Route: Checking...</span></div>
         </div>
         <aside class="hero-right">
           <h3>Miner Setup</h3>
@@ -1748,6 +1772,25 @@ GitHub</a>
     setText("k-blocktime", `${fmtNum(mining?.avg_block_time, 1)} s`);
   }
 
+  function applyRouteBadge() {
+    const badge = document.getElementById('hero-route-badge');
+    const text = document.getElementById('hero-route-text');
+    if (!badge || !text) return;
+
+    const isPrimary = ACTIVE_API?.name === 'api.iriumlabs.org';
+    if (isPrimary) {
+      text.textContent = 'Active Route: PRIMARY API';
+      badge.style.borderColor = 'rgba(80,240,184,0.45)';
+      badge.style.background = 'rgba(80,240,184,0.12)';
+      badge.style.color = '#c8ffe8';
+    } else {
+      text.textContent = `Active Route: FALLBACK (${ACTIVE_API?.name || 'unknown'})`;
+      badge.style.borderColor = 'rgba(255,199,102,0.48)';
+      badge.style.background = 'rgba(255,199,102,0.14)';
+      badge.style.color = '#ffe2b3';
+    }
+  }
+
   function applyPerformance(stats, mining, blocks) {
     const now = Date.now() / 1000;
     const dayAgo = now - 86400;
@@ -1773,6 +1816,7 @@ GitHub</a>
     setText("perf-api", "Online");
 
     setText("ops-api", `Pool API Online (${ACTIVE_API.name})`);
+    applyRouteBadge();
     const t = new Date().toLocaleTimeString();
     setText("ops-updated", t);
     setText("pool-updated-pill", `Updated: ${t}`);
@@ -2020,6 +2064,7 @@ GitHub</a>
       applyStatus(false);
       setText("perf-api", "Degraded");
       setText("ops-api", `API fetch error (${ACTIVE_API.name})`);
+      applyRouteBadge();
       setText("ops-updated", `${new Date().toLocaleTimeString()} (error)`);
       setText("pool-updated-pill", `Updated: ${new Date().toLocaleTimeString()} (error)`);
       setText("s-latency", "Unavailable");

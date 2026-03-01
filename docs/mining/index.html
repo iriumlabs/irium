@@ -58,12 +58,7 @@
   .muted {
     color: #b7c9e8;
   }
-
-  .quick-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-  }
+  .quick-grid { display: block; }
 
   .quick-card {
     border: 1px solid rgba(136,173,232,.24);
@@ -105,12 +100,7 @@
     color: #e5eeff;
     overflow-x: auto;
   }
-
-  .trouble-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
-  }
+  .trouble-grid { display: block; }
 
   .trouble-item {
     border: 1px solid rgba(136,173,232,.22);
@@ -158,12 +148,27 @@
     border-color: rgba(125,212,255,.6);
   }
 
-  @media (max-width: 980px) {
-    .quick-grid,
-    .trouble-grid {
-      grid-template-columns: 1fr;
-    }
+  .quick-card,
+  .trouble-item {
+    width: 100%;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
+
+  .quick-card + .quick-card,
+  .trouble-item + .trouble-item {
+    margin-top: 12px;
+  }
+
+  .line-list code,
+  .cmd code,
+  .trouble-item code {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: pre-wrap;
+  }
+
 </style>
 </head>
 <body class="mining-page">

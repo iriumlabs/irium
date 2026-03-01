@@ -70,7 +70,7 @@
     width: min(1240px, 100% - 2.4rem);
     margin: 0 auto;
     position: relative;
-    z-index: 2;
+    z-index: 4;
   }
 
   .nav {
@@ -756,8 +756,9 @@
     position: fixed;
     inset: 0;
     pointer-events: none;
-    z-index: 1;
+    z-index: 2;
     overflow: hidden;
+    opacity: 1;
   }
 
   .tech-bg::before,
@@ -769,23 +770,23 @@
 
   .tech-bg::before {
     background:
-      linear-gradient(rgba(108, 154, 255, 0.08) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(108, 154, 255, 0.08) 1px, transparent 1px);
-    background-size: 56px 56px;
-    mask-image: radial-gradient(circle at center, black 24%, transparent 80%);
-    opacity: .36;
-    transform: perspective(900px) rotateX(62deg) translateY(22%);
-    animation: techGridDrift 24s linear infinite;
+      linear-gradient(rgba(108, 154, 255, 0.18) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(108, 154, 255, 0.18) 1px, transparent 1px),
+      repeating-linear-gradient(180deg, rgba(111,210,255,.07) 0 2px, transparent 2px 24px);
+    background-size: 52px 52px, 52px 52px, 100% 24px;
+    opacity: .68;
+    transform: perspective(900px) rotateX(62deg) translateY(20%);
+    animation: techGridDrift 18s linear infinite;
   }
 
   .tech-bg::after {
     background:
-      radial-gradient(520px 320px at 20% 25%, rgba(111, 210, 255, 0.20), transparent 70%),
-      radial-gradient(460px 300px at 80% 18%, rgba(141, 125, 255, 0.22), transparent 72%),
-      radial-gradient(400px 280px at 56% 76%, rgba(78, 240, 201, 0.14), transparent 70%);
-    filter: blur(14px);
-    opacity: .9;
-    animation: techGlowFloat 14s ease-in-out infinite alternate;
+      radial-gradient(560px 360px at 18% 24%, rgba(111, 210, 255, 0.36), transparent 70%),
+      radial-gradient(520px 340px at 82% 16%, rgba(141, 125, 255, 0.34), transparent 72%),
+      radial-gradient(440px 300px at 56% 76%, rgba(78, 240, 201, 0.24), transparent 70%);
+    filter: blur(12px);
+    opacity: 1;
+    animation: techGlowFloat 10s ease-in-out infinite alternate;
   }
 
   .cursor-dust-canvas {

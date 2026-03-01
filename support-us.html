@@ -46,6 +46,57 @@
     }
       .glow-title { position: relative; display: inline-block; color: #fff; font-size: 2.4rem; letter-spacing: 0.02em; text-shadow: 0 0 18px rgba(99,102,241,0.55), 0 0 38px rgba(99,102,241,0.35); }
   .glow-title::after { content: attr(data-text); position: absolute; left: 0; top: 0; width: 100%; color: transparent; text-shadow: 0 0 28px rgba(91,177,255,0.6), 0 0 60px rgba(91,177,255,0.45); opacity: 0.85; pointer-events: none; mix-blend-mode: screen; }
+
+    .support-hero {
+        min-height: auto;
+        padding: 100px 0 50px;
+        position: relative;
+    }
+    .support-hero::before {
+        content: '';
+        position: absolute;
+        inset: 8% 4% auto;
+        height: 260px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, rgba(141,125,255,.28), rgba(110,198,255,.30));
+        filter: blur(78px);
+        opacity: .7;
+        z-index: 1;
+        pointer-events: none;
+    }
+    .support-hero .container { position: relative; z-index: 2; }
+    .support-hero-content {
+        max-width: 980px;
+        margin: 0 auto 28px;
+        text-align: center;
+        background: transparent;
+        border: 0;
+        box-shadow: none;
+        animation: heroIntro .9s cubic-bezier(.2,.75,.15,1) both;
+    }
+    .support-hero-title {
+        font-size: clamp(2.6rem, 7.5vw, 4.8rem);
+        letter-spacing: .11em;
+        margin: .15rem 0 .7rem;
+        text-shadow: 0 0 28px rgba(122,216,255,.36);
+    }
+    .support-hero .hero-subtitle {
+        font-size: clamp(1.1rem, 2.8vw, 1.7rem);
+        line-height: 1.25;
+        margin: 0 0 .5rem;
+        color: #f4f8ff;
+    }
+    .support-hero .hero-tagline {
+        margin: 0 auto 1.6rem;
+        font-size: 1.02rem;
+        color: rgba(230,237,243,0.84);
+        max-width: 760px;
+    }
+    @keyframes heroIntro {
+      from { opacity: 0; transform: translateY(14px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
 </style>
 
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
@@ -83,10 +134,13 @@
 </div>
 </nav>
 
-<section class="hero" style="min-height: auto; padding: 100px 0 50px;">
+<section class="hero support-hero">
 <div class="container">
-
-<div class="container">
+<div class="hero-content support-hero-content">
+<h1 class="glitch support-hero-title" data-text="SUPPORT US">SUPPORT US</h1>
+<p class="hero-subtitle">Fund Development • Join Builders • Strengthen the Network</p>
+<p class="hero-tagline">Support Irium through donations, open-source contribution, and community operations.</p>
+</div>
 <h2 class="section-title glow-title" data-text="SUPPORT THE PROJECT">SUPPORT THE PROJECT</h2>
 <div class="support-grid">
 <div class="support-card">
@@ -195,8 +249,6 @@
 <p><strong>Contact:</strong> <a href="mailto:info@iriumlabs.org">info@iriumlabs.org</a></p>
 <p>Join our <a href="https://t.me/iriumlabs" target="_blank">Telegram</a> for collaboration opportunities</p>
 </div>
-</div>
-
 </div>
 </section>
 

@@ -335,3 +335,87 @@ button {
 .mining-page .info-card {
   margin: 0 0 14px !important;
 }
+
+
+/* Force identical homepage footer rendering on every page */
+.footer {
+  border-top: 1px solid var(--elite-line) !important;
+  background: linear-gradient(180deg, rgba(7,11,21,.96), rgba(4,6,12,.98)) !important;
+  padding: 0 !important;
+}
+
+.footer .container {
+  width: min(1240px, 100% - 2.4rem) !important;
+  margin: 0 auto !important;
+}
+
+.footer .footer-content {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)) !important;
+  gap: 1.2rem !important;
+  padding: 2.2rem 0 1.4rem !important;
+}
+
+.footer .footer-brand,
+.footer .footer-links {
+  background: transparent !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+}
+
+.footer .footer-logo {
+  width: 44px !important;
+  height: 44px !important;
+  border-radius: 0 !important;
+  filter: drop-shadow(0 0 14px rgba(110,198,255,.4)) !important;
+}
+
+.footer .footer-brand h4 {
+  font-family: "Sora", sans-serif !important;
+  color: #cfe3ff !important;
+  margin: .2rem 0 0 !important;
+  font-size: 1.05rem !important;
+  font-weight: 700 !important;
+}
+
+.footer .footer-brand p,
+.footer .footer-bottom p,
+.footer .footer-links a {
+  color: #b7c8e3 !important;
+}
+
+.footer .footer-links h4 {
+  margin: 0 0 .55rem !important;
+  font-family: "Sora", sans-serif !important;
+  letter-spacing: .04em !important;
+  color: #dbeaff !important;
+}
+
+.footer .footer-links a {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: .45rem !important;
+  margin: .2rem 0 !important;
+  text-decoration: none !important;
+}
+
+.footer .footer-links a:hover {
+  color: #dff2ff !important;
+}
+
+.footer .footer-icon {
+  width: 16px !important;
+  height: 16px !important;
+  min-width: 16px !important;
+  min-height: 16px !important;
+}
+
+.footer .footer-bottom {
+  border-top: 1px solid rgba(146,176,224,.18) !important;
+  padding: .85rem 0 1.1rem !important;
+  display: flex !important;
+  justify-content: space-between !important;
+  gap: .8rem !important;
+  flex-wrap: wrap !important;
+}

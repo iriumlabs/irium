@@ -193,25 +193,30 @@
 
 
   .hero .coin-container {
-    width: 220px !important;
-    height: 220px !important;
+    width: auto !important;
+    height: auto !important;
     margin: 0 auto 2.1rem;
+    padding: 0 !important;
     position: relative;
-    display: grid;
-    place-items: center;
+    display: block;
     background: transparent !important;
     border: 0 !important;
-    border-radius: 0;
+    border-radius: 0 !important;
     box-shadow: none !important;
-    isolation: isolate;
+    overflow: visible !important;
     animation: coinLift 4.6s ease-in-out infinite;
   }
 
   .hero .hero-coin {
     width: 210px !important;
     height: 210px !important;
-    object-fit: contain;
+    object-fit: contain !important;
     display: block;
+    margin: 0 auto;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    box-shadow: none !important;
     transform-origin: 50% 50%;
     animation: coinSpin 12s linear infinite, coinBreathe 2.2s ease-in-out infinite !important;
     filter: drop-shadow(0 14px 28px rgba(98,184,255,.48));
@@ -718,7 +723,7 @@
 
     .hero { padding-top: 9rem; }
     .hero .hero-content { padding: .9rem 0 0; }
-    .hero .coin-container { width: 176px !important; height: 176px !important; margin-bottom: 1.6rem; }
+    .hero .coin-container { margin-bottom: 1.6rem; }
     .hero .hero-coin { width: 166px !important; height: 166px !important; }
     .btn { width: 100%; }
     .otc-float {

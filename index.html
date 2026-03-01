@@ -193,12 +193,13 @@
 
 
   .hero .coin-container {
-    width: auto !important;
-    height: auto !important;
+    width: 210px !important;
+    height: 210px !important;
     margin: 0 auto 2.1rem;
     padding: 0 !important;
     position: relative;
-    display: block;
+    display: grid;
+    place-items: center;
     background: transparent !important;
     border: 0 !important;
     border-radius: 0 !important;
@@ -219,7 +220,7 @@
     box-shadow: none !important;
     transform-origin: 50% 50%;
     animation: coinSpin 12s linear infinite, coinBreathe 2.2s ease-in-out infinite !important;
-    filter: drop-shadow(0 14px 28px rgba(98,184,255,.48));
+    filter: drop-shadow(0 0 28px rgba(98,184,255,.52));
     z-index: 2;
     will-change: transform, filter;
   }
@@ -705,7 +706,7 @@
   @keyframes heroIntro { from { opacity:0; transform:translateY(18px) scale(.985);} to { opacity:1; transform:translateY(0) scale(1);} }
   @keyframes titleShine { from { background-position: 200% 0; } to { background-position: -20% 0; } }
   @keyframes coinSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg);} }
-  @keyframes coinBreathe { 0%,100%{ filter: drop-shadow(0 14px 28px rgba(98,184,255,.48)); } 50%{ filter: drop-shadow(0 20px 34px rgba(140,212,255,.72)); } }
+  @keyframes coinBreathe { 0%,100%{ filter: drop-shadow(0 0 26px rgba(98,184,255,.50)); } 50%{ filter: drop-shadow(0 0 36px rgba(140,212,255,.74)); } }
   @keyframes holoSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg);} }
   @keyframes coinLift { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-8px);} }
   @keyframes skyShift { from { transform: translateY(0);} to { transform: translateY(-16px);} }

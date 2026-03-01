@@ -323,6 +323,47 @@
   }
 
 
+
+  /* Homepage grid unification: match specs/faq/quickstart cards to innovation-card visual language */
+  .specs-grid {
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 2rem;
+  }
+
+  .spec-card {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(99, 102, 241, 0.2);
+    border-radius: 12px;
+    padding: 2rem;
+    text-align: left;
+    transition: all 0.3s;
+  }
+
+  .spec-card:hover {
+    transform: translateY(-10px);
+    border-color: var(--primary);
+    box-shadow: 0 20px 40px rgba(99, 102, 241, 0.3);
+    background: rgba(99, 102, 241, 0.05);
+  }
+
+  .spec-label {
+    font-family: 'Orbitron', sans-serif;
+    font-size: 1.05rem;
+    letter-spacing: 0.03em;
+    color: var(--secondary);
+    margin-bottom: 0.65rem;
+    text-transform: none;
+  }
+
+  .spec-value {
+    font-family: 'Rajdhani', sans-serif;
+    font-size: 1.08rem;
+    font-weight: 600;
+    color: #c8d3ea;
+    text-shadow: none;
+    line-height: 1.5;
+  }
+
 </style>
 
 <script type="application/ld+json">

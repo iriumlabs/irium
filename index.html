@@ -46,9 +46,9 @@
     font-family: 'Space Grotesk', system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
     color: var(--txt-main);
     background:
-      radial-gradient(1200px 700px at -18% -25%, rgba(141, 125, 255, 0.2), transparent 62%),
-      radial-gradient(1000px 680px at 108% -20%, rgba(110, 198, 255, 0.18), transparent 66%),
-      linear-gradient(180deg, #090d18 0%, var(--bg-main) 45%, #05060a 100%);
+      radial-gradient(900px 500px at 10% -10%, rgba(43, 195, 255, 0.16), transparent 65%),
+      radial-gradient(760px 460px at 90% -15%, rgba(144, 92, 255, 0.18), transparent 67%),
+      linear-gradient(160deg, #060914 0%, #04070f 46%, #03050a 100%);
     overflow-x: hidden;
   }
 
@@ -58,12 +58,12 @@
     pointer-events: none;
     z-index: 0;
     background-image:
-      radial-gradient(2px 2px at 18% 26%, rgba(255,255,255,.24), transparent 60%),
-      radial-gradient(1.5px 1.5px at 73% 12%, rgba(255,255,255,.2), transparent 60%),
-      radial-gradient(1.7px 1.7px at 42% 84%, rgba(110,198,255,.24), transparent 60%),
-      radial-gradient(1.3px 1.3px at 88% 72%, rgba(141,125,255,.22), transparent 60%),
-      radial-gradient(1px 1px at 57% 47%, rgba(255,255,255,.16), transparent 60%);
-    animation: skyShift 30s linear infinite;
+      radial-gradient(1.4px 1.4px at 12% 18%, rgba(255,255,255,.18), transparent 60%),
+      radial-gradient(1px 1px at 79% 32%, rgba(96,204,255,.22), transparent 60%),
+      radial-gradient(1.1px 1.1px at 42% 78%, rgba(150,118,255,.20), transparent 60%),
+      radial-gradient(1.5px 1.5px at 65% 56%, rgba(255,255,255,.14), transparent 60%);
+    opacity: .55;
+    animation: skyShift 46s linear infinite;
   }
 
   .container {
@@ -709,9 +709,9 @@
   @keyframes coinBreathe { 0%,100%{ filter: drop-shadow(0 0 26px rgba(98,184,255,.50)); } 50%{ filter: drop-shadow(0 0 36px rgba(140,212,255,.74)); } }
   @keyframes holoSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg);} }
   @keyframes coinLift { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-8px);} }
-  @keyframes skyShift { from { transform: translateY(0);} to { transform: translateY(-16px);} }
-  @keyframes techGridDrift { from { background-position: 0 0, 0 0; } to { background-position: 0 56px, 56px 0; } }
-  @keyframes techGlowFloat { 0% { transform: translate3d(-1.5%, -1.8%, 0) scale(1); } 100% { transform: translate3d(1.8%, 2.2%, 0) scale(1.04); } }
+  @keyframes skyShift { from { transform: translate3d(0,0,0);} to { transform: translate3d(-18px,-12px,0);} }
+  @keyframes techGridDrift { from { background-position: 0 0, 0 0; } to { background-position: 120px -80px, -140px 90px; } }
+  @keyframes techGlowFloat { 0% { transform: translate3d(-2%, -1%, 0) scale(1); } 100% { transform: translate3d(2%, 2%, 0) scale(1.06); } }
   @keyframes pulseDot { 0%,100%{opacity:1; transform:scale(1);} 50%{opacity:.5; transform:scale(.76);} }
   @keyframes otcPulse { 0%,100%{box-shadow:0 16px 34px rgba(0,0,0,.36),0 0 0 1px rgba(93,211,255,.14) inset;} 50%{box-shadow:0 16px 34px rgba(0,0,0,.36),0 0 0 1px rgba(93,211,255,.26) inset;} }
   @keyframes otcAppear { from { opacity:0; transform:translateX(-50%) translateY(-8px);} to { opacity:1; transform:translateX(-50%) translateY(0);} }
@@ -765,28 +765,27 @@
   .tech-bg::after {
     content: '';
     position: absolute;
-    inset: -20%;
+    inset: -15%;
   }
 
   .tech-bg::before {
     background:
-      linear-gradient(rgba(108, 154, 255, 0.18) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(108, 154, 255, 0.18) 1px, transparent 1px),
-      repeating-linear-gradient(180deg, rgba(111,210,255,.07) 0 2px, transparent 2px 24px);
-    background-size: 52px 52px, 52px 52px, 100% 24px;
-    opacity: .68;
-    transform: perspective(900px) rotateX(62deg) translateY(20%);
-    animation: techGridDrift 18s linear infinite;
+      repeating-linear-gradient(120deg, rgba(90, 157, 255, 0.10) 0 1px, transparent 1px 42px),
+      repeating-linear-gradient(30deg, rgba(87, 235, 214, 0.08) 0 1px, transparent 1px 46px);
+    opacity: .7;
+    transform: scale(1.06);
+    animation: techGridDrift 30s linear infinite;
   }
 
   .tech-bg::after {
     background:
-      radial-gradient(560px 360px at 18% 24%, rgba(111, 210, 255, 0.36), transparent 70%),
-      radial-gradient(520px 340px at 82% 16%, rgba(141, 125, 255, 0.34), transparent 72%),
-      radial-gradient(440px 300px at 56% 76%, rgba(78, 240, 201, 0.24), transparent 70%);
-    filter: blur(12px);
-    opacity: 1;
-    animation: techGlowFloat 10s ease-in-out infinite alternate;
+      radial-gradient(680px 380px at 24% 30%, rgba(91, 208, 255, 0.30), transparent 72%),
+      radial-gradient(640px 420px at 74% 20%, rgba(146, 108, 255, 0.30), transparent 74%),
+      radial-gradient(620px 420px at 52% 86%, rgba(61, 239, 198, 0.16), transparent 70%);
+    mix-blend-mode: screen;
+    filter: blur(16px);
+    opacity: .95;
+    animation: techGlowFloat 13s ease-in-out infinite alternate;
   }
 
   .cursor-dust-canvas {

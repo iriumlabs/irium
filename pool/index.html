@@ -593,14 +593,19 @@
   .span-3 { grid-column: span 3; }
 
   .footer-brand .footer-logo {
-    width: 56px;
-    height: 56px;
+    width: 56px !important;
+    height: 56px !important;
+    min-width: 56px;
+    min-height: 56px;
+    display: block;
     padding: 6px;
     border-radius: 14px;
     background: rgba(255,255,255,0.07);
     border: 1px solid rgba(255,255,255,0.16);
     box-shadow: 0 0 16px rgba(99,102,241,0.35);
     object-fit: contain;
+    opacity: 1;
+    filter: none;
   }
 
   .footer-links a .footer-icon {

@@ -7,8 +7,97 @@
 <link rel="stylesheet" href="style.css?v=6">
 <link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
+
+<style>
+  .whitepaper-page .hero-whitepaper .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
+  }
+  .whitepaper-page .wp-shell {
+    display: grid;
+    gap: 18px;
+    margin-top: 18px;
+  }
+  .whitepaper-page .wp-body {
+    background: rgba(0,0,0,0.32);
+    border: 1px solid rgba(91,177,255,0.34);
+    border-radius: 14px;
+    padding: 18px;
+    box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 30px rgba(42,171,238,0.20);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    position: relative;
+    overflow: hidden;
+  }
+  .whitepaper-page .wp-body:before {
+    content: ;
+    position: absolute;
+    inset: 0;
+    border-radius: 14px;
+    pointer-events: none;
+    box-shadow: 0 0 26px rgba(42,171,238,0.20), inset 0 0 18px rgba(42,171,238,0.10);
+    animation: xGridAura 4.2s ease-in-out infinite;
+  }
+  .whitepaper-page .wp-body > * { position: relative; z-index: 1; }
+  .whitepaper-page .wp-header {
+    background: rgba(0,0,0,0.18);
+    border: 1px solid rgba(91,177,255,0.30);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 12px;
+    animation: xGridGlow 4.8s ease-in-out infinite;
+  }
+  .whitepaper-page .wp-section {
+    background: rgba(0,0,0,0.18);
+    border: 1px solid rgba(91,177,255,0.30);
+    border-radius: 16px;
+    padding: 16px;
+    margin-top: 12px;
+    animation: xGridGlow 4.8s ease-in-out infinite;
+  }
+  .whitepaper-page .wp-section h2,
+  .whitepaper-page .wp-section h3,
+  .whitepaper-page .wp-header h1 { color: rgba(255,255,255,0.95); }
+  .whitepaper-page .wp-body p,
+  .whitepaper-page .wp-body li,
+  .whitepaper-page .wp-body td,
+  .whitepaper-page .wp-body th { color: rgba(230,237,243,0.9); }
+  .whitepaper-page .wp-body a { color: #8be1ff; text-decoration: underline; text-underline-offset: 2px; }
+  .whitepaper-page .wp-body a:hover { color: #c2f0ff; }
+  .whitepaper-page pre,
+  .whitepaper-page .code-block {
+    background: rgba(2,7,14,0.95);
+    border: 1px solid rgba(148,186,240,.26);
+    border-radius: 10px;
+    padding: 11px;
+    overflow-x: auto;
+    color: #e9f2ff;
+  }
+  .whitepaper-page .wp-table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 10px;
+    border: 1px solid rgba(91,177,255,0.24);
+  }
+  .whitepaper-page .wp-table th,
+  .whitepaper-page .wp-table td {
+    padding: 10px;
+    border-bottom: 1px solid rgba(91,177,255,0.16);
+  }
+  @keyframes xGridGlow {
+    0%,100% { border-color: rgba(91,177,255,0.32); box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 26px rgba(42,171,238,0.16); }
+    50% { border-color: rgba(91,177,255,0.60); box-shadow: 0 16px 42px rgba(0,0,0,0.44), 0 0 40px rgba(42,171,238,0.34); }
+  }
+  @keyframes xGridAura {
+    0%,100% { opacity: .62; box-shadow: 0 0 20px rgba(42,171,238,0.18), inset 0 0 14px rgba(42,171,238,0.08); }
+    50% { opacity: .95; box-shadow: 0 0 36px rgba(42,171,238,0.34), inset 0 0 24px rgba(42,171,238,0.16); }
+  }
+</style>
+
 </head>
-<body class="whitepaper-page">
+<body class="whitepaper-page x-explorer">
 
 <div class="stars"></div>
 

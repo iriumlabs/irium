@@ -747,6 +747,13 @@
     .otc-float-new-dot { animation: none !important; }
   }
 
+  .cursor-dust-canvas {
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 119;
+  }
+
   .cursor-orb,
   .cursor-dot {
     position: fixed;
@@ -782,6 +789,7 @@
   }
 
   @media (hover: none), (pointer: coarse) {
+    .cursor-dust-canvas,
     .cursor-orb,
     .cursor-dot { display: none !important; }
   }
@@ -1172,6 +1180,7 @@ GitHub</a>
   })();
 </script>
 
+<canvas class="cursor-dust-canvas" id="cursor-dust-canvas" aria-hidden="true"></canvas>
 <div class="cursor-orb" id="cursor-orb" aria-hidden="true"></div>
 <div class="cursor-dot" id="cursor-dot" aria-hidden="true"></div>
 
@@ -1180,29 +1189,101 @@ GitHub</a>
     if (window.matchMedia('(hover: none), (pointer: coarse)').matches) return;
     const orb = document.getElementById('cursor-orb');
     const dot = document.getElementById('cursor-dot');
-    if (!orb || !dot) return;
+    const canvas = document.getElementById('cursor-dust-canvas');
+    if (!orb || !dot || !canvas) return;
 
+    const ctx = canvas.getContext('2d', { alpha: true });
+    if (!ctx) return;
+
+    const colors = [
+      '110,198,255',   // Irium cyan
+      '141,125,255',   // Irium violet
+      '95,225,255'     // bright aqua
+    ];
+
+    let dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
     let tx = window.innerWidth * 0.5;
     let ty = window.innerHeight * 0.5;
     let ox = tx;
     let oy = ty;
+    let lastX = tx;
+    let lastY = ty;
     let raf = null;
+    const particles = [];
+
+    function resize(){
+      dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+      canvas.width = Math.floor(window.innerWidth * dpr);
+      canvas.height = Math.floor(window.innerHeight * dpr);
+      canvas.style.width = window.innerWidth + 'px';
+      canvas.style.height = window.innerHeight + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function spawnDust(x, y, strength){
+      const count = Math.min(10, 3 + Math.floor(strength / 9));
+      for (let i = 0; i < count; i++) {
+        const a = Math.random() * Math.PI * 2;
+        const speed = 0.5 + Math.random() * 1.9 + strength * 0.012;
+        particles.push({
+          x,
+          y,
+          vx: Math.cos(a) * speed,
+          vy: Math.sin(a) * speed,
+          life: 24 + Math.random() * 24,
+          ttl: 24 + Math.random() * 24,
+          r: 0.9 + Math.random() * 2.0,
+          c: colors[(Math.random() * colors.length) | 0]
+        });
+      }
+      if (particles.length > 220) particles.splice(0, particles.length - 220);
+    }
+
+    function drawDust(){
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vx *= 0.982;
+        p.vy *= 0.982;
+        p.life -= 1;
+        if (p.life <= 0) {
+          particles.splice(i, 1);
+          continue;
+        }
+        const alpha = p.life / p.ttl;
+        ctx.beginPath();
+        ctx.fillStyle = `rgba(${p.c}, ${0.78 * alpha})`;
+        ctx.arc(p.x, p.y, p.r + (1 - alpha) * 0.5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
 
     function frame(){
       ox += (tx - ox) * 0.16;
       oy += (ty - oy) * 0.16;
       orb.style.transform = `translate3d(${ox - 15}px, ${oy - 15}px, 0)`;
       dot.style.transform = `translate3d(${tx - 3.5}px, ${ty - 3.5}px, 0)`;
+      drawDust();
       raf = requestAnimationFrame(frame);
     }
 
     function onMove(e){
       tx = e.clientX;
       ty = e.clientY;
+      const dx = tx - lastX;
+      const dy = ty - lastY;
+      const speed = Math.hypot(dx, dy);
+      if (speed > 0.8) spawnDust(tx, ty, speed);
+      lastX = tx;
+      lastY = ty;
       document.body.classList.remove('cursor-hidden');
       if (!raf) raf = requestAnimationFrame(frame);
     }
 
+    resize();
+    window.addEventListener('resize', resize, { passive: true });
     document.addEventListener('mousemove', onMove, { passive: true });
     document.addEventListener('mouseleave', () => document.body.classList.add('cursor-hidden'));
     document.addEventListener('mouseenter', () => document.body.classList.remove('cursor-hidden'));

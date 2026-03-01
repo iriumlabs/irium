@@ -201,48 +201,10 @@
     place-items: center;
     background: transparent !important;
     border: 0 !important;
-    border-radius: 50%;
+    border-radius: 0;
     box-shadow: none !important;
     isolation: isolate;
     animation: coinLift 4.6s ease-in-out infinite;
-  }
-
-  .hero .coin-container::before {
-    content: '';
-    position: absolute;
-    inset: -8px;
-    border-radius: 50%;
-    border: 1px solid rgba(126, 209, 255, .35);
-    box-shadow: 0 0 16px rgba(126, 209, 255, .22);
-    animation: orbitSpin 6.5s linear infinite;
-    z-index: 0;
-  }
-
-  .hero .coin-container::after {
-    content: '';
-    position: absolute;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: #87dbff;
-    box-shadow: 0 0 12px rgba(135,219,255,.9);
-    top: -2px;
-    left: 50%;
-    transform: translateX(-50%);
-    transform-origin: 0 112px;
-    animation: orbitDot 3.8s linear infinite;
-    z-index: 1;
-  }
-
-  .hero .coin-aura {
-    position: absolute;
-    inset: 10px;
-    border-radius: 50%;
-    background:
-      radial-gradient(circle at 50% 50%, rgba(124, 213, 255, .34), rgba(141,125,255,.18) 46%, transparent 70%);
-    filter: blur(10px);
-    z-index: 0;
-    animation: auraPulse 2.8s ease-in-out infinite;
   }
 
   .hero .hero-coin {
@@ -739,9 +701,6 @@
   @keyframes titleShine { from { background-position: 200% 0; } to { background-position: -20% 0; } }
   @keyframes coinSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg);} }
   @keyframes coinBreathe { 0%,100%{ filter: drop-shadow(0 14px 28px rgba(98,184,255,.48)); } 50%{ filter: drop-shadow(0 20px 34px rgba(140,212,255,.72)); } }
-  @keyframes auraPulse { 0%,100%{ opacity:.64; transform: scale(1); } 50%{ opacity:.92; transform: scale(1.04); } }
-  @keyframes orbitSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-  @keyframes orbitDot { from { transform: translateX(-50%) rotate(0deg); } to { transform: translateX(-50%) rotate(360deg); } }
   @keyframes holoSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg);} }
   @keyframes coinLift { 0%,100%{transform:translateY(0);} 50%{transform:translateY(-8px);} }
   @keyframes skyShift { from { transform: translateY(0);} to { transform: translateY(-16px);} }

@@ -1110,17 +1110,7 @@
     word-break: break-word;
   }
 
-  @media (max-width: 1180px) {
-    .live-activity-panel {
-      grid-column: span 2;
-    }
-  }
-
   @media (max-width: 820px) {
-    .live-activity-panel {
-      grid-column: span 1;
-    }
-
     .live-activity-panel .meta-list li {
       grid-template-columns: 1fr;
     }
@@ -1274,6 +1264,24 @@
         <div class="chart-wrap"><canvas id="chart-hashrate" width="1000" height="180"></canvas></div>
       </article>
 
+      <article class="panel live-activity-panel">
+        <h3>Live Pool Activity</h3>
+        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed.</p>
+        <ul class="meta-list">
+          <li><span class="key">Connected TCP Sessions (live)</span><span id="live-workers">Checking...</span></li>
+          <li><span class="key">Active Miners (window)</span><span id="live-active-miners">Checking...</span></li>
+          <li><span class="key">Accepted Shares</span><span id="live-accepted">Checking...</span></li>
+          <li><span class="key">Rejected / Stale</span><span id="live-rejected">Checking...</span></li>
+          <li><span class="key">Last Share Accepted</span><span id="live-last-accept">Checking...</span></li>
+          <li><span class="key">Last Share Rejected</span><span id="live-last-reject">Checking...</span></li>
+          <li><span class="key">Backend Link</span><span id="live-backend">Checking...</span></li>
+          <li><span class="key">Tip Alignment</span><span id="live-tip-align">Checking...</span></li>
+          <li><span class="key">Last Found Block</span><span id="live-last-found">Checking...</span></li>
+        </ul>
+        <p id="live-trust-note" class="tiny" style="margin-top:10px;">These metrics are pulled directly from <code>/api/pool/*</code> and chain data for independent verification.</p>
+      </article>
+
+
       <article class="panel">
         <h3>Difficulty Trend</h3>
         <p class="panel-sub">Recent difficulty points from chain telemetry.</p>
@@ -1290,22 +1298,7 @@
         <div id="miner-result" class="lookup-result">No lookup run yet.</div>
       </article>
 
-      <article class="panel span-2 live-activity-panel">
-        <h3>Live Pool Activity</h3>
-        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed.</p>
-        <ul class="meta-list">
-          <li><span class="key">Connected TCP Sessions (live)</span><span id="live-workers">Checking...</span></li>
-          <li><span class="key">Active Miners (window)</span><span id="live-active-miners">Checking...</span></li>
-          <li><span class="key">Accepted Shares</span><span id="live-accepted">Checking...</span></li>
-          <li><span class="key">Rejected / Stale</span><span id="live-rejected">Checking...</span></li>
-          <li><span class="key">Last Share Accepted</span><span id="live-last-accept">Checking...</span></li>
-          <li><span class="key">Last Share Rejected</span><span id="live-last-reject">Checking...</span></li>
-          <li><span class="key">Backend Link</span><span id="live-backend">Checking...</span></li>
-          <li><span class="key">Tip Alignment</span><span id="live-tip-align">Checking...</span></li>
-          <li><span class="key">Last Found Block</span><span id="live-last-found">Checking...</span></li>
-        </ul>
-        <p id="live-trust-note" class="tiny" style="margin-top:10px;">These metrics are pulled directly from <code>/api/pool/*</code> and chain data for independent verification.</p>
-      </article>
+      
 
       <article class="panel span-3">
         <h3>Recent Found Blocks (Chain Feed)</h3>

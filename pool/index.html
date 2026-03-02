@@ -1111,6 +1111,37 @@
     word-break: break-word;
   }
 
+  /* Compact low-priority informational cards */
+  .portal-grid .card-compact {
+    padding: 12px 13px;
+  }
+
+  .portal-grid .card-compact h3 {
+    font-size: 0.86rem;
+    letter-spacing: 0.05em;
+  }
+
+  .portal-grid .card-compact .panel-sub {
+    margin: 4px 0 8px;
+    font-size: 0.79rem;
+    line-height: 1.35;
+  }
+
+  .portal-grid .card-compact .meta-list {
+    gap: 6px;
+  }
+
+  .portal-grid .card-compact .meta-list li {
+    padding: 4px 0;
+    font-size: 0.84rem;
+    grid-template-columns: 118px 1fr;
+  }
+
+  .portal-grid .card-compact .meta-list .key {
+    font-size: 0.70rem;
+    letter-spacing: 0.07em;
+  }
+
   /* Stable portal layout (simple order + spans) */
   .portal-grid .card-economics { order: 1; grid-column: span 1; }
   .portal-grid .card-performance { order: 2; grid-column: span 1; }
@@ -1252,7 +1283,7 @@
     </section>
 
     <section class="portal-grid">
-      <article class="panel card-economics">
+      <article class="panel card-economics card-compact">
         <h3>Pool Economics</h3>
         <p class="panel-sub">Production parameters used by miners and listing sites.</p>
         <ul class="meta-list">
@@ -1265,7 +1296,7 @@
         </ul>
       </article>
 
-      <article class="panel card-performance">
+      <article class="panel card-performance card-compact">
         <h3>Pool Performance</h3>
         <p class="panel-sub">Recent throughput and expected production based on live chain pace.</p>
         <ul class="meta-list">
@@ -1278,7 +1309,7 @@
         </ul>
       </article>
 
-      <article class="panel card-ops">
+      <article class="panel card-ops card-compact">
         <h3>Operational Status</h3>
         <p class="panel-sub">Public endpoint diagnostics and miner-side checks.</p>
         <ul class="meta-list">
@@ -1290,7 +1321,7 @@
         </ul>
       </article>
 
-      <article class="panel card-legacy">
+      <article class="panel card-legacy card-compact">
         <h3>Legacy Miner Compatibility</h3>
         <p class="panel-sub">If TCP to the pool works but mining still fails, older miner firmware/clients may be Stratum-incompatible.</p>
         <p class="tiny" style="margin-top:8px;color:#b8ffd5;">Update (March 2, 2026): legacy Stratum compatibility handlers are now enabled server-side for older cgminer/bmminer clients.</p>

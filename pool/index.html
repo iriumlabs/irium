@@ -1095,6 +1095,37 @@
     min-width: 0;
   }
 
+  .live-activity-panel .meta-list li {
+    grid-template-columns: minmax(210px, 36%) 1fr;
+    align-items: start;
+  }
+
+  .live-activity-panel .meta-list .key {
+    min-width: 0;
+  }
+
+  .live-activity-panel .meta-list li span:last-child {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  @media (max-width: 1180px) {
+    .live-activity-panel {
+      grid-column: span 2;
+    }
+  }
+
+  @media (max-width: 820px) {
+    .live-activity-panel {
+      grid-column: span 1;
+    }
+
+    .live-activity-panel .meta-list li {
+      grid-template-columns: 1fr;
+    }
+  }
+
 </style>
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
 </head>
@@ -1259,7 +1290,7 @@
         <div id="miner-result" class="lookup-result">No lookup run yet.</div>
       </article>
 
-      <article class="panel">
+      <article class="panel span-2 live-activity-panel">
         <h3>Live Pool Activity</h3>
         <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed.</p>
         <ul class="meta-list">

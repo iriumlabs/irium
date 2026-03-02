@@ -758,6 +758,13 @@
     .portal-grid { grid-template-columns: 1fr 1fr; }
     .extended-grid { grid-template-columns: 1fr 1fr; }
     .span-3 { grid-column: span 2; }
+
+    .portal-grid .card-hashrate,
+    .portal-grid .card-miner,
+    .portal-grid .card-blocks,
+    .portal-grid .card-payouts {
+      grid-column: span 2;
+    }
   }
 
   @media (max-width: 820px) {
@@ -1110,6 +1117,40 @@
     word-break: break-word;
   }
 
+  /* Professional pool grid ordering */
+  .portal-grid .card-economics { order: 1; }
+  .portal-grid .card-performance { order: 2; }
+  .portal-grid .card-ops { order: 3; }
+  .portal-grid .card-hashrate { order: 4; }
+  .portal-grid .card-live { order: 5; }
+  .portal-grid .card-difficulty { order: 6; }
+  .portal-grid .card-legacy { order: 7; }
+  .portal-grid .card-miner { order: 8; }
+  .portal-grid .card-blocks { order: 9; }
+  .portal-grid .card-payouts { order: 10; }
+
+  .portal-grid .card-hashrate,
+  .portal-grid .card-miner,
+  .portal-grid .card-blocks,
+  .portal-grid .card-payouts {
+    grid-column: span 2;
+  }
+
+  .portal-grid .card-live,
+  .portal-grid .card-difficulty,
+  .portal-grid .card-legacy,
+  .portal-grid .card-economics,
+  .portal-grid .card-performance,
+  .portal-grid .card-ops {
+    grid-column: span 1;
+  }
+
+  .portal-grid .card-blocks,
+  .portal-grid .card-payouts {
+    grid-column: span 3;
+  }
+
+
   @media (max-width: 820px) {
     .live-activity-panel .meta-list li {
       grid-template-columns: 1fr;
@@ -1205,7 +1246,7 @@
     </section>
 
     <section class="portal-grid">
-      <article class="panel">
+      <article class="panel card-economics">
         <h3>Pool Economics</h3>
         <p class="panel-sub">Production parameters used by miners and listing sites.</p>
         <ul class="meta-list">
@@ -1218,7 +1259,7 @@
         </ul>
       </article>
 
-      <article class="panel">
+      <article class="panel card-performance">
         <h3>Pool Performance</h3>
         <p class="panel-sub">Recent throughput and expected production based on live chain pace.</p>
         <ul class="meta-list">
@@ -1231,7 +1272,7 @@
         </ul>
       </article>
 
-      <article class="panel">
+      <article class="panel card-ops">
         <h3>Operational Status</h3>
         <p class="panel-sub">Public endpoint diagnostics and miner-side checks.</p>
         <ul class="meta-list">
@@ -1243,7 +1284,7 @@
         </ul>
       </article>
 
-      <article class="panel">
+      <article class="panel card-legacy">
         <h3>Legacy Miner Compatibility</h3>
         <p class="panel-sub">If TCP to the pool works but mining still fails, older miner firmware/clients may be Stratum-incompatible.</p>
         <p class="tiny" style="margin-top:8px;color:#b8ffd5;">Update (March 2, 2026): legacy Stratum compatibility handlers are now enabled server-side for older cgminer/bmminer clients.</p>
@@ -1258,13 +1299,13 @@
       </article>
 
 
-      <article class="panel span-2">
+      <article class="panel span-2 card-hashrate">
         <h3>Network Hashrate Trend</h3>
         <p class="panel-sub">Derived from recent block windows from the live API.</p>
         <div class="chart-wrap"><canvas id="chart-hashrate" width="1000" height="180"></canvas></div>
       </article>
 
-      <article class="panel live-activity-panel">
+      <article class="panel live-activity-panel card-live">
         <h3>Live Pool Activity</h3>
         <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed.</p>
         <ul class="meta-list">
@@ -1282,13 +1323,13 @@
       </article>
 
 
-      <article class="panel">
+      <article class="panel card-difficulty">
         <h3>Difficulty Trend</h3>
         <p class="panel-sub">Recent difficulty points from chain telemetry.</p>
         <div class="chart-wrap"><canvas id="chart-difficulty" width="520" height="180"></canvas></div>
       </article>
 
-      <article class="panel span-2">
+      <article class="panel span-2 card-miner">
         <h3>Miner Address Dashboard</h3>
         <p class="panel-sub">Lookup recent chain results for a mining payout address.</p>
         <div class="lookup">
@@ -1300,7 +1341,7 @@
 
       
 
-      <article class="panel span-3">
+      <article class="panel span-3 card-blocks">
         <h3>Recent Found Blocks (Chain Feed)</h3>
         <p class="panel-sub">Latest accepted blocks with miner payout address and reward.</p>
         <div class="table-wrap">
@@ -1320,7 +1361,7 @@
         </div>
       </article>
 
-      <article class="panel span-3">
+      <article class="panel span-3 card-payouts">
         <h3>Payout Transparency (Coinbase Rewards)</h3>
         <p class="panel-sub">In SOLO mode, this table is your public payout ledger from chain data.</p>
         <div class="table-wrap">

@@ -2152,7 +2152,7 @@ GitHub</a>
     const payoutRows = Array.isArray(payouts?.payouts) ? payouts.payouts : [];
     const lastFound = payoutRows.length ? payoutRows[0] : null;
 
-    setText('b-workers', tcpSessions ?? workersOnline ?? 'N/A');
+    setText('b-workers', workersOnline ?? tcpSessions ?? 'N/A');
     setText('b-accepted', acceptedText);
     setText('b-rejected', rejectedText);
     setText('b-pending', pendingCount === null ? 'N/A (solo on-chain)' : fmtInt(pendingCount));
@@ -2179,7 +2179,7 @@ GitHub</a>
     const rawHealth = String((health && (health.stratum_status || health.freshness_state || (health.healthy === true ? 'ok' : 'stale'))) || 'unknown').toLowerCase();
     const stratumHealth = (rawHealth === 'ok' || rawHealth === 'fresh' || rawHealth === 'healthy') ? 'ok' : ((rawHealth === 'stale' || rawHealth === 'degraded' || rawHealth === 'down') ? 'stale' : 'unknown');
     const nowTs = Math.floor(Date.now() / 1000);
-    const templateAge = (Number.isFinite(Number(health?.stratum_age_seconds)) ? Number(health.stratum_age_seconds) : (Number.isFinite(Number(tmplTs)) && Number(tmplTs) > 0 ? Math.max(0, nowTs - Number(tmplTs)) : null));
+    const templateAge = (Number.isFinite(Number(health?.stratum_age_seconds)) ? Number(health.stratum_age_seconds) : (Number.isFinite(Number(health?.age_seconds)) ? Number(health.age_seconds) : (Number.isFinite(Number(tmplTs)) && Number(tmplTs) > 0 ? Math.max(0, nowTs - Number(tmplTs)) : null)));
     setText('ops-stratum-health', stratumHealth);
     setText('ops-template-age', templateAge === null ? 'Unknown' : (fmtInt(templateAge) + 's'));
 

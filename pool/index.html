@@ -759,12 +759,6 @@
     .extended-grid { grid-template-columns: 1fr 1fr; }
     .span-3 { grid-column: span 2; }
 
-    .portal-grid .card-hashrate,
-    .portal-grid .card-miner,
-    .portal-grid .card-blocks,
-    .portal-grid .card-payouts {
-      grid-column: span 2;
-    }
   }
 
   @media (max-width: 820px) {
@@ -1117,103 +1111,53 @@
     word-break: break-word;
   }
 
-  /* Professional pool grid ordering */
-  .portal-grid .card-economics { order: 1; }
-  .portal-grid .card-performance { order: 2; }
-  .portal-grid .card-ops { order: 3; }
-  .portal-grid .card-hashrate { order: 4; }
-  .portal-grid .card-live { order: 5; }
-  .portal-grid .card-difficulty { order: 6; }
-  .portal-grid .card-legacy { order: 7; }
-  .portal-grid .card-miner { order: 8; }
-  .portal-grid .card-blocks { order: 9; }
-  .portal-grid .card-payouts { order: 10; }
+  /* Stable portal layout (simple order + spans) */
+  .portal-grid .card-economics { order: 1; grid-column: span 1; }
+  .portal-grid .card-performance { order: 2; grid-column: span 1; }
+  .portal-grid .card-ops { order: 3; grid-column: span 1; }
 
-  .portal-grid .card-hashrate,
-  .portal-grid .card-miner,
-  .portal-grid .card-blocks,
-  .portal-grid .card-payouts {
-    grid-column: span 2;
-  }
+  .portal-grid .card-hashrate { order: 4; grid-column: span 2; }
+  .portal-grid .card-live { order: 5; grid-column: span 1; }
 
-  .portal-grid .card-live,
-  .portal-grid .card-difficulty,
-  .portal-grid .card-legacy,
-  .portal-grid .card-economics,
-  .portal-grid .card-performance,
-  .portal-grid .card-ops {
-    grid-column: span 1;
-  }
+  .portal-grid .card-difficulty { order: 6; grid-column: span 1; }
+  .portal-grid .card-legacy { order: 7; grid-column: span 2; }
 
-  .portal-grid .card-blocks,
-  .portal-grid .card-payouts {
-    grid-column: span 3;
-  }
-
-  /* Deterministic portal layout to prevent card garbling */
-  .portal-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-    grid-template-areas:
-      "economics performance ops"
-      "hashrate hashrate difficulty"
-      "live live legacy"
-      "miner miner miner"
-      "blocks blocks blocks"
-      "payouts payouts payouts";
-    grid-auto-flow: row;
-    align-items: stretch;
-  }
-
-  .portal-grid > .panel {
-    grid-column: auto !important;
-    order: initial !important;
-  }
-
-  .portal-grid .card-economics { grid-area: economics; }
-  .portal-grid .card-performance { grid-area: performance; }
-  .portal-grid .card-ops { grid-area: ops; }
-  .portal-grid .card-hashrate { grid-area: hashrate; }
-  .portal-grid .card-live { grid-area: live; }
-  .portal-grid .card-difficulty { grid-area: difficulty; }
-  .portal-grid .card-legacy { grid-area: legacy; }
-  .portal-grid .card-miner { grid-area: miner; }
-  .portal-grid .card-blocks { grid-area: blocks; }
-  .portal-grid .card-payouts { grid-area: payouts; }
+  .portal-grid .card-miner { order: 8; grid-column: span 3; }
+  .portal-grid .card-blocks { order: 9; grid-column: span 3; }
+  .portal-grid .card-payouts { order: 10; grid-column: span 3; }
 
   @media (max-width: 1180px) {
-    .portal-grid {
-      grid-template-columns: 1fr 1fr !important;
-      grid-template-areas:
-        "economics performance"
-        "ops legacy"
-        "hashrate hashrate"
-        "live difficulty"
-        "miner miner"
-        "blocks blocks"
-        "payouts payouts";
+    .portal-grid .card-hashrate,
+    .portal-grid .card-legacy,
+    .portal-grid .card-miner,
+    .portal-grid .card-blocks,
+    .portal-grid .card-payouts {
+      grid-column: span 2;
+    }
+
+    .portal-grid .card-economics,
+    .portal-grid .card-performance,
+    .portal-grid .card-ops,
+    .portal-grid .card-live,
+    .portal-grid .card-difficulty {
+      grid-column: span 1;
     }
   }
 
-
   @media (max-width: 820px) {
-    .portal-grid {
-      grid-template-columns: 1fr !important;
-      grid-template-areas:
-        "economics"
-        "performance"
-        "ops"
-        "legacy"
-        "hashrate"
-        "live"
-        "difficulty"
-        "miner"
-        "blocks"
-        "payouts";
+    .portal-grid .card-economics,
+    .portal-grid .card-performance,
+    .portal-grid .card-ops,
+    .portal-grid .card-hashrate,
+    .portal-grid .card-live,
+    .portal-grid .card-difficulty,
+    .portal-grid .card-legacy,
+    .portal-grid .card-miner,
+    .portal-grid .card-blocks,
+    .portal-grid .card-payouts {
+      grid-column: span 1;
     }
-  }
 
-
-  @media (max-width: 820px) {
     .live-activity-panel .meta-list li {
       grid-template-columns: 1fr;
     }

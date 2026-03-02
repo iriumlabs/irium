@@ -1171,17 +1171,16 @@
   .portal-grid .card-ops { order: 3; grid-column: span 1; }
 
   .portal-grid .card-hashrate { order: 4; grid-column: span 1; }
-  .portal-grid .card-live { order: 5; grid-column: span 1; }
+  .portal-grid .card-difficulty { order: 5; grid-column: span 1; }
+  .portal-grid .card-legacy { order: 6; grid-column: span 1; }
 
-  .portal-grid .card-difficulty { order: 6; grid-column: span 1; }
-  .portal-grid .card-legacy { order: 7; grid-column: span 2; }
-
+  .portal-grid .card-live { order: 7; grid-column: span 3; }
   .portal-grid .card-miner { order: 8; grid-column: span 3; }
   .portal-grid .card-blocks { order: 9; grid-column: span 3; }
   .portal-grid .card-payouts { order: 10; grid-column: span 3; }
 
   @media (max-width: 1180px) {
-    .portal-grid .card-legacy,
+    .portal-grid .card-live,
     .portal-grid .card-miner,
     .portal-grid .card-blocks,
     .portal-grid .card-payouts {
@@ -1191,8 +1190,9 @@
     .portal-grid .card-economics,
     .portal-grid .card-performance,
     .portal-grid .card-ops,
-    .portal-grid .card-live,
-    .portal-grid .card-difficulty {
+    .portal-grid .card-hashrate,
+    .portal-grid .card-difficulty,
+    .portal-grid .card-legacy {
       grid-column: span 1;
     }
   }

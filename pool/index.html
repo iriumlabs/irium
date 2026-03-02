@@ -1150,6 +1150,68 @@
     grid-column: span 3;
   }
 
+  /* Deterministic portal layout to prevent card garbling */
+  .portal-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+    grid-template-areas:
+      "economics performance ops"
+      "hashrate hashrate difficulty"
+      "live live legacy"
+      "miner miner miner"
+      "blocks blocks blocks"
+      "payouts payouts payouts";
+    grid-auto-flow: row;
+    align-items: stretch;
+  }
+
+  .portal-grid > .panel {
+    grid-column: auto !important;
+    order: initial !important;
+  }
+
+  .portal-grid .card-economics { grid-area: economics; }
+  .portal-grid .card-performance { grid-area: performance; }
+  .portal-grid .card-ops { grid-area: ops; }
+  .portal-grid .card-hashrate { grid-area: hashrate; }
+  .portal-grid .card-live { grid-area: live; }
+  .portal-grid .card-difficulty { grid-area: difficulty; }
+  .portal-grid .card-legacy { grid-area: legacy; }
+  .portal-grid .card-miner { grid-area: miner; }
+  .portal-grid .card-blocks { grid-area: blocks; }
+  .portal-grid .card-payouts { grid-area: payouts; }
+
+  @media (max-width: 1180px) {
+    .portal-grid {
+      grid-template-columns: 1fr 1fr !important;
+      grid-template-areas:
+        "economics performance"
+        "ops legacy"
+        "hashrate hashrate"
+        "live difficulty"
+        "miner miner"
+        "blocks blocks"
+        "payouts payouts";
+    }
+  }
+
+
+  @media (max-width: 820px) {
+    .portal-grid {
+      grid-template-columns: 1fr !important;
+      grid-template-areas:
+        "economics"
+        "performance"
+        "ops"
+        "legacy"
+        "hashrate"
+        "live"
+        "difficulty"
+        "miner"
+        "blocks"
+        "payouts";
+    }
+  }
+
 
   @media (max-width: 820px) {
     .live-activity-panel .meta-list li {

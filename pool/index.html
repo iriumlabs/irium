@@ -1047,6 +1047,54 @@
     color: rgba(255,255,255,0.94) !important;
   }
 
+  /* Pool layout hardening: keep cards aligned and prevent perceived missing content */
+  .kpi-grid,
+  .portal-grid,
+  .extended-grid,
+  .connect-grid,
+  .legal-grid,
+  .status-grid,
+  .howto-grid,
+  .api-grid {
+    align-items: stretch;
+  }
+
+  .panel,
+  .cfg-card,
+  .legal-box,
+  .mini-stat,
+  .kpi {
+    min-width: 0;
+  }
+
+  .meta-list li,
+  .mini-list li {
+    align-items: start;
+    gap: 10px;
+  }
+
+  .meta-list .key,
+  .mini-list .k {
+    min-width: 130px;
+  }
+
+  .meta-list li span:last-child,
+  .mini-list li span:last-child,
+  .panel code,
+  .panel .mono,
+  .cfg-card code,
+  .cfg-card .mono {
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .table-wrap,
+  .lookup,
+  .pool-table {
+    min-width: 0;
+  }
+
 </style>
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
 </head>

@@ -1142,12 +1142,35 @@
     letter-spacing: 0.07em;
   }
 
+  /* Compact trend cards */
+  .portal-grid .card-hashrate,
+  .portal-grid .card-difficulty {
+    padding: 12px 13px;
+  }
+
+  .portal-grid .card-hashrate .panel-sub,
+  .portal-grid .card-difficulty .panel-sub {
+    margin: 4px 0 8px;
+    font-size: 0.79rem;
+    line-height: 1.35;
+  }
+
+  .portal-grid .card-hashrate .chart-wrap,
+  .portal-grid .card-difficulty .chart-wrap {
+    padding: 8px;
+  }
+
+  .portal-grid .card-hashrate canvas,
+  .portal-grid .card-difficulty canvas {
+    height: 130px !important;
+  }
+
   /* Stable portal layout (simple order + spans) */
   .portal-grid .card-economics { order: 1; grid-column: span 1; }
   .portal-grid .card-performance { order: 2; grid-column: span 1; }
   .portal-grid .card-ops { order: 3; grid-column: span 1; }
 
-  .portal-grid .card-hashrate { order: 4; grid-column: span 2; }
+  .portal-grid .card-hashrate { order: 4; grid-column: span 1; }
   .portal-grid .card-live { order: 5; grid-column: span 1; }
 
   .portal-grid .card-difficulty { order: 6; grid-column: span 1; }
@@ -1158,7 +1181,6 @@
   .portal-grid .card-payouts { order: 10; grid-column: span 3; }
 
   @media (max-width: 1180px) {
-    .portal-grid .card-hashrate,
     .portal-grid .card-legacy,
     .portal-grid .card-miner,
     .portal-grid .card-blocks,
@@ -1336,7 +1358,7 @@
       </article>
 
 
-      <article class="panel span-2 card-hashrate">
+      <article class="panel card-hashrate">
         <h3>Network Hashrate Trend</h3>
         <p class="panel-sub">Derived from recent block windows from the live API.</p>
         <div class="chart-wrap"><canvas id="chart-hashrate" width="1000" height="180"></canvas></div>

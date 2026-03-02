@@ -1,0 +1,21 @@
+{
+  "coinTicker": "IRM",
+  "poolDomain": "pool.iriumlabs.org",
+  "ports": {
+    "legacyTcp": 3333,
+    "tls": 4443,
+    "compat": 3335
+  },
+  "defaultPassword": "x",
+  "workerFormat": "WALLET.WORKER",
+  "notes": {
+    "legacyTcp": "Best compatibility (no TLS)",
+    "tls": "Modern firmware (TLS/SSL)",
+    "compat": "Use if your miner has issues on legacy/tls"
+  },
+  "stats": {
+    "enabled": false,
+    "workerLookupUrl": "/api/worker?wallet={wallet}",
+    "poolSummaryUrl": "/api/summary"
+  }
+}

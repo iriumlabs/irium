@@ -2289,15 +2289,19 @@ GitHub</a>
   async function refresh() {
     try {
       const [stats, mining, blocksResp, poolPayouts] = await Promise.all([
-        fetchJson("/stats"),
-        fetchJson("/mining"),
-        fetchJson("/blocks?limit=120"),
+        fetchOptional("/stats"),
+        fetchOptional("/mining"),
+        fetchOptional("/blocks?limit=120"),
         fetchOptional("/pool/payouts?limit=80")
       ]);
 
-      statsCache = stats;
-      miningCache = mining;
-      blocksCache = Array.isArray(blocksResp?.blocks) ? blocksResp.blocks : [];
+      if (stats) statsCache = stats;
+      if (mining) miningCache = mining;
+      if (Array.isArray(blocksResp?.blocks)) blocksCache = blocksResp.blocks;
+
+      if (!statsCache || !miningCache || !Array.isArray(blocksCache)) {
+        throw new Error('insufficient data from API backends');
+      }
 
       applyKpis(statsCache, miningCache);
       applyPerformance(statsCache, miningCache, blocksCache);
@@ -2328,6 +2332,7 @@ GitHub</a>
       setText("s-latency", "Unavailable");
       setText("s-health", "Degraded");
       setText("s-watchdog", "Unavailable");
+      try { await updateBackendTelemetry(); } catch (_) {}
     }
   }
 

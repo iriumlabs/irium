@@ -1444,20 +1444,21 @@
       </article>
 
       <article class="panel span-3 card-payouts">
-        <h3>Payout Transparency (Coinbase Rewards)</h3>
-        <p class="panel-sub">In SOLO mode, this table is your public payout ledger from chain data.</p>
+        <h3>Pool Found Blocks (Attributed)</h3>
+        <p class="panel-sub">Only blocks reported by the live Stratum backend are listed here (not generic chain miner rows).</p>
         <div class="table-wrap">
-          <table class="pool-table" id="payouts-table">
+          <table class="pool-table" id="pool-found-table">
             <thead>
               <tr>
                 <th>Height</th>
+                <th>Time</th>
                 <th>Miner Address</th>
                 <th>Reward (IRM)</th>
                 <th>Status</th>
-                <th>Reference</th>
+                <th>Block Hash</th>
               </tr>
             </thead>
-            <tbody id="payouts-body"><tr><td colspan="5">Loading payouts...</td></tr></tbody>
+            <tbody id="pool-found-body"><tr><td colspan="6">Loading pool found blocks...</td></tr></tbody>
           </table>
         </div>
       </article>
@@ -1987,24 +1988,26 @@ GitHub</a>
     }).join("");
   }
 
-  function renderPayouts(data) {
-    const body = document.getElementById("payouts-body");
+  function renderPoolFoundBlocks(data) {
+    const body = document.getElementById("pool-found-body");
     if (!body) return;
 
-    const payouts = Array.isArray(data?.payouts) ? data.payouts : (Array.isArray(data) ? data : []);
+    const payouts = Array.isArray(data?.payouts) ? data.payouts : [];
     if (!payouts.length) {
-      body.innerHTML = "<tr><td colspan=\"5\">No payout data</td></tr>";
+      body.innerHTML = "<tr><td colspan=\"6\">No pool-found blocks reported yet.</td></tr>";
       return;
     }
 
-    body.innerHTML = payouts.slice(0, 40).map((p) => {
+    body.innerHTML = payouts.slice(0, 60).map((p) => {
       const miner = p?.address || p?.miner_address || p?.miner || "N/A";
       const reward = Number(p?.reward_irm ?? p?.reward ?? 0);
       const ref = p?.hash || p?.block_hash || "";
       const status = p?.status || "on_chain";
       const height = Number(p?.height || 0);
+      const ts = Number(p?.time || 0);
       return `<tr>
         <td>${fmtInt(height)}</td>
+        <td>${ts > 0 ? fmtTime(ts) : "N/A"}</td>
         <td class=\"mono mono-wrap\" title=\"${miner}\">${miner}</td>
         <td class=\"reward-value\">${fmtNum(reward, 2)} IRM</td>
         <td><span class=\"green\">${status === "on_chain" ? "On-chain" : status}</span></td>
@@ -2312,7 +2315,7 @@ GitHub</a>
       applyKpis(statsCache, miningCache);
       applyPerformance(statsCache, miningCache, blocksCache);
       renderBlocks(blocksCache.slice(0, 80));
-      renderPayouts(poolPayouts || blocksCache);
+      renderPoolFoundBlocks(poolPayouts);
 
       const hsSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0) ? Number(miningCache?.hashrate || 0) : Number(miningCache?.hashrate || 0));
       const diffSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0));

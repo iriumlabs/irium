@@ -1203,7 +1203,7 @@
 
   .portal-grid .card-hashrate { order: 4; grid-column: span 1; }
   .portal-grid .card-difficulty { order: 5; grid-column: span 1; }
-  .portal-grid .card-legacy { order: 6; grid-column: span 1; }
+  .portal-grid .card-legacy { order: 6; grid-column: 1 / -1; }
 
   .portal-grid .card-live { order: 7; grid-column: span 3; }
   .portal-grid .card-miner { order: 8; grid-column: span 3; }
@@ -1222,9 +1222,11 @@
     .portal-grid .card-performance,
     .portal-grid .card-ops,
     .portal-grid .card-hashrate,
-    .portal-grid .card-difficulty,
-    .portal-grid .card-legacy {
+    .portal-grid .card-difficulty {
       grid-column: span 1;
+    }
+    .portal-grid .card-legacy {
+      grid-column: span 2;
     }
   }
 

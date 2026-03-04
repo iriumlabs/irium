@@ -2144,7 +2144,7 @@ GitHub</a>
 
     const tcpSessions = Number.isFinite(Number(stats?.active_tcp_sessions)) ? Number(stats.active_tcp_sessions) : null;
     const workersOnline = Number.isFinite(Number(stats?.workers_online)) ? Number(stats.workers_online) : null;
-    const activeMiners = Number.isFinite(Number(stats?.active_miners_as_of_height)) ? Number(stats.active_miners_as_of_height) : null;
+    const activeMiners = Number.isFinite(Number(stats?.active_miners)) ? Number(stats.active_miners) : workersOnline;
     const activeWindow = Number.isFinite(Number(stats?.active_miners_window_blocks)) ? Number(stats.active_miners_window_blocks) : null;
 
     const networkHeightPool = Number(stats?.network_height || 0);

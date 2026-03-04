@@ -1305,22 +1305,22 @@
     </section>
 
     <section class="panel required-update-panel" style="margin-top:14px;">
-      <div class="panel-row">
-        <h3>Required Miner Update</h3>
-        <span class="badge" style="border-color:rgba(255,199,102,.5);color:#ffdca1;background:rgba(255,199,102,.12);">ACTION NEEDED</span>
-      </div>
-      <p class="panel-sub">Before mining, update to latest <code>main</code> to use the current Stratum stability fixes (fresh template guard + watchdog hardening).</p>
-      <div class="table-wrap" style="margin-top:10px;">
-        <pre style="margin:0;white-space:pre-wrap;">git fetch origin
-git checkout main
-git pull --ff-only origin main
-cargo build --release</pre>
-      </div>
-      <ul class="meta-list" style="margin-top:12px;">
-        <li><span class="key">Officially Supported Miner</span><span><b>irium-miner</b> (recommended baseline)</span></li>
-        <li><span class="key">Third-Party GPU Clients</span><span>Some <b>ccminer</b> builds may connect but still reject shares (<code>low_difficulty</code>) due to protocol handling differences.</span></li>
-        <li><span class="key">If You See Rejects</span><span>Share miner version, launch command, and 30-50 log lines in support for compatibility triage.</span></li>
-      </ul>
+      <article class="panel live-activity-panel card-live">
+        <h3>Live Pool Activity</h3>
+        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed. Sessions show connected workers, not total hashpower.</p>
+        <ul class="meta-list">
+          <li><span class="key">Connected TCP Sessions (live)</span><span id="live-workers">Checking...</span></li>
+          <li><span class="key">Active Miners (window)</span><span id="live-active-miners">Checking...</span></li>
+          <li><span class="key">Accepted Shares</span><span id="live-accepted">Checking...</span></li>
+          <li><span class="key">Rejected / Stale</span><span id="live-rejected">Checking...</span></li>
+          <li><span class="key">Last Share Accepted</span><span id="live-last-accept">Checking...</span></li>
+          <li><span class="key">Last Share Rejected</span><span id="live-last-reject">Checking...</span></li>
+          <li><span class="key">Backend Link</span><span id="live-backend">Checking...</span></li>
+          <li><span class="key">Tip Alignment</span><span id="live-tip-align">Checking...</span></li>
+          <li><span class="key">Last Found Block</span><span id="live-last-found">Checking...</span></li>
+        </ul>
+        <p id="live-trust-note" class="tiny" style="margin-top:10px;">These metrics are pulled directly from <code>/api/pool/*</code> and chain data for independent verification.</p>
+      </article>
     </section>
 
     <section class="portal-grid">
@@ -1383,23 +1383,6 @@ cargo build --release</pre>
         <h3>Network Hashrate Trend</h3>
         <p class="panel-sub">Derived from recent block windows from the live API.</p>
         <div class="chart-wrap"><canvas id="chart-hashrate" width="1000" height="180"></canvas></div>
-      </article>
-
-      <article class="panel live-activity-panel card-live">
-        <h3>Live Pool Activity</h3>
-        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed. Sessions show connected workers, not total hashpower.</p>
-        <ul class="meta-list">
-          <li><span class="key">Connected TCP Sessions (live)</span><span id="live-workers">Checking...</span></li>
-          <li><span class="key">Active Miners (window)</span><span id="live-active-miners">Checking...</span></li>
-          <li><span class="key">Accepted Shares</span><span id="live-accepted">Checking...</span></li>
-          <li><span class="key">Rejected / Stale</span><span id="live-rejected">Checking...</span></li>
-          <li><span class="key">Last Share Accepted</span><span id="live-last-accept">Checking...</span></li>
-          <li><span class="key">Last Share Rejected</span><span id="live-last-reject">Checking...</span></li>
-          <li><span class="key">Backend Link</span><span id="live-backend">Checking...</span></li>
-          <li><span class="key">Tip Alignment</span><span id="live-tip-align">Checking...</span></li>
-          <li><span class="key">Last Found Block</span><span id="live-last-found">Checking...</span></li>
-        </ul>
-        <p id="live-trust-note" class="tiny" style="margin-top:10px;">These metrics are pulled directly from <code>/api/pool/*</code> and chain data for independent verification.</p>
       </article>
 
 

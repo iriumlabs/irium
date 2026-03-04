@@ -1113,7 +1113,7 @@
 
   /* Compact low-priority informational cards */
   .portal-grid .card-compact {
-    padding: 12px 13px;
+    padding: 8px 10px;
   }
 
   .portal-grid .card-compact h3 {
@@ -1122,9 +1122,9 @@
   }
 
   .portal-grid .card-compact .panel-sub {
-    margin: 4px 0 8px;
-    font-size: 0.79rem;
-    line-height: 1.35;
+    margin: 2px 0 4px;
+    font-size: 0.72rem;
+    line-height: 1.25;
   }
 
   .portal-grid .card-compact .meta-list {
@@ -1157,18 +1157,18 @@
 
   .portal-grid .card-hashrate .chart-wrap,
   .portal-grid .card-difficulty .chart-wrap {
-    padding: 8px;
+    padding: 4px;
   }
 
   .portal-grid .card-hashrate canvas,
   .portal-grid .card-difficulty canvas {
-    height: 108px !important;
+    height: 72px !important;
   }
 
   .portal-grid .card-hashrate h3,
   .portal-grid .card-difficulty h3 {
-    font-size: 0.88rem;
-    letter-spacing: 0.05em;
+    font-size: 0.82rem;
+    letter-spacing: 0.04em;
   }
 
   .portal-grid .card-legacy {
@@ -1407,15 +1407,15 @@
 
       <article class="panel card-hashrate card-compact">
         <h3>Network Hashrate Trend</h3>
-        <p class="panel-sub">Derived from recent block windows from the live API.</p>
-        <div class="chart-wrap"><canvas id="chart-hashrate" width="460" height="128"></canvas></div>
+        <p class="panel-sub">Live API trend snapshot.</p>
+        <div class="chart-wrap"><canvas id="chart-hashrate" width="360" height="84"></canvas></div>
       </article>
 
 
       <article class="panel card-difficulty card-compact">
         <h3>Difficulty Trend</h3>
-        <p class="panel-sub">Recent difficulty points from chain telemetry.</p>
-        <div class="chart-wrap"><canvas id="chart-difficulty" width="460" height="128"></canvas></div>
+        <p class="panel-sub">Recent chain difficulty trend.</p>
+        <div class="chart-wrap"><canvas id="chart-difficulty" width="360" height="84"></canvas></div>
       </article>
 
       <article class="panel span-2 card-miner">

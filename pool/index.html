@@ -1145,30 +1145,34 @@
   /* Compact trend cards */
   .portal-grid .card-hashrate,
   .portal-grid .card-difficulty {
-    padding: 8px 10px;
-  }
-
-  .portal-grid .card-hashrate .panel-sub,
-  .portal-grid .card-difficulty .panel-sub {
-    margin: 2px 0 4px;
-    font-size: 0.72rem;
-    line-height: 1.25;
-  }
-
-  .portal-grid .card-hashrate .chart-wrap,
-  .portal-grid .card-difficulty .chart-wrap {
-    padding: 4px;
-  }
-
-  .portal-grid .card-hashrate canvas,
-  .portal-grid .card-difficulty canvas {
-    height: 72px !important;
+    padding: 6px 8px;
+    min-height: 118px;
   }
 
   .portal-grid .card-hashrate h3,
   .portal-grid .card-difficulty h3 {
-    font-size: 0.82rem;
-    letter-spacing: 0.04em;
+    font-size: 0.76rem;
+    letter-spacing: 0.03em;
+    margin: 0;
+  }
+
+  .portal-grid .card-hashrate .panel-sub,
+  .portal-grid .card-difficulty .panel-sub {
+    margin: 1px 0 3px;
+    font-size: 0.66rem;
+    line-height: 1.15;
+    opacity: 0.86;
+  }
+
+  .portal-grid .card-hashrate .chart-wrap,
+  .portal-grid .card-difficulty .chart-wrap {
+    padding: 2px;
+    border-radius: 8px;
+  }
+
+  .portal-grid .card-hashrate canvas,
+  .portal-grid .card-difficulty canvas {
+    height: 46px !important;
   }
 
   .portal-grid .card-legacy {
@@ -1407,15 +1411,15 @@
 
       <article class="panel card-hashrate card-compact">
         <h3>Network Hashrate Trend</h3>
-        <p class="panel-sub">Live API trend snapshot.</p>
-        <div class="chart-wrap"><canvas id="chart-hashrate" width="360" height="84"></canvas></div>
+        <p class="panel-sub">Compact trend view.</p>
+        <div class="chart-wrap"><canvas id="chart-hashrate" width="320" height="52"></canvas></div>
       </article>
 
 
       <article class="panel card-difficulty card-compact">
         <h3>Difficulty Trend</h3>
-        <p class="panel-sub">Recent chain difficulty trend.</p>
-        <div class="chart-wrap"><canvas id="chart-difficulty" width="360" height="84"></canvas></div>
+        <p class="panel-sub">Compact difficulty view.</p>
+        <div class="chart-wrap"><canvas id="chart-difficulty" width="320" height="52"></canvas></div>
       </article>
 
       <article class="panel span-2 card-miner">

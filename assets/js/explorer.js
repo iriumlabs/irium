@@ -201,8 +201,17 @@ async function loadMiningMetrics() {
   if (!elHash && !elDiff && !elGrowth) return;
 
   try {
-    const m = await fetchJson('/mining?window=120&series=240');
-    if (elHash) elHash.textContent = fmtHashrate(m.hashrate);
+    const [m, pstats] = await Promise.all([
+      fetchJson('/mining?window=120&series=240'),
+      fetchJson('/pool/stats').catch(() => null)
+    ]);
+    if (elHash) {
+      const chainText = fmtHashrate(m.hashrate);
+      const sess = Number(pstats && pstats.active_tcp_sessions);
+      elHash.textContent = Number.isFinite(sess)
+        ? `${chainText} (pool sessions: ${sess})`
+        : chainText;
+    }
     if (elDiff) elDiff.textContent = fmtDifficulty(m.difficulty);
 
     const g1 = (m.difficulty_change_1h_pct != null) ? fmtPct(m.difficulty_change_1h_pct) : 'N/A';

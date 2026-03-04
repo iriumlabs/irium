@@ -1,10 +1,17 @@
 // Irium Block Explorer JavaScript with CORS Proxy
 const DEFAULT_API_BASE = 'https://api.iriumlabs.org/api';
+const PRIORITY_API_BASES = [
+  'https://api.iriumlabs.org/api',
+  'https://www.iriumlabs.org/api',
+  'https://iriumlabs.org/api'
+];
 const CORS_PROXIES = ['', 'https://api.allorigins.win/raw?url='];
 const FETCH_TIMEOUT_MS = 15000;
 
 let __blocksCursor = null;
 let __blocksLoading = false;
+let __activeApiBase = null;
+let __apiInitPromise = null;
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS) {
   const controller = new AbortController();
@@ -17,19 +24,69 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = FETCH_TIMEOUT_MS)
 }
 
 
+function normalizeBase(base) {
+  return (base || '').replace(/\/+$/, '');
+}
+
 function getApiBases() {
   const bases = [];
+  if (__activeApiBase) bases.push(__activeApiBase);
   if (window.IRIUM_API_BASE) bases.push(window.IRIUM_API_BASE);
   const docBase = document.documentElement.dataset.apiBase || (document.body && document.body.dataset && document.body.dataset.apiBase);
   if (docBase) bases.push(docBase);
+  for (const b of PRIORITY_API_BASES) bases.push(b);
   bases.push(DEFAULT_API_BASE);
-  if (location && location.origin) bases.push(location.origin + '/api');
+  if (location && location.origin) {
+    bases.push(location.origin + '/api');
+    if (location.hostname && location.hostname !== 'www.iriumlabs.org') {
+      bases.push('https://www.iriumlabs.org/api');
+    }
+  }
   const deduped = [];
   for (const base of bases) {
-    const norm = base.replace(/\/+$/, '');
+    const norm = normalizeBase(base);
+    if (!norm) continue;
     if (!deduped.includes(norm)) deduped.push(norm);
   }
   return deduped;
+}
+
+async function probeApiBase(base) {
+  const clean = normalizeBase(base);
+  const errors = [];
+  for (const proxy of CORS_PROXIES) {
+    const target = proxy ? proxy + encodeURIComponent(clean + '/status') : (clean + '/status');
+    try {
+      const res = await fetchWithTimeout(target, { cache: 'no-store' }, 6000);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const j = await res.json();
+      const height = Number(j && (j.height ?? (j.result && j.result.height) ?? 0));
+      if (!Number.isFinite(height) || height <= 0) throw new Error('invalid height');
+      return { ok: true, base: clean, height };
+    } catch (err) {
+      errors.push(err.message || String(err));
+    }
+  }
+  return { ok: false, base: clean, height: 0, error: errors[0] || 'probe failed' };
+}
+
+async function ensureApiBase() {
+  if (__activeApiBase) return __activeApiBase;
+  if (!__apiInitPromise) {
+    __apiInitPromise = (async () => {
+      const candidates = getApiBases();
+      let best = null;
+      for (const base of candidates) {
+        const r = await probeApiBase(base);
+        if (!r.ok) continue;
+        if (!best || r.height > best.height) best = r;
+      }
+      __activeApiBase = best ? best.base : candidates[0];
+      console.log('Explorer API selected:', __activeApiBase, best ? `(height ${best.height})` : '(fallback mode)');
+      return __activeApiBase;
+    })();
+  }
+  return __apiInitPromise;
 }
 
 console.log('Explorer JS loaded');
@@ -54,6 +111,7 @@ function blockRewardIrm(height) {
 
 
 async function fetchJson(path) {
+  await ensureApiBase();
   const bases = getApiBases();
   const errors = [];
   for (const base of bases) {
@@ -63,9 +121,10 @@ async function fetchJson(path) {
       try {
         const res = await fetchWithTimeout(target, { cache: 'no-store' });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!proxy) __activeApiBase = base;
         return await res.json();
       } catch (err) {
-        errors.push(err.message || String(err));
+        errors.push(`${base}: ${err.message || String(err)}`);
       }
     }
   }

@@ -1411,20 +1411,6 @@
         </ul>
       </article>
 
-
-      <article class="panel card-hashrate card-compact">
-        <h3>Network Hashrate Trend</h3>
-        <p class="panel-sub">Compact trend view.</p>
-        <div class="chart-wrap"><canvas id="chart-hashrate" width="320" height="52"></canvas></div>
-      </article>
-
-
-      <article class="panel card-difficulty card-compact">
-        <h3>Difficulty Trend</h3>
-        <p class="panel-sub">Compact difficulty view.</p>
-        <div class="chart-wrap"><canvas id="chart-difficulty" width="320" height="52"></canvas></div>
-      </article>
-
       <article class="panel span-2 card-miner">
         <h3>Miner Address Dashboard</h3>
         <p class="panel-sub">Lookup recent chain results for a mining payout address.</p>
@@ -2328,8 +2314,6 @@ GitHub</a>
       const diffSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0));
 
       const hashratePlot = hsSeries.length ? hsSeries : [Number(miningCache?.hashrate || 0), Number(miningCache?.hashrate || 0)];
-      drawLine("chart-hashrate", hashratePlot.slice(-80), "#57d5ff", "Hashrate trend");
-      drawLine("chart-difficulty", diffSeries.slice(-80), "#7fffb4", "Difficulty trend");
 
       applyStatus(true);
       await updateStatusSignals();

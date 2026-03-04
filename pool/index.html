@@ -2120,6 +2120,7 @@ GitHub</a>
   async function updateBackendTelemetry() {
     const stats = await fetchOptional('/pool/stats');
     const payouts = await fetchOptional('/pool/payouts?limit=20');
+    const workers = await fetchOptional('/pool/workers?window=144&limit=500');
     const health = await fetchOptional('/pool/health');
 
     const hasData = !!stats;
@@ -2144,8 +2145,11 @@ GitHub</a>
 
     const tcpSessions = Number.isFinite(Number(stats?.active_tcp_sessions)) ? Number(stats.active_tcp_sessions) : null;
     const workersOnline = Number.isFinite(Number(stats?.workers_online)) ? Number(stats.workers_online) : null;
-    const activeMiners = Number.isFinite(Number(stats?.active_miners)) ? Number(stats.active_miners) : workersOnline;
-    const activeWindow = Number.isFinite(Number(stats?.active_miners_window_blocks)) ? Number(stats.active_miners_window_blocks) : null;
+    const workersList = Array.isArray(workers?.workers) ? workers.workers : [];
+    const activeMiners = workersList.length > 0 ? workersList.length : null;
+    const activeWindow = Number.isFinite(Number(workers?.window_scanned))
+      ? Number(workers.window_scanned)
+      : (Number.isFinite(Number(stats?.active_miners_window_blocks)) ? Number(stats.active_miners_window_blocks) : null);
 
     const networkHeightPool = Number(stats?.network_height || 0);
     const networkHeightCore = Number(statsCache?.height || 0);
@@ -2164,7 +2168,7 @@ GitHub</a>
 
     setText('live-workers', tcpSessions === null ? 'N/A' : `${fmtInt(tcpSessions)} sessions`);
     setText('live-active-miners', activeMiners === null
-      ? 'N/A'
+      ? 'N/A (window not exposed)'
       : `${fmtInt(activeMiners)} addresses / ${fmtInt(activeWindow || 0)} blocks`);
     setText('live-accepted', acceptedText);
     setText('live-rejected', rejectedText);

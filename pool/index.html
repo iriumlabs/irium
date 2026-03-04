@@ -1297,7 +1297,7 @@
 
     <section class="kpi-grid" aria-label="Top metrics">
       <article class="kpi"><div class="label">Network Height</div><div id="k-height" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Network Hashrate</div><div id="k-hashrate" class="value">Loading...</div></article>
+      <article class="kpi"><div class="label">Network Hashrate (Chain Estimate)</div><div id="k-hashrate" class="value">Loading...</div></article>
       <article class="kpi"><div class="label">Difficulty</div><div id="k-difficulty" class="value">Loading...</div></article>
       <article class="kpi"><div class="label">Active Peers</div><div id="k-peers" class="value">Loading...</div></article>
       <article class="kpi"><div class="label">Active Miners (144 blocks)</div><div id="k-miners" class="value">Loading...</div></article>
@@ -1387,7 +1387,7 @@ cargo build --release</pre>
 
       <article class="panel live-activity-panel card-live">
         <h3>Live Pool Activity</h3>
-        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed.</p>
+        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed. Sessions show connected workers, not total hashpower.</p>
         <ul class="meta-list">
           <li><span class="key">Connected TCP Sessions (live)</span><span id="live-workers">Checking...</span></li>
           <li><span class="key">Active Miners (window)</span><span id="live-active-miners">Checking...</span></li>

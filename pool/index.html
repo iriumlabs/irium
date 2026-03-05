@@ -1346,6 +1346,7 @@
           <li><span class="key">Active Miners (window)</span><span id="live-active-miners">Checking...</span></li>
           <li><span class="key">Accepted Shares</span><span id="live-accepted">Checking...</span></li>
           <li><span class="key">Rejected / Stale</span><span id="live-rejected">Checking...</span></li>
+          <li><span class="key">Reject Breakdown</span><span id="live-reject-breakdown">Checking...</span></li>
           <li><span class="key">Last Share Accepted</span><span id="live-last-accept">Checking...</span></li>
           <li><span class="key">Last Share Rejected</span><span id="live-last-reject">Checking...</span></li>
           <li><span class="key">Backend Link</span><span id="live-backend">Checking...</span></li>
@@ -2134,6 +2135,10 @@ GitHub</a>
     const acceptedShares = stats?.accepted_shares;
     const rejectedShares = stats?.rejected_shares;
     const staleShares = stats?.stale_shares;
+    const rejectedStale = Number.isFinite(Number(stats?.rejected_stale)) ? Number(stats.rejected_stale) : null;
+    const rejectedLow = Number.isFinite(Number(stats?.rejected_low_difficulty)) ? Number(stats.rejected_low_difficulty) : null;
+    const rejectedInvalid = Number.isFinite(Number(stats?.rejected_invalid)) ? Number(stats.rejected_invalid) : null;
+    const rejectedDup = Number.isFinite(Number(stats?.rejected_duplicate)) ? Number(stats.rejected_duplicate) : null;
 
     const acceptedText = Number.isFinite(Number(acceptedShares)) ? fmtInt(acceptedShares) : 'Not exposed';
     const rejectedBase = Number.isFinite(Number(rejectedShares)) ? Number(rejectedShares) : null;
@@ -2175,6 +2180,13 @@ GitHub</a>
       : `${fmtInt(activeMiners)} addresses / ${fmtInt(activeWindow || 0)} blocks`);
     setText('live-accepted', acceptedText);
     setText('live-rejected', rejectedText);
+    const breakdownText = [
+      rejectedLow === null ? null : `low: ${fmtInt(rejectedLow)}`,
+      rejectedStale === null ? null : `stale: ${fmtInt(rejectedStale)}`,
+      rejectedInvalid === null ? null : `invalid: ${fmtInt(rejectedInvalid)}`,
+      rejectedDup === null ? null : `dup: ${fmtInt(rejectedDup)}`,
+    ].filter(Boolean).join(' • ');
+    setText('live-reject-breakdown', breakdownText || 'Not exposed');
     setText('live-last-accept', (Number.isFinite(Number(lastAcceptTs)) && Number(lastAcceptTs) > 0) ? fmtTime(lastAcceptTs) : 'No accepted share yet');
     setText('live-last-reject', (Number.isFinite(Number(lastRejectTs)) && Number(lastRejectTs) > 0) ? fmtTime(lastRejectTs) : 'No rejected share yet');
     setText('live-backend', stats?.backend_connected === true ? 'Connected' : (hasData ? 'Partial' : 'Unavailable'));

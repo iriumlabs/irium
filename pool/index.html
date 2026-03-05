@@ -2009,13 +2009,13 @@ GitHub</a>
 
     const blocksAccepted = Number.isFinite(Number(stats?.blocks_accepted)) ? Number(stats.blocks_accepted) : 0;
     if (blocksAccepted <= 0) {
-      body.innerHTML = "<tr><td colspan="6">No pool-attributed blocks reported by live Stratum metrics yet.</td></tr>";
+      body.innerHTML = '<tr><td colspan="6">No pool-attributed blocks reported by live Stratum metrics yet.</td></tr>';
       return;
     }
 
     const payouts = Array.isArray(data?.payouts) ? data.payouts : [];
     if (!payouts.length) {
-      body.innerHTML = "<tr><td colspan="6">Pool blocks were detected, but payout attribution rows are not yet available.</td></tr>";
+      body.innerHTML = '<tr><td colspan="6">Pool blocks were detected, but payout attribution rows are not yet available.</td></tr>';
       return;
     }
 

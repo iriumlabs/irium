@@ -1357,6 +1357,7 @@
           <li><span class="key">Unique Miners (4000 blocks)</span><span id="live-unique-miners">Checking...</span></li>
           <li><span class="key">Top Miner Address</span><span id="live-top-address" class="mono">Checking...</span></li>
           <li><span class="key">Accepted Shares</span><span id="live-accepted">Checking...</span></li>
+          <li><span class="key">Pool Blocks Accepted</span><span id="live-blocks-accepted">Checking...</span></li>
           <li><span class="key">Rejected / Stale</span><span id="live-rejected">Checking...</span></li>
           <li><span class="key">Reject Breakdown</span><span id="live-reject-breakdown">Checking...</span></li>
           <li><span class="key">Last Share Accepted</span><span id="live-last-accept">Checking...</span></li>
@@ -2148,6 +2149,7 @@ GitHub</a>
 
     const acceptedShares = stats?.accepted_shares;
     const rejectedShares = stats?.rejected_shares;
+    const blocksAccepted = Number.isFinite(Number(stats?.blocks_accepted)) ? Number(stats.blocks_accepted) : null;
     const staleShares = stats?.stale_shares;
     const rejectedStale = Number.isFinite(Number(stats?.rejected_stale)) ? Number(stats.rejected_stale) : null;
     const rejectedLow = Number.isFinite(Number(stats?.rejected_low_difficulty)) ? Number(stats.rejected_low_difficulty) : null;
@@ -2202,6 +2204,7 @@ GitHub</a>
     setText('live-unique-miners', unique === null ? 'N/A' : fmtInt(unique));
     setText('live-top-address', topAddr ? shortHash(topAddr, 10, 6) : 'N/A');
     setText('live-accepted', acceptedText);
+    setText('live-blocks-accepted', blocksAccepted === null ? 'Not exposed' : fmtInt(blocksAccepted));
     setText('live-rejected', rejectedText);
     const breakdownText = [
       rejectedLow === null ? null : `low: ${fmtInt(rejectedLow)}`,
@@ -2216,9 +2219,10 @@ GitHub</a>
     setText('live-tip-align', tipDelta === null
       ? 'Unknown'
       : (tipDelta === 0 ? `Aligned @ ${fmtInt(networkHeightCore)}` : `${fmtInt(tipDelta)} blocks drift`));
-    setText('live-last-found', lastFound
+    const hasPoolBlocks = Number.isFinite(Number(blocksAccepted)) && Number(blocksAccepted) > 0;
+    setText('live-last-found', (hasPoolBlocks && lastFound)
       ? `#${fmtInt(lastFound.height)} • ${fmtTime(lastFound.time)} • ${shortHash(lastFound.address || '', 8, 6)}`
-      : 'No recent payout rows');
+      : 'No pool-attributed block yet');
 
     const rawHealth = String((health && (health.stratum_status || health.freshness_state || (health.healthy === true ? 'ok' : 'stale'))) || 'unknown').toLowerCase();
     const stratumHealth = (rawHealth === 'ok' || rawHealth === 'fresh' || rawHealth === 'healthy') ? 'ok' : ((rawHealth === 'stale' || rawHealth === 'degraded' || rawHealth === 'down') ? 'stale' : 'unknown');
@@ -2245,7 +2249,7 @@ GitHub</a>
     const trust = document.getElementById('live-trust-note');
     if (trust) {
       const maturity = lastFound?.maturity_remaining;
-      const maturityText = Number.isFinite(Number(maturity)) ? `Coinbase maturity remaining: ${fmtInt(maturity)} blocks.` : 'Coinbase maturity progress available when payout rows expose confirmations.';
+      const maturityText = Number.isFinite(Number(maturity)) ? `Coinbase maturity remaining: ${fmtInt(maturity)} blocks.` : 'Coinbase maturity progress is shown after pool-attributed blocks are recorded.';
       const healthState = health?.healthy === true ? 'Health API reports healthy.' : (health ? 'Health API reports degraded.' : 'Health API unavailable.');
       trust.textContent = `Trust check: ${healthState} ${maturityText}`;
     }

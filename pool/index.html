@@ -1348,10 +1348,14 @@
     <section class="required-update-panel" style="margin-top:14px;">
       <article class="panel live-activity-panel card-live">
         <h3>Live Pool Activity</h3>
-        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed. Sessions show connected workers, not total hashpower.</p>
+        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed. Sessions show connected workers, not total hashpower. Long-window miner distribution uses a 4000-block sample for statistical clarity.</p>
         <ul class="meta-list">
           <li><span class="key">Connected TCP Sessions (live)</span><span id="live-workers">Checking...</span></li>
           <li><span class="key">Active Miners (window)</span><span id="live-active-miners">Checking...</span></li>
+          <li><span class="key">Top Miner Share (4000 blocks)</span><span id="live-top1-share">Checking...</span></li>
+          <li><span class="key">Top 5 Share (4000 blocks)</span><span id="live-top5-share">Checking...</span></li>
+          <li><span class="key">Unique Miners (4000 blocks)</span><span id="live-unique-miners">Checking...</span></li>
+          <li><span class="key">Top Miner Address</span><span id="live-top-address" class="mono">Checking...</span></li>
           <li><span class="key">Accepted Shares</span><span id="live-accepted">Checking...</span></li>
           <li><span class="key">Rejected / Stale</span><span id="live-rejected">Checking...</span></li>
           <li><span class="key">Reject Breakdown</span><span id="live-reject-breakdown">Checking...</span></li>
@@ -1540,6 +1544,7 @@
             <tr><td><a href="https://api.iriumlabs.org/api/pool/account/{address}" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/account/{address}</code></a></td><td>Address payout and block summary</td><td><code>{"blocks_found":...}</code></td></tr>
             <tr><td><a href="https://api.iriumlabs.org/api/pool/workers?window=144&limit=20" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/workers?window=144&limit=20</code></a></td><td>Active worker addresses and estimated hashrate share</td><td><code>{"workers":[...]}</code></td></tr>
             <tr><td><a href="https://api.iriumlabs.org/api/pool/health" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/health</code></a></td><td>Pool API health, freshness, latency, and peer signal</td><td><code>{"healthy":true,...}</code></td></tr>
+            <tr><td><a href="https://api.iriumlabs.org/api/pool/distribution?window=4000&limit=20" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/distribution?window=4000&limit=20</code></a></td><td>Long-window miner distribution and concentration metrics</td><td><code>{"top1_share_pct":...,"distribution":[...]}</code></td></tr>
           </tbody>
         </table>
       </div>
@@ -1760,7 +1765,7 @@ GitHub</a>
     { name: "api.iriumlabs.org", base: "https://api.iriumlabs.org/api" },
     { name: "irium-vps", base: "https://207.244.247.86:38310/api" }
   ];
-  const POLL_MS = 15000;
+  const POLL_MS = 10000;
 
   let ACTIVE_API = API_BACKENDS[0];
 
@@ -2134,6 +2139,7 @@ GitHub</a>
     const payouts = await fetchOptional('/pool/payouts?limit=20');
     const workers = await fetchOptional('/pool/workers?window=144&limit=500');
     const health = await fetchOptional('/pool/health');
+    const distribution = await fetchOptional('/pool/distribution?window=4000&limit=5');
 
     const hasData = !!stats;
     const pendingCount = Number.isFinite(Number(payouts?.pending_count))
@@ -2186,6 +2192,15 @@ GitHub</a>
     setText('live-active-miners', activeMiners === null
       ? 'N/A (window not exposed)'
       : `${fmtInt(activeMiners)} addresses / ${fmtInt(activeWindow || 0)} blocks`);
+    const distRows = Array.isArray(distribution?.distribution) ? distribution.distribution : [];
+    const top1 = Number.isFinite(Number(distribution?.top1_share_pct)) ? Number(distribution.top1_share_pct) : null;
+    const top5 = Number.isFinite(Number(distribution?.top5_share_pct)) ? Number(distribution.top5_share_pct) : null;
+    const unique = Number.isFinite(Number(distribution?.unique_addresses)) ? Number(distribution.unique_addresses) : null;
+    const topAddr = distRows.length ? (distRows[0]?.address || '') : '';
+    setText('live-top1-share', top1 === null ? 'N/A' : `${fmtNum(top1, 2)}%`);
+    setText('live-top5-share', top5 === null ? 'N/A' : `${fmtNum(top5, 2)}%`);
+    setText('live-unique-miners', unique === null ? 'N/A' : fmtInt(unique));
+    setText('live-top-address', topAddr ? shortHash(topAddr, 10, 6) : 'N/A');
     setText('live-accepted', acceptedText);
     setText('live-rejected', rejectedText);
     const breakdownText = [

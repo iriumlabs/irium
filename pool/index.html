@@ -2003,17 +2003,23 @@ GitHub</a>
     }).join("");
   }
 
-  function renderPoolFoundBlocks(data) {
+  function renderPoolFoundBlocks(data, stats) {
     const body = document.getElementById("pool-found-body");
     if (!body) return;
 
-    const payouts = Array.isArray(data?.payouts) ? data.payouts : [];
-    if (!payouts.length) {
-      body.innerHTML = "<tr><td colspan=\"6\">No pool-found blocks reported yet.</td></tr>";
+    const blocksAccepted = Number.isFinite(Number(stats?.blocks_accepted)) ? Number(stats.blocks_accepted) : 0;
+    if (blocksAccepted <= 0) {
+      body.innerHTML = "<tr><td colspan="6">No pool-attributed blocks reported by live Stratum metrics yet.</td></tr>";
       return;
     }
 
-    body.innerHTML = payouts.slice(0, 60).map((p) => {
+    const payouts = Array.isArray(data?.payouts) ? data.payouts : [];
+    if (!payouts.length) {
+      body.innerHTML = "<tr><td colspan="6">Pool blocks were detected, but payout attribution rows are not yet available.</td></tr>";
+      return;
+    }
+
+    body.innerHTML = payouts.slice(0, Math.max(1, blocksAccepted)).map((p) => {
       const miner = p?.address || p?.miner_address || p?.miner || "N/A";
       const reward = Number(p?.reward_irm ?? p?.reward ?? 0);
       const ref = p?.hash || p?.block_hash || "";
@@ -2023,13 +2029,14 @@ GitHub</a>
       return `<tr>
         <td>${fmtInt(height)}</td>
         <td>${ts > 0 ? fmtTime(ts) : "N/A"}</td>
-        <td class=\"mono mono-wrap\" title=\"${miner}\">${miner}</td>
-        <td class=\"reward-value\">${fmtNum(reward, 2)} IRM</td>
-        <td><span class=\"green\">${status === "on_chain" ? "On-chain" : status}</span></td>
-        <td class=\"mono mono-wrap\" title=\"${ref}\">${ref}</td>
+        <td class="mono mono-wrap" title="${miner}">${miner}</td>
+        <td class="reward-value">${fmtNum(reward, 2)} IRM</td>
+        <td><span class="green">${status === "on_chain" ? "On-chain" : status}</span></td>
+        <td class="mono mono-wrap" title="${ref}">${ref}</td>
       </tr>`;
     }).join("");
   }
+
 
 
   function applyKpis(stats, mining) {
@@ -2354,7 +2361,7 @@ GitHub</a>
       applyKpis(statsCache, miningCache);
       applyPerformance(statsCache, miningCache, blocksCache);
       renderBlocks(blocksCache.slice(0, 80));
-      renderPoolFoundBlocks(poolPayouts);
+      renderPoolFoundBlocks(poolPayouts, statsCache);
 
       const hsSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0) ? Number(miningCache?.hashrate || 0) : Number(miningCache?.hashrate || 0));
       const diffSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0));

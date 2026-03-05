@@ -539,6 +539,7 @@
   .red { color: var(--bad); font-weight: 700; }
   .muted { color: var(--muted); }
   .reward-value { color: var(--ok) !important; font-weight: 800; }
+  #perf-emission { color: var(--ok) !important; font-weight: 800; }
   .pool-table td .green { color: var(--ok) !important; }
 
   .chart-wrap {
@@ -1378,7 +1379,7 @@
           <li><span class="key">Blocks / 24h (network)</span><span id="perf-24h">Loading...</span></li>
           <li><span class="key">Blocks / 7d (network)</span><span id="perf-7d">Loading...</span></li>
           <li><span class="key">Expected Blocks / Day</span><span id="perf-exp-day">Loading...</span></li>
-          <li><span class="key">Estimated Daily Emission</span><span id="perf-emission">Loading...</span></li>
+          <li><span class="key">Estimated Daily Emission</span><span id="perf-emission" class="reward-value">Loading...</span></li>
           <li><span class="key">Difficulty Δ (1h / 24h)</span><span id="perf-diffdelta">Loading...</span></li>
           <li><span class="key">Public API Health</span><span id="perf-api">Loading...</span></li>
         </ul>

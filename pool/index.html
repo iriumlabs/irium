@@ -1419,6 +1419,7 @@
         <ul class="meta-list">
           <li><span class="key">Known Risk</span><span><b>cgminer 4.10.0</b> can fail subscribe/authorize on some modern pool stacks.</span></li>
           <li><span class="key">Primary</span><span class="mono">stratum+tcp://pool.iriumlabs.org:3333</span></li>
+          <li><span class="key">Fallback</span><span class="mono">stratum+tcp://pool.iriumlabs.org:3335</span></li>
           <li><span class="key">Direct IP</span><span class="mono">stratum+tcp://157.173.116.134:3333</span></li>
           <li><span class="key">Required Mode</span><span>SHA-256d (or SHA-256), TCP only, SSL/TLS off</span></li>
           <li><span class="key">Quick Test</span><span class="mono">printf '{"id":1,"method":"mining.subscribe","params":[]}\n' | nc 157.173.116.134 3333</span></li>
@@ -1560,7 +1561,7 @@
         <div class="cfg-card">
           <h4>Antminer Profile</h4>
           <pre id="cfg-ant">URL: stratum+tcp://pool.iriumlabs.org:3333
-URL2: stratum+tcp://157.173.116.134:3333
+URL2: stratum+tcp://pool.iriumlabs.org:3335
 URL3: stratum+tcp://157.173.116.134:3333
 Worker: YOUR_IRIUM_WALLET_ADDRESS.worker1
 Password: x</pre>
@@ -1569,7 +1570,7 @@ Password: x</pre>
         <div class="cfg-card">
           <h4>Whatsminer Profile</h4>
           <pre id="cfg-whats">Pool 1: stratum+tcp://pool.iriumlabs.org:3333
-Pool 2: stratum+tcp://157.173.116.134:3333
+Pool 2: stratum+tcp://pool.iriumlabs.org:3335
 Pool 3: stratum+tcp://157.173.116.134:3333
 Sub-account: YOUR_IRIUM_WALLET_ADDRESS.worker1
 Password: x</pre>
@@ -1578,7 +1579,7 @@ Password: x</pre>
         <div class="cfg-card">
           <h4>Generic Stratum Client</h4>
           <pre id="cfg-generic">pool0=stratum+tcp://pool.iriumlabs.org:3333
-pool1=stratum+tcp://157.173.116.134:3333
+pool1=stratum+tcp://pool.iriumlabs.org:3335
 pool2=stratum+tcp://157.173.116.134:3333
 user=YOUR_IRIUM_WALLET_ADDRESS.worker1
 pass=x</pre>

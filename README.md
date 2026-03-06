@@ -230,8 +230,10 @@ Optional: set `IRIUM_RELAY_ADDRESS` to advertise a relay payout address in coinb
 
 ## Mining (Stratum Pool)
 Public SOLO Stratum pool:
-- Pool URL: `stratum+tcp://pool.iriumlabs.org:3333`
-- Fallback direct IP: `stratum+tcp://157.173.116.134:3333`
+- Strict ASIC/modern firmware: `stratum+tcp://pool.iriumlabs.org:3333`
+- Legacy CPU/GPU/older clients: `stratum+tcp://pool.iriumlabs.org:3335`
+- Direct IP strict fallback: `stratum+tcp://157.173.116.134:3333`
+- Direct IP legacy fallback: `stratum+tcp://157.173.116.134:3335`
 - If DNS fails on your network, keep pool 0 as hostname and pool 1/2 as direct IP fallback.
 - Compatibility update (March 2, 2026): pool server now includes legacy Stratum handlers for older cgminer/bmminer handshakes.
 - Username: `IRM_ADDRESS.worker1`
@@ -241,24 +243,63 @@ Public SOLO Stratum pool:
 OS setup and install/download paths:
 - ASIC miners (recommended): use Antminer/Whatsminer web UI and set:
   - Algorithm: `SHA-256d`
-  - URL: `stratum+tcp://pool.iriumlabs.org:3333`
+  - URL: `stratum+tcp://pool.iriumlabs.org:3333` (strict profile)
   - Worker: `YOUR_IRIUM_WALLET_ADDRESS.worker1`
   - Password: `x`
 - Windows software miner (CPU/GPU): download a SHA-256d miner build from:
   - `https://github.com/JayDDee/cpuminer-opt/releases`
   - Example command:
-    - `minerd.exe -a sha256d -o stratum+tcp://pool.iriumlabs.org:3333 -u YOUR_IRIUM_WALLET_ADDRESS.worker1 -p x`
+    - `minerd.exe -a sha256d -o stratum+tcp://pool.iriumlabs.org:3335 -u YOUR_IRIUM_WALLET_ADDRESS.worker1 -p x`
 - Linux software miner (CPU/GPU): install/build from:
   - `https://github.com/JayDDee/cpuminer-opt`
   - Example command:
-    - `./minerd -a sha256d -o stratum+tcp://pool.iriumlabs.org:3333 -u YOUR_IRIUM_WALLET_ADDRESS.worker1 -p x`
+    - `./minerd -a sha256d -o stratum+tcp://pool.iriumlabs.org:3335 -u YOUR_IRIUM_WALLET_ADDRESS.worker1 -p x`
 - macOS software miner: use a SHA-256d compatible binary or build from the same project above, then run the same command as Linux.
 
 Important:
-- For pool mining, use Stratum (`pool.iriumlabs.org:3333`).
+- For pool mining, choose endpoint by client type:
+  - `pool.iriumlabs.org:3333` for strict ASIC/modern firmware
+  - `pool.iriumlabs.org:3335` for legacy CPU/GPU/older Stratum clients.
 - Do not point pool miners at local node RPC (`127.0.0.1:38300`) unless you are intentionally doing local template mining.
 
 See `docs/POOL_STRATUM.md` for full miner quickstart, troubleshooting, and operator runbook.
+
+### Height mismatch troubleshooting
+If pool miners report a block height that is far from explorer height (example: `26994` vs `~15080`), run:
+
+```bash
+cd /home/irium/irium
+export IRIUM_RPC_URL=https://127.0.0.1:38300
+export IRIUM_RPC_TOKEN=<your_rpc_token>
+./tools/pool_height_doctor.sh diagnose
+```
+
+Optional explorer cross-check:
+
+```bash
+./tools/pool_height_doctor.sh diagnose --explorer-status-url "https://api.iriumlabs.org/status"
+```
+
+Auto-repair (safe, repeatable):
+
+```bash
+./tools/pool_height_doctor.sh fix --explorer-status-url "https://api.iriumlabs.org/status"
+```
+
+What output means:
+- `LIKELY CAUSE: Multiple iriumd instances`
+  This host is running more than one node process. Pool may read templates from the wrong one.
+- `LIKELY CAUSE: RPC port listener mismatch`
+  Port `38300` is not owned by the intended `iriumd` process.
+- `LIKELY CAUSE: Shim template drift/caching or wrong upstream`
+  Shim template height differs from node height by more than 2 blocks.
+- `LIKELY CAUSE: Forked/wrong chain data`
+  Local chain appears on a divergent history and needs backup + resync.
+
+The script prints `NEXT ACTION` with exact steps and, in `fix` mode, applies:
+- systemd hardening drop-ins for `iriumd`/`irium-pool-shim`/`irium-stratum`
+- shim template sanity checks and logging (`height`, `prevhash`, drift)
+- optional chain backup + resync only when fork is detected and `fix` is used.
 ## Wallet
 The wallet CLI stores keys in `~/.irium/wallet.json` (override with `IRIUM_WALLET_FILE`).
 ```bash

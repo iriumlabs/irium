@@ -48,6 +48,15 @@ Submit a raw block (requires RPC auth).
 ### GET /block/:height
 ### GET /utxo?txid=<hex>&index=<n>
 
+### Pool telemetry routes
+### GET /pool/stats
+### GET /pool/payouts?limit=<n>
+### GET /pool/workers?window=<blocks>&limit=<n>
+### GET /pool/account/:address?window=<blocks>&limit=<n>
+### GET /pool/distribution?window=<blocks>&limit=<n>
+Returns long-window block distribution by miner address (default window `4000`).
+Also exposed as `/api/pool/*` aliases.
+
 ## Wallet API (default 38320)
 ### GET /status
 ### GET /balance?address=<base58>

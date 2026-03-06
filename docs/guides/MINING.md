@@ -48,15 +48,18 @@ Template tuning (optional):
 ## 5) Stratum pool mining (optional)
 Set a Stratum URL to enable pool mode (disables solo template mining):
 ```bash
-export IRIUM_STRATUM_URL=stratum+tcp://pool.iriumlabs.org:3333
+export IRIUM_STRATUM_URL=stratum+tcp://pool.iriumlabs.org:3335
 export IRIUM_STRATUM_USER=YOUR_IRIUM_WALLET_ADDRESS.worker1
 export IRIUM_STRATUM_PASS=x
-# Optional DNS fallback
-# export IRIUM_STRATUM_URL=stratum+tcp://157.173.116.134:3333
+# Optional strict ASIC profile
+# export IRIUM_STRATUM_URL=stratum+tcp://pool.iriumlabs.org:3333
+# Optional direct-IP fallback for legacy profile
+# export IRIUM_STRATUM_URL=stratum+tcp://157.173.116.134:3335
 ./target/release/irium-miner
 ```
 Notes:
 - Stratum is TCP-only in the current miner.
+- Port routing: `3333` strict canonical (ASIC/modern firmware), `3335` legacy compatibility (CPU/GPU/older Stratum clients).
 - Pool mining uses the pool-provided coinbase/merkle and submits shares via `mining.submit`.
 
 ## 6) Check balance

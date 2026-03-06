@@ -518,6 +518,41 @@ async fn pool_stats(
         .and_then(|m| m.get("rejected_shares"))
         .cloned()
         .unwrap_or(Value::Null);
+    let blocks_accepted = stratum_metrics
+        .as_ref()
+        .and_then(|m| m.get("blocks_accepted"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let candidates_detected = stratum_metrics
+        .as_ref()
+        .and_then(|m| m.get("candidates_detected"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let candidates_submitted = stratum_metrics
+        .as_ref()
+        .and_then(|m| m.get("candidates_submitted"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let rejected_stale = stratum_metrics
+        .as_ref()
+        .and_then(|m| m.get("rejected_stale"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let rejected_low_difficulty = stratum_metrics
+        .as_ref()
+        .and_then(|m| m.get("rejected_low_difficulty"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let rejected_invalid = stratum_metrics
+        .as_ref()
+        .and_then(|m| m.get("rejected_invalid"))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let rejected_duplicate = stratum_metrics
+        .as_ref()
+        .and_then(|m| m.get("rejected_duplicate"))
+        .cloned()
+        .unwrap_or(Value::Null);
     let last_share_accepted_at = stratum_metrics
         .as_ref()
         .and_then(|m| m.get("last_share_accepted_at"))
@@ -541,6 +576,13 @@ async fn pool_stats(
         "active_tcp_sessions": active_tcp_sessions,
         "accepted_shares": accepted_shares,
         "rejected_shares": rejected_shares,
+        "blocks_accepted": blocks_accepted,
+        "candidates_detected": candidates_detected,
+        "candidates_submitted": candidates_submitted,
+        "rejected_stale": rejected_stale,
+        "rejected_low_difficulty": rejected_low_difficulty,
+        "rejected_invalid": rejected_invalid,
+        "rejected_duplicate": rejected_duplicate,
         "last_share_accepted_at": last_share_accepted_at,
         "last_share_rejected_at": last_share_rejected_at,
         "stale_shares": Value::Null,
@@ -662,6 +704,88 @@ async fn pool_workers(
         "total_found_blocks": total_found,
         "network_hashrate_hs": network_hashrate,
         "workers": workers
+    })))
+}
+
+async fn pool_distribution(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(q): Query<PoolQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    check_rate(&state, &addr, &headers)?;
+
+    let status = proxy_value(&state, "/status").await?;
+    let chain_height = status.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+
+    let window = q.window.unwrap_or(4000).clamp(200, 20000);
+    let limit = q.limit.unwrap_or(100).min(1000);
+    let start = chain_height.saturating_sub(window.saturating_sub(1));
+
+    let mining = proxy_value(&state, "/rpc/mining_metrics").await.ok();
+    let network_hashrate = value_f64(mining.as_ref().and_then(|m| m.get("hashrate")));
+
+    let mut by_addr: HashMap<String, u64> = HashMap::new();
+    let mut scanned_blocks = 0u64;
+    for h in (start..=chain_height).rev() {
+        let Some(entry) = load_block_entry(&state, h).await else {
+            continue;
+        };
+        scanned_blocks = scanned_blocks.saturating_add(1);
+        if entry.miner.is_empty() || entry.miner == "N/A" {
+            continue;
+        }
+        *by_addr.entry(entry.miner).or_insert(0) += 1;
+    }
+
+    let total_found: u64 = by_addr.values().copied().sum();
+    let mut rows: Vec<(String, u64)> = by_addr.into_iter().collect();
+    rows.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let unique_addresses = rows.len() as u64;
+
+    let top1_share_pct = rows
+        .first()
+        .map(|(_, c)| if total_found > 0 { (*c as f64) * 100.0 / (total_found as f64) } else { 0.0 })
+        .unwrap_or(0.0);
+    let top5_total: u64 = rows.iter().take(5).map(|(_, c)| *c).sum();
+    let top5_share_pct = if total_found > 0 {
+        (top5_total as f64) * 100.0 / (total_found as f64)
+    } else {
+        0.0
+    };
+
+    let distribution: Vec<Value> = rows
+        .into_iter()
+        .take(limit)
+        .enumerate()
+        .map(|(i, (address, blocks_found))| {
+            let share = if total_found > 0 {
+                (blocks_found as f64) / (total_found as f64)
+            } else {
+                0.0
+            };
+            let est_hashrate = network_hashrate.map(|h| h * share);
+            json!({
+                "rank": i + 1,
+                "address": address,
+                "blocks_found": blocks_found,
+                "share_pct": share * 100.0,
+                "estimated_hashrate_hs": est_hashrate,
+            })
+        })
+        .collect();
+
+    Ok(Json(json!({
+        "height": chain_height,
+        "window_scanned": window,
+        "scanned_blocks": scanned_blocks,
+        "total_found_blocks": total_found,
+        "unique_addresses": unique_addresses,
+        "network_hashrate_hs": network_hashrate,
+        "top1_share_pct": top1_share_pct,
+        "top5_share_pct": top5_share_pct,
+        "distribution": distribution,
     })))
 }
 
@@ -856,7 +980,7 @@ async fn main() {
     let miners_refresh_secs = env::var("IRIUM_EXPLORER_MINERS_REFRESH_SECS")
         .ok()
         .and_then(|v| v.parse::<u64>().ok())
-        .unwrap_or(60);
+        .unwrap_or(15);
 
     let stratum_metrics_url = env::var("IRIUM_STRATUM_TELEMETRY_URL")
         .ok()
@@ -880,7 +1004,7 @@ async fn main() {
     tokio::spawn(miners_refresher_task(
         state.clone(),
         miners_window_blocks,
-        Duration::from_secs(miners_refresh_secs.max(10)),
+        Duration::from_secs(miners_refresh_secs.max(3)),
     ));
 
     let app = Router::new()
@@ -913,6 +1037,8 @@ async fn main() {
         .route("/api/pool/payouts", get(pool_payouts))
         .route("/pool/workers", get(pool_workers))
         .route("/api/pool/workers", get(pool_workers))
+        .route("/pool/distribution", get(pool_distribution))
+        .route("/api/pool/distribution", get(pool_distribution))
         .route("/pool/health", get(pool_health))
         .route("/api/pool/health", get(pool_health))
         .route("/pool/account/:address", get(pool_account))

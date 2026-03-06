@@ -37,6 +37,7 @@ Both native and `/api/*` aliases are supported:
 - `/pool/stats`, `/api/pool/stats`
 - `/pool/payouts`, `/api/pool/payouts`
 - `/pool/workers`, `/api/pool/workers`
+- `/pool/distribution`, `/api/pool/distribution`
 - `/pool/health`, `/api/pool/health`
 - `/pool/account/{address}`, `/api/pool/account/{address}`
 
@@ -54,3 +55,21 @@ journalctl -u irium-explorer -n 200 --no-pager
 journalctl -u irium-wallet-api -n 200 --no-pager
 journalctl -u irium-stratum -n 200 --no-pager
 ```
+
+
+## Weekly Candidate Path Verification
+
+Run weekly to ensure the full mining pipeline is healthy:
+
+```bash
+journalctl -u irium-stratum --since "-7 days" --no-pager | egrep "\[block\] candidate_detected|\[block-submit\] attempt|\[block-submit\] result="
+curl -s http://127.0.0.1:3334/metrics | jq '.{candidates_detected,candidates_submitted,blocks_accepted,rpc_submit_attempts,rpc_submit_success,rpc_submit_fail}'
+```
+
+Expected path: `candidate_detected -> submit attempt -> submit result`
+
+If missing for >7d with active miners, investigate template freshness, network target checks, and submit RPC connectivity.
+
+## Explorer Freshness Tuning
+- Set `IRIUM_EXPLORER_MINERS_REFRESH_SECS=15` in `/etc/irium/explorer.env` for faster active-miner telemetry refresh.
+- Restart explorer: `sudo systemctl restart irium-explorer`.

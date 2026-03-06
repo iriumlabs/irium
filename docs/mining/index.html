@@ -329,6 +329,7 @@
     color: #d8ebff;
     border-radius: 8px;
     padding: 6px 10px;
+    min-height: 36px;
     font-size: .84rem;
     cursor: pointer;
   }
@@ -424,8 +425,20 @@
 
   @media (max-width: 560px) {
     .x-explorer .x-wrap { padding: 0 14px; }
-    .x-explorer .x-panel { padding: 16px; }
+    .x-explorer .x-panel { padding: 14px; }
     .x-page-title { font-size: 32px; }
+
+    .m-method-card,
+    .m-step,
+    .m-card { padding: 12px; }
+
+    .m-copy-label { font-size: .78rem; }
+    .m-copy-value { font-size: .84rem; line-height: 1.45; }
+
+    .m-links a {
+      width: 100%;
+      justify-content: center;
+    }
   }
 </style>
 </head>

@@ -265,6 +265,105 @@
     border-color: rgba(125,212,255,.6);
   }
 
+  .m-method-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .m-method-card {
+    display: block;
+    background: rgba(0,0,0,0.18);
+    border: 1px solid rgba(91,177,255,0.30);
+    border-radius: 16px;
+    padding: 14px;
+    text-decoration: none;
+    color: inherit;
+    transition: border-color .2s ease, transform .2s ease;
+    animation: xGridGlow 4.8s ease-in-out infinite;
+  }
+
+  .m-method-card:hover {
+    border-color: rgba(125,212,255,.7);
+    transform: translateY(-1px);
+  }
+
+  .m-method-card h3 {
+    margin: 0 0 8px;
+    color: #f1f7ff;
+    font-size: 1rem;
+  }
+
+  .m-copy-grid {
+    display: grid;
+    gap: 10px;
+  }
+
+  .m-copy-row {
+    display: grid;
+    grid-template-columns: 170px 1fr auto;
+    gap: 8px;
+    align-items: center;
+    background: rgba(0,0,0,0.18);
+    border: 1px solid rgba(91,177,255,0.30);
+    border-radius: 12px;
+    padding: 10px 12px;
+  }
+
+  .m-copy-label {
+    font-size: .85rem;
+    font-weight: 700;
+    color: rgba(230,237,243,0.86);
+  }
+
+  .m-copy-value {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    color: #e9f2ff;
+    overflow-wrap: anywhere;
+  }
+
+  .m-copy-btn,
+  .m-check-btn {
+    border: 1px solid rgba(125,212,255,.6);
+    background: rgba(13,29,48,.78);
+    color: #d8ebff;
+    border-radius: 8px;
+    padding: 6px 10px;
+    font-size: .84rem;
+    cursor: pointer;
+  }
+
+  .m-copy-btn:hover,
+  .m-check-btn:hover {
+    color: #fff;
+    border-color: rgba(155,224,255,.9);
+  }
+
+  .m-alert {
+    margin-top: 10px;
+    border-radius: 10px;
+    padding: 10px 12px;
+    border: 1px solid rgba(255,200,90,.45);
+    background: rgba(40,28,5,.4);
+    color: #ffe9bf;
+  }
+
+  .m-verify-row {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: 1fr auto;
+    margin-top: 10px;
+  }
+
+  .m-input {
+    width: 100%;
+    border: 1px solid rgba(91,177,255,0.30);
+    background: rgba(0,0,0,0.22);
+    color: #e9f2ff;
+    border-radius: 10px;
+    padding: 10px 12px;
+  }
+
   pre.m-cmd {
     margin: 8px 0 0;
     padding: 11px;
@@ -308,7 +407,17 @@
 
   @media (max-width: 900px) {
     .m-grid,
-    .m-stats {
+    .m-stats,
+    .m-method-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .m-copy-row {
+      grid-template-columns: 1fr;
+      align-items: start;
+    }
+
+    .m-verify-row {
       grid-template-columns: 1fr;
     }
   }
@@ -414,19 +523,85 @@
       </div>
     </div>
 
-    <div class="x-panel" id="start-mining">
+    <div class="x-panel" id="mining-methods">
       <div class="x-head">
-        <div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>Start Mining (Simple Steps)</div>
+        <div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M3 5h18v4H3V5zm0 5h18v4H3v-4zm0 5h18v4H3v-4z"/></svg>Choose Your Mining Method</div>
       </div>
-      <p class="m-muted">You need the node running before the miner. Mining on a node that is still syncing can cause stale blocks.</p>
+      <div class="m-method-grid">
+        <a class="m-method-card" href="#asic-pool-quick-config">
+          <h3>ASIC / Pool Mining</h3>
+          <p class="m-muted">Fastest setup. Point your miner to the public Irium Stratum pool.</p>
+        </a>
+        <a class="m-method-card" href="#cpu-mining-official">
+          <h3>CPU Mining</h3>
+          <p class="m-muted">Mine directly using the official Irium Rust miner.</p>
+        </a>
+        <a class="m-method-card" href="#remote-miner-setup">
+          <h3>Remote Miner</h3>
+          <p class="m-muted">Run the miner on one machine and connect to a node on another machine.</p>
+        </a>
+      </div>
+    </div>
+
+    <div class="x-panel" id="asic-pool-quick-config">
+      <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>ASIC / Pool Quick Config</div></div>
+      <div class="m-copy-grid">
+        <div class="m-copy-row"><span class="m-copy-label">Pool URL</span><code class="m-copy-value" id="pool-url">stratum+tcp://pool.iriumlabs.org:3333</code><button class="m-copy-btn" data-copy-target="pool-url">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">Fallback Direct IP</span><code class="m-copy-value" id="pool-ip">stratum+tcp://157.173.116.134:3333</code><button class="m-copy-btn" data-copy-target="pool-ip">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">Worker Format</span><code class="m-copy-value" id="pool-worker">YOUR_IRM_ADDRESS.worker1</code><button class="m-copy-btn" data-copy-target="pool-worker">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">Password</span><code class="m-copy-value" id="pool-pass">x</code><button class="m-copy-btn" data-copy-target="pool-pass">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">Mode</span><code class="m-copy-value" id="pool-mode">SOLO (full block reward goes to the IRM address in the username)</code><button class="m-copy-btn" data-copy-target="pool-mode">Copy</button></div>
+      </div>
+
+      <div class="m-step" style="margin-top:12px;">
+        <div class="m-step-head"><span class="m-step-num">A</span><span class="m-step-title">Antminer / Whatsminer Example</span></div>
+        <ul class="m-list">
+          <li><b>URL:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
+          <li><b>Worker:</b> <code>YOUR_IRM_ADDRESS.worker1</code></li>
+          <li><b>Password:</b> <code>x</code></li>
+        </ul>
+        <p class="m-muted" style="margin-top:8px;">If DNS fails on your network, keep the hostname as Pool 1 and use the direct IP fallback for Pool 2/3.</p>
+      </div>
+
+      <div class="m-alert"><b>Important:</b> For pool mining, do not point ASICs or third-party miners at local node RPC (<code>127.0.0.1:38300</code>). Use the Stratum pool endpoint.</div>
+    </div>
+
+    <div class="x-panel" id="verify-mining">
+      <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17l-3.88-3.88L3.7 13.7 9 19l12-12-1.41-1.41z"/></svg>Verify You’re Mining</div></div>
+      <p class="m-muted">After starting your miner, verify activity using your wallet address.</p>
+      <ul class="m-list">
+        <li><code>https://api.iriumlabs.org/api/pool/account/YOUR_IRM_ADDRESS</code></li>
+        <li><code>https://api.iriumlabs.org/api/pool/stats</code></li>
+        <li><code>https://api.iriumlabs.org/api/pool/workers?window=144&amp;limit=20</code></li>
+      </ul>
+      <p class="m-muted" style="margin-top:8px;">Expect accepted shares to increase, your worker/address to appear in pool stats, and <code>blocks_found</code>/<code>payout</code> history for your address when applicable.</p>
+      <div class="m-verify-row">
+        <input id="verify-address-input" class="m-input" type="text" placeholder="Enter IRM address (starts with Q)">
+        <button id="verify-address-btn" class="m-check-btn" type="button">Check Address</button>
+      </div>
+    </div>
+
+    <div class="x-panel" id="miner-downloads">
+      <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M5 20h14v-2H5v2zM12 2l-5.5 9h3.5v5h4v-5H17.5L12 2z"/></svg>Miner Downloads</div></div>
+      <div class="m-links">
+        <a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener">Official Irium miner (GitHub)</a>
+        <a href="https://github.com/JayDDee/cpuminer-opt/releases" target="_blank" rel="noopener">cpuminer-opt releases</a>
+        <a href="https://github.com/JayDDee/cpuminer-opt" target="_blank" rel="noopener">cpuminer-opt source</a>
+      </div>
+      <p class="m-muted" style="margin-top:10px;">Use the official Irium miner for direct node mining. Use a compatible Stratum miner such as cpuminer-opt for pool mining.</p>
+    </div>
+    <div class="x-panel" id="start-mining"><div id="cpu-mining-official"></div>
+      <div class="x-head">
+        <div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>CPU Mining with Official Irium Miner</div>
+      </div>
+      <p class="m-muted">Direct mining via your own node. You need the node fully synced before starting the miner. Mining on a node that is still syncing can cause stale blocks.</p>
       <div class="m-steps">
         <article class="m-step"><div class="m-step-head"><span class="m-step-num">1</span><span class="m-step-title">Install Rust (one time)</span></div><p class="m-muted">Go to <a class="m-panel-link" href="https://rustup.rs" target="_blank" rel="noopener">rustup.rs</a> and install. Open a new terminal.</p></article>
         <article class="m-step"><div class="m-step-head"><span class="m-step-num">2</span><span class="m-step-title">Download + build</span></div><pre class="m-cmd"><code>git clone https://github.com/iriumlabs/irium.git
 cd irium
 source ~/.cargo/env
 cargo build --release</code></pre></article>
-        <article class="m-step"><div class="m-step-head"><span class="m-step-num">3</span><span class="m-step-title">Start the node (leave running)</span></div><pre class="m-cmd"><code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd
-sudo systemctl enable --now iriumd
+        <article class="m-step"><div class="m-step-head"><span class="m-step-num">3</span><span class="m-step-title">Start the node (leave running)</span></div><p class="m-muted"><b>Option A — Simple local run</b></p><pre class="m-cmd"><code>IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</code></pre><p class="m-muted" style="margin-top:8px;"><b>Option B — systemd service</b></p><pre class="m-cmd"><code>sudo systemctl enable --now iriumd
 sudo journalctl -u iriumd -f</code></pre></article>
         <article class="m-step"><div class="m-step-head"><span class="m-step-num">4</span><span class="m-step-title">Wait for sync</span></div><pre class="m-cmd"><code>curl -k https://127.0.0.1:38300/status</code></pre><ul class="m-list"><li>If you see no peers: wait a few minutes, make sure outbound TCP 38291 is allowed, and confirm <code>bootstrap/seedlist.txt</code> exists.</li><li>If height stays 0: start node with <code>IRIUM_NODE_CONFIG=configs/node.json</code>, then restart.</li></ul></article>
         <article class="m-step"><div class="m-step-head"><span class="m-step-num">5</span><span class="m-step-title">Create a wallet address</span></div><pre class="m-cmd"><code>./target/release/irium-wallet init
@@ -438,10 +613,28 @@ sudo journalctl -u iriumd -f</code></pre></article>
       </div>
     </div>
 
-    <div class="x-panel">
-      <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M13 3L4 14h7l-1 7 9-11h-7l1-7z"/></svg>Public Stratum Pool</div></div>
+    <div class="x-panel" id="public-stratum-pool">
+      <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M13 3L4 14h7l-1 7 9-11h-7l1-7z"/></svg>Public Stratum Pool (Optional Quick Start)</div></div>
+      <p class="m-muted">This path is separate from direct node mining. Use it when you want fast Stratum setup with ASIC/cgminer-compatible clients.</p>
       <div class="m-steps">
-        <article class="m-step"><div class="m-step-head"><span class="m-step-num">★</span><span class="m-step-title">Mine via Irium Public Pool (SOLO)</span></div><ul class="m-list"><li><b>Pool URL:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li><li><b>Username:</b> <code>IRM_ADDRESS.worker1</code></li><li><b>Password:</b> <code>x</code></li><li><b>Mode:</b> SOLO (if block is found, reward pays to IRM address in username).</li></ul></article>
+        <article class="m-step"><div class="m-step-head"><span class="m-step-num">★</span><span class="m-step-title">Mine via Irium Public Pool (SOLO)</span></div><ul class="m-list"><li><b>Pool URL:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li><li><b>Fallback IP:</b> <code>stratum+tcp://157.173.116.134:3333</code></li><li><b>Username:</b> <code>IRM_ADDRESS.worker1</code></li><li><b>Password:</b> <code>x</code></li><li><b>Mode:</b> SOLO (if block is found, reward pays to IRM address in username).</li></ul><p class="m-muted" style="margin-top:8px;">After connecting, verify your address under <a class="m-panel-link" href="#verify-mining">Verify You’re Mining</a>.</p></article>
+      </div>
+    </div>
+
+
+    <div class="x-panel" id="remote-miner-setup">
+      <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M4 6h16v10H4zM2 18h20v2H2z"/></svg>Remote Miner Setup</div></div>
+      <p class="m-muted">Run the miner on one machine while your node runs on another host.</p>
+      <div class="m-steps">
+        <article class="m-step"><div class="m-step-head"><span class="m-step-num">1</span><span class="m-step-title">Set RPC endpoint</span></div><pre class="m-cmd"><code>export IRIUM_NODE_RPC=http://&lt;node-ip&gt;:38300
+# or
+export IRIUM_NODE_RPC=https://&lt;node-ip&gt;:38300</code></pre></article>
+        <article class="m-step"><div class="m-step-head"><span class="m-step-num">2</span><span class="m-step-title">Set token if required</span></div><pre class="m-cmd"><code>export IRIUM_RPC_TOKEN=&lt;same-token-configured-on-node&gt;</code></pre></article>
+        <article class="m-step"><div class="m-step-head"><span class="m-step-num">3</span><span class="m-step-title">Verify node reachability</span></div><pre class="m-cmd"><code>curl -sS $IRIUM_NODE_RPC/status
+# if TLS self-signed
+curl -k -sS $IRIUM_NODE_RPC/status</code></pre></article>
+        <article class="m-step"><div class="m-step-head"><span class="m-step-num">4</span><span class="m-step-title">Start miner</span></div><pre class="m-cmd"><code>export IRIUM_MINER_ADDRESS=&lt;YOUR_IRIUM_ADDRESS&gt;
+./target/release/irium-miner --threads &lt;CORES&gt;</code></pre><p class="m-muted">Then verify with <a class="m-panel-link" href="#verify-mining">Verify You’re Mining</a>.</p></article>
       </div>
     </div>
 
@@ -493,6 +686,34 @@ curl http://127.0.0.1:38300/rpc/network_hashrate?window=120</code></pre><p class
 </footer>
 
 <script src="https://www.iriumlabs.org/assets/js/mining-status.js?v=22"></script>
+<script>
+  document.querySelectorAll('[data-copy-target]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.getAttribute('data-copy-target');
+      const el = document.getElementById(id);
+      if (!el) return;
+      const value = (el.textContent || '').trim();
+      if (!value) return;
+      try {
+        await navigator.clipboard.writeText(value);
+        const old = btn.textContent;
+        btn.textContent = 'Copied';
+        setTimeout(() => { btn.textContent = old; }, 900);
+      } catch (_) {}
+    });
+  });
+
+  const verifyBtn = document.getElementById('verify-address-btn');
+  const verifyInput = document.getElementById('verify-address-input');
+  if (verifyBtn && verifyInput) {
+    verifyBtn.addEventListener('click', () => {
+      const address = (verifyInput.value || '').trim();
+      if (!address) return;
+      window.open('https://api.iriumlabs.org/api/pool/account/' + encodeURIComponent(address), '_blank', 'noopener');
+    });
+  }
+</script>
+
 <script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>
 </body>
 </html>

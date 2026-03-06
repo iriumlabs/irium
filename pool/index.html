@@ -1360,6 +1360,7 @@
           <li><span class="key">Pool Blocks Accepted</span><span id="live-blocks-accepted">Checking...</span></li>
           <li><span class="key">Rejected / Stale</span><span id="live-rejected">Checking...</span></li>
           <li><span class="key">Reject Breakdown</span><span id="live-reject-breakdown">Checking...</span></li>
+          <li><span class="key">Pool Integrity</span><span id="live-integrity">Checking...</span></li>
           <li><span class="key">Last Share Accepted</span><span id="live-last-accept">Checking...</span></li>
           <li><span class="key">Last Share Rejected</span><span id="live-last-reject">Checking...</span></li>
           <li><span class="key">Backend Link</span><span id="live-backend">Checking...</span></li>
@@ -2220,6 +2221,21 @@ GitHub</a>
       rejectedDup === null ? null : `dup: ${fmtInt(rejectedDup)}`,
     ].filter(Boolean).join(' • ');
     setText('live-reject-breakdown', breakdownText || 'Not exposed');
+    const canonicalShares = Number.isFinite(Number(stats?.canonical_shares)) ? Number(stats.canonical_shares) : null;
+    const compatShares = Number.isFinite(Number(stats?.compat_shares)) ? Number(stats.compat_shares) : null;
+    const submittedShares = ((Number.isFinite(Number(acceptedShares)) ? Number(acceptedShares) : 0) + (Number.isFinite(Number(rejectedShares)) ? Number(rejectedShares) : 0));
+    const invalidRatio = (submittedShares > 0 && rejectedInvalid !== null) ? (rejectedInvalid / submittedShares) : null;
+    const staleRatio = (submittedShares > 0 && rejectedStale !== null) ? (rejectedStale / submittedShares) : null;
+    let integrityText = 'Unknown';
+    if (submittedShares >= 10) {
+      const compatOk = (compatShares === null) ? true : (compatShares === 0);
+      const invalidOk = (invalidRatio === null) ? true : (invalidRatio <= 0.05);
+      const staleOk = (staleRatio === null) ? true : (staleRatio <= 0.35);
+      integrityText = (compatOk && invalidOk && staleOk)
+        ? `Healthy • invalid ${invalidRatio === null ? 'n/a' : fmtNum(invalidRatio * 100, 2) + '%'} • stale ${staleRatio === null ? 'n/a' : fmtNum(staleRatio * 100, 2) + '%'}${canonicalShares === null ? '' : ' • canonical ' + fmtInt(canonicalShares)}`
+        : `Degraded • invalid ${invalidRatio === null ? 'n/a' : fmtNum(invalidRatio * 100, 2) + '%'} • stale ${staleRatio === null ? 'n/a' : fmtNum(staleRatio * 100, 2) + '%'}${compatShares === null ? '' : ' • compat ' + fmtInt(compatShares)}`;
+    }
+    setText('live-integrity', integrityText);
     setText('live-last-accept', (Number.isFinite(Number(lastAcceptTs)) && Number(lastAcceptTs) > 0) ? fmtTime(lastAcceptTs) : 'No accepted share yet');
     setText('live-last-reject', (Number.isFinite(Number(lastRejectTs)) && Number(lastRejectTs) > 0) ? fmtTime(lastRejectTs) : 'No rejected share yet');
     setText('live-backend', stats?.backend_connected === true ? 'Connected' : (hasData ? 'Partial' : 'Unavailable'));

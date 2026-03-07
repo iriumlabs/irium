@@ -1327,7 +1327,7 @@
             <li class="setup-row"><span class="setup-key">Mode</span><span class="setup-value">SOLO</span></li>
             <li class="setup-row"><span class="setup-key">Username</span><span class="setup-value mono">YOUR_IRIUM_WALLET_ADDRESS.worker1</span></li>
             <li class="setup-row"><span class="setup-key">Password</span><span class="setup-value mono">x (placeholder)</span></li>
-            <li class="setup-row"><span class="setup-key">Port</span><span class="setup-value mono">3333 / TCP (Primary), 3335 / TCP (Fallback)</span></li>
+            <li class="setup-row"><span class="setup-key">Port</span><span class="setup-value mono">3333 / TCP (Primary), 3333 / TCP (Direct IP Fallback)</span></li>
             <li class="setup-row"><span class="setup-key">Status</span><span class="setup-value"><span id="pool-live-pill" class="status-badge">LOADING...</span></span></li>
             <li class="setup-row"><span class="setup-key">Last Update</span><span id="pool-updated-pill" class="setup-value">--:--:--</span></li>
           </ul>
@@ -1402,13 +1402,13 @@
         <h3>Operational Status</h3>
         <p class="panel-sub">Public endpoint diagnostics and miner-side checks.</p>
         <ul class="meta-list">
-          <li><span class="key">Stratum Endpoint</span><span class="mono">pool.iriumlabs.org:3333 (primary), :3335 (fallback)</span></li>
+          <li><span class="key">Stratum Endpoint</span><span class="mono">pool.iriumlabs.org:3333 (primary), 157.173.116.134:3333 (fallback)</span></li>
           <li><span class="key">Failover Policy</span><span>DNS endpoint only (raw host IP intentionally not public)</span></li>
           <li><span class="key">Explorer API</span><span id="ops-api">Loading...</span></li>
           <li><span class="key">Stratum Health (/health)</span><span id="ops-stratum-health">Checking...</span></li>
           <li><span class="key">Template Age</span><span id="ops-template-age">Checking...</span></li>
           <li><span class="key">Last Refresh</span><span id="ops-updated">Loading...</span></li>
-          <li><span class="key">Troubleshoot</span><span>Allow outbound TCP 3333/3335. 3333 is canonical block-capable; use 3335 only if your miner is unstable on 3333.</span></li>
+          <li><span class="key">Troubleshoot</span><span>Allow outbound TCP 3333. Use pool.iriumlabs.org:3333 as primary and 157.173.116.134:3333 as direct IP fallback if DNS fails.</span></li>
         </ul>
       </article>
 
@@ -1561,7 +1561,7 @@
         <div class="cfg-card">
           <h4>Antminer Profile</h4>
           <pre id="cfg-ant">URL: stratum+tcp://pool.iriumlabs.org:3333
-URL2: stratum+tcp://pool.iriumlabs.org:3335
+URL2: stratum+tcp://157.173.116.134:3333
 URL3: stratum+tcp://157.173.116.134:3333
 Worker: YOUR_IRIUM_WALLET_ADDRESS.worker1
 Password: x</pre>
@@ -1570,7 +1570,7 @@ Password: x</pre>
         <div class="cfg-card">
           <h4>Whatsminer Profile</h4>
           <pre id="cfg-whats">Pool 1: stratum+tcp://pool.iriumlabs.org:3333
-Pool 2: stratum+tcp://pool.iriumlabs.org:3335
+Pool 2: stratum+tcp://157.173.116.134:3333
 Pool 3: stratum+tcp://157.173.116.134:3333
 Sub-account: YOUR_IRIUM_WALLET_ADDRESS.worker1
 Password: x</pre>
@@ -1579,7 +1579,7 @@ Password: x</pre>
         <div class="cfg-card">
           <h4>Generic Stratum Client</h4>
           <pre id="cfg-generic">pool0=stratum+tcp://pool.iriumlabs.org:3333
-pool1=stratum+tcp://pool.iriumlabs.org:3335
+pool1=stratum+tcp://157.173.116.134:3333
 pool2=stratum+tcp://157.173.116.134:3333
 user=YOUR_IRIUM_WALLET_ADDRESS.worker1
 pass=x</pre>

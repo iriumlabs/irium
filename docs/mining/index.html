@@ -556,11 +556,46 @@
       </div>
     </div>
 
-    <div class="x-panel" id="asic-pool-quick-config">
+    <div class="x-panel" id="irium-official-pool">
+      <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>IRIUM OFFICIAL POOL</div></div>
+      <ul class="m-list">
+        <li><b>Pool Endpoint:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
+        <li><b>Algorithm:</b> SHA-256d</li>
+        <li><b>Network:</b> Irium mainnet</li>
+      </ul>
+      <p class="m-muted" style="margin-top:8px;"><b>Recommended miners:</b> Irium CPU miner, ASIC SHA256 miners, GPU miners supporting SHA256d.</p>
+      <div class="m-step" style="margin-top:12px;">
+        <div class="m-step-head"><span class="m-step-num">1</span><span class="m-step-title">Example CPU miner command</span></div>
+        <pre class="m-cmd"><code>./irium-miner \
+--pool stratum+tcp://pool.iriumlabs.org:3333 \
+--user YOUR_IRIUM_WALLET \
+--threads 4</code></pre>
+      </div>
+      <div class="m-step" style="margin-top:12px;">
+        <div class="m-step-head"><span class="m-step-num">2</span><span class="m-step-title">Example ASIC configuration</span></div>
+        <ul class="m-list">
+          <li><b>Pool URL:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
+          <li><b>Worker:</b> <code>YOUR_IRIUM_WALLET</code></li>
+          <li><b>Password:</b> <code>x</code></li>
+        </ul>
+      </div>
+      <div class="m-step" style="margin-top:12px;">
+        <div class="m-step-head"><span class="m-step-num">3</span><span class="m-step-title">Pool Status</span></div>
+        <div class="m-grid">
+          <article class="m-card"><h3>Connected miners</h3><p id="poolstat-connected" class="m-muted">--</p></article>
+          <article class="m-card"><h3>Shares (10 min)</h3><p id="poolstat-shares10" class="m-muted">--</p></article>
+          <article class="m-card"><h3>Block candidates</h3><p id="poolstat-candidates" class="m-muted">--</p></article>
+          <article class="m-card"><h3>Submit attempts</h3><p id="poolstat-attempts" class="m-muted">--</p></article>
+          <article class="m-card"><h3>Last block</h3><p id="poolstat-lastblock" class="m-muted">--</p></article>
+        </div>
+      </div>
+    </div>
+
+<div class="x-panel" id="asic-pool-quick-config">
       <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>ASIC / Pool Quick Config</div></div>
       <div class="m-copy-grid">
         <div class="m-copy-row"><span class="m-copy-label">Pool URL</span><code class="m-copy-value" id="pool-url">stratum+tcp://pool.iriumlabs.org:3333</code><button class="m-copy-btn" data-copy-target="pool-url">Copy</button></div>
-        <div class="m-copy-row"><span class="m-copy-label">Fallback URL</span><code class="m-copy-value" id="pool-fallback">stratum+tcp://pool.iriumlabs.org:3335</code><button class="m-copy-btn" data-copy-target="pool-fallback">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">Fallback URL</span><code class="m-copy-value" id="pool-fallback">stratum+tcp://157.173.116.134:3333</code><button class="m-copy-btn" data-copy-target="pool-fallback">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Direct IP (backup)</span><code class="m-copy-value" id="pool-ip">stratum+tcp://157.173.116.134:3333</code><button class="m-copy-btn" data-copy-target="pool-ip">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Worker Format</span><code class="m-copy-value" id="pool-worker">YOUR_IRM_ADDRESS.worker1</code><button class="m-copy-btn" data-copy-target="pool-worker">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Password</span><code class="m-copy-value" id="pool-pass">x</code><button class="m-copy-btn" data-copy-target="pool-pass">Copy</button></div>
@@ -571,7 +606,7 @@
         <div class="m-step-head"><span class="m-step-num">A</span><span class="m-step-title">Antminer / Whatsminer Example</span></div>
         <ul class="m-list">
           <li><b>Pool 1 (Primary):</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
-          <li><b>Pool 2 (Fallback):</b> <code>stratum+tcp://pool.iriumlabs.org:3335</code></li>
+          <li><b>Pool 2 (Fallback):</b> <code>stratum+tcp://157.173.116.134:3333</code></li>
           <li><b>Worker:</b> <code>YOUR_IRM_ADDRESS.worker1</code></li>
           <li><b>Password:</b> <code>x</code></li>
         </ul>
@@ -633,7 +668,7 @@ sudo journalctl -u iriumd -f</code></pre></article>
       <div class="step-head"><span class="step-num">★</span><span class="step-title">Mine via Irium Public Pool (SOLO)</span></div>
       <ul class="muted">
         <li><strong>Primary Pool URL:</strong> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
-        <li><strong>Fallback URL:</strong> <code>stratum+tcp://pool.iriumlabs.org:3335</code> (use only if your miner is unstable on 3333)</li>
+        <li><strong>Fallback URL:</strong> <code>stratum+tcp://157.173.116.134:3333</code> (use only if your miner is unstable on 3333)</li>
         <li><strong>Username:</strong> <code>IRM_ADDRESS.worker1</code></li>
         <li><strong>Password:</strong> <code>x</code></li>
         <li><strong>Mode:</strong> SOLO (if a block is found, reward pays to the IRM address in the username).</li>
@@ -783,6 +818,22 @@ curl http://127.0.0.1:38300/rpc/network_hashrate?window=120</code></pre><p class
       window.open('https://api.iriumlabs.org/api/pool/account/' + encodeURIComponent(address), '_blank', 'noopener');
     });
   }
+  async function refreshPoolStatusBox() {
+    try {
+      const r = await fetch("https://api.iriumlabs.org/pool/metrics.json", { cache: "no-store" });
+      if (!r.ok) throw new Error("http " + r.status);
+      const m = await r.json();
+      const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+      set("poolstat-connected", m.connected_miners ?? m.active_tcp_sessions ?? "--");
+      set("poolstat-shares10", m.shares_last_10min ?? "--");
+      set("poolstat-candidates", m.block_candidates ?? m.candidates_detected ?? "--");
+      set("poolstat-attempts", m.submit_attempts ?? m.rpc_submit_attempts ?? "--");
+      const lb = m.last_block_time ? new Date(m.last_block_time * 1000).toLocaleString() : "--";
+      set("poolstat-lastblock", lb);
+    } catch (_) {}
+  }
+  refreshPoolStatusBox();
+  setInterval(refreshPoolStatusBox, 10000);
 </script>
 
 <script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>

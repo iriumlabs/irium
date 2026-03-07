@@ -820,7 +820,7 @@ curl http://127.0.0.1:38300/rpc/network_hashrate?window=120</code></pre><p class
   }
   async function refreshPoolStatusBox() {
     try {
-      const r = await fetch("https://api.iriumlabs.org/pool/metrics.json", { cache: "no-store" });
+      const r = await fetch("/pool/metrics.json", { cache: "no-store" });
       if (!r.ok) throw new Error("http " + r.status);
       const m = await r.json();
       const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };

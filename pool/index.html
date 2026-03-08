@@ -1934,6 +1934,14 @@ GitHub</a>
     return 50;
   }
 
+  function sourceLabel(source) {
+    const s = String(source || '').toLowerCase();
+    if (s === 'pool_stratum') return 'Found via Pool';
+    if (s === 'direct_node') return 'Found via Official Miner';
+    if (s === 'direct_node_legacy') return 'Found via Official Miner (Legacy)';
+    return 'Unknown (pre-attribution)';
+  }
+
   function drawLine(canvasId, points, color, label) {
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
@@ -2026,6 +2034,8 @@ GitHub</a>
       const reward = Number(p?.reward_irm ?? p?.reward ?? 0);
       const ref = p?.hash || p?.block_hash || "";
       const status = p?.status || "on_chain";
+      const source = p?.source || '';
+      const sourceText = sourceLabel(source);
       const height = Number(p?.height || 0);
       const ts = Number(p?.time || 0);
       return `<tr>
@@ -2033,7 +2043,7 @@ GitHub</a>
         <td>${ts > 0 ? fmtTime(ts) : "N/A"}</td>
         <td class="mono mono-wrap" title="${miner}">${miner}</td>
         <td class="reward-value">${fmtNum(reward, 2)} IRM</td>
-        <td><span class="green">${status === "on_chain" ? "On-chain" : status}</span></td>
+        <td><span class="green">${status === "on_chain" ? "On-chain" : status}</span><div class="tiny">${sourceText}</div></td>
         <td class="mono mono-wrap" title="${ref}">${ref}</td>
       </tr>`;
     }).join("");
@@ -2338,8 +2348,8 @@ GitHub</a>
       if (!rows.length) {
         table += '<div class="muted" style="margin-top:6px;">No records found in current account window.</div>';
       } else {
-        table += '<div class="table-wrap" style="margin-top:8px;"><table class="pool-table"><thead><tr><th>Height</th><th>Reward</th><th>Status</th><th>Hash</th></tr></thead><tbody>';
-        table += rows.map((r) => `<tr><td>${fmtInt(r?.height)}</td><td class="reward-value">${fmtNum(Number(r?.reward_irm ?? 0),2)} IRM</td><td>${r?.status || 'on_chain'}</td><td class="mono mono-wrap" title="${r?.hash || ''}">${r?.hash || ''}</td></tr>`).join('');
+        table += '<div class="table-wrap" style="margin-top:8px;"><table class="pool-table"><thead><tr><th>Height</th><th>Reward</th><th>Status</th><th>Source</th><th>Hash</th></tr></thead><tbody>';
+        table += rows.map((r) => `<tr><td>${fmtInt(r?.height)}</td><td class="reward-value">${fmtNum(Number(r?.reward_irm ?? 0),2)} IRM</td><td>${r?.status || 'on_chain'}</td><td>${sourceLabel(r?.source)}</td><td class="mono mono-wrap" title="${r?.hash || ''}">${r?.hash || ''}</td></tr>`).join('');
         table += '</tbody></table></div>';
       }
 

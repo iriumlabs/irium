@@ -3120,6 +3120,7 @@ async fn submit_block(
     // Sanity-check header hash matches payload.
     let derived_hash = block_header.hash();
     if derived_hash[..] != hash_bytes[..] {
+        eprintln!("[submit_block] reject branch=hash_mismatch derived={} provided={}", hex::encode(derived_hash), hex::encode(&hash_bytes));
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -3147,10 +3148,12 @@ async fn submit_block(
 
         // Height must match the next expected block height.
         if req.height != chain.height {
+            eprintln!("[submit_block] reject branch=height_mismatch req_height={} chain_height={}", req.height, chain.height);
             return Err(StatusCode::BAD_REQUEST);
         }
 
-        if let Err(_e) = chain.connect_block(block.clone()) {
+        if let Err(e) = chain.connect_block(block.clone()) {
+            eprintln!("[submit_block] reject branch=connect_block_failed err={}", e);
             return Err(StatusCode::BAD_REQUEST);
         }
 
@@ -3161,6 +3164,7 @@ async fn submit_block(
     // If anchors are loaded, enforce anchor consistency on the new tip.
     if let Some(ref anchors) = state.anchors {
         if !anchors.is_chain_valid(new_height, &new_tip_hash) {
+            eprintln!("[submit_block] reject branch=anchor_reject height={} tip={}", new_height, new_tip_hash);
             return Err(StatusCode::BAD_REQUEST);
         }
     }

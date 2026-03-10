@@ -1,47 +1,37 @@
-# Pilot Open-Ready Report (Updated)
+# Pilot Open Ready Report
 
-Date: 2026-03-10
-Branch: `testing-codes-before-merging`
+Date: 2026-03-11
+Branch: testing-codes-before-merging
 
-## Root cause traced
-- Dual-chain assertion fails because `POST /rpc/createhtlc` returns HTTP 400 on the trial runtime, so `run_atomic_swap_dual_chain_assert.sh` receives an empty `txid` and then fails at `assert_txid` (`invalid txid`).
-- Confirmed failure sequence:
-  1. `createhtlc` request issued by harness
-  2. HTTP 400 response body empty
-  3. downstream `txid` parse => empty string
-  4. hard fail in assertion
+## Blocker Root Cause
+- `scripts/run_atomic_swap_prepilot_gate.sh` failed in dual-chain assertion because the assertion/monitoring scripts defaulted to `IRIUM_RPC_URL=http://127.0.0.1:49610` and `IRIUM_STATUS_URL=http://127.0.0.1:49390/status`, while the active pilot node runtime is on `58400/58480`.
+- During failure reproduction with the correct pilot RPC endpoint, `createhtlc` returned `400` with exact reason `chain_fee_calculation_failed`.
+- Under trial mode (`IRIUM_TRIAL_ALLOW_IMMATURE_HTLC_FUNDS=1`), `create_htlc` allowed immature coinbase UTXOs for selection but still called `chain.calculate_fees(&tx)`, which re-ran maturity checks and rejected.
 
-## Fixes applied in this pass
-- Pushed code fix commit to pilot branch:
-  - `7cee62dbf6fa11d664940ccca800f2f0aab1510a`
-  - `2dcf04dd877082dce8c2a86ec176b03952a8fb9f`
-- Trial runtime env aligned on both hosts:
-  - `IRIUM_HTLCV1_ACTIVATION_HEIGHT=0`
-  - `IRIUM_TRIAL_ALLOW_IMMATURE_HTLC_FUNDS=1`
-- Both hosts redeployed to latest fix commit and services restarted.
+## Fixes Applied
+1. `create_htlc` now returns explicit 400 reasons (`(StatusCode, String)`) for rejection paths.
+2. `create_htlc` now honors trial immature-fund mode consistently by computing local tx fee (`sum(inputs)-sum(outputs)`) instead of calling `chain.calculate_fees` when `IRIUM_TRIAL_ALLOW_IMMATURE_HTLC_FUNDS=1`.
+3. Updated script defaults to pilot runtime endpoints:
+   - dual-chain assertion: `IRIUM_RPC_URL=58400`, `IRIUM_STATUS_URL=58480/status`
+   - monitoring check: `IRIUM_RPC_URL=58400`, `IRIUM_STATUS_URL=58480/status`
+4. Updated monitoring DB default path to pilot DB:
+   - `/home/irium/irium-pilot/swap-coordinator.db`
+5. Adjusted `iriumd` HTLC test helper expectations for `(StatusCode, String)` and stabilized one HTLC wrong-preimage test fixture under trial immature-fund env toggle.
 
-## Deployed commit
-- VPS: `2dcf04dd877082dce8c2a86ec176b03952a8fb9f`
-- EU:  `2dcf04dd877082dce8c2a86ec176b03952a8fb9f`
+## Validation
+- `scripts/pilot_preopen_check.sh`: PASS
+- `scripts/verify_pilot_hosts.sh`: PASS
+- `scripts/run_atomic_swap_prepilot_gate.sh`: PASS
+  - lib tests: PASS
+  - `iriumd` tests: PASS
+  - coordinator tests: PASS
+  - `cargo check --tests`: PASS
+  - dual-chain assertion: PASS
+  - monitoring baseline: PASS
 
-## Parity proof
-- `pilot_preopen_check.sh`: PASS
-- `verify_pilot_hosts.sh`: PASS
-  - commit parity PASS
-  - runtime path PASS (`/home/irium/irium-pilot/target/release/iriumd` both hosts)
-  - no `/tmp` drift PASS
-  - mainnet activation safety PASS
+## Open Decision
+- Selected-user pilot open readiness: **YES**
 
-## Mandatory gate status
-- `run_atomic_swap_prepilot_gate.sh`: **FAIL**
-- Failure point remains identical:
-  - `[FAIL] IRIUM RPC /rpc/createhtlc http=400 body=`
-  - `[FAIL] invalid txid:`
-
-## Open decision
-- Selected-user pilot open status: **NO**
-- Mandatory pre-open gate is still not fully green.
-
-## Safety statement
+## Safety
 - HTLCv1 remains OFF by default on Irium mainnet.
 - No Irium mainnet activation has been performed.

@@ -2871,9 +2871,13 @@ async fn wallet_send(
     let mut selected: Vec<WalletUtxo> = Vec::new();
     let mut total = 0u64;
     let mut fee = 0u64;
+    let allow_immature_coinbase = std::env::var("IRIUM_TRIAL_ALLOW_IMMATURE_HTLC_FUNDS")
+        .ok()
+        .map(|v| matches!(v.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(false);
     for utxo in utxos.iter() {
         let confirmations = tip_height.saturating_sub(utxo.height);
-        if utxo.is_coinbase && confirmations < COINBASE_MATURITY {
+        if utxo.is_coinbase && confirmations < COINBASE_MATURITY && !allow_immature_coinbase {
             continue;
         }
         selected.push(utxo.clone());

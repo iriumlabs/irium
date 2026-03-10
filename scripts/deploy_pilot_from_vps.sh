@@ -13,6 +13,10 @@ require_cmd() { command -v "$1" >/dev/null 2>&1 || { echo "missing command: $1" 
 require_cmd git
 require_cmd ssh
 SSH_OPTS=(-i "$EU_SSH_KEY" -o BatchMode=yes -o StrictHostKeyChecking=accept-new)
+if ! sudo -n true 2>/dev/null; then
+  echo "passwordless sudo is required on VPS for deploy script (or run manual install steps)" >&2
+  exit 1
+fi
 
 cd /home/irium/irium-phase3
 if [[ "$ALLOW_DIRTY" != "1" ]] && [[ -n "$(git status --porcelain)" ]]; then
@@ -39,20 +43,21 @@ source "$HOME/.cargo/env" 2>/dev/null || true
 cargo build --release --bin iriumd --bin irium-miner --manifest-path "$PILOT_REPO/Cargo.toml"
 cargo build --manifest-path "$PILOT_REPO/tools/atomic-swap-coordinator/Cargo.toml" --release
 
-sudo mkdir -p /etc/irium-pilot
-sudo install -m 0644 "$PILOT_REPO/systemd/irium-pilot-node.service" /etc/systemd/system/irium-pilot-node.service
-sudo install -m 0644 "$PILOT_REPO/systemd/irium-pilot-coordinator.service" /etc/systemd/system/irium-pilot-coordinator.service
+sudo -n mkdir -p /etc/irium-pilot
+sudo -n install -m 0644 "$PILOT_REPO/systemd/irium-pilot-node.service" /etc/systemd/system/irium-pilot-node.service
+sudo -n install -m 0644 "$PILOT_REPO/systemd/irium-pilot-coordinator.service" /etc/systemd/system/irium-pilot-coordinator.service
 if [[ ! -f /etc/irium-pilot/node.env ]]; then
-  sudo install -m 0644 "$PILOT_REPO/configs/pilot/vps-node.env.example" /etc/irium-pilot/node.env
+  sudo -n install -m 0644 "$PILOT_REPO/configs/pilot/vps-node.env.example" /etc/irium-pilot/node.env
 fi
 if [[ ! -f /etc/irium-pilot/coordinator.env ]]; then
-  sudo install -m 0644 "$PILOT_REPO/configs/pilot/vps-coordinator.env.example" /etc/irium-pilot/coordinator.env
+  sudo -n install -m 0644 "$PILOT_REPO/configs/pilot/vps-coordinator.env.example" /etc/irium-pilot/coordinator.env
 fi
-sudo systemctl daemon-reload
-sudo systemctl enable irium-pilot-node irium-pilot-coordinator
-sudo systemctl restart irium-pilot-node irium-pilot-coordinator
+sudo -n systemctl daemon-reload
+sudo -n systemctl enable irium-pilot-node irium-pilot-coordinator
+sudo -n systemctl restart irium-pilot-node irium-pilot-coordinator
 
 ssh "${SSH_OPTS[@]}" "${EU_USER}@${EU_HOST}" "set -euo pipefail
+  sudo -n true >/dev/null 2>&1 || { echo "passwordless sudo required on EU for deploy script" >&2; exit 1; }
   BR='$PILOT_BRANCH'
   COMMIT='$COMMIT'
   REPO='$PILOT_REPO'
@@ -62,14 +67,14 @@ ssh "${SSH_OPTS[@]}" "${EU_USER}@${EU_HOST}" "set -euo pipefail
   git -C \"\$REPO\" checkout \"\$COMMIT\"
   source \"\$HOME/.cargo/env\" 2>/dev/null || true
   cargo build --release --bin iriumd --bin irium-miner --manifest-path \"\$REPO/Cargo.toml\"
-  sudo mkdir -p /etc/irium-pilot
-  sudo install -m 0644 \"\$REPO/systemd/irium-pilot-node.service\" /etc/systemd/system/irium-pilot-node.service
+  sudo -n mkdir -p /etc/irium-pilot
+  sudo -n install -m 0644 \"\$REPO/systemd/irium-pilot-node.service\" /etc/systemd/system/irium-pilot-node.service
   if [[ ! -f /etc/irium-pilot/node.env ]]; then
-    sudo install -m 0644 \"\$REPO/configs/pilot/eu-node.env.example\" /etc/irium-pilot/node.env
+    sudo -n install -m 0644 \"\$REPO/configs/pilot/eu-node.env.example\" /etc/irium-pilot/node.env
   fi
-  sudo systemctl daemon-reload
-  sudo systemctl enable irium-pilot-node
-  sudo systemctl restart irium-pilot-node
+  sudo -n systemctl daemon-reload
+  sudo -n systemctl enable irium-pilot-node
+  sudo -n systemctl restart irium-pilot-node
 "
 
 VPS_COMMIT=$(git -C "$PILOT_REPO" rev-parse HEAD)

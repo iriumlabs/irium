@@ -89,3 +89,12 @@ Expected:
 - Service layout: `docs/pilot_service_layout.md`
 - Rollback: `docs/pilot_rollback_procedure.md`
 - Branch policy: `docs/pilot_branch_strategy.md`
+
+## Pilot onboarding package
+- Tester guide: `docs/pilot_tester_guide.md`
+- FAQ: `docs/pilot_faq.md`
+- Operator live runbook: `docs/pilot_operator_live_runbook.md`
+- Metrics checklist: `docs/pilot_metrics_checklist.md`
+- Change control: `docs/pilot_change_control.md`
+- Go-live checklist: `docs/pilot_go_live_checklist.md`
+- Pre-open check script: `scripts/pilot_preopen_check.sh`

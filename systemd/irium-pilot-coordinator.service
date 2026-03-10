@@ -1,0 +1,18 @@
+[Unit]
+Description=Irium Atomic Swap Pilot Coordinator
+After=network-online.target irium-pilot-node.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=irium
+WorkingDirectory=/home/irium/irium-pilot/tools/atomic-swap-coordinator
+EnvironmentFile=/etc/irium-pilot/coordinator.env
+ExecStart=/home/irium/irium-pilot/tools/atomic-swap-coordinator/target/release/atomic-swap-coordinator
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

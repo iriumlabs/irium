@@ -75,3 +75,17 @@ Expected:
 - both hosts report the same commit hash (from GitHub branch)
 - runtime executable path is under repo checkout (`~/irium.../target/release/iriumd`)
 - no `/tmp` runtime process remains
+
+## Standardized pilot ops artifacts
+- Deploy/update script (run on code-master VPS): `scripts/deploy_pilot_from_vps.sh`
+- Host verification script (run on code-master VPS): `scripts/verify_pilot_hosts.sh`
+- Service layout: `docs/pilot_service_layout.md`
+- Rollback: `docs/pilot_rollback_procedure.md`
+- Branch policy: `docs/pilot_branch_strategy.md`
+
+## Standardized pilot ops artifacts
+- Deploy/update script (run on code-master VPS): `scripts/deploy_pilot_from_vps.sh`
+- Host verification script (run on code-master VPS): `scripts/verify_pilot_hosts.sh`
+- Service layout: `docs/pilot_service_layout.md`
+- Rollback: `docs/pilot_rollback_procedure.md`
+- Branch policy: `docs/pilot_branch_strategy.md`

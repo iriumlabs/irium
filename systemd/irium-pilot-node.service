@@ -1,0 +1,18 @@
+[Unit]
+Description=Irium Pilot Trial Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=irium
+WorkingDirectory=/home/irium/irium-pilot
+EnvironmentFile=/etc/irium-pilot/node.env
+ExecStart=/home/irium/irium-pilot/target/release/iriumd
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

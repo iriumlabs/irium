@@ -36,11 +36,11 @@ echo "eu_exe=$EU_EXE"
 [[ "$EU_EXE" == "$PILOT_REPO/target/release/iriumd" ]] || { echo "FAIL: eu not running repo pilot binary"; exit 1; }
 
 echo "[5] no /tmp runtime"
-if pgrep -fa '/tmp/htlc-tcbm/target/release/iriumd|iriumd \(deleted\)' >/dev/null; then
+if ps -eo pid,args | grep -E '/tmp/htlc-tcbm/target/release/iriumd|iriumd \(deleted\)' | grep -v grep >/dev/null; then
   echo "FAIL: vps has /tmp or deleted iriumd runtime"
   exit 1
 fi
-if ssh "${SSH_OPTS[@]}" "${EU_USER}@${EU_HOST}" "pgrep -fa '/tmp/htlc-tcbm/target/release/iriumd|iriumd \\(deleted\\)' >/dev/null"; then
+if ssh "${SSH_OPTS[@]}" "${EU_USER}@${EU_HOST}" "ps -eo pid,args | grep -E '/tmp/htlc-tcbm/target/release/iriumd|iriumd \\(deleted\\)' | grep -v grep >/dev/null"; then
   echo "FAIL: eu has /tmp or deleted iriumd runtime"
   exit 1
 fi

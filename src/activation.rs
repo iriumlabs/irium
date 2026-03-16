@@ -4,7 +4,7 @@ use std::env;
 ///
 /// Set this to `Some(<height>)` only after activation governance is complete.
 /// `None` keeps HTLCv1 disabled on mainnet.
-pub const MAINNET_HTLCV1_ACTIVATION_HEIGHT: Option<u64> = None;
+pub const MAINNET_HTLCV1_ACTIVATION_HEIGHT: Option<u64> = Some(18677);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NetworkKind {

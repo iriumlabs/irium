@@ -3,6 +3,8 @@ use std::collections::HashMap;
 use std::fs;
 use std::io::Write;
 use std::net::IpAddr;
+use std::net::Ipv4Addr;
+use std::net::Ipv6Addr;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -312,6 +314,12 @@ pub struct PeerDirectory {
     seed_manager: SeedlistManager,
     records: HashMap<String, PeerRecord>,
     last_flush: f64,
+    last_learned_log_at: f64,
+    suppressed_learned_bursts: usize,
+    suppressed_learned_total: usize,
+    suppressed_learned_private: usize,
+    suppressed_learned_duplicate: usize,
+    suppressed_learned_rate_limited: usize,
 }
 
 impl PeerDirectory {
@@ -336,6 +344,12 @@ impl PeerDirectory {
             seed_manager,
             records: HashMap::new(),
             last_flush: 0.0,
+            last_learned_log_at: 0.0,
+            suppressed_learned_bursts: 0,
+            suppressed_learned_total: 0,
+            suppressed_learned_private: 0,
+            suppressed_learned_duplicate: 0,
+            suppressed_learned_rate_limited: 0,
         };
         dir.load();
         dir
@@ -402,6 +416,79 @@ impl PeerDirectory {
                 );
             }
         }
+    }
+
+    fn is_private_or_unroutable(ip: &IpAddr) -> bool {
+        match ip {
+            IpAddr::V4(v4) => {
+                v4.is_private()
+                    || v4.is_loopback()
+                    || v4.is_link_local()
+                    || v4.is_broadcast()
+                    || v4.is_documentation()
+                    || v4.is_unspecified()
+                    || *v4 == Ipv4Addr::new(0, 0, 0, 0)
+            }
+            IpAddr::V6(v6) => {
+                v6.is_loopback()
+                    || v6.is_unspecified()
+                    || v6.is_unique_local()
+                    || v6.is_unicast_link_local()
+                    || (v6.segments()[0] == 0x2001 && v6.segments()[1] == 0x0db8)
+                    || *v6 == Ipv6Addr::LOCALHOST
+            }
+        }
+    }
+
+    fn flush_suppressed_learned_summary(&mut self, force: bool) {
+        if self.suppressed_learned_bursts == 0 {
+            return;
+        }
+        let now = now_secs();
+        if !force && self.last_learned_log_at > 0.0 && now - self.last_learned_log_at < 60.0 {
+            return;
+        }
+        eprintln!(
+            "peer_mgr: learned bursts suppressed={} peers={} private={} duplicate={} rate_limited={}",
+            self.suppressed_learned_bursts,
+            self.suppressed_learned_total,
+            self.suppressed_learned_private,
+            self.suppressed_learned_duplicate,
+            self.suppressed_learned_rate_limited,
+        );
+        self.suppressed_learned_bursts = 0;
+        self.suppressed_learned_total = 0;
+        self.suppressed_learned_private = 0;
+        self.suppressed_learned_duplicate = 0;
+        self.suppressed_learned_rate_limited = 0;
+        self.last_learned_log_at = now;
+    }
+
+    fn insert_peer_hint_inner(&mut self, multiaddr: String) -> Result<bool, &'static str> {
+        let normalized = normalize_seed(&multiaddr).ok_or("invalid")?;
+        let ip: IpAddr = normalized.parse().map_err(|_| "invalid")?;
+        if Self::is_private_or_unroutable(&ip) {
+            return Err("private");
+        }
+        if self.records.contains_key(&multiaddr) {
+            return Ok(false);
+        }
+        let t = now_secs();
+        self.records.insert(
+            multiaddr.clone(),
+            PeerRecord {
+                multiaddr,
+                agent: None,
+                last_seen: 0.0,
+                first_seen: t,
+                seen_days: Vec::new(),
+                relay_address: None,
+                last_height: None,
+                node_id: None,
+                dialable: false,
+            },
+        );
+        Ok(true)
     }
 
     fn flush(&mut self) {
@@ -490,25 +577,59 @@ impl PeerDirectory {
 
     /// Register a peer from a hint list without marking it active.
     pub fn register_peer_hint(&mut self, multiaddr: String) {
-        if self.records.contains_key(&multiaddr) {
+        if matches!(self.insert_peer_hint_inner(multiaddr), Ok(true)) {
+            self.flush();
+        }
+    }
+
+    /// Register a batch of learned peers and coalesce repetitive giant duplicate bursts.
+    pub fn register_peer_hints(&mut self, peers: Vec<String>, announced_by: Option<&str>) {
+        let mut accepted = 0usize;
+        let mut invalid = 0usize;
+        let mut private = 0usize;
+        let mut duplicate = 0usize;
+        for multiaddr in peers {
+            match self.insert_peer_hint_inner(multiaddr) {
+                Ok(true) => accepted += 1,
+                Ok(false) => duplicate += 1,
+                Err("private") => private += 1,
+                Err(_) => invalid += 1,
+            }
+        }
+        let total = accepted + invalid + private + duplicate;
+        if total == 0 {
             return;
         }
-        let t = now_secs();
-        self.records.insert(
-            multiaddr.clone(),
-            PeerRecord {
-                multiaddr,
-                agent: None,
-                last_seen: 0.0,
-                first_seen: t,
-                seen_days: Vec::new(),
-                relay_address: None,
-                last_height: None,
-                node_id: None,
-                dialable: false,
-            },
-        );
-        self.flush();
+        let suppressible_burst = accepted == 0
+            && invalid == 0
+            && total >= 1024
+            && private <= 4
+            && private + duplicate == total;
+        if suppressible_burst {
+            self.suppressed_learned_bursts = self.suppressed_learned_bursts.saturating_add(1);
+            self.suppressed_learned_total = self.suppressed_learned_total.saturating_add(total);
+            self.suppressed_learned_private = self.suppressed_learned_private.saturating_add(private);
+            self.suppressed_learned_duplicate = self.suppressed_learned_duplicate.saturating_add(duplicate);
+            self.flush_suppressed_learned_summary(false);
+        } else {
+            self.flush_suppressed_learned_summary(true);
+            eprintln!(
+                "peer_mgr: learned source={} total={} accepted={} dropped={} reason=invalid:{} private:{} duplicate:{} rate_limited:{} capped:{}",
+                announced_by.unwrap_or("unknown"),
+                total,
+                accepted,
+                invalid + private + duplicate,
+                invalid,
+                private,
+                duplicate,
+                0,
+                0,
+            );
+            self.last_learned_log_at = now_secs();
+        }
+        if accepted > 0 {
+            self.flush();
+        }
     }
 
     /// Mark a peer as seen without changing its metadata.

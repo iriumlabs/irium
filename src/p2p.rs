@@ -3969,10 +3969,9 @@ impl P2PNode {
                     }
                     MessageType::Peers => {
                         if let Ok(list) = PeersPayload::from_message(&msg) {
+                            let source = format!("/ip4/{}/tcp/{}", addr.ip(), addr.port());
                             let mut dir = dir.lock().await;
-                            for p in list.peers {
-                                dir.register_peer_hint(p);
-                            }
+                            dir.register_peer_hints(list.peers, Some(&source));
                         }
                     }
                     MessageType::GetHeaders => {
@@ -5964,10 +5963,9 @@ async fn handle_incoming_with_sybil(
             }
             MessageType::Peers => {
                 if let Ok(list) = PeersPayload::from_message(&msg) {
+                    let source = format!("/ip4/{}/tcp/{}", addr.ip(), addr.port());
                     let mut dir = directory.lock().await;
-                    for p in list.peers {
-                        dir.register_peer_hint(p);
-                    }
+                    dir.register_peer_hints(list.peers, Some(&source));
                 }
             }
 

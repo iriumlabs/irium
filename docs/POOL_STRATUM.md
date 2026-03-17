@@ -1,3 +1,8 @@
+## Source Repository
+
+- Stratum source repo: https://github.com/iriumlabs/irium-stratum
+- Build/deploy the pool from that repository, not from this irium repo.
+
 # Irium Public Stratum Pool
 
 ## Quickstart (miners)

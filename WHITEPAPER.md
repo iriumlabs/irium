@@ -49,7 +49,7 @@ Most established proof-of-work networks inherit architectural assumptions from B
 | Block Time | 600 seconds (10 minutes) |
 | Initial Reward | 50 IRM |
 | Halving Interval | 210,000 blocks (~4 years) |
-| Difficulty Retarget | 2016 blocks (~14 days) |
+| Difficulty Retarget | 2016-block retarget until height 16,462, then LWMA |
 | Coinbase Maturity | 100 blocks |
 | Min Transaction Fee | 0.0001 IRM (10,000 satoshis) |
 | P2P Port | 38291 |
@@ -114,16 +114,18 @@ valid_block = block_hash < target
 ### 3.2 Difficulty Adjustment
 
 **Target:** 600 seconds per block (10 minutes)
-**Retarget Interval:** Every 2016 blocks (~14 days)
+**Retarget:** Bitcoin-style 2016-block adjustment until mainnet height 16,462, then LWMA
 
-**Algorithm:**
+**Implementation note:** Mainnet keeps SHA-256d and the 10-minute target. The scheduled code-defined activation height for LWMA is 16,462.
+
+**Pre-activation algorithm:**
 ```text
 expected_time = 2016 * 600  # 1,209,600 seconds
 actual_time = last_block_time - first_block_time
 new_difficulty = old_difficulty * (actual_time / expected_time)
 ```
 
-Adjustments are clamped to prevent manipulation.
+After activation, LWMA derives the next target from recent solve times while preserving the same PoW and block target cadence.
 
 ### 3.3 Block Validation
 
@@ -643,16 +645,16 @@ Irium represents a new generation of blockchain technology that addresses fundam
 
 *Built for true decentralization*
 
-## 9. Difficulty Adjustment (v1.0 Release)
+## 9. Difficulty Adjustment (Mainnet)
 
-**v1.0 uses standard Bitcoin difficulty:** 0x1d00ffff
+**Genesis launched at standard Bitcoin difficulty:** 0x1d00ffff
 
 The genesis block was mined with proper Bitcoin-standard difficulty calculation:
 
 - **Difficulty bits**: 0x1d00ffff (standard Bitcoin genesis difficulty)
 - **Expected block time**: ~10 minutes
 - **Proper PoW validation**: No hardcoded overrides
-- **Automatic adjustment**: Every 2016 blocks (~14 days)
+- **Automatic adjustment**: Bitcoin-style retarget until height 16,462, then LWMA
 
 ### Technical Implementation
 

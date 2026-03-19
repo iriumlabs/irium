@@ -207,7 +207,7 @@
 </tr>
 <tr>
 <td>Difficulty Retarget</td>
-<td>2016 blocks (~14 days)</td>
+<td>2016-block retarget until height 16,462, then LWMA</td>
 </tr>
 <tr>
 <td>Coinbase Maturity</td>
@@ -271,13 +271,14 @@ valid_block = block_hash &lt; target
 - Mined: January 5, 2026</p>
 <h3>3.2 Difficulty Adjustment</h3>
 <p><strong>Target:</strong> 600 seconds per block (10 minutes)
-<strong>Retarget Interval:</strong> Every 2016 blocks (~14 days)</p>
-<p><strong>Algorithm:</strong></p>
+<strong>Retarget:</strong> Bitcoin-style 2016-block adjustment until mainnet height 16,462, then LWMA</p>
+<p><strong>Implementation note:</strong> Mainnet keeps SHA-256d and the 10-minute target. The scheduled code-defined activation height for LWMA is 16,462.</p>
+<p><strong>Pre-activation algorithm:</strong></p>
 <pre><code class="language-text">expected_time = 2016 * 600  # 1,209,600 seconds
 actual_time = last_block_time - first_block_time
 new_difficulty = old_difficulty * (actual_time / expected_time)
 </code></pre>
-<p>Adjustments are clamped to prevent manipulation.</p>
+<p>After activation, LWMA derives the next target from recent solve times while preserving the same PoW and block target cadence.</p>
 <h3>3.3 Block Validation</h3>
 <p>Each block must satisfy:
 1. <code>block_hash &lt; target</code> (proof-of-work)
@@ -751,14 +752,14 @@ Nonce (4 bytes)
 <strong>MIT License - Open Source</strong></p>
 <p><em>Built for true decentralization</em></p>
 </div>
-<div class="wp-section"><h2>9. Difficulty Adjustment (v1.0 Release)</h2>
-<p><strong>v1.0 uses standard Bitcoin difficulty:</strong> 0x1d00ffff</p>
+<div class="wp-section"><h2>9. Difficulty Adjustment (Mainnet)</h2>
+<p><strong>Genesis launched at standard Bitcoin difficulty:</strong> 0x1d00ffff</p>
 <p>The genesis block was mined with proper Bitcoin-standard difficulty calculation:</p>
 <ul>
 <li><strong>Difficulty bits</strong>: 0x1d00ffff (standard Bitcoin genesis difficulty)</li>
 <li><strong>Expected block time</strong>: ~10 minutes</li>
 <li><strong>Proper PoW validation</strong>: No hardcoded overrides</li>
-<li><strong>Automatic adjustment</strong>: Every 2016 blocks (~14 days)</li>
+<li><strong>Automatic adjustment</strong>: Bitcoin-style retarget until height 16,462, then LWMA</li>
 </ul>
 <h3>Technical Implementation</h3>
 <pre><code class="language-text"># Standard Bitcoin compact target calculation

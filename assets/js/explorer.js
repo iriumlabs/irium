@@ -131,33 +131,111 @@ async function fetchJson(path) {
   throw new Error(errors[0] || 'Fetch failed');
 }
 
+function formatHeightMetric(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return 'Unavailable';
+  return n.toLocaleString();
+}
+
+function formatAgeSeconds(seconds) {
+  const n = Number(seconds);
+  if (!Number.isFinite(n) || n < 0) return 'just now';
+  if (n < 60) return `${Math.round(n)}s`;
+  if (n < 3600) return `${Math.round(n / 60)}m`;
+  return `${Math.round(n / 3600)}h`;
+}
+
+function setMetricText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
+
+function confidenceLabel(confidence) {
+  switch ((confidence || '').toLowerCase()) {
+    case 'high': return 'High';
+    case 'medium': return 'Medium';
+    case 'low': return 'Low';
+    default: return 'Unknown';
+  }
+}
+
 // Load statistics
 async function loadStats() {
   try {
     console.log('Loading stats...');
-    const data = await fetchJson('/stats');
-    console.log('Stats loaded:', data);
-    const heightEl = document.getElementById('current-height');
-    const blocksEl = document.getElementById('total-blocks');
+    const [statsData, networkData] = await Promise.all([
+      fetchJson('/stats'),
+      fetchJson('/network/status').catch((error) => {
+        console.warn('Network status unavailable, falling back to local stats:', error);
+        return null;
+      })
+    ]);
+    console.log('Stats loaded:', statsData, networkData);
+
+    const networkHeight = networkData?.network_height ?? statsData.height ?? 0;
+    const explorerIndexedHeight = networkData?.explorer_indexed_height ?? statsData.height ?? 0;
+    const bestObservedHeight = networkData?.best_observed_height ?? networkHeight;
+
+    setMetricText('network-height', formatHeightMetric(networkHeight));
+    setMetricText('explorer-indexed-height', formatHeightMetric(explorerIndexedHeight));
+    setMetricText('best-observed-height', formatHeightMetric(bestObservedHeight));
+
     const supplyEl = document.getElementById('total-supply');
-    if (heightEl) heightEl.textContent = data.height ?? '0';
-    if (blocksEl) blocksEl.textContent = data.total_blocks ?? (data.total ?? '0');
-    if (supplyEl) supplyEl.textContent = ((data.supply_irm ?? 0)).toFixed(2) + ' IRM';
+    if (supplyEl) supplyEl.textContent = ((statsData.supply_irm ?? 0)).toFixed(2) + ' IRM';
+
     const peersEl = document.getElementById('live-peers');
-    if (peersEl) peersEl.textContent = String(data.peers_connected ?? data.peer_count ?? '0');
+    if (peersEl) peersEl.textContent = String(statsData.peers_connected ?? statsData.peer_count ?? '0');
+
     const minersEl = document.getElementById('live-miners');
     if (minersEl) {
-      const am = data.active_miners;
+      const am = statsData.active_miners;
       minersEl.textContent = (am == null) ? 'Loading...' : String(am);
     }
 
     const su = document.getElementById('stats-updated');
-    if (su) su.textContent = 'Updated ' + new Date().toLocaleTimeString();
+    if (su) {
+      if (networkData) {
+        const age = formatAgeSeconds(networkData.last_updated_secs_ago);
+        su.textContent = 'Last updated ' + age + ' ago';
+        if (networkData.updated_at_unix) {
+          su.title = new Date(networkData.updated_at_unix * 1000).toLocaleString();
+        }
+      } else {
+        su.textContent = 'Updated ' + new Date().toLocaleTimeString();
+        su.title = '';
+      }
+    }
+
+    const noteEl = document.getElementById('network-status-note');
+    if (noteEl) {
+      const noteParts = ['Network data aggregated from trusted nodes.'];
+      if (networkData) {
+        noteParts.push(`Confidence: ${confidenceLabel(networkData.confidence)}.`);
+        if (Number.isFinite(Number(networkData.healthy_sources)) && Number.isFinite(Number(networkData.total_sources))) {
+          noteParts.push(`Healthy sources: ${networkData.healthy_sources}/${networkData.total_sources}.`);
+        }
+        const lag = Number(networkHeight) - Number(explorerIndexedHeight);
+        if (Number.isFinite(lag) && lag > 0) {
+          noteParts.push(`Explorer indexing ${lag} block${lag === 1 ? '' : 's'} behind.`);
+        }
+        if ((networkData.confidence || '').toLowerCase() === 'low') {
+          noteParts.push('Network data uncertain.');
+        }
+        if (Array.isArray(networkData.notes) && networkData.notes.length > 0) {
+          noteParts.push(networkData.notes.join(' '));
+        }
+      } else {
+        noteParts.push('Using this explorer node only until network aggregation data is available.');
+      }
+      noteEl.textContent = noteParts.join(' ');
+    }
   } catch (error) {
     console.error('Error loading stats:', error);
-    for (const id of ['current-height','total-blocks','total-supply']) {
+    for (const id of ['network-height','explorer-indexed-height','best-observed-height','total-supply']) {
       const el = document.getElementById(id); if (el) el.textContent = 'Error';
     }
+    const noteEl = document.getElementById('network-status-note');
+    if (noteEl) noteEl.textContent = 'Unable to load network status right now.';
   }
 }
 
@@ -209,8 +287,6 @@ async function loadMiningMetrics() {
     const g24 = (m.difficulty_change_24h_pct != null) ? fmtPct(m.difficulty_change_24h_pct) : 'N/A';
     const stable = (g1 === '+0.00%' || g1 === '0.00%') && (g24 === '+0.00%' || g24 === '0.00%');
     if (elGrowth) elGrowth.textContent = stable ? 'Stable' : (g1 + ' / ' + g24);
-    const su = document.getElementById('stats-updated');
-    if (su) su.textContent = 'Updated ' + new Date().toLocaleTimeString();
   } catch (error) {
     console.error('Error loading mining metrics:', error);
     if (elHash) elHash.textContent = 'Error';

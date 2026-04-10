@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="Learn what settlement-first means for Irium and how the live PoW chain connects to escrow, agreements, and proof-based commerce.">
+<meta name="description" content="Understand Irium’s settlement-first direction and how the live PoW chain connects to escrow, agreements, and proof-based commerce.">
 <title>Settlement | Irium</title>
 <link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=4">
 <link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
@@ -11,34 +11,34 @@
 <style>
   :root {
     --settlement-line: rgba(147, 176, 226, 0.14);
-    --settlement-line-strong: rgba(110, 208, 255, 0.28);
+    --settlement-line-strong: rgba(110, 208, 255, 0.3);
     --settlement-text: #edf4ff;
     --settlement-muted: #a7b8d3;
     --settlement-soft: #8092af;
-    --settlement-panel: linear-gradient(165deg, rgba(16, 24, 42, 0.8), rgba(8, 12, 23, 0.92));
-    --settlement-shadow: 0 22px 48px rgba(0, 0, 0, 0.26);
+    --settlement-panel: linear-gradient(165deg, rgba(14, 20, 35, 0.82), rgba(8, 12, 23, 0.92));
+    --settlement-shadow: 0 22px 48px rgba(0, 0, 0, 0.24);
   }
 
   .settlement-page .hero {
     min-height: auto;
-    padding: 7.4rem 0 3.4rem;
+    padding: 7.25rem 0 2.6rem;
     position: relative;
   }
 
   .settlement-page .hero::before {
     content: "";
     position: absolute;
-    inset: 6% 10% auto;
-    height: 300px;
+    inset: 5% 12% auto;
+    height: 240px;
     border-radius: 999px;
-    background: linear-gradient(90deg, rgba(141, 125, 255, 0.18), rgba(110, 198, 255, 0.22));
-    filter: blur(92px);
-    opacity: .76;
+    background: linear-gradient(90deg, rgba(141,125,255,.16), rgba(110,198,255,.22));
+    filter: blur(84px);
+    opacity: .72;
     z-index: 1;
   }
 
   .settlement-page .container {
-    width: min(1140px, 92vw);
+    width: min(1160px, 92vw);
   }
 
   .settlement-main {
@@ -46,8 +46,9 @@
     z-index: 3;
   }
 
-  .settlement-kicker,
-  .settlement-section-kicker,
+  .settlement-eyebrow,
+  .settlement-section-label,
+  .settlement-note-label,
   .settlement-phase-label {
     margin: 0;
     color: #97bbff;
@@ -57,46 +58,63 @@
     text-transform: uppercase;
   }
 
-  .settlement-hero-wrap {
-    display: grid;
-    gap: 2.3rem;
+  .settlement-header {
+    max-width: 840px;
   }
 
-  .settlement-hero {
-    display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
-    gap: 2.6rem;
-    align-items: end;
-  }
-
-  .settlement-kicker {
+  .settlement-eyebrow {
     margin-bottom: 1rem;
   }
 
   .settlement-title {
-    margin: 0 0 1rem;
-    max-width: 11ch;
+    margin: 0;
+    max-width: 12ch;
     color: var(--settlement-text);
     font-family: "Sora", sans-serif;
-    font-size: clamp(3rem, 6.3vw, 5.2rem);
-    line-height: .96;
-    letter-spacing: -.06em;
+    font-size: clamp(2.9rem, 6vw, 4.9rem);
+    line-height: .98;
+    letter-spacing: -.055em;
   }
 
-  .settlement-subtitle {
-    margin: 0 0 1rem;
-    max-width: 46rem;
+  .settlement-dek {
+    margin: 1.15rem 0 0;
+    max-width: 48rem;
     color: #f4f8ff;
-    font-size: clamp(1.08rem, 2vw, 1.4rem);
-    line-height: 1.56;
+    font-size: clamp(1.05rem, 1.9vw, 1.32rem);
+    line-height: 1.62;
   }
 
   .settlement-intro {
-    margin: 0;
-    max-width: 45rem;
+    margin: 1rem 0 0;
+    max-width: 46rem;
     color: var(--settlement-muted);
-    line-height: 1.9;
-    font-size: 1rem;
+    line-height: 1.86;
+    font-size: .98rem;
+  }
+
+  .settlement-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .7rem;
+    margin-top: 1.5rem;
+  }
+
+  .settlement-meta-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .45rem;
+    padding: .52rem .8rem;
+    border-radius: 999px;
+    border: 1px solid rgba(110, 208, 255, 0.16);
+    background: rgba(12, 18, 32, 0.58);
+    color: #d8ecff;
+    font-size: .82rem;
+    line-height: 1.2;
+  }
+
+  .settlement-meta-pill strong {
+    color: #f3f8ff;
+    font-weight: 600;
   }
 
   .settlement-actions {
@@ -111,181 +129,130 @@
     text-align: center;
   }
 
-  .settlement-hero-panel {
-    border: 1px solid rgba(147, 176, 226, 0.14);
-    border-radius: 30px;
-    background:
-      radial-gradient(260px 160px at 100% 0%, rgba(141, 125, 255, 0.1), transparent 70%),
-      radial-gradient(220px 140px at 0% 100%, rgba(110, 208, 255, 0.08), transparent 72%),
-      var(--settlement-panel);
-    box-shadow: var(--settlement-shadow), inset 0 1px 0 rgba(255,255,255,.04);
-    padding: 1.55rem;
-  }
-
-  .settlement-hero-panel h3 {
-    margin: 0 0 1rem;
-    color: var(--settlement-text);
-    font-size: 1.12rem;
-  }
-
-  .settlement-status-list {
-    display: grid;
-    gap: .95rem;
-  }
-
-  .settlement-status-item {
-    padding-bottom: .95rem;
-    border-bottom: 1px solid rgba(147, 176, 226, 0.1);
-  }
-
-  .settlement-status-item:last-child {
-    padding-bottom: 0;
-    border-bottom: 0;
-  }
-
-  .settlement-status-item strong,
-  .settlement-signal strong,
-  .settlement-row-title,
-  .settlement-side-title,
-  .settlement-principle-title,
-  .settlement-phase-title {
-    display: block;
-    margin-bottom: .24rem;
-    color: #eef8ff;
-    font-family: "Sora", sans-serif;
-    font-size: .94rem;
-  }
-
-  .settlement-status-item span,
-  .settlement-signal span,
-  .settlement-row-copy,
-  .settlement-side-copy,
-  .settlement-principle-copy,
-  .settlement-phase-copy,
-  .settlement-prose p,
-  .settlement-section-copy,
-  .settlement-hero-footnote {
-    display: block;
-    color: var(--settlement-muted);
-    line-height: 1.72;
-    font-size: .94rem;
-  }
-
-  .settlement-status-tag {
-    display: inline-flex;
-    margin-bottom: 1rem;
-    padding: .38rem .72rem;
-    border-radius: 999px;
-    border: 1px solid rgba(110, 208, 255, 0.18);
-    background: rgba(110, 208, 255, 0.07);
-    color: #c9f1ff;
-    font-family: "Sora", sans-serif;
-    font-size: .74rem;
-    letter-spacing: .1em;
-    text-transform: uppercase;
-  }
-
-  .settlement-signal-row {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 1rem;
-    padding-top: 1.3rem;
-    border-top: 1px solid var(--settlement-line);
-  }
-
-  .settlement-signal {
-    padding-top: .95rem;
-    border-top: 2px solid rgba(110, 208, 255, 0.18);
-  }
-
   .settlement-divider {
     height: 1px;
-    margin: 3.35rem 0;
+    margin: 2.6rem 0 0;
     background: linear-gradient(90deg, rgba(147,176,226,0.04), rgba(110,208,255,0.28), rgba(147,176,226,0.04));
   }
 
-  .settlement-section {
+  .settlement-article-wrap {
     display: grid;
-    gap: 1.5rem;
-  }
-
-  .settlement-section-head {
-    max-width: 860px;
-  }
-
-  .settlement-section-kicker {
-    margin-bottom: .45rem;
-  }
-
-  .settlement-section-title {
-    margin: 0 0 .65rem;
-    color: var(--settlement-text);
-    font-size: clamp(1.8rem, 3vw, 2.45rem);
-    letter-spacing: -.04em;
-    line-height: 1.08;
-  }
-
-  .settlement-section-copy {
-    margin: 0;
-    max-width: 52rem;
-    line-height: 1.88;
-  }
-
-  .settlement-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.15fr) minmax(320px, .85fr);
-    gap: 2.35rem;
+    grid-template-columns: minmax(0, 760px) minmax(240px, 300px);
+    gap: 3.2rem;
     align-items: start;
+    padding: 3rem 0 4.75rem;
   }
 
-  .settlement-prose p + p {
+  .settlement-article {
+    max-width: 760px;
+  }
+
+  .settlement-section + .settlement-section {
+    margin-top: 3rem;
+    padding-top: 3rem;
+    border-top: 1px solid var(--settlement-line);
+  }
+
+  .settlement-section-label {
+    margin-bottom: .75rem;
+  }
+
+  .settlement-section h2 {
+    margin: 0 0 .95rem;
+    color: var(--settlement-text);
+    font-family: "Sora", sans-serif;
+    font-size: clamp(1.7rem, 2.4vw, 2.3rem);
+    line-height: 1.08;
+    letter-spacing: -.04em;
+  }
+
+  .settlement-section p,
+  .settlement-section li,
+  .settlement-section blockquote {
+    color: var(--settlement-muted);
+    font-size: 1rem;
+    line-height: 1.9;
+  }
+
+  .settlement-section p {
+    margin: 0;
+  }
+
+  .settlement-section p + p,
+  .settlement-section ul + p,
+  .settlement-section blockquote + p,
+  .settlement-callout + p,
+  .settlement-roadmap + p {
     margin-top: 1rem;
   }
 
-  .settlement-side-stack {
-    display: grid;
-    gap: 1rem;
+  .settlement-callout {
+    margin: 1.4rem 0;
+    padding: 1.2rem 0 1.2rem 1.2rem;
+    border-left: 2px solid rgba(110, 208, 255, 0.28);
   }
 
-  .settlement-side-item {
-    padding-left: 1rem;
-    border-left: 2px solid rgba(110, 208, 255, 0.2);
+  .settlement-callout strong,
+  .settlement-subsection h3,
+  .settlement-aside h3,
+  .settlement-phase-title {
+    display: block;
+    color: #f0f7ff;
+    font-family: "Sora", sans-serif;
+    font-size: 1rem;
+    line-height: 1.45;
   }
 
-  .settlement-rows {
+  .settlement-subsections {
     display: grid;
-    gap: 0;
+    gap: 1.5rem;
+    margin-top: 1.5rem;
+  }
+
+  .settlement-subsection {
+    padding-top: 1.1rem;
     border-top: 1px solid var(--settlement-line);
   }
 
-  .settlement-row {
-    display: grid;
-    grid-template-columns: minmax(190px, 230px) minmax(0, 1fr);
-    gap: 1rem 1.5rem;
-    padding: 1.15rem 0;
+  .settlement-subsection p {
+    margin-top: .4rem;
+  }
+
+  .settlement-list {
+    margin: 1.1rem 0 0;
+    padding: 0;
+    list-style: none;
+    border-top: 1px solid var(--settlement-line);
+  }
+
+  .settlement-list li {
+    padding: .95rem 0;
     border-bottom: 1px solid var(--settlement-line);
   }
 
-  .settlement-principles {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1.15rem 1.6rem;
+  .settlement-list strong {
+    color: #eef8ff;
+    font-weight: 600;
   }
 
-  .settlement-principle {
-    padding-top: 1rem;
-    border-top: 1px solid var(--settlement-line);
+  .settlement-quote {
+    margin: 1.6rem 0;
+    padding: 1.1rem 0 1.1rem 1.2rem;
+    border-left: 2px solid rgba(141, 125, 255, 0.34);
+    color: #dcecff;
+    font-family: "Sora", sans-serif;
+    font-size: 1.08rem;
+    line-height: 1.75;
+    letter-spacing: -.01em;
   }
 
   .settlement-roadmap {
     display: grid;
-    gap: 1.25rem;
+    gap: 1.4rem;
+    margin-top: 1.4rem;
   }
 
   .settlement-phase {
-    display: grid;
-    grid-template-columns: 150px minmax(0, 1fr);
-    gap: 1.5rem;
     padding-top: 1rem;
     border-top: 1px solid var(--settlement-line);
   }
@@ -294,36 +261,87 @@
     border-top-color: var(--settlement-line-strong);
   }
 
-  .settlement-closing {
-    text-align: center;
+  .settlement-phase-label {
+    margin-bottom: .5rem;
   }
 
-  .settlement-closing p {
-    margin: 0 auto;
-    max-width: 52rem;
+  .settlement-phase p {
+    margin-top: .35rem;
+  }
+
+  .settlement-aside {
+    position: sticky;
+    top: 96px;
+    display: grid;
+    gap: 1rem;
+  }
+
+  .settlement-aside-panel {
+    padding: 1.15rem 1.15rem 1.2rem;
+    border: 1px solid rgba(147, 176, 226, 0.14);
+    border-radius: 22px;
+    background:
+      radial-gradient(240px 140px at 100% 0%, rgba(141, 125, 255, 0.08), transparent 72%),
+      radial-gradient(180px 110px at 0% 100%, rgba(110, 208, 255, 0.08), transparent 74%),
+      var(--settlement-panel);
+    box-shadow: var(--settlement-shadow), inset 0 1px 0 rgba(255,255,255,.04);
+  }
+
+  .settlement-note-label {
+    margin-bottom: .75rem;
+  }
+
+  .settlement-aside p,
+  .settlement-aside li,
+  .settlement-aside a {
     color: var(--settlement-muted);
-    line-height: 1.88;
+    font-size: .93rem;
+    line-height: 1.7;
+    text-decoration: none;
+  }
+
+  .settlement-aside ul {
+    margin: .85rem 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .settlement-aside li + li {
+    margin-top: .65rem;
+    padding-top: .65rem;
+    border-top: 1px solid rgba(147, 176, 226, 0.1);
+  }
+
+  .settlement-toc a:hover {
+    color: #eef8ff;
+  }
+
+  .settlement-end-links {
+    display: flex;
+    flex-direction: column;
+    gap: .7rem;
+    margin-top: .85rem;
   }
 
   @media (max-width: 980px) {
-    .settlement-hero,
-    .settlement-grid,
-    .settlement-row,
-    .settlement-phase,
-    .settlement-signal-row,
-    .settlement-principles {
+    .settlement-article-wrap {
       grid-template-columns: 1fr;
+      gap: 2rem;
     }
 
-    .settlement-title {
-      max-width: none;
+    .settlement-aside {
+      position: static;
     }
   }
 
   @media (max-width: 720px) {
     .settlement-page .hero {
-      padding-top: 6.25rem;
-      padding-bottom: 2.7rem;
+      padding-top: 6.15rem;
+      padding-bottom: 2.1rem;
+    }
+
+    .settlement-title {
+      max-width: none;
     }
 
     .settlement-actions {
@@ -333,11 +351,6 @@
     .settlement-actions .btn {
       width: 100%;
       min-width: 0;
-    }
-
-    .settlement-hero-panel {
-      border-radius: 22px;
-      padding: 1.2rem;
     }
   }
 </style>
@@ -373,146 +386,163 @@
 
 <section class="hero">
   <div class="container settlement-main">
-    <div class="settlement-hero-wrap">
-      <div class="settlement-hero">
-        <div>
-          <p class="settlement-kicker">Settlement-First Blockchain</p>
-          <h1 class="settlement-title">The blockchain for agreements, not just payments.</h1>
-          <p class="settlement-subtitle">Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce.</p>
-          <p class="settlement-intro">The live network is already an independent SHA-256d Proof-of-Work chain built from scratch in Rust. Its broader direction is trust-minimized commercial settlement built around objective rules, verifiable outcomes, and a narrow consensus model with no admin keys or override powers.</p>
-          <div class="settlement-actions">
-            <a href="https://www.iriumlabs.org/whitepaper.html" class="btn btn-primary">Read Whitepaper</a>
-            <a href="https://www.iriumlabs.org/explorer/" class="btn btn-secondary">View Explorer</a>
-            <a href="https://www.iriumlabs.org/docs/mining/" class="btn btn-secondary">Start Mining</a>
+    <header class="settlement-header">
+      <p class="settlement-eyebrow">Settlement Overview</p>
+      <h1 class="settlement-title">Irium is being built for agreements, not just transfers.</h1>
+      <p class="settlement-dek">Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce. The live network is an independent SHA-256d Proof-of-Work chain. The broader direction is trust-minimized settlement built around objective rules and verifiable outcomes.</p>
+      <p class="settlement-intro">This page is meant to explain the logic behind that positioning in plain terms: what settlement-first means, why payments are not enough, what is already live, what is under active development, and what remains planned. Mining still matters because miners secure the public base layer this direction depends on.</p>
+      <div class="settlement-meta">
+        <span class="settlement-meta-pill"><strong>Live</strong> independent SHA-256d PoW chain and public infrastructure</span>
+        <span class="settlement-meta-pill"><strong>In development</strong> agreement anchoring, escrow direction, and refund logic</span>
+        <span class="settlement-meta-pill"><strong>Planned</strong> proof automation and broader commercial tooling</span>
+      </div>
+      <div class="settlement-actions">
+        <a href="https://www.iriumlabs.org/whitepaper.html" class="btn btn-primary">Read Whitepaper</a>
+        <a href="https://www.iriumlabs.org/docs/mining/" class="btn btn-secondary">Start Mining</a>
+      </div>
+    </header>
+    <div class="settlement-divider"></div>
+
+    <div class="settlement-article-wrap">
+      <article class="settlement-article">
+        <section class="settlement-section" id="meaning">
+          <p class="settlement-section-label">What Settlement-First Means</p>
+          <h2>Most chains move value. Settlement infrastructure is about outcomes.</h2>
+          <p>Many blockchains are primarily framed as payment systems. They move assets from one address to another and treat the transfer itself as the finished job. Irium is being positioned around a different problem: how a blockchain can support agreements, escrow, release conditions, refunds, and proof-linked outcomes without turning consensus into subjective arbitration.</p>
+          <p>A settlement-first chain is not simply a chain with extra labels around payments. It is a chain whose design direction is oriented toward whether an agreement can be anchored, whether a timeout can be defined, whether a release or refund path can be objective, and whether outcomes can be validated without granting special override power to an admin or foundation.</p>
+          <blockquote class="settlement-quote">Trust-minimized outcomes, not just payments.</blockquote>
+          <p>That distinction matters because real commerce usually depends on more than sending value. The difficult part is often deciding what should happen next, under what conditions, and how that result can be verified in a rules-based way.</p>
+        </section>
+
+        <section class="settlement-section" id="payments">
+          <p class="settlement-section-label">Why Payments Are Not Enough</p>
+          <h2>Real-world transactions usually involve release conditions, fallback paths, and proofs.</h2>
+          <p>If two parties are making an OTC trade, funding a contractor milestone, placing a preorder, or handling a business deposit, the main problem is rarely just sending funds. The harder problem is defining what happens if one side completes, delays, disappears, disputes, or fails to respond.</p>
+          <div class="settlement-callout">
+            <strong>Payments can move money.</strong>
+            <p>Settlement defines what happens before release, after non-response, at timeout, or when a verifiable condition is met.</p>
+          </div>
+          <ul class="settlement-list">
+            <li><strong>OTC escrow:</strong> Safer peer-to-peer trades often need release rules, timeout handling, and defined fallback behavior.</li>
+            <li><strong>Contractor payments:</strong> Milestone releases, delayed holdbacks, and proof of completion sit outside the model of a simple transfer.</li>
+            <li><strong>Deposits and preorders:</strong> Refund logic and response windows can matter as much as the original payment.</li>
+            <li><strong>Business settlement:</strong> Commercial agreements often require evidence paths and objective release or refund outcomes.</li>
+          </ul>
+        </section>
+
+        <section class="settlement-section" id="principles">
+          <p class="settlement-section-label">Objective-Only Consensus</p>
+          <h2>The protocol should stay narrow, deterministic, and verifiable.</h2>
+          <p>Irium’s settlement direction does not imply that subjective human judgment should move into consensus. The opposite is true. If the chain is going to support serious commercial settlement, it needs to be disciplined about what belongs inside consensus and what does not.</p>
+          <p>No admin keys, no override powers, no freeze mechanism, and no centralized dispute authority in consensus are part of that stance. Settlement should be rules-based and verifiable. Where proofs, signatures, attestors, or timeout logic are involved, those paths should remain explicit and objective rather than dependent on a privileged actor.</p>
+          <div class="settlement-subsections">
+            <div class="settlement-subsection">
+              <h3>Agreement anchoring</h3>
+              <p>Agreement hashes, references, and supporting metadata can bind commercial context to immutable chain state.</p>
+            </div>
+            <div class="settlement-subsection">
+              <h3>Escrow and refund logic</h3>
+              <p>Settlement outputs and timeout refunds are part of the practical direction because many transactions need more than one-way transfer finality.</p>
+            </div>
+            <div class="settlement-subsection">
+              <h3>Proof-linked paths</h3>
+              <p>Approved attestors, verifiable signatures, and objective evidence paths are roadmap directions only where they can be evaluated without broadening consensus into subjective governance.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="settlement-section" id="foundation">
+          <p class="settlement-section-label">Why Irium Differs</p>
+          <h2>The settlement narrative is built on a live mineable chain, not on marketing abstractions.</h2>
+          <p>Irium is already live as an independent SHA-256d Proof-of-Work network built from scratch in Rust. It is not a fork. It launched without a premine, without an ICO or presale, and without VC control. Public mining, a public pool, an explorer, and a mining calculator are already part of the project’s live infrastructure.</p>
+          <p>The chain foundation still matters. DNS-free bootstrap, resilient peer discovery, Sybil-resistant networking, anchor checkpoints, on-chain metadata support, light-client-oriented architecture, and transparent founder vesting remain part of the story because they are the base layer that any broader settlement direction depends on.</p>
+          <p>Mining is still important. The difference is that mining is no longer the entire identity of the project. It is the mechanism that secures a public settlement-first base layer.</p>
+        </section>
+
+        <section class="settlement-section" id="use-cases">
+          <p class="settlement-section-label">Use Cases</p>
+          <h2>The direction is aimed at specific commercial flows.</h2>
+          <p>The settlement-first framing is meant to support concrete use cases rather than generic crypto language. These examples describe the direction of the protocol and infrastructure. They should not be read as a claim that every settlement primitive below is already fully deployed in production today.</p>
+          <ul class="settlement-list">
+            <li><strong>OTC escrow:</strong> Safer trading flows with defined release, refund, and timeout handling.</li>
+            <li><strong>Contractor and service payments:</strong> Milestone-based release logic, delayed holdbacks, and proof-linked completion paths.</li>
+            <li><strong>Deposits and preorders:</strong> Clear fallback rules if delivery, shipment, or response does not occur.</li>
+            <li><strong>Milestone settlement:</strong> Staged payouts tied to objective checkpoints rather than all-or-nothing transfers.</li>
+            <li><strong>Verifiable commercial agreements:</strong> Agreement references on-chain with future proof-oriented settlement tooling layered on top.</li>
+          </ul>
+        </section>
+
+        <section class="settlement-section" id="roadmap">
+          <p class="settlement-section-label">Roadmap Phases</p>
+          <h2>What is live, what is being built, and what comes next.</h2>
+          <p>The most important thing in this positioning is to stay honest about implementation status. The live chain exists now. The settlement foundation is an active build direction. Objective proof automation and broader commercial infrastructure remain roadmap work.</p>
+          <div class="settlement-roadmap">
+            <div class="settlement-phase">
+              <p class="settlement-phase-label">Phase 1 · Live</p>
+              <strong class="settlement-phase-title">Core independent PoW foundation</strong>
+              <p>Independent SHA-256d Proof-of-Work, Rust implementation, public explorer, public pool, mining calculator, fair launch properties, and network resilience features are the current live base.</p>
+            </div>
+            <div class="settlement-phase is-active">
+              <p class="settlement-phase-label">Phase 2 · In Development</p>
+              <strong class="settlement-phase-title">Settlement foundation</strong>
+              <p>Agreement-hash anchoring, native escrow and settlement output direction, timeout refunds, and simpler flows for OTC escrow, deposits, and contractor release paths.</p>
+            </div>
+            <div class="settlement-phase">
+              <p class="settlement-phase-label">Phase 3 · Planned</p>
+              <strong class="settlement-phase-title">Objective proof automation</strong>
+              <p>Objective proof validation, approved attestors, signature-verifiable evidence, no-response auto-settlement, and milestone-proof flows. This is planned roadmap work, not a live feature claim.</p>
+            </div>
+            <div class="settlement-phase">
+              <p class="settlement-phase-label">Phase 4 · Planned</p>
+              <strong class="settlement-phase-title">Commercial infrastructure</strong>
+              <p>Business templates, contractor and merchant flows, recurring invoice or installment direction, portable reputation tooling, and broader integration APIs.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="settlement-section" id="closing">
+          <p class="settlement-section-label">Closing Note</p>
+          <h2>The settlement story still starts with the base chain.</h2>
+          <p>Irium’s broader identity is moving beyond “just mining” and beyond “just payments,” but the mining path remains central because it secures the live network and the settlement-first infrastructure being built on top of it. The point of the new framing is not to replace the chain foundation. It is to explain what that foundation is for.</p>
+        </section>
+      </article>
+
+      <aside class="settlement-aside">
+        <div class="settlement-aside-panel">
+          <p class="settlement-note-label">On This Page</p>
+          <div class="settlement-toc">
+            <div class="settlement-end-links">
+              <a href="#meaning">What settlement-first means</a>
+              <a href="#payments">Why payments are not enough</a>
+              <a href="#principles">Objective-only consensus</a>
+              <a href="#foundation">Why Irium differs</a>
+              <a href="#use-cases">Use cases</a>
+              <a href="#roadmap">Roadmap phases</a>
+            </div>
           </div>
         </div>
-        <aside class="settlement-hero-panel">
-          <span class="settlement-status-tag">Implementation Status</span>
-          <h3>Live chain first, broader settlement in phases</h3>
-          <div class="settlement-status-list">
-            <div class="settlement-status-item"><strong>Live now</strong><span>Independent SHA-256d mainnet, public mining, public explorer, public pool, calculator, Rust codebase, and core network resilience work.</span></div>
-            <div class="settlement-status-item"><strong>In development</strong><span>Agreement anchoring, escrow-oriented outputs, timeout refund logic, and the first settlement primitives.</span></div>
-            <div class="settlement-status-item"><strong>Planned</strong><span>Objective proof automation, attestor flows, no-response settlement, templates, and broader commercial infrastructure.</span></div>
+
+        <div class="settlement-aside-panel">
+          <p class="settlement-note-label">Status</p>
+          <h3>Implementation status matters.</h3>
+          <ul>
+            <li><strong>Live now:</strong> independent chain, public mining, explorer, pool, calculator, and network foundation.</li>
+            <li><strong>In development:</strong> settlement primitives, anchoring, escrow-oriented outputs, and refund logic.</li>
+            <li><strong>Planned:</strong> proof automation, attestor paths, no-response settlement, and broader commercial templates.</li>
+          </ul>
+        </div>
+
+        <div class="settlement-aside-panel">
+          <p class="settlement-note-label">Explore</p>
+          <h3>Keep the practical path visible.</h3>
+          <div class="settlement-end-links">
+            <a href="https://www.iriumlabs.org/docs/mining/">Open the mining guide</a>
+            <a href="https://www.iriumlabs.org/explorer/">View the explorer</a>
+            <a href="https://www.iriumlabs.org/pool/">Open the pool</a>
           </div>
-        </aside>
-      </div>
-      <div class="settlement-signal-row">
-        <div class="settlement-signal"><strong>Mineable base layer</strong><span>Mining secures the public settlement infrastructure the protocol is building toward.</span></div>
-        <div class="settlement-signal"><strong>Objective-only consensus</strong><span>Deterministic rules stay inside consensus. Subjective judgment stays outside it.</span></div>
-        <div class="settlement-signal"><strong>No override path</strong><span>No admin keys, no freeze mechanism, and no centralized seizure control in protocol consensus.</span></div>
-        <div class="settlement-signal"><strong>Independent chain</strong><span>Built from scratch in Rust with its own PoW network, infrastructure, and launch history.</span></div>
-      </div>
+        </div>
+      </aside>
     </div>
-
-    <div class="settlement-divider"></div>
-
-    <section class="settlement-section">
-      <div class="settlement-section-head">
-        <p class="settlement-section-kicker">What Settlement-First Means</p>
-        <h2 class="settlement-section-title">A chain designed around commercial outcomes rather than simple transfers</h2>
-        <p class="settlement-section-copy">Payment chains move units from one address to another. A settlement-first chain is designed around whether a commercial outcome can be defined, anchored, proved, and resolved under objective rules. That is the difference between a transfer rail and settlement infrastructure.</p>
-      </div>
-      <div class="settlement-grid">
-        <div class="settlement-prose">
-          <p>Irium is being positioned around a narrower and more practical problem than generic payment chains. The goal is not to put human judgment on-chain. The goal is to support escrow, agreements, refunds, timeouts, and proof-linked release paths where outcomes follow predefined rules rather than informal trust.</p>
-          <p>That direction only works if the base layer stays disciplined about its boundaries. Consensus should remain narrow, deterministic, and objective-only. Subjective arbitration, governance overrides, freeze controls, and seizure powers do not belong inside the protocol.</p>
-        </div>
-        <div class="settlement-side-stack">
-          <div class="settlement-side-item"><strong class="settlement-side-title">Agreement anchoring</strong><span class="settlement-side-copy">Commercial terms, hashes, and references can bind to immutable chain state for later verification.</span></div>
-          <div class="settlement-side-item"><strong class="settlement-side-title">Escrow and refunds</strong><span class="settlement-side-copy">Defined release and fallback paths matter more than one-way transfers in many real transactions.</span></div>
-          <div class="settlement-side-item"><strong class="settlement-side-title">Proof-linked settlement</strong><span class="settlement-side-copy">Timeouts, signatures, attestations, and deterministic checks fit a narrow consensus model.</span></div>
-        </div>
-      </div>
-    </section>
-
-    <div class="settlement-divider"></div>
-
-    <section class="settlement-section">
-      <div class="settlement-section-head">
-        <p class="settlement-section-kicker">Why Payments Are Not Enough</p>
-        <h2 class="settlement-section-title">Commercial coordination usually needs more than sending value</h2>
-        <p class="settlement-section-copy">Deposits, milestone payments, holdbacks, refunds, response windows, and proof-linked release conditions all sit beyond the scope of a simple transfer. That gap is where settlement infrastructure starts to matter.</p>
-      </div>
-      <div class="settlement-rows">
-        <div class="settlement-row"><strong class="settlement-row-title">OTC trades</strong><span class="settlement-row-copy">Peer-to-peer trading often needs escrow references, release conditions, and fallback paths rather than trust-only coordination.</span></div>
-        <div class="settlement-row"><strong class="settlement-row-title">Contractor work</strong><span class="settlement-row-copy">Milestone release, delayed holdbacks, and proof of completion are common requirements.</span></div>
-        <div class="settlement-row"><strong class="settlement-row-title">Deposits and preorders</strong><span class="settlement-row-copy">Refund handling and default logic can matter as much as the original payment itself.</span></div>
-        <div class="settlement-row"><strong class="settlement-row-title">Business flows</strong><span class="settlement-row-copy">Commercial agreements usually need evidence paths and objective release or refund outcomes.</span></div>
-      </div>
-    </section>
-
-    <div class="settlement-divider"></div>
-
-    <section class="settlement-section">
-      <div class="settlement-section-head">
-        <p class="settlement-section-kicker">How Irium Differs</p>
-        <h2 class="settlement-section-title">Mineable infrastructure first, settlement direction second</h2>
-        <p class="settlement-section-copy">Irium is not being presented as a generic chain with every possible feature attached to it. It starts from an independent SHA-256d Proof-of-Work foundation and extends carefully toward settlement primitives that remain compatible with objective-only consensus.</p>
-      </div>
-      <div class="settlement-principles">
-        <div class="settlement-principle"><strong class="settlement-principle-title">Independent chain</strong><span class="settlement-principle-copy">Irium is not a fork. It has its own Rust implementation, network stack, and chain identity.</span></div>
-        <div class="settlement-principle"><strong class="settlement-principle-title">Mineable security</strong><span class="settlement-principle-copy">Mining remains central because miners secure the public base layer that settlement functionality depends on.</span></div>
-        <div class="settlement-principle"><strong class="settlement-principle-title">Fair launch profile</strong><span class="settlement-principle-copy">No premine, no ICO, no presale, no VC control, and transparent founder vesting where publicly referenced.</span></div>
-        <div class="settlement-principle"><strong class="settlement-principle-title">Resilient network foundation</strong><span class="settlement-principle-copy">DNS-free bootstrap, peer discovery resilience, anchor checkpoints, and public infrastructure remain important.</span></div>
-      </div>
-    </section>
-
-    <div class="settlement-divider"></div>
-
-    <section class="settlement-section">
-      <div class="settlement-section-head">
-        <p class="settlement-section-kicker">Use Cases</p>
-        <h2 class="settlement-section-title">Where this direction is meant to apply</h2>
-        <p class="settlement-section-copy">These are target use cases for the settlement-first direction. They should not be read as claims that every settlement primitive below is already fully live in production today.</p>
-      </div>
-      <div class="settlement-rows">
-        <div class="settlement-row"><strong class="settlement-row-title">OTC escrow</strong><span class="settlement-row-copy">Safer peer-to-peer trading flows with defined release, refund, and timeout handling rather than pure trust-based coordination.</span></div>
-        <div class="settlement-row"><strong class="settlement-row-title">Contractor and service payments</strong><span class="settlement-row-copy">Milestone-based release logic, delayed holdbacks, and proof-linked completion paths.</span></div>
-        <div class="settlement-row"><strong class="settlement-row-title">Deposits and preorders</strong><span class="settlement-row-copy">Commercial commitments that need clear fallback conditions if delivery, shipment, or response does not occur.</span></div>
-        <div class="settlement-row"><strong class="settlement-row-title">Milestone settlement</strong><span class="settlement-row-copy">Staged business payouts tied to objective checkpoints rather than all-or-nothing payment assumptions.</span></div>
-        <div class="settlement-row"><strong class="settlement-row-title">Verifiable agreements</strong><span class="settlement-row-copy">Agreement references anchored to chain state, with future proof-oriented settlement tooling layered on top.</span></div>
-      </div>
-    </section>
-
-    <div class="settlement-divider"></div>
-
-    <section class="settlement-section">
-      <div class="settlement-section-head">
-        <p class="settlement-section-kicker">Roadmap Phases</p>
-        <h2 class="settlement-section-title">Live chain first, broader settlement in phases</h2>
-        <p class="settlement-section-copy">The roadmap below separates what is already live from what is under active development and what remains planned. That distinction matters if the settlement narrative is going to stay technically credible.</p>
-      </div>
-      <div class="settlement-roadmap">
-        <div class="settlement-phase">
-          <div class="settlement-phase-label">Phase 1 · Live</div>
-          <div><strong class="settlement-phase-title">Core independent PoW foundation</strong><span class="settlement-phase-copy">Independent SHA-256d Proof-of-Work, Rust implementation, public explorer, public pool, calculator, fair launch profile, and core network resilience remain the live foundation of the project.</span></div>
-        </div>
-        <div class="settlement-phase is-active">
-          <div class="settlement-phase-label">Phase 2 · In Development</div>
-          <div><strong class="settlement-phase-title">Settlement foundation</strong><span class="settlement-phase-copy">Agreement-hash anchoring, native escrow and settlement output direction, timeout refunds, and simpler flows for OTC escrow, deposits, and contractor release logic.</span></div>
-        </div>
-        <div class="settlement-phase">
-          <div class="settlement-phase-label">Phase 3 · Planned</div>
-          <div><strong class="settlement-phase-title">Objective proof automation</strong><span class="settlement-phase-copy">Objective proof validation, approved attestors, signature-verifiable evidence, no-response auto-settlement, milestone proofs, and delayed holdback paths. This is roadmap work, not a live claim.</span></div>
-        </div>
-        <div class="settlement-phase">
-          <div class="settlement-phase-label">Phase 4 · Planned</div>
-          <div><strong class="settlement-phase-title">Commercial infrastructure</strong><span class="settlement-phase-copy">Templates for business settlement, contractor and merchant flows, recurring invoice or installment direction, portable reputation tooling, and broader integration APIs.</span></div>
-        </div>
-      </div>
-    </section>
-
-    <div class="settlement-divider"></div>
-
-    <section class="settlement-section settlement-closing">
-      <p class="settlement-section-kicker">Mining and Verification</p>
-      <h2 class="settlement-section-title">The settlement story still starts with the base chain</h2>
-      <p>Mining remains essential because it secures the live network, public explorer, public pool, and the settlement-first infrastructure Irium is building toward. The broader commerce narrative does not replace mining. It gives the base layer a clearer purpose.</p>
-      <div class="settlement-actions" style="justify-content:center; margin-top:1rem;">
-        <a href="https://www.iriumlabs.org/docs/mining/" class="btn btn-primary">Open Mining Guide</a>
-        <a href="https://www.iriumlabs.org/explorer/" class="btn btn-secondary">View Explorer</a>
-      </div>
-    </section>
   </div>
 </section>
 

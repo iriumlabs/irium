@@ -397,112 +397,6 @@
   }
 
 
-  .settlement-hero-shell {
-    display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
-    gap: 2.6rem;
-    align-items: end;
-    padding-bottom: 1.35rem;
-    border-bottom: 1px solid rgba(147, 176, 226, 0.14);
-  }
-
-  .settlement-hero-main {
-    max-width: 48rem;
-  }
-
-  .settlement-hero-title {
-    margin: 0 0 1rem;
-    color: var(--support-text);
-    font-size: clamp(2.9rem, 6.6vw, 5.2rem);
-    line-height: .94;
-    letter-spacing: -.05em;
-  }
-
-  .settlement-hero-subtitle {
-    margin: 0 0 1rem;
-    color: var(--support-text);
-    font-size: clamp(1.12rem, 2.2vw, 1.42rem);
-    line-height: 1.56;
-  }
-
-  .settlement-hero-copy {
-    margin: 0;
-    color: var(--support-muted);
-    line-height: 1.86;
-    font-size: 1rem;
-  }
-
-  .settlement-hero-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .85rem;
-    margin-top: 1.6rem;
-  }
-
-  .settlement-hero-actions .btn {
-    min-width: 190px;
-    text-align: center;
-  }
-
-  .settlement-hero-side {
-    display: grid;
-    gap: 1rem;
-    align-content: start;
-    padding-left: 1.5rem;
-    border-left: 1px solid rgba(147, 176, 226, 0.14);
-  }
-
-  .settlement-status-row {
-    padding-bottom: .95rem;
-    border-bottom: 1px solid rgba(147, 176, 226, 0.12);
-  }
-
-  .settlement-status-row:last-child {
-    padding-bottom: 0;
-    border-bottom: 0;
-  }
-
-  .settlement-status-row strong {
-    display: block;
-    margin-bottom: .24rem;
-    color: #eef8ff;
-    font-family: "Sora", sans-serif;
-    font-size: .92rem;
-  }
-
-  .settlement-status-row span {
-    display: block;
-    color: var(--support-muted);
-    line-height: 1.66;
-    font-size: .93rem;
-  }
-
-  .settlement-signal-row {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 1rem;
-    padding-top: 1.1rem;
-  }
-
-  .settlement-signal {
-    padding-top: .9rem;
-    border-top: 1px solid rgba(147, 176, 226, 0.14);
-  }
-
-  .settlement-signal strong {
-    display: block;
-    margin-bottom: .24rem;
-    color: var(--support-text);
-    font-family: "Sora", sans-serif;
-    font-size: .92rem;
-  }
-
-  .settlement-signal span {
-    display: block;
-    color: var(--support-muted);
-    line-height: 1.62;
-    font-size: .92rem;
-  }
 
   .settlement-frame {
     max-width: 70rem;
@@ -667,6 +561,120 @@
   }
 
 
+  .support-page .hero {
+    min-height: 96vh;
+    display: flex;
+    align-items: center;
+    padding: 7.4rem 0 5.2rem;
+    position: relative;
+  }
+
+  .support-page .hero::before {
+    content: '';
+    position: absolute;
+    inset: 8% 4% auto;
+    height: 300px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, rgba(141,125,255,.28), rgba(110,198,255,.30));
+    filter: blur(78px);
+    opacity: .72;
+    z-index: 1;
+  }
+
+  .support-page .hero .hero-content {
+    position: relative;
+    z-index: 3;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 1.2rem 0 0;
+    text-align: center;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: visible;
+    animation: heroIntro .9s cubic-bezier(.2,.75,.15,1) both;
+  }
+
+  .support-page .hero .coin-container {
+    width: 210px !important;
+    height: 210px !important;
+    margin: 0 auto 2.1rem;
+    padding: 0 !important;
+    position: relative;
+    display: grid;
+    place-items: center;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    overflow: visible !important;
+    animation: coinLift 4.6s ease-in-out infinite;
+  }
+
+  .support-page .hero .hero-coin {
+    width: 210px !important;
+    height: 210px !important;
+    object-fit: contain !important;
+    display: block;
+    margin: 0 auto;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 50% !important;
+    box-shadow: none !important;
+    transform-origin: 50% 50%;
+    animation: coinSpin 12s linear infinite, coinBreathe 2.2s ease-in-out infinite !important;
+    filter: drop-shadow(0 0 28px rgba(98,184,255,.52));
+    z-index: 2;
+    will-change: transform, filter;
+  }
+
+  .support-page .hero .glitch {
+    font-family: 'Sora', sans-serif;
+    font-size: clamp(3rem, 8.5vw, 5.6rem);
+    letter-spacing: .11em;
+    margin: .15rem 0 .7rem;
+    line-height: 1;
+    text-shadow: 0 0 28px rgba(122,216,255,.36);
+  }
+
+  .support-page .hero .hero-subtitle {
+    font-family: 'Sora', sans-serif;
+    font-size: clamp(1.2rem, 3vw, 1.95rem);
+    line-height: 1.25;
+    margin: 0 0 .5rem;
+    color: #f4f8ff;
+    max-width: none;
+  }
+
+  .support-page .hero .hero-tagline {
+    margin: 0 auto 2.1rem;
+    font-size: 1.03rem;
+    color: var(--support-muted);
+    max-width: 760px;
+  }
+
+  .support-page .hero .hero-keyline {
+    margin: 0 auto 1.25rem;
+    max-width: 980px;
+    color: #cfe2ff;
+    font-family: 'Sora', sans-serif;
+    font-size: .88rem;
+    letter-spacing: .08em;
+    line-height: 1.6;
+    text-transform: uppercase;
+    text-align: center;
+  }
+
+  .support-page .hero .hero-cta {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: .8rem;
+    flex-wrap: wrap;
+  }
+
+
   @media (max-width: 1180px) {
     .support-hero,
     .support-bottom-grid {
@@ -685,14 +693,11 @@
     .support-grid-5,
     .settlement-columns,
     .settlement-principle-grid,
-    .settlement-usecase-item,
-    .settlement-hero-shell,
-    .settlement-signal-row {
+    .settlement-usecase-item {
       grid-template-columns: 1fr;
     }
 
-    .settlement-aside,
-    .settlement-hero-side {
+    .settlement-aside {
       padding: 1.25rem 0 0;
       border-left: 0;
       border-top: 1px solid rgba(147, 176, 226, 0.16);
@@ -762,32 +767,21 @@
 </nav>
 
 
-<section class="hero">
-  <div class="container support-stack settlement-frame">
-    <div class="settlement-hero-shell">
-      <div class="settlement-hero-main">
-        <div class="support-label">Settlement-First Direction</div>
-        <h1 class="settlement-hero-title">The blockchain for agreements, not just payments.</h1>
-        <p class="settlement-hero-subtitle">Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce.</p>
-        <p class="settlement-hero-copy">The live network is already an independent SHA-256d Proof-of-Work chain built from scratch in Rust. Its broader direction is trust-minimized settlement for agreements, escrow flows, and proof-based commercial outcomes without admin keys or override powers.</p>
-        <div class="settlement-hero-actions">
-          <a href="https://www.iriumlabs.org/whitepaper.html" class="btn btn-primary">Read Whitepaper</a>
-          <a href="https://www.iriumlabs.org/docs/mining/" class="btn btn-secondary">Start Mining</a>
-        </div>
-      </div>
-      <aside class="settlement-hero-side">
-        <p class="support-side-kicker">Implementation Status</p>
-        <div class="settlement-status-row"><strong>Live now</strong><span>Independent SHA-256d mainnet, public mining, explorer, pool, calculator, Rust codebase, and base network resilience.</span></div>
-        <div class="settlement-status-row"><strong>In development</strong><span>Settlement primitives such as agreement anchoring, escrow-oriented outputs, and timeout refund logic.</span></div>
-        <div class="settlement-status-row"><strong>Planned</strong><span>Objective proof automation, attestor flows, no-response settlement paths, templates, and broader commercial tooling.</span></div>
-      </aside>
-    </div>
-    <div class="settlement-signal-row">
-      <div class="settlement-signal"><strong>Mineable base layer</strong><span>Mining secures the public chain that settlement features build on.</span></div>
-      <div class="settlement-signal"><strong>Objective-only consensus</strong><span>Deterministic rules stay inside consensus. Subjective dispute judgment stays out.</span></div>
-      <div class="settlement-signal"><strong>No override path</strong><span>No admin keys, no freeze mechanism, and no centralized seizure control in protocol consensus.</span></div>
-    </div>
-  </div>
+<section id="home" class="hero">
+<div class="container hero-content">
+<div class="coin-container">
+<img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium Coin" class="hero-coin">
+</div>
+<h1 class="glitch" data-text="IRIUM">IRIUM</h1>
+<p class="hero-subtitle">The blockchain for agreements, not just payments.</p>
+<p class="hero-tagline">Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce. The live network is already an independent SHA-256d Proof-of-Work chain built from scratch in Rust, with no premine, no admin keys, and no override powers.</p>
+<p class="hero-keyline">LIVE MAINNET • SHA-256D POW • SETTLEMENT-FIRST • NO PREMINE • NO ICO • OBJECTIVE-ONLY CONSENSUS</p>
+<div class="hero-cta">
+<a href="https://www.iriumlabs.org/whitepaper.html" class="btn btn-primary">READ WHITEPAPER</a>
+<a href="https://www.iriumlabs.org/explorer/" class="btn btn-secondary">VIEW EXPLORER</a>
+<a href="https://www.iriumlabs.org/docs/mining/" class="btn btn-secondary">START MINING</a>
+</div>
+</div>
 </section>
 
 <section class="section section-dark">

@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Irium Mining Pool | Professional Stratum Portal</title>
-<meta name="description" content="Irium public Stratum mining pool dashboard with live stats, recent blocks, miner lookup, payout transparency, and connection details.">
+<title>Irium Pool | Public Mining for a Settlement-First Chain</title>
+<meta name="description" content="Public Irium Stratum pool dashboard for miners securing a settlement-first SHA-256d blockchain.">
 <link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=4">
 <link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
 <style>
@@ -1272,22 +1272,17 @@
     <ul class="nav-links">
       <li><a href="https://www.iriumlabs.org/">HOME</a></li>
       <li><a href="https://www.iriumlabs.org/whitepaper.html">WHITEPAPER</a></li>
+      <li><a href="https://www.iriumlabs.org/settlement/">SETTLEMENT</a></li>
       <li><a href="https://www.iriumlabs.org/explorer/">EXPLORER</a></li>
       <li><a href="https://www.iriumlabs.org/docs/mining/">MINING</a></li>
-      <li><a href="https://www.iriumlabs.org/pool/" class="active">POOL</a></li>
+      <li><a href="https://www.iriumlabs.org/pool/">POOL</a></li>
       <li><a href="https://www.iriumlabs.org/calculator/">CALCULATOR</a></li>
-      <li><a href="https://www.iriumlabs.org/support-us.html">SUPPORT US</a></li>
+      <li><a href="https://www.iriumlabs.org/support-us.html">SUPPORT</a></li>
     </ul>
     <div class="nav-socials">
-      <a href="https://github.com/iriumlabs/irium" target="_blank" title="GitHub">
-        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-      </a>
-      <a href="https://x.com/GoIrium" target="_blank" title="X (Twitter)">
-        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-      </a>
-      <a href="https://t.me/iriumlabs" target="_blank" title="Telegram">
-        <svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg>
-      </a>
+      <a href="https://github.com/iriumlabs/irium" target="_blank" title="GitHub" rel="noopener"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></a>
+      <a href="https://x.com/GoIrium" target="_blank" title="X (Twitter)" rel="noopener"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>
+      <a href="https://t.me/iriumlabs" target="_blank" title="Telegram" rel="noopener"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg></a>
     </div>
   </div>
 </nav>
@@ -1302,7 +1297,7 @@
             <div class="hero-eyebrow"><span class="dot"></span> Live Public Stratum Pool</div>
           </div>
           <h1 class="hero-title">Irium Stratum Pool Portal</h1>
-          <p class="hero-sub">Enterprise-grade interface for endpoint access, mining telemetry, payout visibility, and network diagnostics for Irium solo miners.</p>
+          <p class="hero-sub">Public mining interface for endpoint access, payout visibility, and live diagnostics. The pool helps secure Irium's settlement-first base layer while keeping mining open and transparent.</p>
 
           <div class="endpoint-stack">
             <div class="endpoint-card">
@@ -1317,7 +1312,7 @@
             </div>
           </div>
 
-          <div class="hero-note">Recommended: use DNS endpoint as Pool 0. If DNS resolution fails on your network, use direct IP fallback as Pool 1/2.</div>
+          <div class="hero-note">Recommended: use the DNS endpoint as Pool 0. Public pool access supports fair mining participation, broader distribution, and the settlement-first base layer that Irium is building on.</div>
           <div id="hero-route-badge" class="hero-route-badge"><span class="dot"></span><span id="hero-route-text">Active Route: Checking...</span></div>
         </div>
         <aside class="hero-right">
@@ -1331,7 +1326,7 @@
             <li class="setup-row"><span class="setup-key">Status</span><span class="setup-value"><span id="pool-live-pill" class="status-badge">LOADING...</span></span></li>
             <li class="setup-row"><span class="setup-key">Last Update</span><span id="pool-updated-pill" class="setup-value">--:--:--</span></li>
           </ul>
-          <p class="panel-sub" style="margin-top:12px;">SOLO payout: when your miner finds a valid block, the coinbase reward is paid directly to the wallet address in your username.</p>
+          <p class="panel-sub" style="margin-top:12px;">SOLO payout: when your miner finds a valid block, the coinbase reward is paid directly to the wallet address in your username. Public mining infrastructure matters because it keeps settlement security and distribution in the open.</p>
         </aside>
       </div>
     </section>
@@ -1348,7 +1343,7 @@
     <section class="required-update-panel" style="margin-top:14px;">
       <article class="panel live-activity-panel card-live">
         <h3>Live Pool Activity</h3>
-        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed. Sessions show connected workers, not total hashpower. Long-window miner distribution uses a 4000-block sample for statistical clarity.</p>
+        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed. Sessions show connected workers, not total hashpower. Long-window miner distribution uses a 4000-block sample for statistical clarity, and public visibility helps miners verify how the settlement-first base layer is being secured.</p>
         <ul class="meta-list">
           <li><span class="key">Connected TCP Sessions (live)</span><span id="live-workers">Checking...</span></li>
           <li><span class="key">Active Miners (window)</span><span id="live-active-miners">Checking...</span></li>
@@ -1733,10 +1728,11 @@ Password: x</pre>
 <div class="footer-brand">
 <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="footer-logo">
 <h4 style="font-family: Orbitron, sans-serif; color: var(--primary); margin: 0.2rem 0 0;">Irium</h4>
-<p>True Decentralization</p>
+<p>Trust-minimized outcomes, not just payments.</p>
 </div>
 <div class="footer-links">
 <h4>Resources</h4>
+<a href="https://www.iriumlabs.org/settlement/">Settlement</a>
 <a href="https://www.iriumlabs.org/whitepaper.html">Whitepaper</a>
 <a href="https://www.iriumlabs.org/docs/mining/">Mining Guide</a>
 <a href="https://www.iriumlabs.org/explorer/">Explorer</a>
@@ -1757,7 +1753,7 @@ GitHub</a>
 </div>
 <div class="footer-bottom">
 <p>&copy; 2026 Irium Labs. Open Source - MIT License</p>
-<p>Built for a decentralized future</p>
+<p>Settlement-first infrastructure for escrow, agreements, and proof-based commerce.</p>
 </div>
 </div>
 </footer>

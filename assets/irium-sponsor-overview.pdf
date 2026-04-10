@@ -6,331 +6,282 @@ endobj
 << /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>
 endobj
 3 0 obj
-<< /Length 7432 >>
+<< /Length 6652 >>
 stream
 0.0314 0.0471 0.0941 rg
 0.00 0.00 595.28 841.89 re f
 0.0706 0.1098 0.2000 rg
-0.00 753.89 595.28 88.00 re f
+0.00 755.89 595.28 86.00 re f
 0.4196 0.8824 1.0000 RG
-2.20 w
-46.00 747.89 m 549.28 747.89 l S
-BT
-/F2 10.00 Tf
-0.4196 0.8824 1.0000 rg
-1 0 0 1 46.00 801.89 Tm (Independent open-source blockchain infrastructure) Tj
-ET
+2.10 w
+46.00 749.89 m 549.28 749.89 l S
 BT
 /F2 28.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 46.00 761.89 Tm (Irium Sponsor Overview) Tj
+1 0 0 1 46.00 783.89 Tm (Support Irium) Tj
 ET
 BT
-/F1 12.00 Tf
+/F1 11.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 46.00 731.89 Tm (Independent open-source blockchain infrastructure for decentralized,) Tj
-1 0 0 1 46.00 714.89 Tm (settlement-first commerce.) Tj
+1 0 0 1 46.00 768.39 Tm (Open-source development, public infrastructure, wallets, explorer improvements, and) Tj
+1 0 0 1 46.00 752.39 Tm (long-term ecosystem growth for the Irium network.) Tj
+ET
+BT
+/F1 10.50 Tf
+0.6980 0.7647 0.8784 rg
+1 0 0 1 46.00 727.39 Tm (Irium is an independent blockchain project building decentralized, settlement-first) Tj
+1 0 0 1 46.00 712.39 Tm (infrastructure with no admin keys, no override powers, and no centralized control.) Tj
 ET
 0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-361.28 623.89 188.00 96.00 re B
-BT
-/F2 11.00 Tf
-0.4196 0.8824 1.0000 rg
-1 0 0 1 375.28 692.89 Tm (Support focus) Tj
-ET
-BT
-/F2 9.30 Tf
-0.4196 0.8824 1.0000 rg
-1 0 0 1 363.28 665.64 Tm (-) Tj
-ET
-BT
-/F1 9.30 Tf
-0.6980 0.7647 0.8784 rg
-1 0 0 1 377.28 665.64 Tm (Open-source development) Tj
-ET
-BT
-/F2 9.30 Tf
-0.4196 0.8824 1.0000 rg
-1 0 0 1 363.28 637.13 Tm (-) Tj
-ET
-BT
-/F1 9.30 Tf
-0.6980 0.7647 0.8784 rg
-1 0 0 1 377.28 637.13 Tm (Public infrastructure) Tj
-ET
-BT
-/F2 9.30 Tf
-0.4196 0.8824 1.0000 rg
-1 0 0 1 363.28 608.63 Tm (-) Tj
-ET
-BT
-/F1 9.30 Tf
-0.6980 0.7647 0.8784 rg
-1 0 0 1 377.28 608.63 Tm (Wallets, explorer, and tooling) Tj
-ET
-BT
-/F2 9.30 Tf
-0.4196 0.8824 1.0000 rg
-1 0 0 1 363.28 580.12 Tm (-) Tj
-ET
-BT
-/F1 9.30 Tf
-0.6980 0.7647 0.8784 rg
-1 0 0 1 377.28 580.12 Tm (Long-term ecosystem growth) Tj
-ET
-0.0549 0.0863 0.1569 rg
-0.2824 0.3804 0.5490 RG
-0.90 w
-46.00 489.89 121.32 120.00 re B
+46.00 513.89 121.32 118.00 re B
 BT
 /F2 13.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 60.00 590.89 Tm (Open-source) Tj
-1 0 0 1 60.00 572.04 Tm (development) Tj
+1 0 0 1 60.00 600.89 Tm (Open-source) Tj
+1 0 0 1 60.00 582.04 Tm (development) Tj
 ET
 BT
 /F1 9.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 60.00 535.69 Tm (Independent build) Tj
-1 0 0 1 60.00 522.69 Tm (direction with) Tj
-1 0 0 1 60.00 509.69 Tm (transparent support) Tj
-1 0 0 1 60.00 496.69 Tm (goals.) Tj
+1 0 0 1 60.00 545.69 Tm (Independent) Tj
+1 0 0 1 60.00 532.77 Tm (engineering for) Tj
+1 0 0 1 60.00 519.85 Tm (protocol work,) Tj
+1 0 0 1 60.00 506.93 Tm (tooling, and) Tj
+1 0 0 1 60.00 494.01 Tm (release hardening.) Tj
 ET
 0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-173.32 489.89 121.32 120.00 re B
+173.32 513.89 121.32 118.00 re B
 BT
 /F2 13.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 187.32 590.89 Tm (Public) Tj
-1 0 0 1 187.32 572.04 Tm (infrastructure) Tj
+1 0 0 1 187.32 600.89 Tm (Public) Tj
+1 0 0 1 187.32 582.04 Tm (infrastructure) Tj
 ET
 BT
 /F1 9.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 187.32 535.69 Tm (Explorer,) Tj
-1 0 0 1 187.32 522.69 Tm (bootstrap, node) Tj
-1 0 0 1 187.32 509.69 Tm (reliability, and) Tj
-1 0 0 1 187.32 496.69 Tm (maintenance.) Tj
+1 0 0 1 187.32 545.69 Tm (Explorer,) Tj
+1 0 0 1 187.32 532.77 Tm (bootstrap, node) Tj
+1 0 0 1 187.32 519.85 Tm (reliability, and) Tj
+1 0 0 1 187.32 506.93 Tm (public service) Tj
+1 0 0 1 187.32 494.01 Tm (maintenance.) Tj
 ET
 0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-300.64 489.89 121.32 120.00 re B
+300.64 513.89 121.32 118.00 re B
 BT
 /F2 13.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 314.64 590.89 Tm (Self-custodial) Tj
-1 0 0 1 314.64 572.04 Tm (direction) Tj
+1 0 0 1 314.64 600.89 Tm (Self-custodial) Tj
+1 0 0 1 314.64 582.04 Tm (direction) Tj
 ET
 BT
 /F1 9.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 314.64 535.69 Tm (No admin override) Tj
-1 0 0 1 314.64 522.69 Tm (powers or) Tj
-1 0 0 1 314.64 509.69 Tm (centralized control) Tj
-1 0 0 1 314.64 496.69 Tm (path.) Tj
+1 0 0 1 314.64 545.69 Tm (No admin keys, no) Tj
+1 0 0 1 314.64 532.77 Tm (override powers,) Tj
+1 0 0 1 314.64 519.85 Tm (and no centralized) Tj
+1 0 0 1 314.64 506.93 Tm (control path.) Tj
 ET
 0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-427.96 489.89 121.32 120.00 re B
+427.96 513.89 121.32 118.00 re B
 BT
 /F2 13.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 441.96 590.89 Tm (Settlement-first) Tj
-1 0 0 1 441.96 572.04 Tm (roadmap) Tj
+1 0 0 1 441.96 600.89 Tm (Settlement-first) Tj
+1 0 0 1 441.96 582.04 Tm (roadmap) Tj
 ET
 BT
 /F1 9.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 441.96 535.69 Tm (Long-term focus on) Tj
-1 0 0 1 441.96 522.69 Tm (practical) Tj
-1 0 0 1 441.96 509.69 Tm (decentralized) Tj
-1 0 0 1 441.96 496.69 Tm (commerce utility.) Tj
+1 0 0 1 441.96 545.69 Tm (Long-term focus on) Tj
+1 0 0 1 441.96 532.77 Tm (practical) Tj
+1 0 0 1 441.96 519.85 Tm (decentralized) Tj
+1 0 0 1 441.96 506.93 Tm (commerce utility.) Tj
 ET
 0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-46.00 240.00 251.64 248.00 re B
+46.00 255.00 251.64 243.00 re B
 BT
 /F2 16.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 62.00 466.00 Tm (What is Irium) Tj
-ET
-BT
-/F1 10.30 Tf
-0.6980 0.7647 0.8784 rg
-1 0 0 1 62.00 439.70 Tm (Irium is an independent, open-source) Tj
-1 0 0 1 62.00 424.70 Tm (blockchain project focused on building) Tj
-1 0 0 1 62.00 409.70 Tm (decentralized, trust-minimized settlement) Tj
-1 0 0 1 62.00 394.70 Tm (infrastructure. The network is already) Tj
-1 0 0 1 62.00 379.70 Tm (live and is being developed with a clear) Tj
-1 0 0 1 62.00 364.70 Tm (long-term direction: strengthen base-layer) Tj
-1 0 0 1 62.00 349.70 Tm (reliability, avoid admin control or) Tj
-1 0 0 1 62.00 334.70 Tm (override powers, and build toward) Tj
-1 0 0 1 62.00 319.70 Tm (practical settlement use cases rather than) Tj
-1 0 0 1 62.00 304.70 Tm (speculative complexity.) Tj
-ET
-BT
-/F2 10.10 Tf
-0.4196 0.8824 1.0000 rg
-1 0 0 1 50.00 277.60 Tm (-) Tj
+1 0 0 1 62.00 476.00 Tm (Why support Irium) Tj
 ET
 BT
 /F1 10.10 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 277.60 Tm (No admin keys) Tj
-ET
-BT
-/F2 10.10 Tf
-0.4196 0.8824 1.0000 rg
-1 0 0 1 50.00 247.16 Tm (-) Tj
-ET
-BT
-/F1 10.10 Tf
-0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 247.16 Tm (No override powers) Tj
-ET
-BT
-/F2 10.10 Tf
-0.4196 0.8824 1.0000 rg
-1 0 0 1 50.00 216.72 Tm (-) Tj
+1 0 0 1 62.00 451.90 Tm (Irium is an open-source, decentralized) Tj
+1 0 0 1 62.00 437.40 Tm (blockchain project being built with a clear) Tj
+1 0 0 1 62.00 422.90 Tm (long-term goal: create a trust-minimized) Tj
+1 0 0 1 62.00 408.40 Tm (settlement-first network for real commerce,) Tj
+1 0 0 1 62.00 393.90 Tm (without admin keys, override powers, or) Tj
+1 0 0 1 62.00 379.40 Tm (centralized control.) Tj
 ET
 BT
 /F1 10.10 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 216.72 Tm (No freeze or seizure controls) Tj
+1 0 0 1 62.00 352.80 Tm (The project is developed independently, and) Tj
+1 0 0 1 62.00 338.30 Tm (community support helps fund the) Tj
+1 0 0 1 62.00 323.80 Tm (infrastructure, engineering, maintenance,) Tj
+1 0 0 1 62.00 309.30 Tm (and ecosystem work needed to keep Irium) Tj
+1 0 0 1 62.00 294.80 Tm (stable, useful, and growing.) Tj
 ET
 BT
-/F2 10.10 Tf
+/F2 9.80 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 50.00 186.27 Tm (-) Tj
+1 0 0 1 50.00 266.50 Tm (-) Tj
 ET
 BT
-/F1 10.10 Tf
+/F1 9.80 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 186.27 Tm (Objective-only consensus) Tj
+1 0 0 1 64.00 266.50 Tm (No admin keys) Tj
 ET
 BT
-/F2 10.10 Tf
+/F2 9.80 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 50.00 155.83 Tm (-) Tj
+1 0 0 1 50.00 236.78 Tm (-) Tj
 ET
 BT
-/F1 10.10 Tf
+/F1 9.80 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 155.83 Tm (Self-custodial ecosystem direction) Tj
+1 0 0 1 64.00 236.78 Tm (No override powers) Tj
 ET
 BT
-/F2 10.10 Tf
+/F2 9.80 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 50.00 125.39 Tm (-) Tj
+1 0 0 1 50.00 207.07 Tm (-) Tj
 ET
 BT
-/F1 10.10 Tf
+/F1 9.80 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 125.39 Tm (Open-source public infrastructure) Tj
+1 0 0 1 64.00 207.07 Tm (No freeze or seizure controls) Tj
+ET
+BT
+/F2 9.80 Tf
+0.4196 0.8824 1.0000 rg
+1 0 0 1 50.00 177.35 Tm (-) Tj
+ET
+BT
+/F1 9.80 Tf
+0.6980 0.7647 0.8784 rg
+1 0 0 1 64.00 177.35 Tm (Objective-only consensus) Tj
+ET
+BT
+/F2 9.80 Tf
+0.4196 0.8824 1.0000 rg
+1 0 0 1 50.00 147.64 Tm (-) Tj
+ET
+BT
+/F1 9.80 Tf
+0.6980 0.7647 0.8784 rg
+1 0 0 1 64.00 147.64 Tm (Self-custodial ecosystem direction) Tj
+ET
+BT
+/F2 9.80 Tf
+0.4196 0.8824 1.0000 rg
+1 0 0 1 50.00 117.92 Tm (-) Tj
+ET
+BT
+/F1 9.80 Tf
+0.6980 0.7647 0.8784 rg
+1 0 0 1 64.00 117.92 Tm (Open-source infrastructure) Tj
 ET
 0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-317.77 240.00 231.51 248.00 re B
+317.77 255.00 231.51 243.00 re B
 BT
 /F2 16.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 333.77 466.00 Tm (What support helps fund) Tj
-ET
-BT
-/F1 10.30 Tf
-0.6980 0.7647 0.8784 rg
-1 0 0 1 333.77 439.70 Tm (Support for Irium helps fund the) Tj
-1 0 0 1 333.77 424.70 Tm (engineering and public-network work) Tj
-1 0 0 1 333.77 409.70 Tm (needed to keep the project stable,) Tj
-1 0 0 1 333.77 394.70 Tm (useful, and growing.) Tj
+1 0 0 1 333.77 476.00 Tm (What contributions support) Tj
 ET
 BT
 /F2 9.70 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 321.77 368.00 Tm (-) Tj
+1 0 0 1 321.77 452.30 Tm (-) Tj
 ET
 BT
 /F1 9.70 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 335.77 368.00 Tm (Core protocol development) Tj
+1 0 0 1 335.77 452.30 Tm (Core protocol development) Tj
 ET
 BT
 /F2 9.70 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 321.77 338.53 Tm (-) Tj
+1 0 0 1 321.77 422.83 Tm (-) Tj
 ET
 BT
 /F1 9.70 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 335.77 338.53 Tm (Explorer, bootstrap, and public) Tj
-1 0 0 1 335.77 324.75 Tm (infrastructure) Tj
+1 0 0 1 335.77 422.83 Tm (Explorer, bootstrap, and public) Tj
+1 0 0 1 335.77 409.05 Tm (infrastructure) Tj
 ET
 BT
 /F2 9.70 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 321.77 295.28 Tm (-) Tj
+1 0 0 1 321.77 379.58 Tm (-) Tj
 ET
 BT
 /F1 9.70 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 335.77 295.28 Tm (Wallet and user experience improvements) Tj
+1 0 0 1 335.77 379.58 Tm (Wallet and user experience improvements) Tj
 ET
 BT
 /F2 9.70 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 321.77 265.80 Tm (-) Tj
+1 0 0 1 321.77 350.10 Tm (-) Tj
 ET
 BT
 /F1 9.70 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 335.77 265.80 Tm (Testing, security hardening, and) Tj
-1 0 0 1 335.77 252.03 Tm (maintenance) Tj
+1 0 0 1 335.77 350.10 Tm (Testing, security hardening, and) Tj
+1 0 0 1 335.77 336.33 Tm (maintenance) Tj
 ET
 BT
 /F2 9.70 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 321.77 222.56 Tm (-) Tj
+1 0 0 1 321.77 306.86 Tm (-) Tj
 ET
 BT
 /F1 9.70 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 335.77 222.56 Tm (Documentation and onboarding) Tj
+1 0 0 1 335.77 306.86 Tm (Documentation and onboarding) Tj
 ET
 BT
 /F2 9.70 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 321.77 193.08 Tm (-) Tj
+1 0 0 1 321.77 277.38 Tm (-) Tj
 ET
 BT
 /F1 9.70 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 335.77 193.08 Tm (Deployment, monitoring, and reliability) Tj
-1 0 0 1 335.77 179.31 Tm (improvements) Tj
+1 0 0 1 335.77 277.38 Tm (Deployment, monitoring, and reliability) Tj
+1 0 0 1 335.77 263.61 Tm (improvements) Tj
 ET
 BT
 /F2 9.70 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 321.77 149.83 Tm (-) Tj
+1 0 0 1 321.77 234.13 Tm (-) Tj
 ET
 BT
 /F1 9.70 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 335.77 149.83 Tm (Future ecosystem tooling and) Tj
-1 0 0 1 335.77 136.06 Tm (integrations) Tj
+1 0 0 1 335.77 234.13 Tm (Future ecosystem tooling and) Tj
+1 0 0 1 335.77 220.36 Tm (integrations) Tj
 ET
 BT
 /F2 11.00 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 46.00 73.00 Tm (Irium is being built as durable public infrastructure: decentralized, self-custodial, and) Tj
-1 0 0 1 46.00 59.00 Tm (settlement-first.) Tj
+1 0 0 1 46.00 71.00 Tm (Support for Irium is support for the network and its development, not a promise of) Tj
+1 0 0 1 46.00 57.00 Tm (financial return.) Tj
 ET
 0.2824 0.3804 0.5490 RG
 0.80 w
@@ -348,19 +299,19 @@ ET
 endstream
 endobj
 4 0 obj
-<< /Length 7325 >>
+<< /Length 7077 >>
 stream
 0.0314 0.0471 0.0941 rg
 0.00 0.00 595.28 841.89 re f
 0.0706 0.1098 0.2000 rg
 0.00 769.89 595.28 72.00 re f
 0.6039 0.5686 1.0000 RG
-2.20 w
+2.10 w
 46.00 763.89 m 549.28 763.89 l S
 BT
 /F2 24.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 46.00 787.89 Tm (Support Structure and Contact) Tj
+1 0 0 1 46.00 787.89 Tm (Support structure and contact) Tj
 ET
 BT
 /F1 11.00 Tf
@@ -373,87 +324,85 @@ BT
 0.9216 0.9529 1.0000 rg
 1 0 0 1 46.00 707.89 Tm (Funding goals) Tj
 ET
-0.0706 0.1098 0.2000 rg
+0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-46.00 593.89 114.82 112.00 re B
+46.00 591.89 114.82 114.00 re B
 BT
 /F2 13.00 Tf
 0.9216 0.9529 1.0000 rg
 1 0 0 1 60.00 674.89 Tm ($500/month) Tj
 ET
 BT
-/F1 9.40 Tf
+/F1 9.10 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 60.00 636.64 Tm (Supports basic) Tj
-1 0 0 1 60.00 623.84 Tm (infrastructure and) Tj
-1 0 0 1 60.00 611.04 Tm (maintenance for) Tj
-1 0 0 1 60.00 598.24 Tm (public services) Tj
-1 0 0 1 60.00 585.44 Tm (such as explorer,) Tj
-1 0 0 1 60.00 572.64 Tm (bootstrap, and) Tj
-1 0 0 1 60.00 559.84 Tm (network) Tj
-1 0 0 1 60.00 547.04 Tm (operations.) Tj
+1 0 0 1 60.00 638.94 Tm (Supports basic) Tj
+1 0 0 1 60.00 626.56 Tm (infrastructure and) Tj
+1 0 0 1 60.00 614.19 Tm (maintenance for) Tj
+1 0 0 1 60.00 601.81 Tm (public services) Tj
+1 0 0 1 60.00 589.44 Tm (such as explorer,) Tj
+1 0 0 1 60.00 577.06 Tm (bootstrap, and) Tj
+1 0 0 1 60.00 564.68 Tm (network operations.) Tj
 ET
-0.0706 0.1098 0.2000 rg
+0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-168.82 593.89 114.82 112.00 re B
+168.82 591.89 114.82 114.00 re B
 BT
 /F2 13.00 Tf
 0.9216 0.9529 1.0000 rg
 1 0 0 1 182.82 674.89 Tm ($1,500/month) Tj
 ET
 BT
-/F1 9.40 Tf
+/F1 9.10 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 182.82 636.64 Tm (Supports ongoing) Tj
-1 0 0 1 182.82 623.84 Tm (development,) Tj
-1 0 0 1 182.82 611.04 Tm (wallet and) Tj
-1 0 0 1 182.82 598.24 Tm (explorer) Tj
-1 0 0 1 182.82 585.44 Tm (improvements,) Tj
-1 0 0 1 182.82 572.64 Tm (testing, and) Tj
-1 0 0 1 182.82 559.84 Tm (regular) Tj
-1 0 0 1 182.82 547.04 Tm (maintenance work.) Tj
+1 0 0 1 182.82 638.94 Tm (Supports ongoing) Tj
+1 0 0 1 182.82 626.56 Tm (development, wallet) Tj
+1 0 0 1 182.82 614.19 Tm (and explorer) Tj
+1 0 0 1 182.82 601.81 Tm (improvements,) Tj
+1 0 0 1 182.82 589.44 Tm (testing, and) Tj
+1 0 0 1 182.82 577.06 Tm (regular maintenance) Tj
+1 0 0 1 182.82 564.68 Tm (work.) Tj
 ET
-0.0706 0.1098 0.2000 rg
+0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-46.00 471.89 114.82 112.00 re B
+46.00 467.89 114.82 114.00 re B
 BT
 /F2 13.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 60.00 552.89 Tm ($3,000/month) Tj
+1 0 0 1 60.00 550.89 Tm ($3,000/month) Tj
 ET
 BT
-/F1 9.40 Tf
+/F1 9.10 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 60.00 514.64 Tm (Supports major) Tj
-1 0 0 1 60.00 501.84 Tm (implementation) Tj
-1 0 0 1 60.00 489.04 Tm (work for Phase 1) Tj
-1 0 0 1 60.00 476.24 Tm (settlement) Tj
-1 0 0 1 60.00 463.44 Tm (foundation) Tj
-1 0 0 1 60.00 450.64 Tm (features and) Tj
-1 0 0 1 60.00 437.84 Tm (related tooling.) Tj
+1 0 0 1 60.00 514.94 Tm (Supports major) Tj
+1 0 0 1 60.00 502.56 Tm (implementation work) Tj
+1 0 0 1 60.00 490.19 Tm (for Phase 1) Tj
+1 0 0 1 60.00 477.81 Tm (settlement) Tj
+1 0 0 1 60.00 465.44 Tm (foundation features) Tj
+1 0 0 1 60.00 453.06 Tm (and related) Tj
+1 0 0 1 60.00 440.68 Tm (tooling.) Tj
 ET
-0.0706 0.1098 0.2000 rg
+0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-168.82 471.89 114.82 112.00 re B
+168.82 467.89 114.82 114.00 re B
 BT
 /F2 13.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 182.82 552.89 Tm ($5,000+/month) Tj
+1 0 0 1 182.82 550.89 Tm ($5,000+/month) Tj
 ET
 BT
-/F1 9.40 Tf
+/F1 9.10 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 182.82 514.64 Tm (Supports faster) Tj
-1 0 0 1 182.82 501.84 Tm (delivery, stronger) Tj
-1 0 0 1 182.82 489.04 Tm (testing, broader) Tj
-1 0 0 1 182.82 476.24 Tm (tooling, ecosystem) Tj
-1 0 0 1 182.82 463.44 Tm (support, and) Tj
-1 0 0 1 182.82 450.64 Tm (long-term network) Tj
-1 0 0 1 182.82 437.84 Tm (expansion.) Tj
+1 0 0 1 182.82 514.94 Tm (Supports faster) Tj
+1 0 0 1 182.82 502.56 Tm (delivery, stronger) Tj
+1 0 0 1 182.82 490.19 Tm (testing, broader) Tj
+1 0 0 1 182.82 477.81 Tm (tooling, ecosystem) Tj
+1 0 0 1 182.82 465.44 Tm (support, and) Tj
+1 0 0 1 182.82 453.06 Tm (long-term network) Tj
+1 0 0 1 182.82 440.68 Tm (expansion.) Tj
 ET
 BT
 /F2 16.00 Tf
@@ -461,128 +410,128 @@ BT
 1 0 0 1 305.64 707.89 Tm (Ways to support) Tj
 ET
 BT
-/F2 10.20 Tf
+/F2 10.00 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 689.69 Tm (-) Tj
+1 0 0 1 305.64 689.89 Tm (-) Tj
 ET
 BT
-/F1 10.20 Tf
+/F1 10.00 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 689.69 Tm (Monthly sponsorship) Tj
+1 0 0 1 319.64 689.89 Tm (Monthly sponsorship) Tj
 ET
 BT
-/F2 10.20 Tf
+/F2 10.00 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 659.01 Tm (-) Tj
+1 0 0 1 305.64 659.69 Tm (-) Tj
 ET
 BT
-/F1 10.20 Tf
+/F1 10.00 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 659.01 Tm (One-time contribution) Tj
+1 0 0 1 319.64 659.69 Tm (One-time contribution) Tj
 ET
 BT
-/F2 10.20 Tf
+/F2 10.00 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 628.32 Tm (-) Tj
+1 0 0 1 305.64 629.49 Tm (-) Tj
 ET
 BT
-/F1 10.20 Tf
+/F1 10.00 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 628.32 Tm (Infrastructure sponsorship) Tj
+1 0 0 1 319.64 629.49 Tm (Infrastructure sponsorship) Tj
 ET
 BT
-/F2 10.20 Tf
+/F2 10.00 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 597.64 Tm (-) Tj
+1 0 0 1 305.64 599.29 Tm (-) Tj
 ET
 BT
-/F1 10.20 Tf
+/F1 10.00 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 597.64 Tm (Milestone sponsorship) Tj
+1 0 0 1 319.64 599.29 Tm (Milestone sponsorship) Tj
 ET
 BT
-/F2 10.20 Tf
+/F2 10.00 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 566.95 Tm (-) Tj
+1 0 0 1 305.64 569.09 Tm (-) Tj
 ET
 BT
-/F1 10.20 Tf
+/F1 10.00 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 566.95 Tm (Ecosystem partnership) Tj
+1 0 0 1 319.64 569.09 Tm (Ecosystem partnership) Tj
 ET
 BT
 /F2 16.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 305.64 524.47 Tm (Transparency) Tj
+1 0 0 1 305.64 528.89 Tm (Transparency) Tj
 ET
 BT
-/F2 10.00 Tf
+/F2 9.80 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 506.47 Tm (-) Tj
+1 0 0 1 305.64 511.09 Tm (-) Tj
 ET
 BT
-/F1 10.00 Tf
+/F1 9.80 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 506.47 Tm (Current monthly support level) Tj
+1 0 0 1 319.64 511.09 Tm (Current monthly support level) Tj
 ET
 BT
-/F2 10.00 Tf
+/F2 9.80 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 476.27 Tm (-) Tj
+1 0 0 1 305.64 481.37 Tm (-) Tj
 ET
 BT
-/F1 10.00 Tf
+/F1 9.80 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 476.27 Tm (Infrastructure costs) Tj
+1 0 0 1 319.64 481.37 Tm (Infrastructure costs) Tj
 ET
 BT
-/F2 10.00 Tf
+/F2 9.80 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 446.07 Tm (-) Tj
+1 0 0 1 305.64 451.66 Tm (-) Tj
 ET
 BT
-/F1 10.00 Tf
+/F1 9.80 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 446.07 Tm (Major expenses) Tj
+1 0 0 1 319.64 451.66 Tm (Major expenses) Tj
 ET
 BT
-/F2 10.00 Tf
+/F2 9.80 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 415.87 Tm (-) Tj
+1 0 0 1 305.64 421.94 Tm (-) Tj
 ET
 BT
-/F1 10.00 Tf
+/F1 9.80 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 415.87 Tm (Completed milestones) Tj
+1 0 0 1 319.64 421.94 Tm (Completed milestones) Tj
 ET
 BT
-/F2 10.00 Tf
+/F2 9.80 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 385.67 Tm (-) Tj
+1 0 0 1 305.64 392.23 Tm (-) Tj
 ET
 BT
-/F1 10.00 Tf
+/F1 9.80 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 385.67 Tm (Current development priorities) Tj
+1 0 0 1 319.64 392.23 Tm (Current development priorities) Tj
 ET
 BT
-/F2 10.00 Tf
+/F2 9.80 Tf
 0.4196 0.8824 1.0000 rg
-1 0 0 1 305.64 355.47 Tm (-) Tj
+1 0 0 1 305.64 362.51 Tm (-) Tj
 ET
 BT
-/F1 10.00 Tf
+/F1 9.80 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 319.64 355.47 Tm (Next funding targets) Tj
+1 0 0 1 319.64 362.51 Tm (Next funding targets) Tj
 ET
 0.0549 0.0863 0.1569 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-46.00 182.00 503.28 166.00 re B
+46.00 190.00 503.28 158.00 re B
 BT
 /F2 16.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 62.00 326.00 Tm (Official contact and support channels) Tj
+1 0 0 1 62.00 326.00 Tm (Active support channels) Tj
 ET
 BT
 /F2 9.50 Tf
@@ -602,7 +551,7 @@ ET
 BT
 /F1 9.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 277.51 Tm (Open Collective: #) Tj
+1 0 0 1 64.00 277.51 Tm (Primary donation address: IRM Q8Ni6TJ6Y77vvtMZ1E474kn2jYNawjvaLa) Tj
 ET
 BT
 /F2 9.50 Tf
@@ -612,7 +561,7 @@ ET
 BT
 /F1 9.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 248.52 Tm (Primary donation address: IRM Q8Ni6TJ6Y77vvtMZ1E474kn2jYNawjvaLa) Tj
+1 0 0 1 64.00 248.52 Tm (Secondary donation address: USDT \(TRC20\): TU1WjsSLaKx7DboBbLKCTb59gG2DPMK8Y8) Tj
 ET
 BT
 /F2 9.50 Tf
@@ -622,7 +571,7 @@ ET
 BT
 /F1 9.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 219.53 Tm (Secondary donation address: USDT \(TRC20\): TU1WjsSLaKx7DboBbLKCTb59gG2DPMK8Y8) Tj
+1 0 0 1 64.00 219.53 Tm (Support email: info@iriumlabs.org) Tj
 ET
 BT
 /F2 9.50 Tf
@@ -632,7 +581,7 @@ ET
 BT
 /F1 9.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 190.54 Tm (Support email: info@iriumlabs.org) Tj
+1 0 0 1 64.00 190.54 Tm (Partnership inquiry: mailto:info@iriumlabs.org?subject=Irium%20Partnership%20Inquiry) Tj
 ET
 BT
 /F2 9.50 Tf
@@ -642,34 +591,24 @@ ET
 BT
 /F1 9.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 161.55 Tm (Partnership inquiry: mailto:info@iriumlabs.org?subject=Irium%20Partnership%20Inquiry) Tj
-ET
-BT
-/F2 9.50 Tf
-0.4196 0.8824 1.0000 rg
-1 0 0 1 50.00 132.56 Tm (-) Tj
-ET
-BT
-/F1 9.50 Tf
-0.6980 0.7647 0.8784 rg
-1 0 0 1 64.00 132.56 Tm (Sponsor overview URL: https://iriumlabs.org/assets/irium-sponsor-overview.pdf) Tj
+1 0 0 1 64.00 161.55 Tm (Sponsor overview PDF: https://iriumlabs.org/assets/irium-sponsor-overview.pdf) Tj
 ET
 0.0706 0.1098 0.2000 rg
 0.2824 0.3804 0.5490 RG
 0.90 w
-46.00 78.00 503.28 80.00 re B
+46.00 78.00 503.28 86.00 re B
 BT
 /F2 16.00 Tf
 0.9216 0.9529 1.0000 rg
-1 0 0 1 62.00 136.00 Tm (Important note) Tj
+1 0 0 1 62.00 142.00 Tm (Important note) Tj
 ET
 BT
-/F1 9.60 Tf
+/F1 9.50 Tf
 0.6980 0.7647 0.8784 rg
-1 0 0 1 62.00 114.40 Tm (Contributions made to support Irium are voluntary contributions for open-source development,) Tj
-1 0 0 1 62.00 101.20 Tm (infrastructure, and ecosystem growth. They do not represent equity, ownership, profit rights,) Tj
-1 0 0 1 62.00 88.00 Tm (guaranteed returns, or investment contracts. Support for Irium is support for the network and its) Tj
-1 0 0 1 62.00 74.80 Tm (development, not a promise of financial return.) Tj
+1 0 0 1 62.00 118.50 Tm (Contributions made to support Irium are voluntary contributions for open-source development,) Tj
+1 0 0 1 62.00 105.50 Tm (infrastructure, and ecosystem growth. They do not represent equity, ownership, profit rights,) Tj
+1 0 0 1 62.00 92.50 Tm (guaranteed returns, or investment contracts. Support for Irium is support for the network and its) Tj
+1 0 0 1 62.00 79.50 Tm (development, not a promise of financial return.) Tj
 ET
 0.2824 0.3804 0.5490 RG
 0.80 w
@@ -699,7 +638,7 @@ endobj
 << /Type /Catalog /Pages 7 0 R >>
 endobj
 9 0 obj
-<< /Title (Irium Sponsor Overview) /Author (Irium Labs) /Producer (Irium static site generator) /Creator (Irium website) >>
+<< /Title (Irium Sponsor Overview) /Author (Irium Labs) /Producer (Irium website) /Creator (Irium website) >>
 endobj
 xref
 0 10
@@ -707,14 +646,14 @@ xref
 0000000009 00000 n 
 0000000079 00000 n 
 0000000154 00000 n 
-0000007638 00000 n 
-0000015015 00000 n 
-0000015157 00000 n 
-0000015299 00000 n 
-0000015364 00000 n 
-0000015413 00000 n 
+0000006858 00000 n 
+0000013987 00000 n 
+0000014129 00000 n 
+0000014271 00000 n 
+0000014336 00000 n 
+0000014385 00000 n 
 trailer
 << /Size 10 /Root 8 0 R /Info 9 0 R >>
 startxref
-15552
+14510
 %%EOF

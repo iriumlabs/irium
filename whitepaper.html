@@ -86,6 +86,39 @@
     padding: 10px;
     border-bottom: 1px solid rgba(91,177,255,0.16);
   }
+  .whitepaper-page .wp-single-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .whitepaper-page .wp-grid-card {
+    background: rgba(0,0,0,0.18);
+    border: 1px solid rgba(91,177,255,0.30);
+    border-radius: 16px;
+    padding: 14px;
+    animation: xGridGlow 4.8s ease-in-out infinite;
+  }
+  .whitepaper-page .wp-grid-card strong {
+    display: block;
+    margin-bottom: 6px;
+    color: rgba(255,255,255,0.95);
+  }
+  .whitepaper-page .wp-grid-card span {
+    color: rgba(230,237,243,0.88);
+    line-height: 1.6;
+    font-size: 0.95rem;
+  }
+  @media (max-width: 900px) {
+    .whitepaper-page .wp-single-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 560px) {
+    .whitepaper-page .wp-single-grid {
+      grid-template-columns: 1fr;
+    }
+  }
   @keyframes xGridGlow {
     0%,100% { border-color: rgba(91,177,255,0.32); box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 26px rgba(42,171,238,0.16); }
     50% { border-color: rgba(91,177,255,0.60); box-shadow: 0 16px 42px rgba(0,0,0,0.44), 0 0 40px rgba(42,171,238,0.34); }
@@ -136,6 +169,12 @@
 <h1>Irium: DNS-Free Proof-of-Work Mainnet</h1>
 <p class="wp-subtitle">Technical Whitepaper - Version 1.0</p>
 <div class="wp-badges"><span class="badge">** LIVE on Mainnet</span> <span class="badge" style="background: rgba(99, 102, 241, 0.3);">Genesis Hash: ** 0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd10a3</span> <span class="badge" style="background: rgba(99, 102, 241, 0.3);">Launch: ** January 5, 2026</span></div>
+</div>
+<div class="wp-single-grid">
+<div class="wp-grid-card"><strong>Mainnet</strong><span>Live since January 5, 2026 with a mined genesis block and public network services.</span></div>
+<div class="wp-grid-card"><strong>Consensus</strong><span>Independent SHA-256d Proof-of-Work chain built for long-term survivability.</span></div>
+<div class="wp-grid-card"><strong>Supply Model</strong><span>100,000,000 IRM max supply with transparent founder vesting and public mining.</span></div>
+<div class="wp-grid-card"><strong>Architecture</strong><span>DNS-free bootstrap, resilient peer discovery, and light-client-oriented design.</span></div>
 </div>
 <div class="wp-section"><h2>Abstract</h2>
 <p>Irium is a purpose-built proof-of-work blockchain designed to maximize network independence and long-term survivability. The protocol eliminates reliance on DNS infrastructure, enforces transparent founder vesting via on-chain timelocks, incentivizes transaction relay quality without inflation, and prioritizes light client usability from genesis. This whitepaper outlines the core design principles, system architecture, monetary policy, and implementation status of the IRM asset and its supporting network.</p>

@@ -5,400 +5,121 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="description" content="Understand Irium’s settlement-first direction and how the live PoW chain connects to escrow, agreements, and proof-based commerce.">
 <title>Settlement | Irium</title>
-<link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=4">
+<link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=6">
 <link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
 <style>
-  :root {
-    --settlement-line: rgba(147, 176, 226, 0.14);
-    --settlement-line-strong: rgba(110, 208, 255, 0.28);
-    --settlement-text: #edf4ff;
-    --settlement-muted: #a7b8d3;
-    --settlement-soft: #8ea0bc;
-    --settlement-panel: linear-gradient(180deg, rgba(15, 22, 39, 0.9), rgba(8, 12, 23, 0.96));
-    --settlement-panel-soft: linear-gradient(180deg, rgba(12, 18, 33, 0.82), rgba(8, 11, 20, 0.92));
-    --settlement-shadow: 0 26px 70px rgba(0, 0, 0, 0.32);
+  .settlement-page .hero-whitepaper .container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 0 20px;
   }
-
-  .settlement-page .hero {
-    min-height: auto;
-    padding: 7.2rem 0 4rem;
-    position: relative;
-  }
-
-  .settlement-page .hero::before {
-    content: "";
-    position: absolute;
-    inset: 6% 10% auto;
-    height: 360px;
-    border-radius: 999px;
-    background: linear-gradient(90deg, rgba(141, 125, 255, 0.18), rgba(110, 198, 255, 0.24));
-    filter: blur(96px);
-    opacity: .78;
-    z-index: 1;
-  }
-
-  .settlement-page .container {
-    width: min(1180px, 92vw);
-  }
-
-  .settlement-main {
-    position: relative;
-    z-index: 3;
-  }
-
-  .settlement-kicker,
-  .settlement-section-kicker,
-  .settlement-phase-label,
-  .settlement-note-label {
-    margin: 0;
-    color: #97bbff;
-    font-family: "Sora", sans-serif;
-    font-size: .74rem;
-    letter-spacing: .14em;
-    text-transform: uppercase;
-  }
-
-  .settlement-hero {
+  .settlement-page .wp-shell {
     display: grid;
-    gap: 2.15rem;
+    gap: 18px;
+    margin-top: 18px;
   }
-
-  .settlement-hero-copy {
-    max-width: 760px;
-  }
-
-  .settlement-kicker {
-    margin-bottom: 1rem;
-  }
-
-  .settlement-title {
-    margin: 0;
-    max-width: 11ch;
-    color: var(--settlement-text);
-    font-family: "Sora", sans-serif;
-    font-size: clamp(3.3rem, 6.3vw, 5.6rem);
-    line-height: .94;
-    letter-spacing: -.07em;
-  }
-
-  .settlement-subtitle {
-    margin: 1.1rem 0 0;
-    max-width: 45rem;
-    color: #f4f8ff;
-    font-size: clamp(1.08rem, 1.85vw, 1.32rem);
-    line-height: 1.64;
-  }
-
-  .settlement-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .85rem;
-    margin-top: 1.6rem;
-  }
-
-  .settlement-actions .btn {
-    min-width: 180px;
-    text-align: center;
-  }
-
-  .settlement-showcase {
-    display: grid;
-    grid-template-columns: minmax(0, 1.08fr) minmax(280px, .62fr);
-    gap: 1rem;
-    align-items: stretch;
-  }
-
-  .settlement-hero-panel,
-  .settlement-mini-panel,
-  .settlement-feature-card,
-  .settlement-highlight,
-  .settlement-use-card,
-  .settlement-roadmap-card,
-  .settlement-essay-card,
-  .settlement-principles-card {
-    border: 1px solid rgba(147, 176, 226, 0.14);
-    box-shadow: var(--settlement-shadow), inset 0 1px 0 rgba(255,255,255,.03);
-  }
-
-  .settlement-hero-panel {
+  .settlement-page .wp-body {
+    background: rgba(0,0,0,0.32);
+    border: 1px solid rgba(91,177,255,0.34);
+    border-radius: 14px;
+    padding: 18px;
+    box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 30px rgba(42,171,238,0.20);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     position: relative;
     overflow: hidden;
-    min-height: 470px;
-    padding: 1.6rem;
-    border-radius: 34px;
-    background:
-      radial-gradient(280px 180px at 18% 22%, rgba(110, 208, 255, 0.14), transparent 70%),
-      radial-gradient(260px 180px at 84% 18%, rgba(141, 125, 255, 0.16), transparent 68%),
-      var(--settlement-panel);
   }
-
-  .settlement-hero-panel::before,
-  .settlement-hero-panel::after {
+  .settlement-page .wp-body:before {
     content: "";
     position: absolute;
-    border-radius: 50%;
-    border: 1px solid rgba(255,255,255,.08);
+    inset: 0;
+    border-radius: 14px;
+    pointer-events: none;
+    box-shadow: 0 0 26px rgba(42,171,238,0.20), inset 0 0 18px rgba(42,171,238,0.10);
+    animation: xGridAura 4.2s ease-in-out infinite;
   }
-
-  .settlement-hero-panel::before {
-    width: 250px;
-    height: 250px;
-    top: 42px;
-    right: 54px;
+  .settlement-page .wp-body > * { position: relative; z-index: 1; }
+  .settlement-page .wp-header {
+    background: rgba(0,0,0,0.18);
+    border: 1px solid rgba(91,177,255,0.30);
+    border-radius: 16px;
+    padding: 16px;
+    margin-bottom: 12px;
+    animation: xGridGlow 4.8s ease-in-out infinite;
   }
-
-  .settlement-hero-panel::after {
-    width: 170px;
-    height: 170px;
-    left: 32px;
-    bottom: 38px;
-    border-color: rgba(110, 208, 255, 0.14);
+  .settlement-page .wp-section {
+    background: rgba(0,0,0,0.18);
+    border: 1px solid rgba(91,177,255,0.30);
+    border-radius: 16px;
+    padding: 16px;
+    margin-top: 12px;
+    animation: xGridGlow 4.8s ease-in-out infinite;
   }
-
-  .settlement-hero-core {
-    position: relative;
-    z-index: 3;
-    width: min(100%, 370px);
-    padding: 1.35rem;
-    border-radius: 28px;
-    background: var(--settlement-panel-soft);
-    border: 1px solid rgba(147, 176, 226, 0.14);
+  .settlement-page .wp-section h2,
+  .settlement-page .wp-section h3,
+  .settlement-page .wp-header h1 { color: rgba(255,255,255,0.95); }
+  .settlement-page .wp-body p,
+  .settlement-page .wp-body li,
+  .settlement-page .wp-body td,
+  .settlement-page .wp-body th { color: rgba(230,237,243,0.9); }
+  .settlement-page .wp-body a { color: #8be1ff; text-decoration: underline; text-underline-offset: 2px; }
+  .settlement-page .wp-body a:hover { color: #c2f0ff; }
+  .settlement-page pre,
+  .settlement-page .code-block {
+    background: rgba(2,7,14,0.95);
+    border: 1px solid rgba(148,186,240,.26);
+    border-radius: 10px;
+    padding: 11px;
+    overflow-x: auto;
+    color: #e9f2ff;
   }
-
-  .settlement-tag {
+  .settlement-page .wp-table {
+    width: 100%;
+    border-collapse: collapse;
+    overflow: hidden;
+    border-radius: 10px;
+    border: 1px solid rgba(91,177,255,0.24);
+  }
+  .settlement-page .wp-table th,
+  .settlement-page .wp-table td {
+    padding: 10px;
+    border-bottom: 1px solid rgba(91,177,255,0.16);
+    vertical-align: top;
+  }
+  .settlement-page .wp-subtitle {
+    color: rgba(205, 224, 244, 0.86);
+    margin-top: .35rem;
+  }
+  .settlement-page .wp-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .65rem;
+    margin-top: .85rem;
+  }
+  .settlement-page .badge {
     display: inline-flex;
-    padding: .36rem .64rem;
+    align-items: center;
+    padding: .42rem .7rem;
     border-radius: 999px;
-    border: 1px solid rgba(110, 208, 255, 0.16);
-    background: rgba(110, 208, 255, 0.06);
-    color: #cbefff;
-    font-family: "Sora", sans-serif;
-    font-size: .72rem;
-    letter-spacing: .08em;
-    text-transform: uppercase;
+    background: rgba(35, 166, 213, 0.20);
+    border: 1px solid rgba(91,177,255,0.28);
+    color: #e8f7ff;
+    font-size: .86rem;
   }
-
-  .settlement-hero-core h3,
-  .settlement-mini-panel h3,
-  .settlement-feature-card h3,
-  .settlement-highlight h3,
-  .settlement-use-card h3,
-  .settlement-roadmap-card h3,
-  .settlement-essay-card h3,
-  .settlement-principles-card h3 {
-    margin: .6rem 0 .5rem;
-    color: var(--settlement-text);
-    font-family: "Sora", sans-serif;
-    font-size: 1rem;
-    line-height: 1.42;
+  @keyframes xGridGlow {
+    0%,100% { border-color: rgba(91,177,255,0.32); box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 26px rgba(42,171,238,0.16); }
+    50% { border-color: rgba(91,177,255,0.60); box-shadow: 0 16px 42px rgba(0,0,0,0.44), 0 0 40px rgba(42,171,238,0.34); }
   }
-
-  .settlement-hero-core p,
-  .settlement-mini-panel p,
-  .settlement-feature-card p,
-  .settlement-highlight p,
-  .settlement-use-card p,
-  .settlement-roadmap-card p,
-  .settlement-essay-card p,
-  .settlement-principles-card p,
-  .settlement-led p,
-  .settlement-metric span {
-    color: var(--settlement-muted);
-    font-size: .95rem;
-    line-height: 1.74;
-  }
-
-  .settlement-mini-float {
-    position: absolute;
-    max-width: 210px;
-    padding: .92rem 1rem;
-    border-radius: 18px;
-    background: rgba(10, 16, 29, 0.72);
-    border: 1px solid rgba(147, 176, 226, 0.12);
-    backdrop-filter: blur(8px);
-  }
-
-  .settlement-mini-float.one { top: 26px; right: 24px; }
-  .settlement-mini-float.two { left: 28px; bottom: 34px; }
-  .settlement-mini-float.three { right: 40px; bottom: 22px; }
-
-  .settlement-metrics {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: .75rem;
-    margin-top: 1rem;
-  }
-
-  .settlement-metric {
-    padding-top: .85rem;
-    border-top: 1px solid rgba(147, 176, 226, 0.1);
-  }
-
-  .settlement-metric strong,
-  .settlement-feature-card strong,
-  .settlement-roadmap-card strong {
-    display: block;
-    margin-bottom: .18rem;
-    color: #eef8ff;
-    font-family: "Sora", sans-serif;
-    font-size: .92rem;
-  }
-
-  .settlement-showcase-side {
-    display: grid;
-    gap: 1rem;
-  }
-
-  .settlement-mini-panel {
-    padding: 1.15rem 1.15rem 1.2rem;
-    border-radius: 28px;
-    background: var(--settlement-panel-soft);
-  }
-
-  .settlement-divider {
-    height: 1px;
-    margin: 3rem 0;
-    background: linear-gradient(90deg, rgba(147,176,226,0.04), rgba(110,208,255,0.28), rgba(147,176,226,0.04));
-  }
-
-  .settlement-shell {
-    display: grid;
-    gap: 3rem;
-    padding-bottom: 4.8rem;
-  }
-
-  .settlement-section {
-    display: grid;
-    gap: 1.35rem;
-  }
-
-  .settlement-led {
-    max-width: 760px;
-  }
-
-  .settlement-section-kicker {
-    margin-bottom: .7rem;
-  }
-
-  .settlement-led h2 {
-    margin: 0 0 .9rem;
-    color: var(--settlement-text);
-    font-family: "Sora", sans-serif;
-    font-size: clamp(1.95rem, 2.8vw, 2.75rem);
-    line-height: 1.06;
-    letter-spacing: -.045em;
-  }
-
-  .settlement-led p + p {
-    margin-top: .95rem;
-  }
-
-  .settlement-feature-grid,
-  .settlement-use-grid,
-  .settlement-roadmap-grid {
-    display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 1rem;
-  }
-
-  .settlement-feature-card,
-  .settlement-use-card,
-  .settlement-roadmap-card,
-  .settlement-essay-card,
-  .settlement-principles-card,
-  .settlement-highlight {
-    padding: 1.2rem 1.2rem 1.25rem;
-    border-radius: 28px;
-    background: var(--settlement-panel-soft);
-  }
-
-  .settlement-wide {
-    display: grid;
-    grid-template-columns: minmax(0, 1.08fr) minmax(280px, .72fr);
-    gap: 1rem;
-    align-items: stretch;
-  }
-
-  .settlement-quote {
-    margin: 1.45rem 0 0;
-    padding: 1.15rem 0 1.15rem 1.2rem;
-    border-left: 2px solid rgba(141, 125, 255, 0.34);
-    color: #deecff;
-    font-family: "Sora", sans-serif;
-    font-size: 1.05rem;
-    line-height: 1.72;
-  }
-
-  .settlement-roadmap-card.active {
-    border-color: rgba(110, 208, 255, 0.22);
-  }
-
-  .settlement-closing {
-    padding-top: .8rem;
-    border-top: 1px solid var(--settlement-line);
-  }
-
-  @media (max-width: 1080px) {
-    .settlement-showcase,
-    .settlement-feature-grid,
-    .settlement-use-grid,
-    .settlement-roadmap-grid,
-    .settlement-wide,
-    .settlement-metrics {
-      grid-template-columns: 1fr;
-    }
-
-    .settlement-title,
-    .settlement-led,
-    .settlement-hero-copy {
-      max-width: none;
-    }
-  }
-
-  @media (max-width: 720px) {
-    .settlement-page .hero {
-      padding-top: 6.05rem;
-      padding-bottom: 2.8rem;
-    }
-
-    .settlement-actions {
-      flex-direction: column;
-    }
-
-    .settlement-actions .btn {
-      width: 100%;
-      min-width: 0;
-    }
-
-    .settlement-hero-panel,
-    .settlement-mini-panel,
-    .settlement-feature-card,
-    .settlement-highlight,
-    .settlement-use-card,
-    .settlement-roadmap-card,
-    .settlement-essay-card,
-    .settlement-principles-card {
-      border-radius: 22px;
-    }
-
-    .settlement-hero-panel {
-      min-height: auto;
-      display: grid;
-      gap: .8rem;
-    }
-
-    .settlement-mini-float {
-      position: static;
-      max-width: none;
-    }
+  @keyframes xGridAura {
+    0%,100% { opacity: .62; box-shadow: 0 0 20px rgba(42,171,238,0.18), inset 0 0 14px rgba(42,171,238,0.08); }
+    50% { opacity: .95; box-shadow: 0 0 36px rgba(42,171,238,0.34), inset 0 0 24px rgba(42,171,238,0.16); }
   }
 </style>
 </head>
-<body class="settlement-page">
+<body class="settlement-page x-explorer">
 
 <div class="stars"></div>
-<div class="tech-bg" aria-hidden="true"></div>
 
 <nav class="nav">
   <div class="container">
@@ -424,156 +145,121 @@
   </div>
 </nav>
 
-<section class="hero">
-  <div class="container settlement-main">
-    <div class="settlement-hero">
-      <div class="settlement-hero-copy">
-        <p class="settlement-kicker">Settlement-First Blockchain</p>
-        <h1 class="settlement-title">The blockchain for agreements, not just payments.</h1>
-        <p class="settlement-subtitle">Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce. The live network is already an independent SHA-256d Proof-of-Work chain built from scratch in Rust, with the broader direction focused on trust-minimized commercial settlement.</p>
-        <div class="settlement-actions">
-          <a href="https://www.iriumlabs.org/whitepaper.html" class="btn btn-primary">Read Whitepaper</a>
-          <a href="https://www.iriumlabs.org/explorer/" class="btn btn-secondary">View Explorer</a>
-          <a href="https://www.iriumlabs.org/docs/mining/" class="btn btn-secondary">Start Mining</a>
-        </div>
-      </div>
+<section class="hero hero-whitepaper">
+<div class="container">
+<h1 class="glitch wp-title" data-text="SETTLEMENT">SETTLEMENT</h1>
+<div class="wp-content wp-shell">
 
-      <div class="settlement-showcase">
-        <div class="settlement-hero-panel">
-          <div class="settlement-hero-core">
-            <span class="settlement-tag">Settlement Direction</span>
-            <h3>Objective settlement on a live mineable base layer</h3>
-            <p>The live chain already exists. The next layer is settlement infrastructure built around escrow, agreement anchoring, refunds, and proof-linked outcomes that stay compatible with objective-only consensus.</p>
-            <div class="settlement-metrics">
-              <div class="settlement-metric"><strong>Live</strong><span>PoW chain, explorer, pool, calculator</span></div>
-              <div class="settlement-metric"><strong>Building</strong><span>Anchoring, escrow direction, refund logic</span></div>
-              <div class="settlement-metric"><strong>Planned</strong><span>Proof automation and templates</span></div>
-            </div>
-          </div>
-          <div class="settlement-mini-float one"><p>No admin keys or override path in consensus.</p></div>
-          <div class="settlement-mini-float two"><p>Mining still secures the public settlement base layer.</p></div>
-          <div class="settlement-mini-float three"><p>Trust-minimized outcomes, not just transfers.</p></div>
-        </div>
+<div class="wp-body">
+<div class="wp-header">
+<h1>Irium: Settlement-First Blockchain for Agreements and Commerce</h1>
+<p class="wp-subtitle">Positioning Overview - Current Network, Settlement Direction, and Roadmap</p>
+<div class="wp-badges">
+  <span class="badge">Live: Independent SHA-256d PoW Mainnet</span>
+  <span class="badge">In Development: Settlement Foundation</span>
+  <span class="badge">Planned: Proof-Based Commerce Tooling</span>
+</div>
+</div>
 
-        <div class="settlement-showcase-side">
-          <div class="settlement-mini-panel">
-            <p class="settlement-note-label">Live Now</p>
-            <h3>Independent SHA-256d mainnet</h3>
-            <p>Built from scratch in Rust with public mining, public explorer, pool access, and fair-launch infrastructure already live.</p>
-          </div>
-          <div class="settlement-mini-panel">
-            <p class="settlement-note-label">In Development</p>
-            <h3>Settlement foundation</h3>
-            <p>Agreement-hash anchoring, escrow-oriented outputs, timeout refunds, and simpler commercial release logic.</p>
-          </div>
-          <div class="settlement-mini-panel">
-            <p class="settlement-note-label">Planned</p>
-            <h3>Proof-based commerce tooling</h3>
-            <p>Approved attestors, objective proof validation, no-response auto-settlement, and broader commercial templates remain roadmap work.</p>
-          </div>
-        </div>
-      </div>
-    </div>
+<div class="wp-section"><h2>Abstract</h2>
+<p>Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce. The live network already operates as an independent SHA-256d Proof-of-Work chain built from scratch in Rust with public mining, public explorer access, public pool infrastructure, and a fair-launch profile. Its broader direction is to extend that base layer toward trust-minimized commercial settlement built around objective rules, agreement anchoring, escrow-oriented outputs, timeout refunds, and proof-linked outcomes.</p>
+<p><strong>Implementation status:</strong> the base chain and infrastructure are live today; settlement primitives are in active development; objective proof automation and broader commercial tooling remain planned roadmap work.</p>
+</div>
 
-    <div class="settlement-divider"></div>
+<div class="wp-section"><h2>1. Positioning</h2>
+<p>Most blockchains are framed primarily as payment systems. They move value from one address to another and treat the transfer itself as the finished job. Irium is being positioned around a narrower and more practical problem: how a public blockchain can support agreements, escrow, release conditions, refund logic, and objective settlement outcomes without turning consensus into subjective arbitration.</p>
+<p><strong>Core positioning:</strong></p>
+<ul>
+<li><strong>Settlement-first blockchain</strong> rather than a generic transfer chain</li>
+<li><strong>Mineable</strong> and secured by public Proof-of-Work</li>
+<li><strong>Designed for escrow, agreements, and proof-based commerce</strong></li>
+<li><strong>Rules-based and objective-only</strong>, not dependent on admin overrides</li>
+</ul>
+<p><strong>Preferred description:</strong> Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce.</p>
+</div>
 
-    <div class="settlement-shell">
-      <section class="settlement-section">
-        <div class="settlement-wide">
-          <div class="settlement-essay-card">
-            <p class="settlement-section-kicker">What Settlement-First Means</p>
-            <h3>Settlement is about outcomes, not just sending value.</h3>
-            <p>Many chains stop at transfer finality. Irium is being developed toward a narrower commercial question: how agreements, escrow conditions, refunds, and proof-linked outcomes can be anchored and resolved under objective rules rather than informal trust.</p>
-            <div class="settlement-quote">Trust-minimized outcomes, not just payments.</div>
-          </div>
-          <div class="settlement-feature-grid">
-            <div class="settlement-feature-card"><strong>Agreement anchoring</strong><p>Commercial terms and references can bind to immutable chain state.</p></div>
-            <div class="settlement-feature-card"><strong>Escrow outputs</strong><p>Release and fallback paths matter more than one-way transfers in many transactions.</p></div>
-            <div class="settlement-feature-card"><strong>Timeout refunds</strong><p>Default and non-response behavior should be explicit rather than improvised.</p></div>
-            <div class="settlement-feature-card"><strong>Objective proofs</strong><p>Where proof paths exist, they should remain narrow, verifiable, and deterministic.</p></div>
-          </div>
-        </div>
-      </section>
+<div class="wp-section"><h2>2. Why Payments Are Not Enough</h2>
+<p>Commercial coordination usually requires more than a transfer. OTC trades may need escrow release rules. Contractor payments may need milestone logic and holdbacks. Deposits and preorders may require refund handling and response windows. Business agreements may need defined proof paths and objective fallback outcomes if one side fails to perform or fails to respond.</p>
+<p>A settlement-first blockchain is concerned with what happens before release, after timeout, at refund, or when a verifiable condition is met. That makes it different from a chain whose primary concern is only transferring units between addresses.</p>
+<h3>2.1 Example Use Cases</h3>
+<ul>
+<li><strong>OTC escrow</strong> for safer peer-to-peer trading</li>
+<li><strong>Contractor and service payments</strong> with milestone-oriented release logic</li>
+<li><strong>Deposits and preorders</strong> with explicit refund paths</li>
+<li><strong>Milestone settlement</strong> for staged commercial payouts</li>
+<li><strong>Verifiable commercial agreements</strong> anchored to chain state</li>
+</ul>
+</div>
 
-      <section class="settlement-section">
-        <div class="settlement-led">
-          <p class="settlement-section-kicker">Why Payments Are Not Enough</p>
-          <h2>Commercial coordination usually needs a ruleset, not just a transfer.</h2>
-          <p>If two parties are handling an OTC trade, a contractor milestone, a preorder deposit, or a staged business payout, the hard part is rarely sending value. The hard part is defining what should happen if one side completes, delays, disappears, or needs to trigger a refund or release condition.</p>
-        </div>
-        <div class="settlement-use-grid">
-          <div class="settlement-use-card"><h3>OTC escrow</h3><p>Safer peer-to-peer trading with release rules, timeout handling, and fallback behavior.</p></div>
-          <div class="settlement-use-card"><h3>Contractor payments</h3><p>Milestone release, delayed holdbacks, and proof-linked completion paths.</p></div>
-          <div class="settlement-use-card"><h3>Deposits and preorders</h3><p>Refund logic and response windows that matter as much as the original payment.</p></div>
-          <div class="settlement-use-card"><h3>Business settlement</h3><p>Commercial agreements that need objective release or refund outcomes instead of trust-only coordination.</p></div>
-        </div>
-      </section>
+<div class="wp-section"><h2>3. What Is Live Today</h2>
+<p>The current Irium network is already live as an independent SHA-256d Proof-of-Work blockchain. It is not a fork. It was built from scratch in Rust and launched with public mining rather than a private distribution model.</p>
+<table class="wp-table">
+<thead>
+<tr><th>Live Base Layer</th><th>Status</th></tr>
+</thead>
+<tbody>
+<tr><td>Independent SHA-256d Proof-of-Work chain</td><td>Live</td></tr>
+<tr><td>Rust implementation</td><td>Live</td></tr>
+<tr><td>Public mining path and public pool</td><td>Live</td></tr>
+<tr><td>Explorer and mining calculator</td><td>Live</td></tr>
+<tr><td>No premine, no ICO, no presale, no VC control</td><td>Live positioning / launch model</td></tr>
+<tr><td>DNS-free bootstrap approach</td><td>Live foundation</td></tr>
+<tr><td>Resilient peer discovery and Sybil-resistant networking</td><td>Live foundation</td></tr>
+<tr><td>Anchor checkpoints and light-client-oriented architecture</td><td>Live foundation</td></tr>
+<tr><td>On-chain metadata support</td><td>Live foundation</td></tr>
+</tbody>
+</table>
+<p>Mining remains important because miners secure the public base layer that the broader settlement narrative depends on.</p>
+</div>
 
-      <section class="settlement-section">
-        <div class="settlement-wide">
-          <div class="settlement-principles-card">
-            <p class="settlement-section-kicker">Objective-Only Consensus</p>
-            <h3>The protocol should stay narrow, deterministic, and verifiable.</h3>
-            <p>Irium’s settlement direction does not imply that subjective human judgment should move into consensus. No admin keys, no override powers, no freeze mechanism, and no centralized dispute authority in consensus are part of that stance.</p>
-            <p>Settlement should remain rules-based. Where proofs, signatures, attestors, or no-response logic are involved, they should stay explicit and technically verifiable rather than dependent on privileged actors.</p>
-          </div>
-          <div class="settlement-highlight">
-            <p class="settlement-note-label">Protocol Principles</p>
-            <h3>Rules first, not human override.</h3>
-            <p>No admin keys. No freeze or seizure control. No centralized dispute authority embedded inside protocol consensus.</p>
-            <p>The chain should remain objective-only even as the settlement layer grows more useful for real commercial flows.</p>
-          </div>
-        </div>
-      </section>
+<div class="wp-section"><h2>4. Settlement Foundation In Development</h2>
+<p>The next layer of Irium’s direction is settlement infrastructure built on top of the live chain. This does not mean every settlement feature is already in production. It means the protocol and product direction are moving toward practical settlement primitives that remain compatible with objective-only consensus.</p>
+<h3>4.1 Active Direction</h3>
+<ul>
+<li><strong>Agreement-hash anchoring</strong></li>
+<li><strong>Native escrow / settlement output direction</strong></li>
+<li><strong>Timeout refund logic</strong></li>
+<li><strong>Basic commercial settlement primitives</strong></li>
+<li><strong>Safer OTC escrow and simpler contractor/deposit flows</strong></li>
+</ul>
+<p>These items should be understood as in development unless explicitly described elsewhere as already live.</p>
+</div>
 
-      <section class="settlement-section">
-        <div class="settlement-led">
-          <p class="settlement-section-kicker">Why Irium Differs</p>
-          <h2>Settlement direction built on a live mineable chain, not generic crypto branding.</h2>
-          <p>Irium is already live as an independent SHA-256d Proof-of-Work network built from scratch in Rust. It is not a fork. It launched without a premine, without an ICO or presale, and without VC control. Public mining, a public pool, a public explorer, and a mining calculator are already part of the live base layer.</p>
-          <p>That base still matters. DNS-free bootstrap, resilient peer discovery, Sybil-resistant networking, anchor checkpoints, light-client-oriented architecture, on-chain metadata support, and transparent founder vesting remain part of the story because the settlement narrative depends on the strength of the underlying chain.</p>
-        </div>
-      </section>
+<div class="wp-section"><h2>5. Objective-Only Consensus</h2>
+<p>Irium’s settlement direction depends on keeping consensus narrow, deterministic, and objective-only. The protocol should not become a general-purpose human dispute system. Subjective judgment, discretionary governance, and privileged override powers would conflict with the trust-minimized positioning the project is aiming for.</p>
+<h3>5.1 Public Principles</h3>
+<ul>
+<li><strong>No admin keys</strong></li>
+<li><strong>No override powers</strong></li>
+<li><strong>No freeze or seizure mechanism</strong></li>
+<li><strong>No centralized dispute authority in consensus</strong></li>
+<li><strong>Rules-based, verifiable settlement paths only</strong></li>
+</ul>
+<p>Where signatures, attestors, proofs, or timeout behavior are used, they should remain explicit and technically verifiable rather than dependent on a privileged operator.</p>
+</div>
 
-      <section class="settlement-section">
-        <div class="settlement-led">
-          <p class="settlement-section-kicker">Roadmap Phases</p>
-          <h2>Live chain first, broader settlement in phases.</h2>
-          <p>The roadmap below separates what is already live from what is under active development and what remains planned. That distinction matters if the settlement narrative is going to stay technically credible.</p>
-        </div>
-        <div class="settlement-roadmap-grid">
-          <div class="settlement-roadmap-card">
-            <p class="settlement-phase-label">Phase 1 · Live</p>
-            <h3>Core independent PoW foundation</h3>
-            <p>Independent SHA-256d Proof-of-Work, Rust implementation, public explorer, pool, calculator, fair launch profile, and resilient network infrastructure.</p>
-          </div>
-          <div class="settlement-roadmap-card active">
-            <p class="settlement-phase-label">Phase 2 · In Development</p>
-            <h3>Settlement foundation</h3>
-            <p>Agreement-hash anchoring, native escrow direction, timeout refunds, and simpler flows for OTC escrow, deposits, and contractor release logic.</p>
-          </div>
-          <div class="settlement-roadmap-card">
-            <p class="settlement-phase-label">Phase 3 · Planned</p>
-            <h3>Objective proof automation</h3>
-            <p>Objective proof validation, approved attestors, signature-verifiable evidence, and no-response auto-settlement. This is roadmap work, not a live claim.</p>
-          </div>
-          <div class="settlement-roadmap-card">
-            <p class="settlement-phase-label">Phase 4 · Planned</p>
-            <h3>Commercial infrastructure</h3>
-            <p>Templates for business settlement, contractor and merchant flows, recurring invoice direction, portable reputation tooling, and broader integration APIs.</p>
-          </div>
-        </div>
-      </section>
+<div class="wp-section"><h2>6. Roadmap Phases</h2>
+<p>Irium’s public messaging needs to distinguish clearly between what already exists, what is under active development, and what is still planned. The roadmap below follows that principle.</p>
+<table class="wp-table">
+<thead>
+<tr><th>Phase</th><th>Scope</th><th>Status</th></tr>
+</thead>
+<tbody>
+<tr><td><strong>Phase 1</strong></td><td>Core independent PoW foundation, Rust node, public explorer, public pool, calculator, fair-launch profile, resilient networking</td><td>Live</td></tr>
+<tr><td><strong>Phase 2</strong></td><td>Agreement anchoring, native escrow / settlement direction, timeout refunds, basic settlement primitives</td><td>In Development</td></tr>
+<tr><td><strong>Phase 3</strong></td><td>Objective proof validation, approved attestors, no-response auto-settlement, milestone proofs and holdbacks</td><td>Planned</td></tr>
+<tr><td><strong>Phase 4</strong></td><td>Commercial templates, contractor and merchant flows, recurring invoice direction, reputation tooling, broader integration APIs</td><td>Planned</td></tr>
+</tbody>
+</table>
+</div>
 
-      <section class="settlement-closing">
-        <div class="settlement-led">
-          <p class="settlement-section-kicker">Closing Note</p>
-          <h2>The settlement story still starts with the base chain.</h2>
-          <p>Mining remains essential because it secures the live network, public explorer, public pool, and the settlement-first infrastructure Irium is building toward. The broader commerce narrative does not replace mining. It gives the base layer a clearer purpose.</p>
-        </div>
-      </section>
-    </div>
-  </div>
+<div class="wp-section"><h2>7. Closing Note</h2>
+<p>Irium is not abandoning mining, nor is it reducing the importance of the base chain. The point of the settlement-first positioning is to explain what that base layer is for. Mining secures the live public network. The broader settlement roadmap gives that network a clearer commercial purpose: trust-minimized outcomes, not just payments.</p>
+</div>
+
+</div>
+</div>
+</div>
 </section>
 
 <footer class="footer">

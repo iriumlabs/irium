@@ -3,83 +3,278 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="Support Irium through donations, development, and community operations.">
-<title>Support Us - Irium</title>
+<meta name="description" content="Support Irium and help fund open-source blockchain development, public infrastructure, wallets, explorer improvements, and long-term ecosystem growth.">
+<title>Support Irium - Irium</title>
 <link rel="stylesheet" href="style.css?v=4">
 <link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
 <style>
   .support-page .hero {
     min-height: auto;
-    padding: 4.6rem 0 1.4rem;
+    padding: 7rem 0 2.2rem;
   }
 
   .support-page .hero .hero-content {
-    max-width: 820px;
+    max-width: 980px;
   }
 
   .support-page .glitch {
-    font-size: 3.4rem;
-    margin: .05rem 0 .45rem;
+    font-size: clamp(2.8rem, 7vw, 4.8rem);
+    margin: 0 0 .8rem;
   }
 
   .support-page .hero-subtitle {
-    font-size: 1.25rem;
-    margin: 0 0 .35rem;
+    max-width: 860px;
+    margin: 0 auto 1rem;
+    font-size: clamp(1.05rem, 2.3vw, 1.45rem);
+    line-height: 1.55;
   }
 
   .support-page .hero-tagline {
-    margin: 0 auto .9rem;
-    max-width: 700px;
-    font-size: .96rem;
+    max-width: 840px;
+    margin: 0 auto 1.5rem;
+    color: var(--txt-soft);
+    font-size: 1rem;
+    line-height: 1.75;
+  }
+
+  .support-page .hero-cta {
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: .85rem;
+    margin-bottom: 1.3rem;
   }
 
   .support-page .hero-cta .btn {
-    padding: .62rem 1rem;
-    font-size: .74rem;
-    border-radius: 10px;
-  }
-
-  .support-note {
-    margin-top: .9rem;
-    color: var(--txt-soft);
+    min-width: 200px;
     text-align: center;
-    font-size: .98rem;
+    padding: .82rem 1.2rem;
   }
 
-  .support-list {
-    margin: .8rem 0 0;
-    padding-left: 1.1rem;
-    color: #d7e5ff;
+  .support-summary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1rem;
+    margin-top: 1.8rem;
+  }
+
+  .support-summary-card {
+    padding: 1.15rem 1.1rem;
+    border-radius: 16px;
+    border: 1px solid rgba(147, 176, 226, .22);
+    background: linear-gradient(160deg, rgba(19,29,50,.78), rgba(11,17,31,.88));
+    box-shadow: 0 14px 30px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+
+  .support-summary-card strong {
+    display: block;
+    margin-bottom: .35rem;
+    color: #edf7ff;
+    font-size: .92rem;
+    letter-spacing: .06em;
+  }
+
+  .support-summary-card span {
+    color: var(--txt-soft);
     line-height: 1.6;
+    font-size: .95rem;
   }
 
-  .support-list li { margin-bottom: .3rem; }
+  .support-stack {
+    display: grid;
+    gap: 1.4rem;
+  }
 
-  .inline-code {
+  .support-panel {
+    padding: 1.5rem;
+    border-radius: 18px;
+    border: 1px solid rgba(147,176,226,.22);
+    background: linear-gradient(160deg, rgba(18,27,47,.84), rgba(10,16,29,.9));
+    box-shadow: 0 16px 36px rgba(0,0,0,.26), inset 0 1px 0 rgba(255,255,255,.04);
+  }
+
+  .support-panel p {
+    margin: 0;
+    line-height: 1.7;
+    color: #d4e1f3;
+  }
+
+  .principles-grid,
+  .goals-grid,
+  .tiers-grid,
+  .ways-grid,
+  .transparency-grid {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .principles-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .principle-pill {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: 1rem 1.05rem;
+    border-radius: 16px;
+    border: 1px solid rgba(112, 196, 255, .18);
+    background: linear-gradient(160deg, rgba(16,24,42,.86), rgba(9,15,27,.92));
+  }
+
+  .principle-pill .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6be1ff, #9a91ff);
+    box-shadow: 0 0 16px rgba(107, 225, 255, .6);
+    flex: 0 0 auto;
+  }
+
+  .principle-pill span {
+    color: #e9f5ff;
+    line-height: 1.45;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    font-size: .88rem;
+  }
+
+  .ways-grid,
+  .transparency-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+
+  .goals-grid,
+  .tiers-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .goal-card,
+  .tier-card,
+  .way-card,
+  .transparency-item,
+  .support-page .feature-card {
+    padding: 1.35rem;
+  }
+
+  .goal-range {
     display: inline-block;
-    margin-top: .45rem;
-    padding: .25rem .45rem;
-    border-radius: 8px;
-    border: 1px solid rgba(147,176,226,.35);
-    background: rgba(10,16,30,.72);
-    color: #cfe4ff;
-    word-break: break-all;
-    font-size: .86rem;
+    margin-bottom: .8rem;
+    padding: .35rem .7rem;
+    border-radius: 999px;
+    background: rgba(107, 225, 255, .12);
+    border: 1px solid rgba(107, 225, 255, .18);
+    color: #b9efff;
+    font-weight: 700;
+    letter-spacing: .04em;
   }
 
-  .contact-strip {
-    margin-top: 1.4rem;
+  .goal-card p,
+  .tier-card p,
+  .way-card p,
+  .transparency-item p,
+  .support-page .feature-card p {
+    margin: 0;
+    line-height: 1.7;
+    color: #d5e3f5;
+  }
+
+  .support-page .feature-card h3,
+  .tier-card h3,
+  .way-card h3,
+  .transparency-item h3,
+  .goal-card h3 {
+    margin-bottom: .7rem;
+  }
+
+  .support-page .feature-icon {
+    width: 52px;
+    height: 52px;
+    margin-bottom: 1rem;
+    border-radius: 14px;
+    display: inline-grid;
+    place-items: center;
+    font-size: 1.15rem;
+    font-weight: 700;
+    background: linear-gradient(135deg, rgba(107,225,255,.22), rgba(154,145,255,.2));
+    border: 1px solid rgba(154,145,255,.22);
+    color: #eaf7ff;
+  }
+
+  .note-box {
+    padding: 1.55rem;
+    border-radius: 18px;
+    border: 1px solid rgba(255, 194, 122, .22);
+    background: linear-gradient(160deg, rgba(33,23,10,.55), rgba(17,13,8,.88));
+    box-shadow: 0 16px 36px rgba(0,0,0,.24), inset 0 1px 0 rgba(255,255,255,.03);
+  }
+
+  .note-box h3 {
+    margin: 0 0 .8rem;
+    color: #ffe0ad;
+  }
+
+  .note-box p {
+    margin: 0;
+    color: #f1ddbf;
+    line-height: 1.8;
+  }
+
+  .support-cta-box {
+    padding: 1.7rem;
+    border-radius: 18px;
     text-align: center;
-    color: var(--txt-soft);
+    border: 1px solid rgba(147,176,226,.24);
+    background: linear-gradient(160deg, rgba(19,29,50,.84), rgba(11,17,31,.92));
+    box-shadow: 0 18px 38px rgba(0,0,0,.28), inset 0 1px 0 rgba(255,255,255,.05);
   }
 
-  .contact-strip a { color: #bfe2ff; }
+  .support-cta-box p {
+    margin: 0 0 1.2rem;
+    line-height: 1.8;
+    color: #dbe7f8;
+  }
+
+  .support-cta-box .hero-cta {
+    margin: 0;
+  }
+
+  @media (max-width: 1080px) {
+    .support-summary,
+    .principles-grid,
+    .ways-grid,
+    .transparency-grid,
+    .goals-grid,
+    .tiers-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 768px) {
+    .support-page .hero {
+      padding-top: 6.1rem;
+    }
+
+    .support-summary,
+    .principles-grid,
+    .ways-grid,
+    .transparency-grid,
+    .goals-grid,
+    .tiers-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .support-page .hero-cta .btn {
+      width: 100%;
+      min-width: 0;
+    }
+  }
 </style>
 </head>
 <body class="support-page">
 
 <div class="stars"></div>
+<div class="tech-bg" aria-hidden="true"></div>
 
 <nav class="nav">
   <div class="container">
@@ -112,114 +307,239 @@
 
 <section class="hero">
   <div class="container hero-content">
-    <h1 class="glitch" data-text="SUPPORT US">SUPPORT US</h1>
-    <h2 class="hero-subtitle">Fund Development • Join Builders • Strengthen the Network</h2>
-    <p class="hero-tagline">Support Irium through donations, open-source contribution, and community operations.</p>
+    <h1 class="glitch" data-text="SUPPORT IRIUM">SUPPORT IRIUM</h1>
+    <p class="hero-subtitle">Help fund open-source development, public infrastructure, wallets, explorer improvements, and long-term ecosystem growth for the Irium network.</p>
+    <p class="hero-tagline">Irium is an independent blockchain project building decentralized, settlement-first infrastructure with no admin keys, no override powers, and no centralized control.</p>
     <div class="hero-cta">
-      <a href="https://github.com/iriumlabs/irium" class="btn btn-primary" target="_blank" rel="noopener">Contribute on GitHub</a>
-      <a href="mailto:info@iriumlabs.org" class="btn btn-secondary">Contact Team</a>
+      <a href="mailto:info@iriumlabs.org?subject=Support%20Irium" class="btn btn-primary">Become a Sponsor</a>
+      <a href="https://t.me/iriumlabs" class="btn btn-secondary" target="_blank" rel="noopener">Discuss Support</a>
     </div>
-    <p class="support-note">Every contribution helps secure infrastructure, improve tooling, and grow the Irium ecosystem.</p>
+    <div class="support-summary">
+      <div class="support-summary-card">
+        <strong>Independent Build</strong>
+        <span>Community support helps fund engineering, infrastructure, maintenance, and ecosystem work without centralized control.</span>
+      </div>
+      <div class="support-summary-card">
+        <strong>Settlement-First</strong>
+        <span>Irium is designed around durable settlement, self-custody, and objective-only network rules.</span>
+      </div>
+      <div class="support-summary-card">
+        <strong>Long-Term Focus</strong>
+        <span>Support helps move the network from stable public infrastructure into stronger tooling, wallets, and broader adoption.</span>
+      </div>
+    </div>
   </div>
 </section>
 
 <section class="section section-dark">
   <div class="container">
-    <h2 class="section-title">WAYS TO CONTRIBUTE</h2>
-    <p class="section-subtitle">Pick the contribution type that fits your time and expertise.</p>
-
-    <div class="features-grid">
-      <div class="feature-card">
-        <div class="feature-icon">💰</div>
-        <h3>Donations</h3>
-        <p>Help fund infrastructure and long-term development.</p>
-        <p class="inline-code">USDT (TRC20): TU1WjsSLaKx7DboBbLKCTb59gG2DPMK8Y8</p>
-        <p class="inline-code">IRM: Q5uT1k6DR7WpxqYuiy7sQQXp8pYDx6U4eS</p>
-        <ul class="support-list">
-          <li>Infrastructure and hosting costs</li>
-          <li>Development and testing effort</li>
-          <li>Security reviews and tooling</li>
-          <li>Community and ecosystem growth</li>
-        </ul>
+    <h2 class="section-title">WHY SUPPORT IRIUM</h2>
+    <p class="section-subtitle">A trust-minimized, settlement-first network needs independent funding to stay stable, useful, and growing.</p>
+    <div class="support-stack">
+      <div class="support-panel">
+        <p>Irium is an open-source, decentralized blockchain project being built with a clear long-term goal: create a trust-minimized settlement-first network for real commerce, without admin keys, override powers, or centralized control.</p>
       </div>
-
-      <div class="feature-card">
-        <div class="feature-icon">👨‍💻</div>
-        <h3>Volunteer Developers</h3>
-        <p>Join as a contributor and help ship the next protocol milestones.</p>
-        <ul class="support-list">
-          <li>Mobile wallet development</li>
-          <li>Mining pool and explorer features</li>
-          <li>Protocol testing and QA</li>
-          <li>Developer docs and tutorials</li>
-          <li>Security research and review</li>
-        </ul>
-      </div>
-
-      <div class="feature-card">
-        <div class="feature-icon">🌍</div>
-        <h3>Community Operations</h3>
-        <p>Support adoption through nodes, mining, and education.</p>
-        <ul class="support-list">
-          <li>Run a reliable public node</li>
-          <li>Contribute hashrate to the network</li>
-          <li>Help users with setup in community channels</li>
-          <li>Share updates and public resources</li>
-        </ul>
+      <div class="support-panel">
+        <p>The project is developed independently, and community support helps fund the infrastructure, engineering, maintenance, and ecosystem work needed to keep Irium stable, useful, and growing.</p>
       </div>
     </div>
-
-    <p class="contact-strip">
-      Contact: <a href="mailto:info@iriumlabs.org">info@iriumlabs.org</a> • Join <a href="https://t.me/iriumlabs" target="_blank" rel="noopener">Telegram</a> for contribution opportunities.
-    </p>
   </div>
 </section>
 
 <section class="section">
   <div class="container">
-    <h2 class="section-title">SUPPORT FAQ</h2>
-    <p class="section-subtitle">Quick operational answers for contributors and operators.</p>
+    <h2 class="section-title">CORE PRINCIPLES</h2>
+    <p class="section-subtitle">The funding page follows the same network philosophy the protocol is being built around.</p>
+    <div class="principles-grid">
+      <div class="principle-pill"><span class="dot"></span><span>No admin keys</span></div>
+      <div class="principle-pill"><span class="dot"></span><span>No override powers</span></div>
+      <div class="principle-pill"><span class="dot"></span><span>No freeze or seizure controls</span></div>
+      <div class="principle-pill"><span class="dot"></span><span>Objective-only consensus</span></div>
+      <div class="principle-pill"><span class="dot"></span><span>Self-custodial ecosystem direction</span></div>
+      <div class="principle-pill"><span class="dot"></span><span>Open-source infrastructure</span></div>
+    </div>
+  </div>
+</section>
 
+<section class="section section-dark">
+  <div class="container">
+    <h2 class="section-title">WHAT CONTRIBUTIONS SUPPORT</h2>
+    <p class="section-subtitle">Support is directed toward practical network delivery, public services, and long-term resilience.</p>
     <div class="features-grid">
       <div class="feature-card">
-        <div class="feature-icon">🔌</div>
-        <h3>Node shows height 0 / peers = 0</h3>
-        <p>Start with the config so seed peers load.</p>
-        <p class="inline-code">IRIUM_NODE_CONFIG=configs/node.json ./target/release/iriumd</p>
+        <div class="feature-icon">01</div>
+        <h3>Core Protocol Development</h3>
+        <p>Funding helps sustain consensus, networking, validation, and implementation work needed for the chain itself.</p>
       </div>
-
       <div class="feature-card">
-        <div class="feature-icon">🛡️</div>
-        <h3>Frequent disconnects or bans</h3>
-        <p>Check system time and clear peer reputation cache before restart.</p>
-        <p class="inline-code">rm -f ~/.irium/peer_reputation.json</p>
+        <div class="feature-icon">02</div>
+        <h3>Public Infrastructure</h3>
+        <p>Explorer, bootstrap, and public network services need reliable hosting, maintenance, and operational attention.</p>
       </div>
-
       <div class="feature-card">
-        <div class="feature-icon">⛏️</div>
-        <h3>Miner stuck at height 0/1</h3>
-        <p>Miner requires a synced node RPC and valid miner address.</p>
-        <p class="inline-code">export IRIUM_MINER_ADDRESS=&lt;YOUR_ADDRESS&gt;</p>
+        <div class="feature-icon">03</div>
+        <h3>Wallet and UX</h3>
+        <p>Support helps improve wallet flows, usability, onboarding, and network-facing tools for real users.</p>
       </div>
-
       <div class="feature-card">
-        <div class="feature-icon">🌐</div>
-        <h3>Template error: InvalidContentType</h3>
-        <p>RPC protocol mismatch. Ensure HTTP/HTTPS scheme matches node endpoint.</p>
-        <p class="inline-code">curl -s http://127.0.0.1:38300/status</p>
-        <p class="inline-code">curl -sk https://127.0.0.1:38300/status</p>
+        <div class="feature-icon">04</div>
+        <h3>Security and Maintenance</h3>
+        <p>Testing, reliability work, hardening, and ongoing maintenance are essential for a durable public network.</p>
       </div>
-
       <div class="feature-card">
-        <div class="feature-icon">🔐</div>
-        <h3>Token and rate-limit errors</h3>
-        <p>401 means token mismatch. 429 means rate limit, use token consistently for node and miner.</p>
+        <div class="feature-icon">05</div>
+        <h3>Documentation and Onboarding</h3>
+        <p>Clear docs, setup guidance, and onboarding improvements lower friction for miners, node operators, and users.</p>
       </div>
-
       <div class="feature-card">
-        <div class="feature-icon">⚓</div>
-        <h3>Unknown parent / orphan events</h3>
-        <p>Normal during catch-up or competing tips. Keep node online to resolve ancestry.</p>
+        <div class="feature-icon">06</div>
+        <h3>Ecosystem Tooling</h3>
+        <p>Longer term support helps fund integrations, monitoring, deployment improvements, and future ecosystem services.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">FUNDING GOALS</h2>
+    <p class="section-subtitle">A simple roadmap for how recurring support can expand what Irium can maintain and deliver.</p>
+    <div class="goals-grid">
+      <div class="goal-card spec-card">
+        <div class="goal-range">$500 / month</div>
+        <h3>Baseline Operations</h3>
+        <p>Supports basic infrastructure and maintenance for public services such as explorer, bootstrap, and network operations.</p>
+      </div>
+      <div class="goal-card spec-card">
+        <div class="goal-range">$1,500 / month</div>
+        <h3>Ongoing Development</h3>
+        <p>Supports ongoing development, wallet and explorer improvements, testing, and regular maintenance work.</p>
+      </div>
+      <div class="goal-card spec-card">
+        <div class="goal-range">$3,000 / month</div>
+        <h3>Phase 1 Delivery</h3>
+        <p>Supports major implementation work for Phase 1 settlement foundation features and related tooling.</p>
+      </div>
+      <div class="goal-card spec-card">
+        <div class="goal-range">$5,000+ / month</div>
+        <h3>Faster Expansion</h3>
+        <p>Supports faster delivery, stronger testing, broader tooling, ecosystem support, and long-term network expansion.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section-dark">
+  <div class="container">
+    <h2 class="section-title">WAYS TO SUPPORT</h2>
+    <p class="section-subtitle">Different contribution paths can support the network at different stages and scales.</p>
+    <div class="ways-grid">
+      <div class="way-card feature-card">
+        <h3>Monthly Sponsorship</h3>
+        <p>Recurring support helps stabilize public services and gives development work a dependable runway.</p>
+      </div>
+      <div class="way-card feature-card">
+        <h3>One-Time Contribution</h3>
+        <p>Single contributions can help cover immediate infrastructure costs, tooling needs, or milestone work.</p>
+      </div>
+      <div class="way-card feature-card">
+        <h3>Infrastructure Sponsorship</h3>
+        <p>Support targeted at hosting, monitoring, bootstrap services, and explorer availability strengthens public reliability.</p>
+      </div>
+      <div class="way-card feature-card">
+        <h3>Milestone Sponsorship</h3>
+        <p>Focused sponsorship can help move a specific development target from planning into active implementation.</p>
+      </div>
+      <div class="way-card feature-card">
+        <h3>Ecosystem Partnership</h3>
+        <p>Longer-term ecosystem support can help unlock integrations, tooling, documentation, and broader network utility.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">SPONSOR TIERS</h2>
+    <p class="section-subtitle">These tiers describe the kinds of support the network can recognize and organize around.</p>
+    <div class="tiers-grid">
+      <div class="tier-card support-card">
+        <h3>Supporter</h3>
+        <p>Helps support Irium's open-source development and network growth.</p>
+      </div>
+      <div class="tier-card support-card">
+        <h3>Node Sponsor</h3>
+        <p>Helps support public infrastructure, node reliability, bootstrap services, and explorer availability.</p>
+      </div>
+      <div class="tier-card support-card">
+        <h3>Builder Sponsor</h3>
+        <p>Helps fund active work on wallets, tooling, APIs, documentation, and network-facing improvements.</p>
+      </div>
+      <div class="tier-card support-card">
+        <h3>Infrastructure Sponsor</h3>
+        <p>Helps cover hosting, deployment, monitoring, and service maintenance for public Irium infrastructure.</p>
+      </div>
+      <div class="tier-card support-card">
+        <h3>Ecosystem Sponsor</h3>
+        <p>Helps accelerate major development milestones, ecosystem tooling, and long-term adoption.</p>
+      </div>
+      <div class="tier-card support-card">
+        <h3>Milestone Sponsor</h3>
+        <p>Supports a specific development target with a clear purpose and defined outcome.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section section-dark">
+  <div class="container">
+    <h2 class="section-title">TRANSPARENCY</h2>
+    <p class="section-subtitle">Funding updates can stay grounded in concrete network work, operational costs, and next targets.</p>
+    <div class="transparency-grid">
+      <div class="transparency-item feature-card">
+        <h3>Monthly Support</h3>
+        <p>Current monthly support level.</p>
+      </div>
+      <div class="transparency-item feature-card">
+        <h3>Infrastructure Costs</h3>
+        <p>Hosting, explorer, bootstrap, and related service costs.</p>
+      </div>
+      <div class="transparency-item feature-card">
+        <h3>Major Expenses</h3>
+        <p>Material costs tied to development and operations.</p>
+      </div>
+      <div class="transparency-item feature-card">
+        <h3>Completed Milestones</h3>
+        <p>Work delivered and infrastructure improvements finished.</p>
+      </div>
+      <div class="transparency-item feature-card">
+        <h3>Next Targets</h3>
+        <p>Current development priorities and upcoming funding goals.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="container">
+    <h2 class="section-title">IMPORTANT NOTE</h2>
+    <div class="note-box">
+      <h3>Voluntary Open-Source Support</h3>
+      <p>Contributions made to support Irium are voluntary contributions for open-source development, infrastructure, and ecosystem growth.</p>
+      <p style="margin-top:.9rem;">They do not represent equity, ownership, profit rights, guaranteed returns, or investment contracts.</p>
+      <p style="margin-top:.9rem;">Support for Irium is support for the network and its development, not a promise of financial return.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section section-dark">
+  <div class="container">
+    <div class="support-cta-box">
+      <h2 class="section-title" style="margin-bottom:.7rem;">BUILD DURABLE PUBLIC INFRASTRUCTURE</h2>
+      <p>If you believe in a decentralized, self-custodial, settlement-first blockchain with no admin override powers, your support can help Irium grow into durable public infrastructure.</p>
+      <div class="hero-cta">
+        <a href="mailto:info@iriumlabs.org?subject=Irium%20Sponsorship" class="btn btn-primary">Contact for Sponsorship</a>
+        <a href="https://github.com/iriumlabs/irium" class="btn btn-secondary" target="_blank" rel="noopener">Follow Development</a>
       </div>
     </div>
   </div>
@@ -258,12 +578,10 @@
     </div>
     <div class="footer-bottom">
       <p>&copy; 2026 Irium Labs. Open Source - MIT License</p>
-      <p>Built for a decentralized future</p>
     </div>
   </div>
 </footer>
 
 <script src="script.js"></script>
-<script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>
 </body>
 </html>

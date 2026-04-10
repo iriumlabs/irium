@@ -14,14 +14,15 @@
     --settlement-line-strong: rgba(110, 208, 255, 0.28);
     --settlement-text: #edf4ff;
     --settlement-muted: #a7b8d3;
+    --settlement-soft: #8ea0bc;
     --settlement-panel: linear-gradient(180deg, rgba(15, 22, 39, 0.9), rgba(8, 12, 23, 0.96));
-    --settlement-panel-soft: linear-gradient(180deg, rgba(12, 18, 33, 0.8), rgba(7, 10, 19, 0.9));
-    --settlement-shadow: 0 28px 68px rgba(0, 0, 0, 0.3);
+    --settlement-panel-soft: linear-gradient(180deg, rgba(12, 18, 33, 0.82), rgba(8, 11, 20, 0.92));
+    --settlement-shadow: 0 26px 70px rgba(0, 0, 0, 0.32);
   }
 
   .settlement-page .hero {
     min-height: auto;
-    padding: 7.15rem 0 3.7rem;
+    padding: 7.2rem 0 4rem;
     position: relative;
   }
 
@@ -29,7 +30,7 @@
     content: "";
     position: absolute;
     inset: 6% 10% auto;
-    height: 340px;
+    height: 360px;
     border-radius: 999px;
     background: linear-gradient(90deg, rgba(141, 125, 255, 0.18), rgba(110, 198, 255, 0.24));
     filter: blur(96px);
@@ -60,7 +61,7 @@
 
   .settlement-hero {
     display: grid;
-    gap: 2rem;
+    gap: 2.15rem;
   }
 
   .settlement-hero-copy {
@@ -76,24 +77,24 @@
     max-width: 11ch;
     color: var(--settlement-text);
     font-family: "Sora", sans-serif;
-    font-size: clamp(3.2rem, 6.2vw, 5.4rem);
-    line-height: .95;
-    letter-spacing: -.065em;
+    font-size: clamp(3.3rem, 6.3vw, 5.6rem);
+    line-height: .94;
+    letter-spacing: -.07em;
   }
 
   .settlement-subtitle {
-    margin: 1.05rem 0 0;
-    max-width: 44rem;
+    margin: 1.1rem 0 0;
+    max-width: 45rem;
     color: #f4f8ff;
-    font-size: clamp(1.08rem, 1.85vw, 1.3rem);
-    line-height: 1.62;
+    font-size: clamp(1.08rem, 1.85vw, 1.32rem);
+    line-height: 1.64;
   }
 
   .settlement-actions {
     display: flex;
     flex-wrap: wrap;
     gap: .85rem;
-    margin-top: 1.55rem;
+    margin-top: 1.6rem;
   }
 
   .settlement-actions .btn {
@@ -101,28 +102,30 @@
     text-align: center;
   }
 
-  .settlement-hero-showcase {
+  .settlement-showcase {
     display: grid;
-    grid-template-columns: minmax(0, 1.1fr) minmax(260px, .62fr);
+    grid-template-columns: minmax(0, 1.08fr) minmax(280px, .62fr);
     gap: 1rem;
     align-items: stretch;
   }
 
-  .settlement-hero-stage,
-  .settlement-hero-stack-card,
+  .settlement-hero-panel,
+  .settlement-mini-panel,
   .settlement-feature-card,
+  .settlement-highlight,
   .settlement-use-card,
   .settlement-roadmap-card,
-  .settlement-text-panel {
+  .settlement-essay-card,
+  .settlement-principles-card {
     border: 1px solid rgba(147, 176, 226, 0.14);
     box-shadow: var(--settlement-shadow), inset 0 1px 0 rgba(255,255,255,.03);
   }
 
-  .settlement-hero-stage {
+  .settlement-hero-panel {
     position: relative;
     overflow: hidden;
-    min-height: 440px;
-    padding: 1.5rem;
+    min-height: 470px;
+    padding: 1.6rem;
     border-radius: 34px;
     background:
       radial-gradient(280px 180px at 18% 22%, rgba(110, 208, 255, 0.14), transparent 70%),
@@ -130,35 +133,35 @@
       var(--settlement-panel);
   }
 
-  .settlement-hero-stage::before,
-  .settlement-hero-stage::after {
+  .settlement-hero-panel::before,
+  .settlement-hero-panel::after {
     content: "";
     position: absolute;
     border-radius: 50%;
     border: 1px solid rgba(255,255,255,.08);
   }
 
-  .settlement-hero-stage::before {
-    width: 240px;
-    height: 240px;
-    top: 48px;
+  .settlement-hero-panel::before {
+    width: 250px;
+    height: 250px;
+    top: 42px;
     right: 54px;
   }
 
-  .settlement-hero-stage::after {
+  .settlement-hero-panel::after {
     width: 170px;
     height: 170px;
-    left: 34px;
-    bottom: 42px;
+    left: 32px;
+    bottom: 38px;
     border-color: rgba(110, 208, 255, 0.14);
   }
 
-  .settlement-stage-core {
+  .settlement-hero-core {
     position: relative;
     z-index: 3;
-    width: min(100%, 360px);
-    padding: 1.3rem 1.3rem 1.35rem;
-    border-radius: 26px;
+    width: min(100%, 370px);
+    padding: 1.35rem;
+    border-radius: 28px;
     background: var(--settlement-panel-soft);
     border: 1px solid rgba(147, 176, 226, 0.14);
   }
@@ -176,52 +179,55 @@
     text-transform: uppercase;
   }
 
-  .settlement-stage-core h3,
-  .settlement-hero-stack-card h3,
+  .settlement-hero-core h3,
+  .settlement-mini-panel h3,
   .settlement-feature-card h3,
+  .settlement-highlight h3,
   .settlement-use-card h3,
   .settlement-roadmap-card h3,
-  .settlement-text-panel h3 {
-    margin: .55rem 0 .5rem;
+  .settlement-essay-card h3,
+  .settlement-principles-card h3 {
+    margin: .6rem 0 .5rem;
     color: var(--settlement-text);
     font-family: "Sora", sans-serif;
     font-size: 1rem;
     line-height: 1.42;
   }
 
-  .settlement-stage-core p,
-  .settlement-hero-stack-card p,
+  .settlement-hero-core p,
+  .settlement-mini-panel p,
   .settlement-feature-card p,
+  .settlement-highlight p,
   .settlement-use-card p,
   .settlement-roadmap-card p,
-  .settlement-text-panel p,
+  .settlement-essay-card p,
+  .settlement-principles-card p,
   .settlement-led p,
-  .settlement-led li,
   .settlement-metric span {
     color: var(--settlement-muted);
     font-size: .95rem;
     line-height: 1.74;
   }
 
-  .settlement-mini-orb {
+  .settlement-mini-float {
     position: absolute;
-    padding: .92rem 1rem;
     max-width: 210px;
+    padding: .92rem 1rem;
     border-radius: 18px;
     background: rgba(10, 16, 29, 0.72);
     border: 1px solid rgba(147, 176, 226, 0.12);
     backdrop-filter: blur(8px);
   }
 
-  .settlement-mini-orb.one { top: 28px; right: 24px; }
-  .settlement-mini-orb.two { left: 28px; bottom: 34px; }
-  .settlement-mini-orb.three { right: 40px; bottom: 22px; }
+  .settlement-mini-float.one { top: 26px; right: 24px; }
+  .settlement-mini-float.two { left: 28px; bottom: 34px; }
+  .settlement-mini-float.three { right: 40px; bottom: 22px; }
 
   .settlement-metrics {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: .75rem;
-    margin-top: .95rem;
+    margin-top: 1rem;
   }
 
   .settlement-metric {
@@ -239,14 +245,14 @@
     font-size: .92rem;
   }
 
-  .settlement-hero-stack {
+  .settlement-showcase-side {
     display: grid;
     gap: 1rem;
   }
 
-  .settlement-hero-stack-card {
+  .settlement-mini-panel {
     padding: 1.15rem 1.15rem 1.2rem;
-    border-radius: 26px;
+    border-radius: 28px;
     background: var(--settlement-panel-soft);
   }
 
@@ -264,7 +270,7 @@
 
   .settlement-section {
     display: grid;
-    gap: 1.4rem;
+    gap: 1.35rem;
   }
 
   .settlement-led {
@@ -279,7 +285,7 @@
     margin: 0 0 .9rem;
     color: var(--settlement-text);
     font-family: "Sora", sans-serif;
-    font-size: clamp(1.95rem, 2.8vw, 2.7rem);
+    font-size: clamp(1.95rem, 2.8vw, 2.75rem);
     line-height: 1.06;
     letter-spacing: -.045em;
   }
@@ -299,13 +305,15 @@
   .settlement-feature-card,
   .settlement-use-card,
   .settlement-roadmap-card,
-  .settlement-text-panel {
+  .settlement-essay-card,
+  .settlement-principles-card,
+  .settlement-highlight {
     padding: 1.2rem 1.2rem 1.25rem;
     border-radius: 28px;
     background: var(--settlement-panel-soft);
   }
 
-  .settlement-wide-panel {
+  .settlement-wide {
     display: grid;
     grid-template-columns: minmax(0, 1.08fr) minmax(280px, .72fr);
     gap: 1rem;
@@ -332,11 +340,11 @@
   }
 
   @media (max-width: 1080px) {
-    .settlement-hero-showcase,
+    .settlement-showcase,
     .settlement-feature-grid,
     .settlement-use-grid,
     .settlement-roadmap-grid,
-    .settlement-wide-panel,
+    .settlement-wide,
     .settlement-metrics {
       grid-template-columns: 1fr;
     }
@@ -363,22 +371,24 @@
       min-width: 0;
     }
 
-    .settlement-hero-stage,
-    .settlement-hero-stack-card,
+    .settlement-hero-panel,
+    .settlement-mini-panel,
     .settlement-feature-card,
+    .settlement-highlight,
     .settlement-use-card,
     .settlement-roadmap-card,
-    .settlement-text-panel {
+    .settlement-essay-card,
+    .settlement-principles-card {
       border-radius: 22px;
     }
 
-    .settlement-hero-stage {
+    .settlement-hero-panel {
       min-height: auto;
       display: grid;
       gap: .8rem;
     }
 
-    .settlement-mini-orb {
+    .settlement-mini-float {
       position: static;
       max-width: none;
     }
@@ -420,7 +430,7 @@
       <div class="settlement-hero-copy">
         <p class="settlement-kicker">Settlement-First Blockchain</p>
         <h1 class="settlement-title">The blockchain for agreements, not just payments.</h1>
-        <p class="settlement-subtitle">Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce.</p>
+        <p class="settlement-subtitle">Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce. The live network is already an independent SHA-256d Proof-of-Work chain built from scratch in Rust, with the broader direction focused on trust-minimized commercial settlement.</p>
         <div class="settlement-actions">
           <a href="https://www.iriumlabs.org/whitepaper.html" class="btn btn-primary">Read Whitepaper</a>
           <a href="https://www.iriumlabs.org/explorer/" class="btn btn-secondary">View Explorer</a>
@@ -428,9 +438,9 @@
         </div>
       </div>
 
-      <div class="settlement-hero-showcase">
-        <div class="settlement-hero-stage">
-          <div class="settlement-stage-core">
+      <div class="settlement-showcase">
+        <div class="settlement-hero-panel">
+          <div class="settlement-hero-core">
             <span class="settlement-tag">Settlement Direction</span>
             <h3>Objective settlement on a live mineable base layer</h3>
             <p>The live chain already exists. The next layer is settlement infrastructure built around escrow, agreement anchoring, refunds, and proof-linked outcomes that stay compatible with objective-only consensus.</p>
@@ -440,23 +450,23 @@
               <div class="settlement-metric"><strong>Planned</strong><span>Proof automation and templates</span></div>
             </div>
           </div>
-          <div class="settlement-mini-orb one"><p>No admin keys or override path in consensus.</p></div>
-          <div class="settlement-mini-orb two"><p>Mining still secures the public settlement base layer.</p></div>
-          <div class="settlement-mini-orb three"><p>Trust-minimized outcomes, not just transfers.</p></div>
+          <div class="settlement-mini-float one"><p>No admin keys or override path in consensus.</p></div>
+          <div class="settlement-mini-float two"><p>Mining still secures the public settlement base layer.</p></div>
+          <div class="settlement-mini-float three"><p>Trust-minimized outcomes, not just transfers.</p></div>
         </div>
 
-        <div class="settlement-hero-stack">
-          <div class="settlement-hero-stack-card">
+        <div class="settlement-showcase-side">
+          <div class="settlement-mini-panel">
             <p class="settlement-note-label">Live Now</p>
             <h3>Independent SHA-256d mainnet</h3>
             <p>Built from scratch in Rust with public mining, public explorer, pool access, and fair-launch infrastructure already live.</p>
           </div>
-          <div class="settlement-hero-stack-card">
+          <div class="settlement-mini-panel">
             <p class="settlement-note-label">In Development</p>
             <h3>Settlement foundation</h3>
             <p>Agreement-hash anchoring, escrow-oriented outputs, timeout refunds, and simpler commercial release logic.</p>
           </div>
-          <div class="settlement-hero-stack-card">
+          <div class="settlement-mini-panel">
             <p class="settlement-note-label">Planned</p>
             <h3>Proof-based commerce tooling</h3>
             <p>Approved attestors, objective proof validation, no-response auto-settlement, and broader commercial templates remain roadmap work.</p>
@@ -469,8 +479,8 @@
 
     <div class="settlement-shell">
       <section class="settlement-section">
-        <div class="settlement-wide-panel">
-          <div class="settlement-text-panel">
+        <div class="settlement-wide">
+          <div class="settlement-essay-card">
             <p class="settlement-section-kicker">What Settlement-First Means</p>
             <h3>Settlement is about outcomes, not just sending value.</h3>
             <p>Many chains stop at transfer finality. Irium is being developed toward a narrower commercial question: how agreements, escrow conditions, refunds, and proof-linked outcomes can be anchored and resolved under objective rules rather than informal trust.</p>
@@ -500,14 +510,14 @@
       </section>
 
       <section class="settlement-section">
-        <div class="settlement-wide-panel">
-          <div class="settlement-led">
+        <div class="settlement-wide">
+          <div class="settlement-principles-card">
             <p class="settlement-section-kicker">Objective-Only Consensus</p>
-            <h2>The protocol should stay narrow, deterministic, and verifiable.</h2>
+            <h3>The protocol should stay narrow, deterministic, and verifiable.</h3>
             <p>Irium’s settlement direction does not imply that subjective human judgment should move into consensus. No admin keys, no override powers, no freeze mechanism, and no centralized dispute authority in consensus are part of that stance.</p>
             <p>Settlement should remain rules-based. Where proofs, signatures, attestors, or no-response logic are involved, they should stay explicit and technically verifiable rather than dependent on privileged actors.</p>
           </div>
-          <div class="settlement-text-panel">
+          <div class="settlement-highlight">
             <p class="settlement-note-label">Protocol Principles</p>
             <h3>Rules first, not human override.</h3>
             <p>No admin keys. No freeze or seizure control. No centralized dispute authority embedded inside protocol consensus.</p>

@@ -396,6 +396,186 @@
     color: #dce8fb;
   }
 
+
+  .settlement-prose {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .settlement-prose-card,
+  .settlement-split-card,
+  .settlement-phase-card {
+    border: 1px solid var(--support-line);
+    border-radius: 24px;
+    background: var(--support-panel);
+    box-shadow: var(--support-shadow), inset 0 1px 0 rgba(255,255,255,.04);
+    padding: 1.5rem;
+  }
+
+  .settlement-prose-card p,
+  .settlement-split-card p,
+  .settlement-phase-card p {
+    margin: 0;
+    color: var(--support-muted);
+    line-height: 1.8;
+  }
+
+  .settlement-prose-card p + p,
+  .settlement-split-card p + p,
+  .settlement-phase-card p + p {
+    margin-top: .95rem;
+  }
+
+  .settlement-split {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(320px, .9fr);
+    gap: 1rem;
+  }
+
+  .settlement-list {
+    display: grid;
+    gap: .9rem;
+    margin-top: 1rem;
+  }
+
+  .settlement-list-item {
+    padding-top: .9rem;
+    border-top: 1px solid rgba(147, 176, 226, 0.12);
+  }
+
+  .settlement-list-item:first-child {
+    padding-top: 0;
+    border-top: 0;
+  }
+
+  .settlement-list-item strong {
+    display: block;
+    margin-bottom: .22rem;
+    color: #eef8ff;
+    font-family: "Sora", sans-serif;
+    font-size: .95rem;
+  }
+
+  .settlement-list-item span {
+    display: block;
+    color: var(--support-muted);
+    line-height: 1.7;
+    font-size: .94rem;
+  }
+
+  .settlement-inline-points {
+    display: grid;
+    gap: .8rem;
+    margin-top: 1rem;
+  }
+
+  .settlement-inline-points div {
+    padding-left: 1rem;
+    border-left: 2px solid rgba(110, 208, 255, 0.22);
+    color: var(--support-muted);
+    line-height: 1.7;
+  }
+
+  .settlement-inline-points strong {
+    color: #eef8ff;
+  }
+
+  .settlement-usecases {
+    display: grid;
+    gap: .9rem;
+  }
+
+  .settlement-usecase {
+    padding: 1.05rem 1.15rem;
+    border-radius: 18px;
+    border: 1px solid rgba(147, 176, 226, 0.12);
+    background: rgba(255,255,255,.02);
+  }
+
+  .settlement-usecase strong {
+    display: block;
+    margin-bottom: .28rem;
+    color: #eef8ff;
+    font-family: "Sora", sans-serif;
+    font-size: .94rem;
+  }
+
+  .settlement-usecase span {
+    display: block;
+    color: var(--support-muted);
+    line-height: 1.68;
+    font-size: .93rem;
+  }
+
+  .settlement-phase-stack {
+    display: grid;
+    gap: 1rem;
+  }
+
+  .settlement-phase-card {
+    background: var(--support-panel-soft);
+  }
+
+  .settlement-phase-card.is-featured {
+    border-color: var(--support-line-strong);
+    background:
+      radial-gradient(360px 180px at 50% 0%, rgba(110, 208, 255, 0.1), transparent 72%),
+      linear-gradient(165deg, rgba(17, 25, 43, 0.96), rgba(8, 12, 23, 0.99));
+  }
+
+  .settlement-phase-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: .75rem;
+  }
+
+  .settlement-phase-title {
+    margin: 0;
+    color: var(--support-text);
+    font-size: 1.08rem;
+  }
+
+  .settlement-phase-tag {
+    display: inline-block;
+    padding: .4rem .74rem;
+    border-radius: 999px;
+    border: 1px solid rgba(110, 208, 255, 0.18);
+    background: rgba(110, 208, 255, 0.08);
+    color: #c9f1ff;
+    font-family: "Sora", sans-serif;
+    font-size: .76rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .settlement-phase-points {
+    display: grid;
+    gap: .55rem;
+    margin-top: .95rem;
+  }
+
+  .settlement-phase-points div {
+    color: var(--support-muted);
+    line-height: 1.65;
+    padding-left: 1rem;
+    position: relative;
+  }
+
+  .settlement-phase-points div::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: .72rem;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6be1ff, #9a91ff);
+    box-shadow: 0 0 10px rgba(107, 225, 255, 0.42);
+  }
+
   @media (max-width: 1180px) {
     .support-hero,
     .support-bottom-grid {
@@ -411,7 +591,8 @@
     .support-grid-2,
     .support-grid-3,
     .support-grid-4,
-    .support-grid-5 {
+    .support-grid-5,
+    .settlement-split {
       grid-template-columns: 1fr;
     }
 
@@ -421,6 +602,11 @@
   }
 
   @media (max-width: 720px) {
+    .settlement-phase-head {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+
     .support-hero-main,
     .support-hero-side,
     .support-card,
@@ -515,10 +701,29 @@
       <h2 class="support-section-title">Settlement-first means outcomes, not only transfers</h2>
       <p class="support-section-copy">Payment chains move units from one address to another. A settlement-first chain is built around whether a defined commercial outcome can be expressed, anchored, proved, and resolved under objective rules.</p>
     </div>
-    <div class="support-grid-3">
-      <div class="support-card"><h3>Escrow</h3><p>Funds should be able to move under defined release or refund conditions instead of trust-heavy manual coordination.</p></div>
-      <div class="support-card"><h3>Agreements</h3><p>Agreement hashes and related references can anchor real business terms to immutable chain state.</p></div>
-      <div class="support-card"><h3>Proof-based commerce</h3><p>The long-term aim is commerce that settles from signatures, timestamps, verifiable proofs, and explicit timeout rules.</p></div>
+    <div class="settlement-prose">
+      <div class="settlement-prose-card">
+        <p>Irium is being positioned around a narrower problem than generic payment chains. The chain is meant to support escrow, agreements, and objective settlement paths where release, refund, or timeout behavior can be tied to predefined rules rather than informal trust.</p>
+        <p>That only works if the base layer stays serious about what consensus should and should not do. The goal is not to put subjective human judgment on-chain. The goal is to create a mineable public chain where verifiable commercial conditions can anchor to objective state.</p>
+      </div>
+      <div class="settlement-split">
+        <div class="settlement-split-card">
+          <h3>What belongs inside the model</h3>
+          <div class="settlement-list">
+            <div class="settlement-list-item"><strong>Escrow and refunds</strong><span>Defined release and fallback paths matter more than simple one-way transfers for many real transactions.</span></div>
+            <div class="settlement-list-item"><strong>Agreement anchoring</strong><span>Commercial terms, hashes, and references can be bound to immutable chain state for later verification.</span></div>
+            <div class="settlement-list-item"><strong>Objective proof paths</strong><span>Timeouts, signatures, attestations, and deterministic checks are compatible with a narrow consensus model.</span></div>
+          </div>
+        </div>
+        <div class="settlement-split-card">
+          <h3>What should stay outside consensus</h3>
+          <div class="settlement-list">
+            <div class="settlement-list-item"><strong>No subjective judges</strong><span>Consensus should not depend on open-ended human arbitration or protocol-level discretion.</span></div>
+            <div class="settlement-list-item"><strong>No admin override path</strong><span>There should be no privileged key able to freeze, seize, or rewrite expected ownership outcomes.</span></div>
+            <div class="settlement-list-item"><strong>No vague governance settlement</strong><span>Rules-based, verifiable outcomes are the priority, not social-layer intervention inside the protocol.</span></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -527,22 +732,20 @@
   <div class="container support-section">
     <div class="support-section-head">
       <p class="support-kicker">Why Payments Are Not Enough</p>
-      <h2 class="support-section-title">Transfers alone do not solve commercial coordination</h2>
-      <p class="support-section-copy">Many real transactions need more than a payment rail. They need deposits, milestones, refunds, delivery proofs, or a way to define what happens if one side does not respond.</p>
+      <h2 class="support-section-title">Commercial coordination usually requires more than a transfer</h2>
+      <p class="support-section-copy">Many real transactions need deposits, milestones, refunds, holdbacks, or a response window. That is where settlement infrastructure starts to matter.</p>
     </div>
-    <div class="support-grid-2">
-      <div class="support-card">
-        <div class="support-split-list">
-          <div class="support-list-item"><span class="support-list-dot"></span><div><strong>Contractor work</strong><span>A transfer does not describe milestones, holdbacks, or proof of completion.</span></div></div>
-          <div class="support-list-item"><span class="support-list-dot"></span><div><strong>Deposits and preorders</strong><span>Merchants and buyers often need refund conditions, not just a one-way payment.</span></div></div>
-          <div class="support-list-item"><span class="support-list-dot"></span><div><strong>OTC trading</strong><span>Peer-to-peer deals are safer when escrow and objective release logic are available.</span></div></div>
-        </div>
+    <div class="settlement-split">
+      <div class="settlement-split-card">
+        <p>A contractor payment is rarely just a transfer. It may need milestone release, delayed holdback, or proof that a defined checkpoint was reached. A preorder or supplier deposit may need a timeout refund if the other side never completes the expected step.</p>
+        <p>OTC trades also expose the gap between transfer rails and settlement rails. Counterparties often need a safer way to stage value movement than simply trusting the other side to act after payment is sent.</p>
       </div>
-      <div class="support-card">
-        <div class="support-split-list">
-          <div class="support-list-item"><span class="support-list-dot"></span><div><strong>Business settlement flows</strong><span>Commercial agreements often require staged releases, defaults, and evidence paths.</span></div></div>
-          <div class="support-list-item"><span class="support-list-dot"></span><div><strong>Proof handling</strong><span>Consensus must stay objective, so only verifiable proof paths belong in settlement logic.</span></div></div>
-          <div class="support-list-item"><span class="support-list-dot"></span><div><strong>No subjective judges in consensus</strong><span>Human arbitration should remain outside consensus rather than becoming a protocol backdoor.</span></div></div>
+      <div class="settlement-split-card">
+        <div class="settlement-inline-points">
+          <div><strong>Contractor work:</strong> milestones, holdbacks, completion signals, and staged release logic.</div>
+          <div><strong>Deposits and preorders:</strong> refund conditions matter as much as the initial payment.</div>
+          <div><strong>OTC settlement:</strong> peer-to-peer deals benefit from escrow references and objective fallback rules.</div>
+          <div><strong>Business flows:</strong> agreements often need evidence paths and explicit default handling, not just transfer settlement.</div>
         </div>
       </div>
     </div>
@@ -553,13 +756,29 @@
   <div class="container support-section">
     <div class="support-section-head">
       <p class="support-kicker">How Irium Differs</p>
-      <h2 class="support-section-title">Built for objective settlement, not generic chain marketing</h2>
+      <h2 class="support-section-title">Built for objective settlement, with a mineable base layer</h2>
     </div>
-    <div class="support-grid-4">
-      <div class="support-mini-card"><div class="support-mini-index">01</div><h3>Independent chain</h3><p>Irium is not a fork and is built from scratch in Rust.</p></div>
-      <div class="support-mini-card"><div class="support-mini-index">02</div><h3>Mineable base layer</h3><p>SHA-256d Proof-of-Work secures the chain that settlement tooling depends on.</p></div>
-      <div class="support-mini-card"><div class="support-mini-index">03</div><h3>Narrow consensus</h3><p>Consensus is intended to remain deterministic, objective-only, and free of discretionary override.</p></div>
-      <div class="support-mini-card"><div class="support-mini-index">04</div><h3>No admin path</h3><p>No admin keys, no freeze mechanism, no seizure control, and no foundation override powers.</p></div>
+    <div class="settlement-prose">
+      <div class="settlement-prose-card">
+        <p>Irium is not trying to be a generic chain with every possible feature attached to it. It starts from an independent SHA-256d Proof-of-Work chain built from scratch in Rust, then extends toward settlement primitives that remain compatible with objective-only consensus.</p>
+        <p>The chain is mineable, not a fork, and does not rely on admin keys, freeze controls, or foundation override powers. Mining remains essential because it secures the public base layer that all future settlement functionality depends on.</p>
+      </div>
+      <div class="settlement-split">
+        <div class="settlement-split-card">
+          <h3>Base-layer principles</h3>
+          <div class="settlement-list">
+            <div class="settlement-list-item"><strong>Independent chain</strong><span>Rust implementation, independent networking, and SHA-256d Proof-of-Work rather than a forked identity.</span></div>
+            <div class="settlement-list-item"><strong>Mineable security</strong><span>Settlement is built on a public miner-secured chain, not on privileged operator control.</span></div>
+          </div>
+        </div>
+        <div class="settlement-split-card">
+          <h3>Consensus principles</h3>
+          <div class="settlement-list">
+            <div class="settlement-list-item"><strong>Narrow and objective</strong><span>Deterministic validation remains the boundary for consensus behavior.</span></div>
+            <div class="settlement-list-item"><strong>No override powers</strong><span>No admin path, no freeze mechanism, and no centralized seizure control embedded in the protocol.</span></div>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </section>
@@ -568,15 +787,15 @@
   <div class="container support-section">
     <div class="support-section-head">
       <p class="support-kicker">Use Cases</p>
-      <h2 class="support-section-title">Commercial flows Irium is being aimed toward</h2>
-      <p class="support-section-copy">These are use cases for the settlement-first direction. They should be read alongside the roadmap phases below, not as claims that every flow is already fully live on mainnet today.</p>
+      <h2 class="support-section-title">Commercial flows this direction is meant to support</h2>
+      <p class="support-section-copy">These are target use cases for the settlement-first direction. They are not all claims of fully live production functionality today.</p>
     </div>
-    <div class="support-grid-5">
-      <div class="support-tier-card"><div class="support-tier-index">OTC</div><h3>OTC escrow</h3><p>Safer peer-to-peer trading with defined release or refund conditions.</p></div>
-      <div class="support-tier-card"><div class="support-tier-index">SRV</div><h3>Contractor payments</h3><p>Service work with milestones, holdbacks, and proof-triggered release paths.</p></div>
-      <div class="support-tier-card"><div class="support-tier-index">DEP</div><h3>Deposits and preorders</h3><p>Buyer and seller flows that need clear timeout or refund outcomes.</p></div>
-      <div class="support-tier-card"><div class="support-tier-index">MLS</div><h3>Milestone settlement</h3><p>Staged releases tied to objective checkpoints rather than blind trust.</p></div>
-      <div class="support-tier-card"><div class="support-tier-index">BIZ</div><h3>Verifiable agreements</h3><p>Commercial agreements anchored to chain state and later linked to proof-based settlement paths.</p></div>
+    <div class="settlement-usecases">
+      <div class="settlement-usecase"><strong>OTC escrow</strong><span>Peer-to-peer trading with defined release, timeout, and refund handling rather than trust-only coordination.</span></div>
+      <div class="settlement-usecase"><strong>Contractor and service payments</strong><span>Milestone-based release paths, holdbacks, and proof-linked completion flows.</span></div>
+      <div class="settlement-usecase"><strong>Deposits and preorders</strong><span>Commercial commitments that require clear fallback logic if delivery or response does not happen.</span></div>
+      <div class="settlement-usecase"><strong>Milestone settlement</strong><span>Staged commercial payouts tied to objective checkpoints instead of all-or-nothing transfer assumptions.</span></div>
+      <div class="settlement-usecase"><strong>Verifiable business agreements</strong><span>Agreement references anchored to chain state, with future proof-oriented settlement paths layered on top.</span></div>
     </div>
   </div>
 </section>
@@ -585,13 +804,58 @@
   <div class="container support-section">
     <div class="support-section-head">
       <p class="support-kicker">Roadmap Phases</p>
-      <h2 class="support-section-title">Progression from base layer to commercial settlement</h2>
+      <h2 class="support-section-title">A clearer progression from base layer to commercial infrastructure</h2>
+      <p class="support-section-copy">The phases below are intentionally separated by status so the page stays honest about what is live, what is under active development, and what remains planned.</p>
     </div>
-    <div class="support-grid-4">
-      <div class="support-goal-card"><div class="support-goal-tag">Phase 1 • Live</div><h3>Core independent PoW foundation</h3><p>Independent chain, mineable SHA-256d Proof-of-Work, Rust implementation, DNS-free bootstrap direction, peer resilience, public explorer, public pool, calculator, fair launch properties, and locked founder vesting.</p></div>
-      <div class="support-goal-card is-featured"><div class="support-goal-tag">Phase 2 • In development</div><h3>Settlement foundation</h3><p>Agreement-hash anchoring, native escrow and settlement outputs, timeout refunds, and simple flows for OTC escrow, deposits, and contractor settlement.</p></div>
-      <div class="support-goal-card"><div class="support-goal-tag">Phase 3 • Planned</div><h3>Objective proof automation</h3><p>Objective proof validation, approved attestors, signature-verifiable proof paths, no-response auto-settlement, and milestone proofs remain planned work.</p></div>
-      <div class="support-goal-card"><div class="support-goal-tag">Phase 4 • Planned</div><h3>Commercial infrastructure</h3><p>Templates, merchant and contractor flows, recurring settlement direction, portable reputation tooling, APIs, and broader business integrations.</p></div>
+    <div class="settlement-phase-stack">
+      <article class="settlement-phase-card">
+        <div class="settlement-phase-head">
+          <h3 class="settlement-phase-title">Phase 1: Core independent PoW foundation</h3>
+          <span class="settlement-phase-tag">Live</span>
+        </div>
+        <p>The live chain already includes the independent SHA-256d base layer, Rust implementation, public mining access, public explorer, public pool, calculator, and core network resilience work such as bootstrap and peer survivability.</p>
+        <div class="settlement-phase-points">
+          <div>Independent chain and mineable Proof-of-Work.</div>
+          <div>Rust implementation and mainnet-first operating model.</div>
+          <div>Public explorer, pool, calculator, and transparent founder vesting.</div>
+        </div>
+      </article>
+      <article class="settlement-phase-card is-featured">
+        <div class="settlement-phase-head">
+          <h3 class="settlement-phase-title">Phase 2: Settlement foundation</h3>
+          <span class="settlement-phase-tag">In development</span>
+        </div>
+        <p>This phase is about the basic primitives required for trust-minimized commercial settlement: agreement-hash anchoring, escrow-oriented outputs, timeout refund paths, and simpler flows for OTC escrow, deposits, and contractor-style release logic.</p>
+        <div class="settlement-phase-points">
+          <div>Agreement-hash anchoring and settlement references.</div>
+          <div>Native escrow and settlement output direction.</div>
+          <div>Timeout refunds and basic commercial settlement primitives.</div>
+        </div>
+      </article>
+      <article class="settlement-phase-card">
+        <div class="settlement-phase-head">
+          <h3 class="settlement-phase-title">Phase 3: Objective proof automation</h3>
+          <span class="settlement-phase-tag">Planned</span>
+        </div>
+        <p>This is roadmap work, not a live claim. The goal is proof-triggered settlement through deterministic checks such as approved attestors, signatures, objective evidence paths, and no-response auto-settlement under explicit rules.</p>
+        <div class="settlement-phase-points">
+          <div>Objective proof validation and approved attestor paths.</div>
+          <div>Signature-verifiable proof flows and no-response auto-settlement.</div>
+          <div>Milestone proofs and delayed holdback logic.</div>
+        </div>
+      </article>
+      <article class="settlement-phase-card">
+        <div class="settlement-phase-head">
+          <h3 class="settlement-phase-title">Phase 4: Commercial infrastructure</h3>
+          <span class="settlement-phase-tag">Planned</span>
+        </div>
+        <p>The later layer is broader commercial tooling: templates, contractor and merchant flows, recurring settlement direction, portable reputation tooling, and APIs or integrations that help businesses use the chain more directly.</p>
+        <div class="settlement-phase-points">
+          <div>Commercial templates and repeatable settlement patterns.</div>
+          <div>Contractor, merchant, and installment-style workflow direction.</div>
+          <div>Portable reputation and integration APIs as future infrastructure.</div>
+        </div>
+      </article>
     </div>
   </div>
 </section>

@@ -74,12 +74,12 @@ If you want the detailed/advanced steps, continue below.
 > - Some third-party GPU miner builds (including some ccminer variants) may connect but still submit rejected shares (for example low_difficulty) due to protocol-handling differences.
 > - If this happens, share miner version, exact launch command, and 30-50 lines of logs so compatibility can be triaged quickly.
 
-If you prefer pool mode, use the public Irium Stratum endpoint:
+If you prefer pool mode, use the public Irium Stratum endpoint after the pool DNS cutover is confirmed. This is a Stratum TCP endpoint, not a browser website:
 
-- Pool URL: `stratum+tcp://pool.iriumlabs.org:3333`
-- Fallback direct IP: `stratum+tcp://157.173.116.134:3333`
-- Recommended failover config: use hostname as pool 0, direct IP as pool 1/2.
-- Compatibility update (March 2, 2026): legacy Stratum handshake support enabled on the pool server for older ASIC firmware clients.
+- ASIC/modern firmware pool URL: `stratum+tcp://pool.iriumlabs.org:3333`
+- CPU/GPU software miner pool URL: `stratum+tcp://pool.iriumlabs.org:3335`
+- Use the DNS hostname only after operator cutover; backend pool IPs are operator-private and may change.
+- Compatibility update (March 2, 2026): legacy Stratum handshake support enabled on the pool server for older ASIC and software miner clients.
 - Username: `IRM_ADDRESS.worker1`
 - Password: `x`
 - Mode: SOLO (if your worker finds a valid block, reward pays to the IRM address in the username)
@@ -94,25 +94,25 @@ How to start on each OS:
   - `https://github.com/JayDDee/cpuminer-opt/releases`
   - Run:
 ```bash
-minerd.exe -a sha256d -o stratum+tcp://pool.iriumlabs.org:3333 -u YOUR_IRIUM_WALLET_ADDRESS.worker1 -p x
+minerd.exe -a sha256d -o stratum+tcp://pool.iriumlabs.org:3335 -u YOUR_IRIUM_WALLET_ADDRESS.worker1 -p x
 ```
 - Linux/macOS software miner: build/install from:
   - `https://github.com/JayDDee/cpuminer-opt`
   - Run:
 ```bash
-./minerd -a sha256d -o stratum+tcp://pool.iriumlabs.org:3333 -u YOUR_IRIUM_WALLET_ADDRESS.worker1 -p x
+./minerd -a sha256d -o stratum+tcp://pool.iriumlabs.org:3335 -u YOUR_IRIUM_WALLET_ADDRESS.worker1 -p x
 ```
 
 Using `irium-miner` in Stratum mode:
 ```bash
-export IRIUM_STRATUM_URL=stratum+tcp://pool.iriumlabs.org:3333
+export IRIUM_STRATUM_URL=stratum+tcp://pool.iriumlabs.org:3335
 export IRIUM_STRATUM_USER=IRM_ADDRESS.worker1
 export IRIUM_STRATUM_PASS=x
 ./target/release/irium-miner --threads 2
 ```
 
 Important:
-- For pool mining, use Stratum endpoint `pool.iriumlabs.org:3333`.
+- For ASIC pool mining, use `pool.iriumlabs.org:3333`; for CPU/GPU software miners, use `pool.iriumlabs.org:3335`.
 - Do not use `127.0.0.1:38300` for pool mode (that is local node RPC/template path).
 
 For troubleshooting and operator notes, see `docs/POOL_STRATUM.md`.
@@ -217,6 +217,7 @@ source ~/.cargo/env
 - Set `IRIUM_MINER_STRICT_RPC=1` to stop mining if RPC/template fetch fails.
 - The miner pauses if the node is behind peers (sync guard). Set `IRIUM_MINER_SYNC_GUARD=0` to disable, or `IRIUM_MINER_MAX_BEHIND=<n>` to allow a small lag.
 - Pool mining (Stratum v1, TCP): set `IRIUM_STRATUM_URL`, `IRIUM_STRATUM_USER`, `IRIUM_STRATUM_PASS`.
+- Solo ASIC mining: run `irium-miner --solo-stratum --listen 0.0.0.0:3333`; ASIC worker names should start with the payout address. See `docs/SOLO_STRATUM.md`.
 
 ## 7) Check balance
 ```

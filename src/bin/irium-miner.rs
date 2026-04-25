@@ -1,8 +1,9 @@
 use reqwest::blocking::Client;
 use reqwest::Certificate;
 use reqwest::StatusCode;
+use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, Ordering},
@@ -297,21 +298,25 @@ fn miner_pubkey_hash() -> Option<Vec<u8>> {
     miner_address_info().map(|(_, pkh)| pkh)
 }
 
-fn build_coinbase(height: u64, reward: u64) -> Transaction {
+fn build_coinbase_with_pkh(
+    reward: u64,
+    payout_pkh: Option<&[u8]>,
+    script_sig: Vec<u8>,
+) -> Transaction {
     let coinbase_input = TxInput {
         prev_txid: [0u8; 32],
         prev_index: 0xffff_ffff,
-        script_sig: format!("Block {}", height).into_bytes(),
+        script_sig,
         sequence: 0xffff_ffff,
     };
 
-    let script_pubkey = if let Some(pkh) = miner_pubkey_hash() {
+    let script_pubkey = if let Some(pkh) = payout_pkh {
         // P2PKH: OP_DUP OP_HASH160 0x14 <20-byte-pkh> OP_EQUALVERIFY OP_CHECKSIG
         let mut s = Vec::with_capacity(25);
         s.push(0x76);
         s.push(0xa9);
         s.push(0x14);
-        s.extend_from_slice(&pkh);
+        s.extend_from_slice(pkh);
         s.push(0x88);
         s.push(0xac);
         s
@@ -331,6 +336,15 @@ fn build_coinbase(height: u64, reward: u64) -> Transaction {
         outputs: vec![coinbase_output],
         locktime: 0,
     }
+}
+
+fn build_coinbase(height: u64, reward: u64) -> Transaction {
+    let pkh = miner_pubkey_hash();
+    build_coinbase_with_pkh(
+        reward,
+        pkh.as_deref(),
+        format!("Block {}", height).into_bytes(),
+    )
 }
 
 #[derive(Deserialize)]
@@ -1991,6 +2005,732 @@ fn run_stratum_miner() -> Result<(), String> {
     }
 }
 
+#[derive(Clone)]
+struct SoloMinerAuth {
+    user: String,
+    payout_label: String,
+    payout_pkh: Vec<u8>,
+}
+
+#[derive(Clone)]
+struct SoloStratumJob {
+    job_id: String,
+    height: u64,
+    version: u32,
+    prev_hash: [u8; 32],
+    bits: u32,
+    time: u32,
+    network_target: BigUint,
+    share_target: BigUint,
+    coinbase1: String,
+    coinbase2: String,
+    merkle_branch: Vec<String>,
+    txs: Vec<Transaction>,
+    extranonce2_size: usize,
+    template_key: String,
+}
+
+static SOLO_CONN_ID: AtomicU64 = AtomicU64::new(1);
+static SOLO_JOB_ID: AtomicU64 = AtomicU64::new(1);
+
+fn env_flag(name: &str) -> bool {
+    env::var(name)
+        .ok()
+        .map(|v| {
+            let v = v.to_lowercase();
+            v == "1" || v == "true" || v == "yes" || v == "on"
+        })
+        .unwrap_or(false)
+}
+
+fn solo_stratum_listen_addr() -> Option<String> {
+    let default = "0.0.0.0:3333".to_string();
+    let mut enabled = env_flag("IRIUM_SOLO_STRATUM");
+    let mut listen = env::var("IRIUM_SOLO_STRATUM_LISTEN")
+        .ok()
+        .filter(|v| !v.trim().is_empty());
+
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--solo-stratum" => enabled = true,
+            "--solo-stratum-listen" | "--listen" => {
+                enabled = true;
+                if let Some(val) = args.next() {
+                    listen = Some(val);
+                }
+            }
+            _ => {
+                if let Some(val) = arg.strip_prefix("--solo-stratum=") {
+                    enabled = true;
+                    if !val.is_empty() {
+                        listen = Some(val.to_string());
+                    }
+                } else if let Some(val) = arg.strip_prefix("--solo-stratum-listen=") {
+                    enabled = true;
+                    if !val.is_empty() {
+                        listen = Some(val.to_string());
+                    }
+                } else if let Some(val) = arg.strip_prefix("--listen=") {
+                    enabled = true;
+                    if !val.is_empty() {
+                        listen = Some(val.to_string());
+                    }
+                }
+            }
+        }
+    }
+
+    if enabled {
+        Some(listen.unwrap_or(default))
+    } else {
+        listen
+    }
+}
+
+fn solo_stratum_difficulty() -> f64 {
+    env::var("IRIUM_SOLO_STRATUM_DIFFICULTY")
+        .ok()
+        .and_then(|v| v.parse::<f64>().ok())
+        .filter(|v| *v > 0.0)
+        .unwrap_or(1.0)
+}
+
+fn solo_stratum_extranonce2_size() -> usize {
+    env::var("IRIUM_SOLO_STRATUM_EXTRANONCE2_SIZE")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .map(|v| v.clamp(1, 16))
+        .unwrap_or(4)
+}
+
+fn solo_stratum_refresh_secs() -> u64 {
+    env::var("IRIUM_SOLO_STRATUM_REFRESH_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(|v| v.clamp(2, 120))
+        .unwrap_or(10)
+}
+
+fn payout_pkh_from_worker(user: &str) -> Option<(String, Vec<u8>)> {
+    let label = user
+        .split(|c| c == '.' || c == '/' || c == ':')
+        .next()
+        .unwrap_or(user)
+        .trim();
+    if label.is_empty() {
+        return None;
+    }
+    if label.len() == 40 {
+        if let Ok(pkh) = hex::decode(label) {
+            if pkh.len() == 20 {
+                return Some((format!("pkh:{label}"), pkh));
+            }
+        }
+    }
+    base58_p2pkh_to_hash(label).map(|pkh| (label.to_string(), pkh))
+}
+
+fn solo_auth_from_user(user: &str) -> Result<SoloMinerAuth, String> {
+    if let Some((label, pkh)) = payout_pkh_from_worker(user) {
+        return Ok(SoloMinerAuth {
+            user: user.to_string(),
+            payout_label: label,
+            payout_pkh: pkh,
+        });
+    }
+    if let Some((label, pkh)) = miner_address_info() {
+        return Ok(SoloMinerAuth {
+            user: user.to_string(),
+            payout_label: label,
+            payout_pkh: pkh,
+        });
+    }
+    Err(
+        "worker username must start with an Irium payout address, or set IRIUM_MINER_ADDRESS"
+            .to_string(),
+    )
+}
+
+fn decode_template_txs(template: &BlockTemplate) -> Result<Vec<Transaction>, String> {
+    let mut txs = Vec::with_capacity(template.txs.len());
+    for tx in &template.txs {
+        let raw = hex::decode(&tx.hex).map_err(|e| format!("template tx decode: {e}"))?;
+        txs.push(decode_compact_tx(&raw));
+    }
+    Ok(txs)
+}
+
+fn relay_outputs_from_template(
+    template: &BlockTemplate,
+    total_fees: u64,
+) -> Result<Vec<TxOutput>, String> {
+    let relay_pool = total_fees / 10;
+    if relay_pool == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut relays: Vec<String> = Vec::new();
+    for tx in &template.txs {
+        if let Some(addresses) = &tx.relay_addresses {
+            for address in addresses {
+                if !relays.contains(address) {
+                    relays.push(address.clone());
+                }
+                if relays.len() >= 3 {
+                    break;
+                }
+            }
+        }
+        if relays.len() >= 3 {
+            break;
+        }
+    }
+
+    let weights = [50u64, 30, 20];
+    let mut outputs = Vec::new();
+    for (idx, weight) in weights.iter().enumerate() {
+        let amount = relay_pool * *weight / 100;
+        if amount == 0 {
+            continue;
+        }
+        let address = relays
+            .get(idx)
+            .cloned()
+            .unwrap_or_else(|| "RELAY_PLACEHOLDER".to_string());
+        let commitment = RelayCommitment {
+            address,
+            amount,
+            memo: Some(format!("relay-{idx}")),
+        };
+        outputs.extend(commitment.build_outputs(|addr| script_from_relay_address(addr))?);
+    }
+    Ok(outputs)
+}
+
+fn raw_tx_hash(tx: &Transaction) -> [u8; 32] {
+    let mut h = tx.txid();
+    h.reverse();
+    h
+}
+
+fn merkle_branch_for_coinbase(txs: &[Transaction]) -> Vec<String> {
+    let mut leaves = Vec::with_capacity(txs.len() + 1);
+    leaves.push([0u8; 32]);
+    for tx in txs {
+        leaves.push(raw_tx_hash(tx));
+    }
+
+    let mut index = 0usize;
+    let mut branch = Vec::new();
+    while leaves.len() > 1 {
+        if leaves.len() % 2 == 1 {
+            let last = *leaves.last().unwrap();
+            leaves.push(last);
+        }
+
+        let sibling = if index % 2 == 0 { index + 1 } else { index - 1 };
+        branch.push(hex::encode(leaves[sibling]));
+
+        let path_parent = index / 2;
+        let mut next = Vec::with_capacity(leaves.len() / 2);
+        for (parent, pair) in leaves.chunks(2).enumerate() {
+            if parent == path_parent {
+                next.push([0u8; 32]);
+            } else {
+                let mut data = Vec::with_capacity(64);
+                data.extend_from_slice(&pair[0]);
+                data.extend_from_slice(&pair[1]);
+                next.push(sha256d(&data));
+            }
+        }
+        index = path_parent;
+        leaves = next;
+    }
+    branch
+}
+
+fn build_solo_stratum_job(
+    template: &BlockTemplate,
+    auth: &SoloMinerAuth,
+    extranonce1: &str,
+    extranonce2_size: usize,
+    share_difficulty: f64,
+) -> Result<SoloStratumJob, String> {
+    let prev_bytes =
+        hex::decode(&template.prev_hash).map_err(|e| format!("template prev_hash decode: {e}"))?;
+    if prev_bytes.len() != 32 {
+        return Err(format!("template prev_hash len {} != 32", prev_bytes.len()));
+    }
+    let mut prev_hash = [0u8; 32];
+    prev_hash.copy_from_slice(&prev_bytes);
+
+    let bits = parse_bits(&template.bits)?;
+    let txs = decode_template_txs(template)?;
+    let total_fees = template
+        .txs
+        .iter()
+        .fold(0u64, |acc, tx| acc.saturating_add(tx.fee.unwrap_or(0)));
+    let relay_outputs = relay_outputs_from_template(template, total_fees)?;
+    let relay_total = relay_outputs
+        .iter()
+        .fold(0u64, |acc, out| acc.saturating_add(out.value));
+    let reward = block_reward(template.height);
+    let miner_reward = reward.saturating_add(total_fees.saturating_sub(relay_total));
+
+    let extranonce1_bytes =
+        hex::decode(extranonce1).map_err(|e| format!("extranonce1 decode: {e}"))?;
+    let prefix = format!("Block {} solo ", template.height).into_bytes();
+    let mut script_sig = prefix.clone();
+    script_sig.extend(std::iter::repeat(0u8).take(extranonce1_bytes.len() + extranonce2_size));
+
+    let mut coinbase =
+        build_coinbase_with_pkh(miner_reward, Some(auth.payout_pkh.as_slice()), script_sig);
+    coinbase.outputs.extend(relay_outputs);
+    if let Some(output) = coinbase_metadata_output() {
+        coinbase.outputs.push(output);
+    }
+
+    let raw_coinbase = coinbase.serialize();
+    let script_start = 4 + 1 + 1 + 32 + 4 + 1;
+    let split1 = script_start + prefix.len();
+    let split2 = split1 + extranonce1_bytes.len() + extranonce2_size;
+    if raw_coinbase.len() < split2 {
+        return Err("coinbase split exceeds serialized coinbase length".to_string());
+    }
+
+    let now = Utc::now().timestamp() as u32;
+    let time = template.time.max(now);
+    let job_id = SOLO_JOB_ID.fetch_add(1, Ordering::SeqCst).to_string();
+    let template_key = format!(
+        "{}:{}:{:08x}:{}:{}:{}",
+        template.height,
+        template.prev_hash,
+        bits,
+        time,
+        template.txs.len(),
+        auth.payout_label
+    );
+
+    Ok(SoloStratumJob {
+        job_id,
+        height: template.height,
+        version: 1,
+        prev_hash,
+        bits,
+        time,
+        network_target: Target { bits }.to_target(),
+        share_target: stratum_target_from_difficulty(share_difficulty),
+        coinbase1: hex::encode(&raw_coinbase[..split1]),
+        coinbase2: hex::encode(&raw_coinbase[split2..]),
+        merkle_branch: merkle_branch_for_coinbase(&txs),
+        txs,
+        extranonce2_size,
+        template_key,
+    })
+}
+
+fn solo_notify_params(job: &SoloStratumJob, clean: bool) -> serde_json::Value {
+    json!([
+        job.job_id.clone(),
+        hex::encode(job.prev_hash),
+        job.coinbase1.clone(),
+        job.coinbase2.clone(),
+        job.merkle_branch.clone(),
+        format!("{:08x}", job.version),
+        format!("{:08x}", job.bits),
+        format!("{:08x}", job.time),
+        clean
+    ])
+}
+
+fn solo_send_response(
+    writer: &Mutex<TcpStream>,
+    id: serde_json::Value,
+    result: serde_json::Value,
+) -> Result<(), String> {
+    stratum_send(writer, &json!({"id": id, "result": result, "error": null}))
+}
+
+fn solo_send_error(writer: &Mutex<TcpStream>, id: serde_json::Value, message: &str) {
+    let _ = stratum_send(
+        writer,
+        &json!({"id": id, "result": false, "error": [20, message, null]}),
+    );
+}
+
+fn publish_solo_job(
+    writer: &Mutex<TcpStream>,
+    current_job: &Mutex<Option<SoloStratumJob>>,
+    client: &Client,
+    auth: &SoloMinerAuth,
+    extranonce1: &str,
+    extranonce2_size: usize,
+    share_difficulty: f64,
+    force: bool,
+) -> Result<(), String> {
+    let template = fetch_block_template(client, false)?;
+    let job = build_solo_stratum_job(
+        &template,
+        auth,
+        extranonce1,
+        extranonce2_size,
+        share_difficulty,
+    )?;
+
+    {
+        let guard = current_job.lock().unwrap_or_else(|e| e.into_inner());
+        if !force {
+            if let Some(existing) = guard.as_ref() {
+                if existing.template_key == job.template_key {
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    stratum_send(
+        writer,
+        &json!({"id": null, "method": "mining.set_difficulty", "params": [share_difficulty]}),
+    )?;
+    stratum_send(
+        writer,
+        &json!({"id": null, "method": "mining.notify", "params": solo_notify_params(&job, true)}),
+    )?;
+
+    let mut guard = current_job.lock().unwrap_or_else(|e| e.into_inner());
+    *guard = Some(job);
+    Ok(())
+}
+
+fn merkle_root_from_coinbase_and_branch(
+    coinbase_raw: &[u8],
+    branch: &[String],
+) -> Result<[u8; 32], String> {
+    let mut merkle = sha256d(coinbase_raw);
+    for sibling in branch {
+        let sibling_bytes =
+            hex::decode(sibling).map_err(|e| format!("merkle branch decode: {e}"))?;
+        if sibling_bytes.len() != 32 {
+            return Err(format!("merkle branch len {} != 32", sibling_bytes.len()));
+        }
+        let mut data = Vec::with_capacity(64);
+        data.extend_from_slice(&merkle);
+        data.extend_from_slice(&sibling_bytes);
+        merkle = sha256d(&data);
+    }
+    Ok(merkle)
+}
+
+fn submit_solo_share(
+    job: &SoloStratumJob,
+    extranonce1: &str,
+    extranonce2: &str,
+    ntime: &str,
+    nonce_hex: &str,
+    seen_shares: &mut HashSet<String>,
+) -> Result<bool, String> {
+    let share_key = format!("{}:{extranonce2}:{ntime}:{nonce_hex}", job.job_id);
+    if !seen_shares.insert(share_key) {
+        return Err("duplicate share".to_string());
+    }
+
+    if extranonce2.len() % 2 != 0 {
+        return Err("extranonce2 must be hex".to_string());
+    }
+    let extranonce2_bytes =
+        hex::decode(extranonce2).map_err(|e| format!("extranonce2 decode: {e}"))?;
+    if extranonce2_bytes.len() != job.extranonce2_size {
+        return Err(format!(
+            "unexpected extranonce2 size {} != {}",
+            extranonce2_bytes.len(),
+            job.extranonce2_size
+        ));
+    }
+
+    let time = parse_u32_hex(ntime)?;
+    let nonce = parse_u32_hex(nonce_hex)?;
+    let coinbase_hex = format!(
+        "{}{}{}{}",
+        job.coinbase1, extranonce1, extranonce2, job.coinbase2
+    );
+    let coinbase_raw = hex::decode(&coinbase_hex).map_err(|e| format!("coinbase decode: {e}"))?;
+    let coinbase = decode_compact_tx(&coinbase_raw);
+    let merkle_root = merkle_root_from_coinbase_and_branch(&coinbase_raw, &job.merkle_branch)?;
+
+    let header = BlockHeader {
+        version: job.version,
+        prev_hash: job.prev_hash,
+        merkle_root,
+        time,
+        bits: job.bits,
+        nonce,
+    };
+    let hash = header.hash();
+    let hash_value = BigUint::from_bytes_be(&hash);
+    if hash_value > job.share_target {
+        return Err("low difficulty share".to_string());
+    }
+
+    if hash_value <= job.network_target {
+        let mut txs = Vec::with_capacity(job.txs.len() + 1);
+        txs.push(coinbase);
+        txs.extend(job.txs.clone());
+        let block = Block {
+            header,
+            transactions: txs,
+        };
+        if block.merkle_root() != merkle_root {
+            return Err("submitted share merkle mismatch".to_string());
+        }
+        submit_block_to_node(job.height, &block)?;
+        if let Err(e) = write_block_json(job.height, &block) {
+            eprintln!(
+                "[warn] solo Stratum failed to persist block {}: {e}",
+                job.height
+            );
+        }
+        println!(
+            "[solo-stratum] submitted block height {} hash {}",
+            job.height,
+            hex::encode(hash)
+        );
+        return Ok(true);
+    }
+
+    Ok(false)
+}
+
+fn solo_job_refresher(
+    writer: Arc<Mutex<TcpStream>>,
+    current_job: Arc<Mutex<Option<SoloStratumJob>>>,
+    auth: Arc<Mutex<Option<SoloMinerAuth>>>,
+    running: Arc<AtomicBool>,
+    extranonce1: String,
+    extranonce2_size: usize,
+    share_difficulty: f64,
+) {
+    let client = match node_http_client() {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("[warn] solo Stratum could not build RPC client: {e}");
+            return;
+        }
+    };
+    let refresh = Duration::from_secs(solo_stratum_refresh_secs());
+    while running.load(Ordering::Relaxed) {
+        let auth_snapshot = auth.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        if let Some(auth_snapshot) = auth_snapshot {
+            if let Err(e) = publish_solo_job(
+                &writer,
+                &current_job,
+                &client,
+                &auth_snapshot,
+                &extranonce1,
+                extranonce2_size,
+                share_difficulty,
+                false,
+            ) {
+                eprintln!("[warn] solo Stratum job refresh failed: {e}");
+            }
+        }
+        thread::sleep(refresh);
+    }
+}
+
+fn handle_solo_stratum_client(stream: TcpStream, peer: SocketAddr) -> Result<(), String> {
+    let _ = stream.set_nodelay(true);
+    let reader_stream = stream
+        .try_clone()
+        .map_err(|e| format!("clone stream: {e}"))?;
+    let writer = Arc::new(Mutex::new(stream));
+    let mut reader = BufReader::new(reader_stream);
+    let connection_id = SOLO_CONN_ID.fetch_add(1, Ordering::SeqCst);
+    let extranonce1 = format!("{:08x}", connection_id as u32);
+    let extranonce2_size = solo_stratum_extranonce2_size();
+    let share_difficulty = solo_stratum_difficulty();
+    let current_job = Arc::new(Mutex::new(None::<SoloStratumJob>));
+    let auth = Arc::new(Mutex::new(None::<SoloMinerAuth>));
+    let running = Arc::new(AtomicBool::new(true));
+
+    {
+        let writer_ref = Arc::clone(&writer);
+        let current_ref = Arc::clone(&current_job);
+        let auth_ref = Arc::clone(&auth);
+        let running_ref = Arc::clone(&running);
+        let extranonce1_ref = extranonce1.clone();
+        thread::spawn(move || {
+            solo_job_refresher(
+                writer_ref,
+                current_ref,
+                auth_ref,
+                running_ref,
+                extranonce1_ref,
+                extranonce2_size,
+                share_difficulty,
+            );
+        });
+    }
+
+    let client = node_http_client()?;
+    let mut seen_shares = HashSet::new();
+    println!("[solo-stratum] client connected: {peer}");
+
+    loop {
+        let mut line = String::new();
+        let read = reader
+            .read_line(&mut line)
+            .map_err(|e| format!("stratum read: {e}"))?;
+        if read == 0 {
+            break;
+        }
+        let msg: serde_json::Value = match serde_json::from_str(line.trim()) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[solo-stratum] bad json from {peer}: {e}");
+                continue;
+            }
+        };
+        let id = msg.get("id").cloned().unwrap_or_else(|| json!(null));
+        let method = msg.get("method").and_then(|v| v.as_str()).unwrap_or("");
+        let params = msg
+            .get("params")
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+
+        match method {
+            "mining.configure" => {
+                solo_send_response(&writer, id, json!({}))?;
+            }
+            "mining.subscribe" => {
+                let result = json!([
+                    [["mining.set_difficulty", "1"], ["mining.notify", "1"]],
+                    extranonce1,
+                    extranonce2_size
+                ]);
+                solo_send_response(&writer, id, result)?;
+            }
+            "mining.authorize" => {
+                let user = params.get(0).and_then(|v| v.as_str()).unwrap_or("irium");
+                match solo_auth_from_user(user) {
+                    Ok(auth_info) => {
+                        {
+                            let mut guard = auth.lock().unwrap_or_else(|e| e.into_inner());
+                            *guard = Some(auth_info.clone());
+                        }
+                        solo_send_response(&writer, id, json!(true))?;
+                        publish_solo_job(
+                            &writer,
+                            &current_job,
+                            &client,
+                            &auth_info,
+                            &extranonce1,
+                            extranonce2_size,
+                            share_difficulty,
+                            true,
+                        )?;
+                        println!(
+                            "[solo-stratum] authorized {} payout {}",
+                            auth_info.user, auth_info.payout_label
+                        );
+                    }
+                    Err(e) => solo_send_error(&writer, id, &e),
+                }
+            }
+            "mining.submit" => {
+                if params.len() < 5 {
+                    solo_send_error(
+                        &writer,
+                        id,
+                        "mining.submit requires user, job_id, extranonce2, ntime, nonce",
+                    );
+                    continue;
+                }
+                let job_id = params[1].as_str().unwrap_or("");
+                let extranonce2 = params[2].as_str().unwrap_or("");
+                let ntime = params[3].as_str().unwrap_or("");
+                let nonce = params[4].as_str().unwrap_or("");
+                let job = current_job
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                let Some(job) = job else {
+                    solo_send_error(&writer, id, "no active job");
+                    continue;
+                };
+                if job.job_id != job_id {
+                    solo_send_error(&writer, id, "stale job");
+                    continue;
+                }
+                match submit_solo_share(
+                    &job,
+                    &extranonce1,
+                    extranonce2,
+                    ntime,
+                    nonce,
+                    &mut seen_shares,
+                ) {
+                    Ok(found_block) => {
+                        solo_send_response(&writer, id, json!(true))?;
+                        if found_block {
+                            let auth_snapshot =
+                                auth.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                            if let Some(auth_snapshot) = auth_snapshot {
+                                let _ = publish_solo_job(
+                                    &writer,
+                                    &current_job,
+                                    &client,
+                                    &auth_snapshot,
+                                    &extranonce1,
+                                    extranonce2_size,
+                                    share_difficulty,
+                                    true,
+                                );
+                            }
+                        }
+                    }
+                    Err(e) => solo_send_error(&writer, id, &e),
+                }
+            }
+            "mining.extranonce.subscribe" | "mining.suggest_difficulty" => {
+                solo_send_response(&writer, id, json!(true))?;
+            }
+            "" => {}
+            _ => {
+                solo_send_error(&writer, id, "unsupported method");
+            }
+        }
+    }
+
+    running.store(false, Ordering::Relaxed);
+    println!("[solo-stratum] client disconnected: {peer}");
+    Ok(())
+}
+
+fn run_solo_stratum_server(addr: &str) -> Result<(), String> {
+    let listener = TcpListener::bind(addr).map_err(|e| format!("solo Stratum bind {addr}: {e}"))?;
+    println!("[solo-stratum] listening on {addr}");
+    println!("[solo-stratum] worker usernames should start with an Irium payout address");
+
+    for stream in listener.incoming() {
+        match stream {
+            Ok(stream) => {
+                let peer = stream
+                    .peer_addr()
+                    .unwrap_or_else(|_| "0.0.0.0:0".parse().unwrap());
+                thread::spawn(move || {
+                    if let Err(e) = handle_solo_stratum_client(stream, peer) {
+                        eprintln!("[warn] solo Stratum client {peer} exited: {e}");
+                    }
+                });
+            }
+            Err(e) => eprintln!("[warn] solo Stratum accept failed: {e}"),
+        }
+    }
+    Ok(())
+}
+
 fn main() {
     let loaded_env = load_env_file("/etc/irium/miner.env");
     if loaded_env {
@@ -2070,6 +2810,18 @@ fn main() {
         } else {
             println!("[🪝] Anchors digest: {}", manager.payload_digest());
         }
+    }
+
+    if let Some(addr) = solo_stratum_listen_addr() {
+        if stratum_url().is_some() {
+            eprintln!(
+                "[warn] IRIUM_STRATUM_URL is ignored while solo Stratum server mode is enabled"
+            );
+        }
+        if let Err(e) = run_solo_stratum_server(&addr) {
+            eprintln!("[warn] Solo Stratum server exited: {e}");
+        }
+        return;
     }
 
     if stratum_url().is_some() {

@@ -1,9 +1,15 @@
 ## Source Repository
 
 - Stratum source repo: https://github.com/iriumlabs/irium-stratum
-- Build/deploy the pool from that repository, not from this irium repo.
+- Build/deploy the public pool from that repository, not from this irium repo.
+- Public users should connect through the Stratum DNS hostname `pool.iriumlabs.org` after DNS and services are cut over to the active pool host. This is not a browser website.
+- Backend host IPs must not be published in public miner guides.
 
 # Irium Public Stratum Pool
+
+## Endpoint status
+
+`pool.iriumlabs.org` is the intended public Stratum DNS hostname, not a website. Before announcing the migrated pool, operators must confirm DNS points at the active pool host and both TCP ports are listening.
 
 ## Quickstart (miners)
 Port profiles:
@@ -12,9 +18,6 @@ Port profiles:
   - Use for: ASIC/modern firmware
 - `3335` (legacy compatibility): `stratum+tcp://pool.iriumlabs.org:3335`
   - Use for: CPU/GPU and older Stratum clients (cpuminer/ccminer/legacy cgminer family)
-- Direct IP fallback:
-  - `stratum+tcp://157.173.116.134:3333` (strict)
-  - `stratum+tcp://157.173.116.134:3335` (legacy)
 - Username: `IRM_ADDRESS.worker1`
 - Password: `x`
 
@@ -28,15 +31,13 @@ Example username:
 
 Recommended failover list for CPU/GPU/legacy clients:
 1. `stratum+tcp://pool.iriumlabs.org:3335`
-2. `stratum+tcp://157.173.116.134:3335`
-3. `stratum+tcp://pool.iriumlabs.org:3333`
+2. `stratum+tcp://pool.iriumlabs.org:3333`
 
 Recommended failover list for ASIC/strict clients:
 1. `stratum+tcp://pool.iriumlabs.org:3333`
-2. `stratum+tcp://157.173.116.134:3333`
-3. `stratum+tcp://pool.iriumlabs.org:3335`
+2. `stratum+tcp://pool.iriumlabs.org:3335`
 
-This keeps miners online if DNS resolution fails locally while preserving profile compatibility.
+Use the DNS hostname only after operator cutover; backend IPs may change and should not be published in public miner configuration.
 
 ## Payout model (SOLO)
 This pool runs in SOLO mode.
@@ -53,25 +54,23 @@ If you cannot connect:
 getent hosts pool.iriumlabs.org
 ```
 
-2. Check TCP reachability on both ports (hostname + direct IP):
+2. Check TCP reachability on both public ports:
 ```bash
 nc -vz pool.iriumlabs.org 3333
-nc -vz 157.173.116.134 3333
 nc -vz pool.iriumlabs.org 3335
-nc -vz 157.173.116.134 3335
 ```
 
 3. Test a raw Stratum subscribe (strict + legacy):
 ```bash
-printf '{"id":1,"method":"mining.subscribe","params":[]}\n' | nc 157.173.116.134 3333
-printf '{"id":1,"method":"mining.subscribe","params":[]}\n' | nc 157.173.116.134 3335
+printf '{"id":1,"method":"mining.subscribe","params":[]}\n' | nc pool.iriumlabs.org 3333
+printf '{"id":1,"method":"mining.subscribe","params":[]}\n' | nc pool.iriumlabs.org 3335
 ```
 
-4. If hostname fails but IP works:
-- DNS issue on miner network/ISP.
-- Keep mining on direct IP and fix resolver settings later.
+4. If DNS fails:
+- Fix resolver settings on the miner network.
+- Do not publish or depend on backend host IPs in public miner config.
 
-5. If both fail:
+5. If connectivity still fails:
 - Confirm outbound TCP/3333 and TCP/3335 are allowed on firewall/router.
 - Check ISP/VPS filtering for mining ports.
 - Try another network to isolate local filtering.
@@ -81,8 +80,6 @@ From any Linux/macOS shell:
 ```bash
 nc -vz pool.iriumlabs.org 3333
 nc -vz pool.iriumlabs.org 3335
-nc -vz 157.173.116.134 3333
-nc -vz 157.173.116.134 3335
 ```
 
 From the pool host:
@@ -143,7 +140,7 @@ Use explicit port routing by hardware/client type:
 - `3333` strict canonical profile: ASIC/modern firmware
 - `3335` legacy profile: CPU/GPU and older Stratum clients
 
-If direct IP TCP connects but your miner still reports subscribe/authorize issues, verify:
+If the public hostname connects but your miner still reports subscribe/authorize issues, verify:
 - Algorithm is SHA-256/SHA-256d
 - SSL/TLS is disabled (`stratum+tcp://`)
 - Worker format is `IRM_ADDRESS.worker1`
@@ -155,7 +152,7 @@ If direct IP TCP connects but your miner still reports subscribe/authorize issue
 |---|---|---|---|---|
 | `cpuminer-opt 26.1` | CPU | Stable on legacy port | `-a sha256d -o stratum+tcp://pool.iriumlabs.org:3335 -u WALLET.worker -p x -t N` | Use legacy profile port `3335`. |
 | `ccminer 2.3.1/2.3.2` | GPU | Stable on legacy port | `-a sha256d -o stratum+tcp://pool.iriumlabs.org:3335 -u WALLET.worker -p x` | Use legacy profile port `3335`. |
-| `cgminer/bmminer 4.10.0` | ASIC/legacy | Stable on strict port | Pool0 DNS + Pool1/2 direct IP | Use strict port `3333`; fallback `3335` only if firmware requires it. |
+| `cgminer/bmminer 4.10.0` | ASIC/legacy | Stable on strict port | Pool0 DNS hostname | Use strict port `3333`; fallback `3335` only if firmware requires it. |
 | `irium-miner` | Native | Recommended | Use latest `main` build | Baseline for protocol correctness and debugging. |
 
 Use `/metrics` reject reasons (`rejected_stale`, `rejected_low_difficulty`, `rejected_invalid`, `rejected_duplicate`) for triage.

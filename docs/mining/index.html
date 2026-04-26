@@ -561,7 +561,8 @@
     <div class="x-panel" id="irium-official-pool">
       <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>IRIUM OFFICIAL POOL</div></div>
       <ul class="m-list">
-        <li><b>Pool Endpoint:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
+        <li><b>ASIC / modern firmware:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
+        <li><b>CPU/GPU third-party miners:</b> <code>stratum+tcp://pool.iriumlabs.org:3335</code></li>
         <li><b>Algorithm:</b> SHA-256d</li>
         <li><b>Network:</b> Irium mainnet</li>
       </ul>
@@ -569,7 +570,7 @@
       <div class="m-step" style="margin-top:12px;">
         <div class="m-step-head"><span class="m-step-num">1</span><span class="m-step-title">Example CPU miner command</span></div>
         <pre class="m-cmd"><code>./irium-miner \
---pool stratum+tcp://pool.iriumlabs.org:3333 \
+--pool stratum+tcp://pool.iriumlabs.org:3335 \
 --user YOUR_IRIUM_WALLET \
 --threads 4</code></pre>
       </div>
@@ -597,8 +598,7 @@
       <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>ASIC / Pool Quick Config</div></div>
       <div class="m-copy-grid">
         <div class="m-copy-row"><span class="m-copy-label">Pool URL</span><code class="m-copy-value" id="pool-url">stratum+tcp://pool.iriumlabs.org:3333</code><button class="m-copy-btn" data-copy-target="pool-url">Copy</button></div>
-        <div class="m-copy-row"><span class="m-copy-label">Fallback URL</span><code class="m-copy-value" id="pool-fallback">stratum+tcp://157.173.116.134:3333</code><button class="m-copy-btn" data-copy-target="pool-fallback">Copy</button></div>
-        <div class="m-copy-row"><span class="m-copy-label">Direct IP (backup)</span><code class="m-copy-value" id="pool-ip">stratum+tcp://157.173.116.134:3333</code><button class="m-copy-btn" data-copy-target="pool-ip">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">CPU/GPU URL</span><code class="m-copy-value" id="pool-software">stratum+tcp://pool.iriumlabs.org:3335</code><button class="m-copy-btn" data-copy-target="pool-software">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Worker Format</span><code class="m-copy-value" id="pool-worker">YOUR_IRM_ADDRESS.worker1</code><button class="m-copy-btn" data-copy-target="pool-worker">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Password</span><code class="m-copy-value" id="pool-pass">x</code><button class="m-copy-btn" data-copy-target="pool-pass">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Mode</span><code class="m-copy-value" id="pool-mode">SOLO (full block reward goes to the IRM address in the username)</code><button class="m-copy-btn" data-copy-target="pool-mode">Copy</button></div>
@@ -608,11 +608,11 @@
         <div class="m-step-head"><span class="m-step-num">A</span><span class="m-step-title">Antminer / Whatsminer Example</span></div>
         <ul class="m-list">
           <li><b>Pool 1 (Primary):</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
-          <li><b>Pool 2 (Fallback):</b> <code>stratum+tcp://157.173.116.134:3333</code></li>
+          <li><b>CPU/GPU software miners:</b> <code>stratum+tcp://pool.iriumlabs.org:3335</code></li>
           <li><b>Worker:</b> <code>YOUR_IRM_ADDRESS.worker1</code></li>
           <li><b>Password:</b> <code>x</code></li>
         </ul>
-        <p class="m-muted" style="margin-top:8px;">If DNS fails on your network, keep hostname on Pool 1 and use direct IP backup for Pool 2/3. If your miner has stability issues on 3333, use 3335 fallback.</p>
+        <p class="m-muted" style="margin-top:8px;">Use the public DNS hostname only. ASICs and modern firmware use 3333; CPU/GPU third-party software miners use 3335.</p>
       </div>
 
       <div class="m-alert"><b>Important:</b> For pool mining, do not point ASICs or third-party miners at local node RPC (<code>127.0.0.1:38300</code>). Use the Stratum pool endpoint.</div>
@@ -669,8 +669,8 @@ sudo journalctl -u iriumd -f</code></pre></article>
     <div class="step-card">
       <div class="step-head"><span class="step-num">★</span><span class="step-title">Mine via Irium Public Pool (SOLO)</span></div>
       <ul class="muted">
-        <li><strong>Primary Pool URL:</strong> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
-        <li><strong>Fallback URL:</strong> <code>stratum+tcp://157.173.116.134:3333</code> (use only if your miner is unstable on 3333)</li>
+        <li><strong>ASIC / Modern Endpoint:</strong> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
+        <li><strong>CPU/GPU Endpoint:</strong> <code>stratum+tcp://pool.iriumlabs.org:3335</code></li>
         <li><strong>Username:</strong> <code>IRM_ADDRESS.worker1</code></li>
         <li><strong>Password:</strong> <code>x</code></li>
         <li><strong>Mode:</strong> SOLO (if a block is found, reward pays to the IRM address in the username).</li>

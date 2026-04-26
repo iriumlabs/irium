@@ -1294,25 +1294,25 @@
         <div>
           <div class="hero-brand">
             <img class="hero-logo" src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium">
-            <div class="hero-eyebrow"><span class="dot"></span> Live Public Stratum Pool</div>
+            <div class="hero-eyebrow"><span class="dot"></span> Public Stratum Pool</div>
           </div>
           <h1 class="hero-title">Irium Stratum Pool Portal</h1>
-          <p class="hero-sub">Public mining interface for endpoint access, payout visibility, and live diagnostics. The pool helps secure Irium's settlement-first base layer while keeping mining open and transparent.</p>
+          <p class="hero-sub">Use the public Stratum DNS hostname only. ASIC and modern firmware mine on port 3333; CPU/GPU software miners use the compatibility profile on port 3335.</p>
 
           <div class="endpoint-stack">
             <div class="endpoint-card">
-              <span class="endpoint-label">Primary</span>
+              <span class="endpoint-label">ASIC / Modern</span>
               <div id="primary-endpoint" class="endpoint-main">stratum+tcp://pool.iriumlabs.org:3333</div>
               <button class="copy-btn" data-copy="primary-endpoint">Copy</button>
             </div>
             <div class="endpoint-card">
-              <span class="endpoint-label">Fallback</span>
-              <div class="endpoint-main">Use <span class="mono">pool.iriumlabs.org:3333</span> as primary. If your client is unstable, try <span class="mono">157.173.116.134:3333</span> fallback.</div>
-              <button class="copy-btn secondary" data-copy="primary-endpoint">Copy</button>
+              <span class="endpoint-label">CPU / GPU</span>
+              <div id="legacy-endpoint" class="endpoint-main">stratum+tcp://pool.iriumlabs.org:3335</div>
+              <button class="copy-btn secondary" data-copy="legacy-endpoint">Copy</button>
             </div>
           </div>
 
-          <div class="hero-note">Recommended: use the DNS endpoint as Pool 0. Public pool access supports fair mining participation, broader distribution, and the settlement-first base layer that Irium is building on.</div>
+          <div class="hero-note">Backend host IPs are intentionally not published. If DNS has not been cut over yet, wait for operator confirmation before announcing the pool.</div>
           <div id="hero-route-badge" class="hero-route-badge"><span class="dot"></span><span id="hero-route-text">Active Route: Checking...</span></div>
         </div>
         <aside class="hero-right">
@@ -1321,12 +1321,12 @@
             <li class="setup-row"><span class="setup-key">Algorithm</span><span class="setup-value">SHA-256d</span></li>
             <li class="setup-row"><span class="setup-key">Mode</span><span class="setup-value">SOLO</span></li>
             <li class="setup-row"><span class="setup-key">Username</span><span class="setup-value mono">YOUR_IRIUM_WALLET_ADDRESS.worker1</span></li>
-            <li class="setup-row"><span class="setup-key">Password</span><span class="setup-value mono">x (placeholder)</span></li>
-            <li class="setup-row"><span class="setup-key">Port</span><span class="setup-value mono">3333 / TCP (Primary), 3333 / TCP (Direct IP Fallback)</span></li>
+            <li class="setup-row"><span class="setup-key">Password</span><span class="setup-value mono">x</span></li>
+            <li class="setup-row"><span class="setup-key">Ports</span><span class="setup-value mono">3333 ASIC, 3335 CPU/GPU</span></li>
             <li class="setup-row"><span class="setup-key">Status</span><span class="setup-value"><span id="pool-live-pill" class="status-badge">LOADING...</span></span></li>
             <li class="setup-row"><span class="setup-key">Last Update</span><span id="pool-updated-pill" class="setup-value">--:--:--</span></li>
           </ul>
-          <p class="panel-sub" style="margin-top:12px;">SOLO payout: when your miner finds a valid block, the coinbase reward is paid directly to the wallet address in your username. Public mining infrastructure matters because it keeps settlement security and distribution in the open.</p>
+          <p class="panel-sub" style="margin-top:12px;">SOLO payout: when your miner finds a valid block, the coinbase reward is paid directly to the wallet address in your username.</p>
         </aside>
       </div>
     </section>
@@ -1340,33 +1340,22 @@
       <article class="kpi"><div class="label">Avg Block Time</div><div id="k-blocktime" class="value">Loading...</div></article>
     </section>
 
-    <section class="required-update-panel" style="margin-top:14px;">
-      <article class="panel live-activity-panel card-live">
-        <h3>Live Pool Activity</h3>
-        <p class="panel-sub">Real-time pool signals from backend telemetry and chain feed. Sessions show connected workers, not total hashpower. Long-window miner distribution uses a 4000-block sample for statistical clarity, and public visibility helps miners verify how the settlement-first base layer is being secured.</p>
-        <ul class="meta-list">
-          <li><span class="key">Connected TCP Sessions (live)</span><span id="live-workers">Checking...</span></li>
-          <li><span class="key">Active Miners (window)</span><span id="live-active-miners">Checking...</span></li>
-          <li><span class="key">Top Miner Share (4000 blocks)</span><span id="live-top1-share">Checking...</span></li>
-          <li><span class="key">Top 5 Share (4000 blocks)</span><span id="live-top5-share">Checking...</span></li>
-          <li><span class="key">Unique Miners (4000 blocks)</span><span id="live-unique-miners">Checking...</span></li>
-          <li><span class="key">Top Miner Address</span><span id="live-top-address" class="mono">Checking...</span></li>
-          <li><span class="key">Accepted Shares</span><span id="live-accepted">Checking...</span></li>
-          <li><span class="key">Pool Blocks Accepted</span><span id="live-blocks-accepted">Checking...</span></li>
-          <li><span class="key">Rejected / Stale</span><span id="live-rejected">Checking...</span></li>
-          <li><span class="key">Reject Breakdown</span><span id="live-reject-breakdown">Checking...</span></li>
-          <li><span class="key">Pool Integrity</span><span id="live-integrity">Checking...</span></li>
-          <li><span class="key">Last Share Accepted</span><span id="live-last-accept">Checking...</span></li>
-          <li><span class="key">Last Share Rejected</span><span id="live-last-reject">Checking...</span></li>
-          <li><span class="key">Backend Link</span><span id="live-backend">Checking...</span></li>
-          <li><span class="key">Tip Alignment</span><span id="live-tip-align">Checking...</span></li>
-          <li><span class="key">Last Found Block</span><span id="live-last-found">Checking...</span></li>
-        </ul>
-        <p id="live-trust-note" class="tiny" style="margin-top:10px;">These metrics are pulled directly from <code>/api/pool/*</code> and chain data for independent verification.</p>
-      </article>
-    </section>
-
     <section class="portal-grid">
+      <article class="panel card-ops card-compact">
+        <h3>Operational Status</h3>
+        <p class="panel-sub">Public endpoint diagnostics and miner-side checks.</p>
+        <ul class="meta-list">
+          <li><span class="key">ASIC Endpoint</span><span class="mono">pool.iriumlabs.org:3333</span></li>
+          <li><span class="key">CPU/GPU Endpoint</span><span class="mono">pool.iriumlabs.org:3335</span></li>
+          <li><span class="key">Failover Policy</span><span>DNS hostname only; raw backend IPs are not public.</span></li>
+          <li><span class="key">Explorer API</span><span id="ops-api">Loading...</span></li>
+          <li><span class="key">Stratum Health (/health)</span><span id="ops-stratum-health">Checking...</span></li>
+          <li><span class="key">Template Age</span><span id="ops-template-age">Checking...</span></li>
+          <li><span class="key">Last Refresh</span><span id="ops-updated">Loading...</span></li>
+          <li><span class="key">Troubleshoot</span><span>Allow outbound TCP 3333 for ASICs or TCP 3335 for CPU/GPU software miners.</span></li>
+        </ul>
+      </article>
+
       <article class="panel card-economics card-compact">
         <h3>Pool Economics</h3>
         <p class="panel-sub">Production parameters used by miners and listing sites.</p>
@@ -1375,8 +1364,22 @@
           <li><span class="key">Payout Model</span><span><b>SOLO</b> (full coinbase to miner address)</span></li>
           <li><span class="key">Min Payout</span><span><b>None</b> (on found block, chain maturity rules apply)</span></li>
           <li><span class="key">Payout Schedule</span><span><b>On-chain</b> when your block is accepted</span></li>
-          <li><span class="key">Primary Region</span><span>EU</span></li>
+          <li><span class="key">Public Hostname</span><span>pool.iriumlabs.org</span></li>
           <li><span class="key">Support</span><span>Telegram + GitHub Issues</span></li>
+        </ul>
+      </article>
+
+      <article class="panel card-legacy card-compact">
+        <h3>Miner Compatibility</h3>
+        <p class="panel-sub">Choose the endpoint by miner class.</p>
+        <ul class="meta-list">
+          <li><span class="key">ASIC / modern firmware</span><span class="mono">stratum+tcp://pool.iriumlabs.org:3333</span></li>
+          <li><span class="key">CPU software miners</span><span class="mono">stratum+tcp://pool.iriumlabs.org:3335</span></li>
+          <li><span class="key">GPU software miners</span><span class="mono">stratum+tcp://pool.iriumlabs.org:3335</span></li>
+          <li><span class="key">Quick Test 3333</span><span class="mono">printf '{"id":1,"method":"mining.subscribe","params":[]}
+' | nc pool.iriumlabs.org 3333</span></li>
+          <li><span class="key">Quick Test 3335</span><span class="mono">printf '{"id":1,"method":"mining.subscribe","params":[]}
+' | nc pool.iriumlabs.org 3335</span></li>
         </ul>
       </article>
 
@@ -1388,208 +1391,18 @@
           <li><span class="key">Blocks / 7d (network)</span><span id="perf-7d">Loading...</span></li>
           <li><span class="key">Expected Blocks / Day</span><span id="perf-exp-day">Loading...</span></li>
           <li><span class="key">Estimated Daily Emission</span><span id="perf-emission" class="reward-value">Loading...</span></li>
-          <li><span class="key">Difficulty Δ (1h / 24h)</span><span id="perf-diffdelta">Loading...</span></li>
+          <li><span class="key">Difficulty Delta</span><span id="perf-diffdelta">Loading...</span></li>
           <li><span class="key">Public API Health</span><span id="perf-api">Loading...</span></li>
         </ul>
       </article>
-
-      <article class="panel card-ops card-compact">
-        <h3>Operational Status</h3>
-        <p class="panel-sub">Public endpoint diagnostics and miner-side checks.</p>
-        <ul class="meta-list">
-          <li><span class="key">Stratum Endpoint</span><span class="mono">pool.iriumlabs.org:3333 (primary), 157.173.116.134:3333 (fallback)</span></li>
-          <li><span class="key">Failover Policy</span><span>DNS endpoint only (raw host IP intentionally not public)</span></li>
-          <li><span class="key">Explorer API</span><span id="ops-api">Loading...</span></li>
-          <li><span class="key">Stratum Health (/health)</span><span id="ops-stratum-health">Checking...</span></li>
-          <li><span class="key">Template Age</span><span id="ops-template-age">Checking...</span></li>
-          <li><span class="key">Last Refresh</span><span id="ops-updated">Loading...</span></li>
-          <li><span class="key">Troubleshoot</span><span>Allow outbound TCP 3333. Use pool.iriumlabs.org:3333 as primary and 157.173.116.134:3333 as direct IP fallback if DNS fails.</span></li>
-        </ul>
-      </article>
-
-      <article class="panel card-legacy card-compact">
-        <h3>Legacy Miner Compatibility</h3>
-        <p class="panel-sub">If TCP to the pool works but mining still fails, older miner firmware/clients may be Stratum-incompatible.</p>
-        <p class="tiny" style="margin-top:8px;color:#b8ffd5;">Update (March 2, 2026): legacy Stratum compatibility handlers are now enabled server-side for older cgminer/bmminer clients.</p>
-        <ul class="meta-list">
-          <li><span class="key">Known Risk</span><span><b>cgminer 4.10.0</b> can fail subscribe/authorize on some modern pool stacks.</span></li>
-          <li><span class="key">Primary</span><span class="mono">stratum+tcp://pool.iriumlabs.org:3333</span></li>
-          <li><span class="key">Fallback</span><span class="mono">stratum+tcp://157.173.116.134:3333</span></li>
-          <li><span class="key">Direct IP</span><span class="mono">stratum+tcp://157.173.116.134:3333</span></li>
-          <li><span class="key">Required Mode</span><span>SHA-256d (or SHA-256), TCP only, SSL/TLS off</span></li>
-          <li><span class="key">Quick Test</span><span class="mono">printf '{"id":1,"method":"mining.subscribe","params":[]}\n' | nc 157.173.116.134 3333</span></li>
-          <li><span class="key">Recommendation</span><span>Use <b>irium-miner</b> as known-stable baseline. For third-party miners, update firmware/binary and validate accepted shares.</span></li>
-        </ul>
-      </article>
-
-      <article class="panel span-2 card-miner">
-        <h3>Miner Address Dashboard</h3>
-        <p class="panel-sub">Lookup recent chain results for a mining payout address.</p>
-        <div class="lookup">
-          <input id="miner-input" type="text" placeholder="Enter miner payout address (Q...)" aria-label="Miner address">
-          <button id="miner-btn" type="button">ANALYZE</button>
-        </div>
-        <div id="miner-result" class="lookup-result">No lookup run yet.</div>
-      </article>
-
-      
-
-      <article class="panel span-3 card-blocks">
-        <h3>Recent Found Blocks (Chain Feed)</h3>
-        <p class="panel-sub">Latest accepted blocks with miner payout address and reward.</p>
-        <div class="table-wrap">
-          <table class="pool-table" id="blocks-table">
-            <thead>
-              <tr>
-                <th>Height</th>
-                <th>Time</th>
-                <th>Block Hash</th>
-                <th>Miner</th>
-                <th>Reward</th>
-                <th>Tx Count</th>
-              </tr>
-            </thead>
-            <tbody id="blocks-body"><tr><td colspan="6">Loading blocks...</td></tr></tbody>
-          </table>
-        </div>
-      </article>
-
-      <article class="panel span-3 card-payouts">
-        <h3>Pool Found Blocks (Attributed)</h3>
-        <p class="panel-sub">Only blocks reported by the live Stratum backend are listed here (not generic chain miner rows).</p>
-        <div class="table-wrap">
-          <table class="pool-table" id="pool-found-table">
-            <thead>
-              <tr>
-                <th>Height</th>
-                <th>Time</th>
-                <th>Miner Address</th>
-                <th>Reward (IRM)</th>
-                <th>Status</th>
-                <th>Block Hash</th>
-              </tr>
-            </thead>
-            <tbody id="pool-found-body"><tr><td colspan="6">Loading pool found blocks...</td></tr></tbody>
-          </table>
-        </div>
-      </article>
-    </section>
-
-    <section class="extended-grid">
-      <article class="panel">
-        <div class="panel-row">
-          <h3>Pool Backend Telemetry</h3>
-          <span id="backend-badge" class="badge">Checking...</span>
-        </div>
-        <p class="panel-sub">Direct pool backend metrics (workers/shares/payout queue) when exposed by API.</p>
-        <div class="mini-grid">
-          <div class="mini-stat"><div class="k">Workers Online</div><div id="b-workers" class="v">N/A</div></div>
-          <div class="mini-stat"><div class="k">Accepted Shares</div><div id="b-accepted" class="v">N/A</div></div>
-          <div class="mini-stat"><div class="k">Rejected Shares</div><div id="b-rejected" class="v">N/A</div></div>
-          <div class="mini-stat"><div class="k">Pending Payouts</div><div id="b-pending" class="v">N/A</div></div>
-          <div class="mini-stat"><div class="k">Last Template Update</div><div id="b-last-template" class="v">N/A</div></div>
-          <div class="mini-stat"><div class="k">Last Share Accepted</div><div id="b-last-accept" class="v">N/A</div></div>
-          <div class="mini-stat"><div class="k">Last Share Rejected</div><div id="b-last-reject" class="v">N/A</div></div>
-        </div>
-        <p id="b-note" class="tiny" style="margin-top:10px;">If unavailable, backend endpoints are private or not enabled yet.</p>
-      </article>
-
-      <article class="panel">
-        <h3>Miner Account Portal</h3>
-        <p class="panel-sub">Address-centric view: recent blocks, reward totals, and payout status.</p>
-        <div class="lookup">
-          <input id="acct-input" type="text" placeholder="Enter payout address (Q...)" aria-label="Account address">
-          <button id="acct-btn" type="button">Open</button>
-        </div>
-        <div id="acct-result" class="lookup-result">No account selected.</div>
-      </article>
-
-      <article class="panel">
-                <h3>Status and Incidents</h3>
-        <p class="panel-sub">Public reliability indicators for pool operators and miners.</p>
-        <ul class="meta-list">
-          <li><span class="key">API Latency</span><span id="s-latency">Checking...</span></li>
-          <li><span class="key">Data Freshness</span><span id="s-freshness">Checking...</span></li>
-          <li><span class="key">Pool Health</span><span id="s-health">Checking...</span></li>
-          <li><span class="key">Pool Health API</span><span id="s-health-api">Checking...</span></li>
-          <li><span class="key">Watchdog Status</span><span id="s-watchdog">Checking...</span></li>
-          <li><span class="key">Health Reason</span><span id="s-health-reason">Checking...</span></li>
-          <li><span class="key">Uptime Signal</span><span id="s-uptime">Checking...</span></li>
-        </ul>
-        <p class="tiny" style="margin:10px 0 6px;">Incident log (public page)</p>
-        <ul id="incident-list" class="incident-list">
-          <li>No active incidents reported.</li>
-        </ul>
-      </article>
-    </section>
-
-    <section class="panel api-docs" style="margin-top:14px;">
-      <h3>API and Integrations</h3>
-      <p class="panel-sub">Public endpoints for monitoring and ecosystem integrations.</p>
-      <p class="tiny" style="margin:4px 0 10px;">API source: <code>/api/pool/*</code> is served from the live pool backend via secure proxy. Core explorer endpoints are served separately.</p>
-      <div class="table-wrap">
-        <table class="pool-table">
-          <thead>
-            <tr><th>Endpoint</th><th>Purpose</th><th>Sample</th></tr>
-          </thead>
-          <tbody>
-            <tr><td><a href="https://api.iriumlabs.org/api/stats" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/stats</code></a></td><td>Global chain + peer + miner counters</td><td><code>{"height":14391,"peers_connected":29}</code></td></tr>
-            <tr><td><a href="https://api.iriumlabs.org/api/mining" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/mining</code></a></td><td>Hashrate, difficulty, timing series</td><td><code>{"hashrate":...,"difficulty":...}</code></td></tr>
-            <tr><td><a href="https://api.iriumlabs.org/api/blocks?limit=20" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/blocks?limit=20</code></a></td><td>Recent block feed with miner addresses</td><td><code>{"blocks":[...]}</code></td></tr>
-            <tr><td><a href="https://api.iriumlabs.org/api/block/14391" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/block/{height}</code></a></td><td>Single block detail by height</td><td><code>{"height":...,"header":...}</code></td></tr>
-            <tr><td><a href="https://api.iriumlabs.org/api/pool/stats" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/stats</code></a></td><td>Pool backend telemetry</td><td><code>{"active_tcp_sessions":12,"accepted_shares":...}</code></td></tr>
-            <tr><td><a href="https://api.iriumlabs.org/api/pool/payouts?limit=20" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/payouts?limit=20</code></a></td><td>Recent payout ledger</td><td><code>{"payouts":[...]}</code></td></tr>
-            <tr><td><a href="https://api.iriumlabs.org/api/pool/account/{address}" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/account/{address}</code></a></td><td>Address payout and block summary</td><td><code>{"blocks_found":...}</code></td></tr>
-            <tr><td><a href="https://api.iriumlabs.org/api/pool/workers?window=144&limit=20" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/workers?window=144&limit=20</code></a></td><td>Active worker addresses and estimated hashrate share</td><td><code>{"workers":[...]}</code></td></tr>
-            <tr><td><a href="https://api.iriumlabs.org/api/pool/health" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/health</code></a></td><td>Pool API health, freshness, latency, and peer signal</td><td><code>{"healthy":true,...}</code></td></tr>
-            <tr><td><a href="https://api.iriumlabs.org/api/pool/distribution?window=4000&limit=20" target="_blank" rel="noopener"><code>https://api.iriumlabs.org/api/pool/distribution?window=4000&limit=20</code></a></td><td>Long-window miner distribution and concentration metrics</td><td><code>{"top1_share_pct":...,"distribution":[...]}</code></td></tr>
-          </tbody>
-        </table>
-      </div>
-      <p class="tiny" style="margin-top:8px;">All public responses are fetched live from <code>https://api.iriumlabs.org/api</code>. Use the full endpoint URLs above.</p>
     </section>
 
     <section class="panel" style="margin-top:14px;">
       <h3>Miner Config Quickstart</h3>
-      <p class="panel-sub">Ready-to-use profile snippets for common miner UIs.</p>
+      <p class="panel-sub">Ready-to-use snippets. Replace <code>YOUR_IRIUM_WALLET_ADDRESS</code> with your own IRM address.</p>
       <div class="connect-grid">
         <div class="cfg-card">
-          <h4>Antminer Profile</h4>
-          <pre id="cfg-ant">URL: stratum+tcp://pool.iriumlabs.org:3333
-URL2: stratum+tcp://157.173.116.134:3333
-URL3: stratum+tcp://157.173.116.134:3333
-Worker: YOUR_IRIUM_WALLET_ADDRESS.worker1
-Password: x</pre>
-          <button class="copy-btn" data-copy="cfg-ant">Copy Config</button>
-        </div>
-        <div class="cfg-card">
-          <h4>Whatsminer Profile</h4>
-          <pre id="cfg-whats">Pool 1: stratum+tcp://pool.iriumlabs.org:3333
-Pool 2: stratum+tcp://157.173.116.134:3333
-Pool 3: stratum+tcp://157.173.116.134:3333
-Sub-account: YOUR_IRIUM_WALLET_ADDRESS.worker1
-Password: x</pre>
-          <button class="copy-btn" data-copy="cfg-whats">Copy Config</button>
-        </div>
-        <div class="cfg-card">
-          <h4>Generic Stratum Client</h4>
-          <pre id="cfg-generic">pool0=stratum+tcp://pool.iriumlabs.org:3333
-pool1=stratum+tcp://157.173.116.134:3333
-pool2=stratum+tcp://157.173.116.134:3333
-user=YOUR_IRIUM_WALLET_ADDRESS.worker1
-pass=x</pre>
-          <button class="copy-btn" data-copy="cfg-generic">Copy Config</button>
-        </div>
-      </div>
-    </section>
-
-
-    <section class="panel" style="margin-top:14px;">
-      <h3>Start Mining on Any OS</h3>
-      <p class="panel-sub">Use the same pool endpoint on ASIC or software miners. Replace <code>YOUR_IRIUM_WALLET_ADDRESS</code> with your own IRM address.</p>
-      <div class="connect-grid">
-        <div class="cfg-card">
-          <h4>ASIC Miner UI (Antminer / Whatsminer)</h4>
+          <h4>ASIC Miner UI</h4>
           <pre id="cfg-asic-ui">Algorithm: SHA-256d
 Pool URL: stratum+tcp://pool.iriumlabs.org:3333
 Worker: YOUR_IRIUM_WALLET_ADDRESS.worker1
@@ -1597,128 +1410,40 @@ Password: x</pre>
           <button class="copy-btn" data-copy="cfg-asic-ui">Copy Setup</button>
         </div>
         <div class="cfg-card">
-          <h4>Windows (Software Miner)</h4>
+          <h4>Windows CPU/GPU Miner</h4>
           <pre id="cfg-win-soft">minerd.exe -a sha256d ^
-  -o stratum+tcp://pool.iriumlabs.org:3333 ^
+  -o stratum+tcp://pool.iriumlabs.org:3335 ^
   -u YOUR_IRIUM_WALLET_ADDRESS.worker1 ^
   -p x</pre>
           <button class="copy-btn" data-copy="cfg-win-soft">Copy Command</button>
         </div>
         <div class="cfg-card">
-          <h4>Linux / macOS (Software Miner)</h4>
-          <pre id="cfg-unix-soft">./minerd -a sha256d \
-  -o stratum+tcp://pool.iriumlabs.org:3333 \
-  -u YOUR_IRIUM_WALLET_ADDRESS.worker1 \
-  -p x</pre>
+          <h4>Linux / macOS CPU/GPU Miner</h4>
+          <pre id="cfg-unix-soft">./minerd -a sha256d   -o stratum+tcp://pool.iriumlabs.org:3335   -u YOUR_IRIUM_WALLET_ADDRESS.worker1   -p x</pre>
           <button class="copy-btn" data-copy="cfg-unix-soft">Copy Command</button>
         </div>
       </div>
-      <p class="tiny" style="margin-top:10px;">Important: for pool mining, use the Stratum URL above. Do not point miners at <code>127.0.0.1:38300</code> unless you are running local node-template mining.</p>
-      <p class="tiny" style="margin-top:6px; color:#ffdca1;">Profitability note: SHA-256d pool mining is generally practical on ASIC hardware. CPU/GPU miners are supported for testing/learning but typically have low yield.</p>
-
-      <div class="legal-grid" style="margin-top:12px;">
-        <div class="legal-box">
-          <h5>Windows Setup (CPU/GPU software miner)</h5>
-          <p>1) Download a SHA-256d miner build (example: <a href="https://github.com/JayDDee/cpuminer-opt/releases" target="_blank" rel="noopener">cpuminer-opt releases</a>).</p>
-          <p>2) Extract ZIP and open <code>cmd.exe</code> in that folder.</p>
-          <p>3) Run:</p>
-          <pre>minerd.exe -a sha256d ^
-  -o stratum+tcp://pool.iriumlabs.org:3333 ^
-  -u YOUR_IRIUM_WALLET_ADDRESS.worker1 ^
-  -p x</pre>
-        </div>
-        <div class="legal-box">
-          <h5>Linux Setup (software miner)</h5>
-          <p>1) Install a SHA-256d miner (package or source; example project: <a href="https://github.com/JayDDee/cpuminer-opt" target="_blank" rel="noopener">cpuminer-opt</a>).</p>
-          <p>2) Run:</p>
-          <pre>./minerd -a sha256d \
-  -o stratum+tcp://pool.iriumlabs.org:3333 \
-  -u YOUR_IRIUM_WALLET_ADDRESS.worker1 \
-  -p x</pre>
-          <p>3) Keep firewall allowing outbound TCP 3333.</p>
-        </div>
-        <div class="legal-box">
-          <h5>macOS Setup (software miner)</h5>
-          <p>1) Use a SHA-256d compatible miner binary, or build from source from the same upstream project used on Linux.</p>
-          <p>2) Run the same command as Linux with your wallet address.</p>
-          <p>3) If Gatekeeper blocks execution, allow the binary in macOS Security settings.</p>
-        </div>
-        <div class="legal-box">
-          <h5>ASIC Setup (recommended)</h5>
-          <p>1) Open your ASIC web dashboard (Antminer/Whatsminer/etc.).</p>
-          <p>2) Set algorithm to <code>SHA-256d</code>.</p>
-          <p>3) Use:</p>
-          <pre>Pool URL: stratum+tcp://pool.iriumlabs.org:3333
-Worker: YOUR_IRIUM_WALLET_ADDRESS.worker1
-Password: x</pre>
-        </div>
-      </div>
+      <p class="tiny" style="margin-top:10px;">Do not point public-pool miners at <code>127.0.0.1:38300</code>; that is local node RPC/template mining.</p>
     </section>
-
-
 
     <section class="panel" style="margin-top:14px;">
       <h3>Miner Compatibility Matrix</h3>
-      <p class="panel-sub">Known behavior across miner types. If your setup differs, share logs in support for tuning guidance.</p>
       <div class="table-wrap">
         <table class="pool-table">
           <thead><tr><th>Miner Type</th><th>OS</th><th>Status</th><th>Notes</th></tr></thead>
           <tbody>
-            <tr><td>Antminer / Whatsminer ASIC</td><td>Embedded Linux</td><td><span class="green">Recommended</span></td><td>Use SHA-256d + Stratum endpoint. Best reliability and economics.</td></tr>
-            <tr><td>CPU software miner</td><td>Windows/Linux/macOS</td><td><span class="amber">Supported</span></td><td>Works for testing and onboarding; usually unprofitable at scale.</td></tr>
-            <tr><td>GPU software miner</td><td>Windows/Linux</td><td><span class="amber">Depends on miner</span></td><td>Use a SHA-256d-capable client; verify accepted shares in miner logs.</td></tr>
+            <tr><td>Antminer / Whatsminer ASIC</td><td>Embedded Linux</td><td><span class="green">Recommended</span></td><td>Use SHA-256d on port 3333.</td></tr>
+            <tr><td>CPU software miner</td><td>Windows/Linux/macOS</td><td><span class="amber">Supported</span></td><td>Use port 3335; typically useful for testing and onboarding.</td></tr>
+            <tr><td>GPU software miner</td><td>Windows/Linux</td><td><span class="amber">Supported</span></td><td>Use port 3335 with a SHA-256d-capable client.</td></tr>
           </tbody>
         </table>
       </div>
     </section>
 
     <section class="panel" style="margin-top:14px;">
-      <h3>Troubleshooting Payload (Share This If Mining Fails)</h3>
-      <p class="panel-sub">Post this exact dataset in support so we can reproduce and fix compatibility issues quickly.</p>
-      <ul class="meta-list">
-        <li><span class="key">Miner Build</span><span>Exact miner software + version (and firmware for ASICs).</span></li>
-        <li><span class="key">Launch Command</span><span>Full command/config (with wallet partially masked if needed).</span></li>
-        <li><span class="key">Log Sample</span><span>30-50 lines including subscribe, authorize, difficulty, accepted/rejected counters.</span></li>
-        <li><span class="key">Environment</span><span>OS version, hardware model, and whether DNS endpoint or direct IP was used.</span></li>
-      </ul>
+      <h3>Troubleshooting Payload</h3>
+      <p class="panel-sub">Share miner software/version, endpoint port, wallet worker name, and 30-50 lines of miner logs if mining fails.</p>
     </section>
-
-    <section class="panel" style="margin-top:14px;">
-      <h3>Common Share Reject Reasons</h3>
-      <p class="panel-sub">If you see high reject ratio, check these first before changing hardware settings.</p>
-      <ul class="meta-list">
-        <li><span class="key">low_difficulty</span><span>Submitted share hash is above pool share target at current difficulty.</span></li>
-        <li><span class="key">stale share</span><span>Job changed before submit arrived; reduce latency and keep miner clock/network stable.</span></li>
-        <li><span class="key">invalid format</span><span>Non-Stratum or malformed submit payload reached the pool.</span></li>
-        <li><span class="key">wrong algorithm</span><span>Miner not configured for SHA-256d.</span></li>
-        <li><span class="key">bad username</span><span>Use <span class="mono">WALLET_ADDRESS.worker</span> format; wallet address must be valid.</span></li>
-      </ul>
-    </section>
-
-    <section class="panel" style="margin-top:14px;">
-      <h3>Compliance and Operations</h3>
-      <p class="panel-sub">Operational policy, security stance, and support channels.</p>
-      <div class="legal-grid">
-        <div class="legal-box">
-          <h5>Risk and Terms</h5>
-          <p>Mining rewards are probabilistic in SOLO mode. Network orphan risk and node maturity rules apply before spendability.</p>
-        </div>
-        <div class="legal-box">
-          <h5>Abuse Policy</h5>
-          <p>Automated abuse, malformed share floods, and endpoint attacks may be rate-limited or blocked to protect pool availability.</p>
-        </div>
-        <div class="legal-box">
-          <h5>Security Posture</h5>
-          <p>Public page exposes DNS endpoint only. Internal node RPC remains non-public and protected.</p>
-        </div>
-        <div class="legal-box">
-          <h5>Support Escalation</h5>
-          <p>Primary support via Telegram and GitHub issues. Include miner model, config, and timestamp when reporting incidents.</p>
-        </div>
-      </div>
-      <p class="tiny" style="margin-top:8px;">Handshake/submit path verified in local testing; ongoing real ASIC validation across hardware models is encouraged.</p>
-    </section>
-
   </div>
 </main>
 
@@ -1761,8 +1486,7 @@ GitHub</a>
 
 <script>
   const API_BACKENDS = [
-    { name: "api.iriumlabs.org", base: "https://api.iriumlabs.org/api" },
-    { name: "irium-vps", base: "https://207.244.247.86:38310/api" }
+    { name: "api.iriumlabs.org", base: "https://api.iriumlabs.org/api" }
   ];
   const POLL_MS = 10000;
 

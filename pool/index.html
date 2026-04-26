@@ -1410,16 +1410,24 @@ Password: x</pre>
           <button class="copy-btn" data-copy="cfg-asic-ui">Copy Setup</button>
         </div>
         <div class="cfg-card">
-          <h4>Windows CPU/GPU Miner</h4>
-          <pre id="cfg-win-soft">minerd.exe -a sha256d ^
+          <h4>Windows CPU Miner (cpuminer-opt)</h4>
+          <pre id="cfg-win-soft">dir *.exe
+.\cpuminer-&lt;your-cpu-build&gt;.exe -a sha256d ^
   -o stratum+tcp://pool.iriumlabs.org:3335 ^
   -u YOUR_IRIUM_WALLET_ADDRESS.worker1 ^
-  -p x</pre>
+  -p x ^
+  -t 4</pre>
+          <p class="tiny">Use the executable that exists in your extracted folder, such as cpuminer-avx2.exe, cpuminer-avx2-sha-vaes.exe, or cpuminer-sse2.exe.</p>
           <button class="copy-btn" data-copy="cfg-win-soft">Copy Command</button>
         </div>
         <div class="cfg-card">
-          <h4>Linux / macOS CPU/GPU Miner</h4>
-          <pre id="cfg-unix-soft">./minerd -a sha256d   -o stratum+tcp://pool.iriumlabs.org:3335   -u YOUR_IRIUM_WALLET_ADDRESS.worker1   -p x</pre>
+          <h4>Linux / macOS CPU Miner (cpuminer-opt)</h4>
+          <pre id="cfg-unix-soft">./cpuminer -a sha256d \
+  -o stratum+tcp://pool.iriumlabs.org:3335 \
+  -u YOUR_IRIUM_WALLET_ADDRESS.worker1 \
+  -p x \
+  -t 4</pre>
+          <p class="tiny">cpuminer-opt is CPU-only. GPU miners need a separate SHA-256d-capable Stratum client on the same 3335 endpoint.</p>
           <button class="copy-btn" data-copy="cfg-unix-soft">Copy Command</button>
         </div>
       </div>

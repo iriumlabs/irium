@@ -1397,6 +1397,134 @@
       </article>
     </section>
 
+    <section class="portal-grid pool-telemetry-grid" aria-label="Live pool dashboard" style="margin-top:14px;">
+      <article class="panel card-live card-compact">
+        <h3>Live Stratum Telemetry <span id="backend-badge" class="status-badge" style="margin-left:8px;">Loading</span></h3>
+        <p id="b-note" class="panel-sub">Loading pool telemetry from the public API.</p>
+        <ul class="meta-list">
+          <li><span class="key">Connected Sessions</span><span id="live-workers">Loading...</span></li>
+          <li><span class="key">Active Miner Addresses</span><span id="live-active-miners">Loading...</span></li>
+          <li><span class="key">Accepted Shares</span><span id="live-accepted">Loading...</span></li>
+          <li><span class="key">Rejected Shares</span><span id="live-rejected">Loading...</span></li>
+          <li><span class="key">Reject Breakdown</span><span id="live-reject-breakdown">Loading...</span></li>
+          <li><span class="key">Share Integrity</span><span id="live-integrity">Loading...</span></li>
+          <li><span class="key">Last Accepted Share</span><span id="live-last-accept">Loading...</span></li>
+          <li><span class="key">Last Rejected Share</span><span id="live-last-reject">Loading...</span></li>
+        </ul>
+      </article>
+
+      <article class="panel card-live card-compact">
+        <h3>Pool Backend Counters</h3>
+        <p class="panel-sub">SOLO pool counters from Stratum metrics and chain attribution.</p>
+        <ul class="meta-list">
+          <li><span class="key">Backend Status</span><span id="live-backend">Loading...</span></li>
+          <li><span class="key">Metrics Connected</span><span id="live-metrics-connected">Loading...</span></li>
+          <li><span class="key">Metrics Source</span><span id="live-metrics-source">Loading...</span></li>
+          <li><span class="key">Pool Hashrate</span><span id="live-pool-hashrate">Loading...</span></li>
+          <li><span class="key">Payout Model</span><span id="live-payout-model">Loading...</span></li>
+          <li><span class="key">Tip Alignment</span><span id="live-tip-align">Loading...</span></li>
+          <li><span class="key">Last Pool Block</span><span id="live-last-found">Loading...</span></li>
+          <li><span class="key">Trust Note</span><span id="live-trust-note">Loading...</span></li>
+        </ul>
+      </article>
+
+      <article class="panel card-live card-compact">
+        <h3>Candidate And Submit Path</h3>
+        <p class="panel-sub">These fields prove whether shares are becoming block candidates and whether submits are accepted by the node.</p>
+        <ul class="meta-list">
+          <li><span class="key">Candidates Detected</span><span id="live-candidates-detected">Loading...</span></li>
+          <li><span class="key">Candidates Submitted</span><span id="live-candidates-submitted">Loading...</span></li>
+          <li><span class="key">Blocks Accepted</span><span id="live-blocks-accepted">Loading...</span></li>
+          <li><span class="key">Submit Rejected</span><span id="live-submit-rejected">Loading...</span></li>
+          <li><span class="key">Pool Blocks On Chain</span><span id="live-chain-attributed">Loading...</span></li>
+          <li><span class="key">Round Effort</span><span id="live-round-effort">Loading...</span></li>
+          <li><span class="key">Round Luck</span><span id="live-round-luck">Loading...</span></li>
+        </ul>
+      </article>
+
+      <article class="panel card-live card-compact">
+        <h3>Dashboard Summary</h3>
+        <p class="panel-sub">Compact counters for quick operator checks.</p>
+        <ul class="meta-list">
+          <li><span class="key">Workers / Sessions</span><span id="b-workers">Loading...</span></li>
+          <li><span class="key">Accepted</span><span id="b-accepted">Loading...</span></li>
+          <li><span class="key">Rejected</span><span id="b-rejected">Loading...</span></li>
+          <li><span class="key">Pending Payouts</span><span id="b-pending">Loading...</span></li>
+          <li><span class="key">Last Template</span><span id="b-last-template">Loading...</span></li>
+          <li><span class="key">Last Accept</span><span id="b-last-accept">Loading...</span></li>
+          <li><span class="key">Last Reject</span><span id="b-last-reject">Loading...</span></li>
+        </ul>
+      </article>
+
+      <article class="panel card-live card-compact">
+        <h3>Miner Distribution</h3>
+        <p class="panel-sub">Chain-derived miner distribution over the public API window.</p>
+        <ul class="meta-list">
+          <li><span class="key">Unique Miners</span><span id="live-unique-miners">Loading...</span></li>
+          <li><span class="key">Top Miner Share</span><span id="live-top1-share">Loading...</span></li>
+          <li><span class="key">Top 5 Share</span><span id="live-top5-share">Loading...</span></li>
+          <li><span class="key">Top Address</span><span id="live-top-address" class="mono">Loading...</span></li>
+        </ul>
+      </article>
+
+      <article class="panel card-live card-compact">
+        <h3>Status Signals</h3>
+        <p class="panel-sub">API freshness, watchdog, and incident indicators.</p>
+        <ul class="meta-list">
+          <li><span class="key">Dashboard Health</span><span id="s-health">Loading...</span></li>
+          <li><span class="key">Pool Health API</span><span id="s-health-api">Loading...</span></li>
+          <li><span class="key">Freshness</span><span id="s-freshness">Loading...</span></li>
+          <li><span class="key">API Latency</span><span id="s-latency">Loading...</span></li>
+          <li><span class="key">Watchdog</span><span id="s-watchdog">Loading...</span></li>
+          <li><span class="key">Uptime Signal</span><span id="s-uptime">Loading...</span></li>
+          <li><span class="key">Health Reason</span><span id="s-health-reason">Loading...</span></li>
+        </ul>
+        <ul id="incident-list" class="m-list" style="margin-top:10px;"><li>Loading incidents...</li></ul>
+      </article>
+
+      <article class="panel card-miner card-compact">
+        <h3>Miner Block Lookup</h3>
+        <p class="panel-sub">Check recent chain blocks mined by a payout address.</p>
+        <div class="lookup">
+          <input id="miner-input" type="text" placeholder="Enter IRM address">
+          <button id="miner-btn" type="button">Lookup</button>
+        </div>
+        <div id="miner-result" class="lookup-result">Enter a miner address to search the loaded block window.</div>
+      </article>
+
+      <article class="panel card-miner card-compact">
+        <h3>Pool Account Lookup</h3>
+        <p class="panel-sub">Check pool-account attribution when public account records are available.</p>
+        <div class="lookup">
+          <input id="acct-input" type="text" placeholder="Enter IRM address">
+          <button id="acct-btn" type="button">Lookup</button>
+        </div>
+        <div id="acct-result" class="lookup-result">Enter a payout address.</div>
+      </article>
+
+      <article class="panel card-blocks card-compact">
+        <h3>Recent Network Blocks</h3>
+        <p class="panel-sub">Latest blocks from the public explorer API.</p>
+        <div class="table-wrap">
+          <table id="blocks-table" class="pool-table">
+            <thead><tr><th>Height</th><th>Time</th><th>Hash</th><th>Miner</th><th>Reward</th><th>Txs</th></tr></thead>
+            <tbody id="blocks-body"><tr><td colspan="6">Loading blocks...</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="panel card-payouts card-compact">
+        <h3>Pool-Attributed Blocks</h3>
+        <p class="panel-sub">Blocks submitted through the public Stratum pool. SOLO rewards pay directly on chain.</p>
+        <div class="table-wrap">
+          <table id="pool-found-table" class="pool-table">
+            <thead><tr><th>Height</th><th>Time</th><th>Miner</th><th>Reward</th><th>Status</th><th>Reference</th></tr></thead>
+            <tbody id="pool-found-body"><tr><td colspan="6">Loading pool block attribution...</td></tr></tbody>
+          </table>
+        </div>
+      </article>
+    </section>
+
     <section class="panel" style="margin-top:14px;">
       <h3>Miner Config Quickstart</h3>
       <p class="panel-sub">Ready-to-use snippets. Replace <code>YOUR_IRIUM_WALLET_ADDRESS</code> with your own IRM address.</p>
@@ -1872,7 +2000,7 @@ GitHub</a>
       <div style="margin-top:6px;">Blocks in window: <b>${hits.length}</b></div>
       <div>Total rewards in window: <b class="green">${fmtNum(total, 2)} IRM</b></div>
       <div>Latest block: <b>${fmtInt(latest.height)}</b> at ${fmtTime(latest?.header?.time)}</div>
-      <div class="muted" style="margin-top:8px;">Per-worker accepted/rejected shares are not exposed by public API. Use miner local dashboard for share counters.</div>
+      <div class="muted" style="margin-top:8px;">Pool share counters are shown in the live telemetry cards when exposed by the public API. Use the miner local dashboard for per-device counters.</div>
     `;
   }
 
@@ -1953,6 +2081,16 @@ GitHub</a>
     setText('live-accepted', acceptedText);
     setText('live-blocks-accepted', blocksAccepted === null ? 'Not exposed' : fmtInt(blocksAccepted));
     setText('live-rejected', rejectedText);
+    setText('live-candidates-detected', Number.isFinite(Number(stats?.candidates_detected)) ? fmtInt(stats.candidates_detected) : 'Not exposed');
+    setText('live-candidates-submitted', Number.isFinite(Number(stats?.candidates_submitted)) ? fmtInt(stats.candidates_submitted) : 'Not exposed');
+    setText('live-submit-rejected', Number.isFinite(Number(stats?.submit_rejected)) ? fmtInt(stats.submit_rejected) : 'Not exposed');
+    setText('live-chain-attributed', Number.isFinite(Number(stats?.pool_blocks_accepted_chain_attributed)) ? fmtInt(stats.pool_blocks_accepted_chain_attributed) : 'Not exposed');
+    setText('live-metrics-connected', stats?.stratum_metrics_connected === true ? 'Connected' : (stats?.stratum_metrics_connected === false ? 'Not connected' : 'Unknown'));
+    setText('live-metrics-source', stats?.source || 'N/A');
+    setText('live-pool-hashrate', fmtHashrate(stats?.pool_hashrate));
+    setText('live-payout-model', stats?.payout_model ? String(stats.payout_model).toUpperCase() : 'N/A');
+    setText('live-round-effort', Number.isFinite(Number(stats?.round_effort)) ? fmtNum(stats.round_effort, 2) : 'N/A');
+    setText('live-round-luck', Number.isFinite(Number(stats?.round_luck)) ? fmtNum(stats.round_luck, 2) : 'N/A');
     const breakdownText = [
       rejectedLow === null ? null : `low: ${fmtInt(rejectedLow)}`,
       rejectedStale === null ? null : `stale: ${fmtInt(rejectedStale)}`,
@@ -2098,11 +2236,12 @@ GitHub</a>
 
   async function refresh() {
     try {
-      const [stats, mining, blocksResp, poolPayouts] = await Promise.all([
+      const [stats, mining, blocksResp, poolPayouts, poolStats] = await Promise.all([
         fetchOptional("/stats"),
         fetchOptional("/mining"),
         fetchOptional("/blocks?limit=120"),
-        fetchOptional("/pool/payouts?limit=80")
+        fetchOptional("/pool/payouts?limit=80"),
+        fetchOptional("/pool/stats")
       ]);
 
       if (stats) statsCache = stats;
@@ -2116,7 +2255,7 @@ GitHub</a>
       applyKpis(statsCache, miningCache);
       applyPerformance(statsCache, miningCache, blocksCache);
       renderBlocks(blocksCache.slice(0, 80));
-      renderPoolFoundBlocks(poolPayouts, statsCache);
+      renderPoolFoundBlocks(poolPayouts, poolStats || {});
 
       const hsSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0) ? Number(miningCache?.hashrate || 0) : Number(miningCache?.hashrate || 0));
       const diffSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0));

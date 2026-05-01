@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Network Status - Irium</title>
+<link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=4">
+<link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
+<link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
+<style>
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 16px;
+    margin: 24px 0;
+  }
+  .stat-card {
+    background: rgba(0,0,0,0.32);
+    border: 1px solid rgba(91,177,255,0.34);
+    border-radius: 14px;
+    padding: 20px 16px;
+    text-align: center;
+  }
+  .stat-value {
+    font-size: 2rem;
+    font-weight: 700;
+    color: #5bb1ff;
+    display: block;
+    font-family: 'Orbitron', monospace;
+  }
+  .stat-label {
+    font-size: 0.75rem;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: 4px;
+    display: block;
+  }
+  .status-meta {
+    color: #555;
+    font-size: 0.8rem;
+    margin-top: 8px;
+    text-align: right;
+  }
+  .status-ok { color: #4ade80; }
+  .status-warn { color: #fbbf24; }
+</style>
+</head>
+<body>
+<div class="stars"></div>
+<div class="tech-bg" aria-hidden="true"></div>
+
+<nav class="navbar">
+  <div class="container">
+    <div class="nav-brand">
+      <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="nav-logo">
+      <span class="nav-title">Irium</span>
+    </div>
+    <div class="nav-socials">
+      <a href="https://t.me/iriumlabs" target="_blank" rel="noopener" aria-label="Telegram">
+        <svg fill="currentColor" viewBox="0 0 24 24" width="20" height="20"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg>
+      </a>
+      <a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener" aria-label="GitHub">
+        <svg fill="currentColor" viewBox="0 0 24 24" width="20" height="20"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<section class="section" style="min-height: auto; padding: 112px 0 64px;">
+  <div class="container">
+    <h2 class="section-title" style="margin-bottom: 8px;">Network Status</h2>
+    <p class="section-subtitle" style="margin-bottom: 0;">Live Irium mainnet data — refreshes every 30 seconds</p>
+
+    <div class="status-grid">
+      <div class="stat-card">
+        <span class="stat-value" id="stat-height">—</span>
+        <span class="stat-label">Chain Height</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value" id="stat-peers">—</span>
+        <span class="stat-label">Connected Peers</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value" id="stat-hashrate">—</span>
+        <span class="stat-label">Network Hashrate</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value" id="stat-since">—</span>
+        <span class="stat-label">Since Last Block</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value" id="stat-difficulty">—</span>
+        <span class="stat-label">Difficulty</span>
+      </div>
+      <div class="stat-card">
+        <span class="stat-value" id="stat-version">—</span>
+        <span class="stat-label">Node Version</span>
+      </div>
+    </div>
+
+    <div class="stat-card" style="margin-bottom: 16px;">
+      <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+        <span style="color: #888; font-size: 0.8rem;">Tip hash:</span>
+        <code id="stat-tiphash" style="font-size: 0.75rem; color: #5bb1ff; word-break: break-all;">—</code>
+      </div>
+    </div>
+
+    <p class="status-meta" id="stat-updated">Fetching data...</p>
+
+    <div style="margin-top: 32px;">
+      <h3 class="section-subtitle" style="margin-bottom: 12px;">API Endpoint</h3>
+      <p style="color: #888; font-size: 0.9rem;">This page fetches from the public node API. You can query it directly:</p>
+      <pre style="background: rgba(0,0,0,0.4); border: 1px solid rgba(91,177,255,0.2); border-radius: 8px; padding: 16px; font-size: 0.8rem; overflow-x: auto;"><code>curl https://api.iriumlabs.org/network-status</code></pre>
+      <p style="color: #888; font-size: 0.85rem; margin-top: 8px;">Response fields: <code>height</code>, <code>tip_hash</code>, <code>peer_count</code>, <code>difficulty</code>, <code>hashrate_estimate</code>, <code>seconds_since_last_block</code>, <code>node_version</code></p>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-content">
+      <div class="footer-brand">
+        <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="footer-logo">
+        <h4 style="font-family: Orbitron, sans-serif; color: var(--primary); margin: 0.2rem 0 0;">Irium</h4>
+        <p>True Decentralization</p>
+      </div>
+      <div class="footer-links">
+        <h4>Resources</h4>
+        <a href="https://www.iriumlabs.org/whitepaper.html">Whitepaper</a>
+        <a href="https://www.iriumlabs.org/docs/mining/">Mining Guide</a>
+        <a href="https://www.iriumlabs.org/explorer/">Explorer</a>
+        <a href="https://www.iriumlabs.org/status/">Network Status</a>
+      </div>
+      <div class="footer-links">
+        <h4>Community</h4>
+        <a href="https://t.me/iriumlabs" target="_blank" rel="noopener">Telegram</a>
+        <a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; 2026 Irium Labs. Open Source - MIT License</p>
+    </div>
+  </div>
+</footer>
+
+<script>
+async function refreshStatus() {
+  try {
+    const r = await fetch('https://api.iriumlabs.org/network-status', { cache: 'no-store' });
+    if (!r.ok) throw new Error('http ' + r.status);
+    const d = await r.json();
+    const set = (id, v) => { const el = document.getElementById(id); if (el) el.textContent = v; };
+    set('stat-height', d.height != null ? d.height.toLocaleString() : '—');
+    set('stat-peers', d.peer_count != null ? d.peer_count : '—');
+    const hr = d.hashrate_estimate;
+    set('stat-hashrate', hr != null ? (hr >= 1e9 ? (hr/1e9).toFixed(2)+' GH/s' : hr >= 1e6 ? (hr/1e6).toFixed(1)+' MH/s' : (hr/1e3).toFixed(0)+' KH/s') : '—');
+    const s = d.seconds_since_last_block;
+    set('stat-since', s != null ? (s < 60 ? s+'s' : s < 3600 ? Math.floor(s/60)+'m '+( s%60)+'s' : Math.floor(s/3600)+'h') : '—');
+    set('stat-difficulty', d.difficulty != null ? d.difficulty.toFixed(2) : '—');
+    set('stat-version', d.node_version || '—');
+    set('stat-tiphash', d.tip_hash || '—');
+    set('stat-updated', 'Updated ' + new Date().toLocaleTimeString());
+  } catch (e) {
+    document.getElementById('stat-updated').textContent = 'Error fetching data — ' + e.message;
+  }
+}
+refreshStatus();
+setInterval(refreshStatus, 30000);
+</script>
+
+<script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>
+</body>
+</html>

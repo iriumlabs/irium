@@ -1576,6 +1576,49 @@ Password: x</pre>
       </div>
     </section>
 
+    <section class="panel" style="margin-top:14px;" id="sha256d-compatibility">
+      <h3>SHA-256d Hardware Compatibility</h3>
+      <p class="panel-sub">Irium uses SHA-256d &mdash; the same double-SHA256 algorithm as Bitcoin. Every SHA-256d ASIC mines Irium with no firmware or hardware changes required.</p>
+      <div class="table-wrap">
+        <table class="pool-table">
+          <thead><tr><th>Hardware</th><th>Endpoint</th><th>Status</th></tr></thead>
+          <tbody>
+            <tr><td>Antminer S19 / S21 series</td><td>stratum+tcp://pool.iriumlabs.org:3333</td><td><span class="green">Full compatibility</span></td></tr>
+            <tr><td>Whatsminer M50 / M60 series</td><td>stratum+tcp://pool.iriumlabs.org:3333</td><td><span class="green">Full compatibility</span></td></tr>
+            <tr><td>Any SHA-256d ASIC</td><td>stratum+tcp://pool.iriumlabs.org:3333</td><td><span class="green">Full compatibility</span></td></tr>
+            <tr><td>CPU software miner (cpuminer-opt)</td><td>stratum+tcp://pool.iriumlabs.org:3335</td><td><span class="amber">Supported</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="panel" style="margin-top:14px;" id="merged-mining-status">
+      <h3>Merged Mining (AuxPoW)</h3>
+      <p class="panel-sub">Mining Irium alongside Bitcoin at zero extra energy cost &mdash; status and roadmap.</p>
+      <ul class="meta-list">
+        <li><span class="key">AuxPoW status</span><span><b style="color:var(--warn)">Not yet implemented</b> &mdash; planned future addition</span></li>
+        <li><span class="key">What works today</span><span>Any SHA-256d ASIC mines Irium as a standalone chain</span></li>
+        <li><span class="key">When AuxPoW lands</span><span>SHA-256d ASICs will mine IRM alongside BTC with zero extra energy</span></li>
+        <li><span class="key">Algorithm confirmed</span><span>SHA-256d &mdash; block header is standard Bitcoin 80-byte format</span></li>
+        <li><span class="key">Merged mining guide</span><span><a href="https://github.com/iriumlabs/irium/blob/main/docs/MERGED-MINING.md" target="_blank" rel="noopener">docs/MERGED-MINING.md</a></span></li>
+      </ul>
+    </section>
+
+    <section class="panel" style="margin-top:14px;" id="block-economics">
+      <h3>Block Economics</h3>
+      <p class="panel-sub">Live block reward and emission data.</p>
+      <ul class="meta-list">
+        <li><span class="key">Current block reward</span><span id="econ-reward"><b>50 IRM</b></span></li>
+        <li><span class="key">Next halving at block</span><span>210,000 (first halving)</span></li>
+        <li><span class="key">Max supply</span><span>100,000,000 IRM</span></li>
+        <li><span class="key">Halving schedule</span><span>Every 210,000 blocks &mdash; identical to Bitcoin</span></li>
+        <li><span class="key">Pool fee (iriumlabs.org)</span><span><b class="green">0%</b> &mdash; SOLO payout model</span></li>
+        <li><span class="key">Coinbase maturity</span><span>100 blocks before reward is spendable</span></li>
+        <li><span class="key">Network hashrate</span><span id="econ-hashrate"><b>Loading...</b></span></li>
+        <li><span class="key">Current difficulty</span><span id="econ-difficulty"><b>Loading...</b></span></li>
+      </ul>
+    </section>
+
     <section class="panel" style="margin-top:14px;">
       <h3>Troubleshooting Payload</h3>
       <p class="panel-sub">Share miner software/version, endpoint port, wallet worker name, and 30-50 lines of miner logs if mining fails.</p>

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="See exactly how Irium escrow works for a freelancer and client — step by step, in plain English.">
+<title>Settlement Walkthrough - Irium</title>
+<link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=8">
+<link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
+<link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
+<style>
+  .wt-step {
+    background: rgba(0,0,0,0.32);
+    border: 1px solid rgba(91,177,255,0.22);
+    border-radius: 14px;
+    padding: 24px 22px;
+    margin-bottom: 20px;
+  }
+  .wt-step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px; height: 32px;
+    border-radius: 50%;
+    background: rgba(91,177,255,0.18);
+    border: 1px solid rgba(91,177,255,0.5);
+    color: #5bb1ff;
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-right: 10px;
+    flex-shrink: 0;
+  }
+  .wt-step-title {
+    font-weight: 600;
+    font-size: 1.05rem;
+    color: #eaf1ff;
+    display: flex;
+    align-items: center;
+    margin-bottom: 12px;
+  }
+  .wt-step p { color: #9fb0ca; font-size: 0.95rem; line-height: 1.65; margin: 0 0 10px 0; }
+  .wt-step p:last-child { margin-bottom: 0; }
+  .wt-cmd {
+    background: rgba(0,0,0,0.5);
+    border: 1px solid rgba(91,177,255,0.2);
+    border-radius: 8px;
+    padding: 14px 16px;
+    font-family: 'Courier New', Courier, monospace;
+    font-size: 0.78rem;
+    color: #7dd3fc;
+    overflow-x: auto;
+    margin: 12px 0;
+    white-space: pre;
+  }
+  .wt-outcome-table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+  .wt-outcome-table th {
+    background: rgba(91,177,255,0.1);
+    border: 1px solid rgba(91,177,255,0.2);
+    padding: 10px 14px;
+    text-align: left;
+    font-size: 0.8rem;
+    color: #5bb1ff;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .wt-outcome-table td {
+    border: 1px solid rgba(91,177,255,0.12);
+    padding: 10px 14px;
+    font-size: 0.88rem;
+    color: #9fb0ca;
+  }
+  .wt-outcome-table tr:hover td { background: rgba(91,177,255,0.05); }
+  .wt-callout {
+    background: rgba(74,222,128,0.08);
+    border-left: 3px solid #4ade80;
+    border-radius: 0 8px 8px 0;
+    padding: 12px 16px;
+    margin: 12px 0;
+    color: #9fb0ca;
+    font-size: 0.9rem;
+  }
+  .wt-callout-warn {
+    background: rgba(251,191,36,0.08);
+    border-left: 3px solid #fbbf24;
+  }
+  .wt-persona {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin: 0 4px;
+  }
+  .alice { background: rgba(91,177,255,0.15); color: #5bb1ff; border: 1px solid rgba(91,177,255,0.3); }
+  .bob { background: rgba(74,222,128,0.12); color: #4ade80; border: 1px solid rgba(74,222,128,0.3); }
+</style>
+</head>
+<body>
+<div class="stars"></div>
+<div class="tech-bg" aria-hidden="true"></div>
+
+<nav class="navbar">
+  <div class="container">
+    <div class="nav-brand">
+      <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="nav-logo">
+      <span class="nav-title">Irium</span>
+    </div>
+    <div class="nav-socials">
+      <a href="https://t.me/iriumlabs" target="_blank" rel="noopener" aria-label="Telegram">
+        <svg fill="currentColor" viewBox="0 0 24 24" width="20" height="20"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg>
+      </a>
+      <a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener" aria-label="GitHub">
+        <svg fill="currentColor" viewBox="0 0 24 24" width="20" height="20"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+      </a>
+    </div>
+  </div>
+</nav>
+
+<section class="section" style="min-height: auto; padding: 112px 0 80px;">
+  <div class="container" style="max-width: 860px;">
+    <h2 class="section-title" style="margin-bottom: 8px;">How Irium Escrow Works</h2>
+    <p class="section-subtitle" style="margin-bottom: 32px;">A complete, plain-English walkthrough — no blockchain knowledge required.</p>
+
+    <div style="background: rgba(91,177,255,0.07); border: 1px solid rgba(91,177,255,0.25); border-radius: 14px; padding: 20px 22px; margin-bottom: 32px;">
+      <p style="color: #eaf1ff; font-size: 1rem; margin: 0 0 8px 0; font-weight: 600;">The Scenario</p>
+      <p style="color: #9fb0ca; font-size: 0.95rem; line-height: 1.65; margin: 0;">
+        <span class="alice">Alice</span> is a freelance developer. <span class="bob">Bob</span> wants to hire her to build a website for 50 IRM.
+        They have never worked together. Alice does not know if Bob will pay after she delivers. Bob does not know if Alice will deliver after he pays.
+        <strong style="color: #eaf1ff;">Neither wants to go first.</strong>
+      </p>
+      <p style="color: #9fb0ca; font-size: 0.95rem; line-height: 1.65; margin: 12px 0 0 0;">
+        Irium escrow solves this. Bob locks 50 IRM on-chain before Alice does any work. The chain enforces the agreement — no bank, no lawyer, no intermediary.
+      </p>
+    </div>
+
+    <div class="wt-step">
+      <div class="wt-step-title"><span class="wt-step-num">1</span>Alice and Bob agree on terms</div>
+      <p>Before anything goes on-chain, they agree on: the amount (50 IRM), what counts as delivery (a working website at an agreed URL), and a deadline (a block height — about 1 block per 10 minutes).</p>
+      <p>They write the terms into a document file. This file is hashed and recorded on-chain so neither party can claim the terms were different later.</p>
+    </div>
+
+    <div class="wt-step">
+      <div class="wt-step-title"><span class="wt-step-num">2</span>Bob creates the escrow agreement</div>
+      <p><span class="bob">Bob</span> generates a one-time secret and creates the agreement:</p>
+      <div class="wt-cmd">SECRET=$(openssl rand -hex 32)
+SECRET_HASH=$(printf '%s' "$SECRET" | xxd -r -p | sha256sum | awk '{print $1}')
+DOCUMENT_HASH=$(sha256sum terms.txt | awk '{print $1}')
+
+irium-wallet agreement-create-simple-settlement   --agreement-id website-project-001   --creation-time $(date +%s)   --party-a "id=alice,name=Alice,role=freelancer"   --party-b "id=bob,name=Bob,role=client"   --amount 50   --secret-hash $SECRET_HASH   --refund-timeout 21500   --document-hash $DOCUMENT_HASH   --release-summary "Alice delivers completed website by block 21500"   --refund-summary "Bob reclaims if website not delivered by block 21500"   --out website-project-001.json</div>
+      <p>Bob sends the agreement JSON to Alice. Alice inspects it and confirms the terms are correct before anything is funded.</p>
+    </div>
+
+    <div class="wt-step">
+      <div class="wt-step-title"><span class="wt-step-num">3</span>Bob funds the escrow — money goes on-chain</div>
+      <p><span class="bob">Bob</span> locks 50 IRM into the on-chain contract:</p>
+      <div class="wt-cmd">irium-wallet agreement-fund website-project-001.json   --broadcast   --rpc http://localhost:38300</div>
+      <div class="wt-callout">The 50 IRM is now locked. Bob cannot take it back before block 21500. Alice can verify the funding independently and knows the money is waiting.</div>
+    </div>
+
+    <div class="wt-step">
+      <div class="wt-step-title"><span class="wt-step-num">4</span>Alice does the work</div>
+      <p><span class="alice">Alice</span> builds the website. When it is ready, she notifies Bob for review.</p>
+    </div>
+
+    <div class="wt-step">
+      <div class="wt-step-title"><span class="wt-step-num">5</span>Bob accepts and reveals the secret</div>
+      <p>If <span class="bob">Bob</span> is satisfied with the delivery, he sends Alice the secret. Alice uses it to claim the funds:</p>
+      <div class="wt-cmd">irium-wallet agreement-release-eligibility website-project-001.json   --secret $SECRET   --destination &lt;ALICE_ADDRESS&gt;   --rpc http://localhost:38300</div>
+      <p>The 50 IRM moves from the escrow output to Alice's address. The agreement is settled.</p>
+    </div>
+
+    <div style="margin: 32px 0 16px 0;">
+      <h3 style="font-family: 'Orbitron', sans-serif; font-size: 1rem; color: #5bb1ff; letter-spacing: 0.06em; margin-bottom: 16px;">ALL POSSIBLE OUTCOMES</h3>
+      <table class="wt-outcome-table">
+        <tr><th>Situation</th><th>Outcome</th></tr>
+        <tr><td>Alice delivers, Bob accepts</td><td style="color: #4ade80;">Alice receives 50 IRM</td></tr>
+        <tr><td>Alice delivers, Bob withholds secret</td><td>Alice submits proof — attestor can release funds</td></tr>
+        <tr><td>Alice does not deliver</td><td>Bob reclaims 50 IRM automatically after timeout</td></tr>
+        <tr><td>Bob never responds after timeout</td><td>Bob reclaims 50 IRM automatically</td></tr>
+        <tr><td>Bob tries to take funds back early</td><td style="color: #f87171;">Impossible — HTLC contract prevents it</td></tr>
+      </table>
+    </div>
+
+    <div style="margin: 32px 0 0 0;">
+      <h3 style="font-family: 'Orbitron', sans-serif; font-size: 1rem; color: #5bb1ff; letter-spacing: 0.06em; margin-bottom: 12px;">WHAT DOES IT COST?</h3>
+      <p style="color: #9fb0ca; font-size: 0.95rem; line-height: 1.65;">Two on-chain transactions: one to fund, one to release or refund. Each transaction costs approximately 0.001 IRM in network fees. Total cost for a complete agreement: roughly <strong style="color: #eaf1ff;">0.002 IRM</strong>.</p>
+    </div>
+
+    <div style="margin: 40px 0 0 0; display: flex; gap: 12px; flex-wrap: wrap;">
+      <a href="https://github.com/iriumlabs/irium/blob/main/docs/SETTLEMENT-EXAMPLE.md" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; background: rgba(91,177,255,0.12); border: 1px solid rgba(91,177,255,0.35); border-radius: 8px; color: #5bb1ff; text-decoration: none; font-size: 0.9rem; font-weight: 500;">Full Walkthrough with CLI Commands</a>
+      <a href="https://github.com/iriumlabs/irium/blob/main/docs/SETTLEMENT-DEV.md" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; background: rgba(91,177,255,0.06); border: 1px solid rgba(91,177,255,0.2); border-radius: 8px; color: #9fb0ca; text-decoration: none; font-size: 0.9rem;">Developer Integration Guide</a>
+      <a href="https://t.me/iriumlabs" target="_blank" rel="noopener" style="display: inline-flex; align-items: center; gap: 6px; padding: 10px 20px; background: rgba(91,177,255,0.06); border: 1px solid rgba(91,177,255,0.2); border-radius: 8px; color: #9fb0ca; text-decoration: none; font-size: 0.9rem;">Questions — Telegram</a>
+    </div>
+  </div>
+</section>
+
+<footer class="footer">
+  <div class="container">
+    <div class="footer-content">
+      <div class="footer-brand">
+        <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="footer-logo">
+        <h4 style="font-family: Orbitron, sans-serif; color: var(--primary); margin: 0.2rem 0 0;">Irium</h4>
+        <p>True Decentralization</p>
+      </div>
+      <div class="footer-links">
+        <h4>Resources</h4>
+        <a href="https://www.iriumlabs.org/whitepaper.html">Whitepaper</a>
+        <a href="https://www.iriumlabs.org/docs/mining/">Mining Guide</a>
+        <a href="https://www.iriumlabs.org/explorer/">Explorer</a>
+        <a href="https://www.iriumlabs.org/status/">Network Status</a>
+      </div>
+      <div class="footer-links">
+        <h4>Community</h4>
+        <a href="https://t.me/iriumlabs" target="_blank" rel="noopener">Telegram</a>
+        <a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener">GitHub</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <p>&copy; 2026 Irium Labs. Open Source - MIT License</p>
+    </div>
+  </div>
+</footer>
+<script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>
+</body>
+</html>

@@ -1093,6 +1093,44 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
     </div>
   </div>
 </section>
+
+<section id="faq" class="section section-dark">
+<h2 class="section-title">FREQUENTLY ASKED QUESTIONS</h2>
+<p class="section-subtitle">No blockchain knowledge required to understand these answers.</p>
+<div style="max-width: 760px; margin: 32px auto 0;">
+
+  <details style="background: rgba(0,0,0,0.32); border: 1px solid rgba(91,177,255,0.18); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px;">
+    <summary style="cursor: pointer; font-weight: 600; color: #eaf1ff; font-size: 0.97rem; list-style: none;">Do I need to understand blockchain to use this?</summary>
+    <p style="color: #9fb0ca; font-size: 0.93rem; line-height: 1.65; margin: 14px 0 0 0;">No. You need a wallet address (which the wallet tool creates in one command) and an agreement with your counterparty. You do not need to understand how it works at a technical level. The process is similar to an online payment.</p>
+  </details>
+
+  <details style="background: rgba(0,0,0,0.32); border: 1px solid rgba(91,177,255,0.18); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px;">
+    <summary style="cursor: pointer; font-weight: 600; color: #eaf1ff; font-size: 0.97rem; list-style: none;">What happens if something goes wrong with my agreement?</summary>
+    <p style="color: #9fb0ca; font-size: 0.93rem; line-height: 1.65; margin: 14px 0 0 0;">Every agreement has two defined outcomes: a release condition and a refund timeout. If the work is delivered and the payer releases, the payee receives the funds. If the payer withholds despite delivery, the payee can submit verifiable proof and the chain policy can force release. If nobody acts before the timeout, the payer&#39;s funds return automatically. Funds cannot be locked permanently.</p>
+  </details>
+
+  <details style="background: rgba(0,0,0,0.32); border: 1px solid rgba(91,177,255,0.18); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px;">
+    <summary style="cursor: pointer; font-weight: 600; color: #eaf1ff; font-size: 0.97rem; list-style: none;">How do I know my money is safe while it is in escrow?</summary>
+    <p style="color: #9fb0ca; font-size: 0.93rem; line-height: 1.65; margin: 14px 0 0 0;">The escrow is a transaction output locked by a Hash Time-Locked Contract on-chain. Irium Labs cannot touch it. Nobody can touch it. The only ways to move the funds are: the recipient reveals the secret, or the timeout passes and the funder reclaims it. Both are enforced by math, not by any server or company.</p>
+  </details>
+
+  <details style="background: rgba(0,0,0,0.32); border: 1px solid rgba(91,177,255,0.18); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px;">
+    <summary style="cursor: pointer; font-weight: 600; color: #eaf1ff; font-size: 0.97rem; list-style: none;">What does this cost to use?</summary>
+    <p style="color: #9fb0ca; font-size: 0.93rem; line-height: 1.65; margin: 14px 0 0 0;">Two on-chain transactions total: one to fund, one to release or refund. Each costs approximately 0.001 IRM in network fees &mdash; currently negligible. No platform fee, no percentage taken, no account subscription.</p>
+  </details>
+
+  <details style="background: rgba(0,0,0,0.32); border: 1px solid rgba(91,177,255,0.18); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px;">
+    <summary style="cursor: pointer; font-weight: 600; color: #eaf1ff; font-size: 0.97rem; list-style: none;">Is this available in my country?</summary>
+    <p style="color: #9fb0ca; font-size: 0.93rem; line-height: 1.65; margin: 14px 0 0 0;">Irium is a decentralized blockchain with no company controlling access. There are no geo-restrictions built into the protocol. You are responsible for complying with the laws in your jurisdiction regarding cryptocurrency use.</p>
+  </details>
+
+  <details style="background: rgba(0,0,0,0.32); border: 1px solid rgba(91,177,255,0.18); border-radius: 12px; padding: 18px 20px; margin-bottom: 12px;">
+    <summary style="cursor: pointer; font-weight: 600; color: #eaf1ff; font-size: 0.97rem; list-style: none;">How do I get started if I am not technical?</summary>
+    <p style="color: #9fb0ca; font-size: 0.93rem; line-height: 1.65; margin: 14px 0 0 0;">Download the pre-built binary from <a href="https://github.com/iriumlabs/irium/releases/latest" target="_blank" rel="noopener" style="color: #5bb1ff;">GitHub Releases</a>. Run <code style="background: rgba(0,0,0,0.4); padding: 1px 6px; border-radius: 4px; font-size: 0.85rem;">irium-wallet init</code> to create a wallet, then follow the <a href="/settlement/example/" style="color: #5bb1ff;">settlement walkthrough</a>. If you get stuck, ask in <a href="https://t.me/iriumlabs" target="_blank" rel="noopener" style="color: #5bb1ff;">Telegram</a>.</p>
+  </details>
+
+</div>
+</section>
 <footer class="footer">
 <div class="container">
 <div class="footer-content">

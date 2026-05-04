@@ -545,6 +545,9 @@ function initExplorer() {
   loadMiningMetrics();
   loadBlocksPage(30, null, false);
   ensureLoadMoreButton();
+  loadSettlementStats();
+  loadSettlementAgreements(1);
+  loadSettlementProofs();
 }
 
 // Initialize when DOM is ready
@@ -560,10 +563,159 @@ setInterval(() => {
   loadStats();
   loadMiningMetrics();
   loadBlocksPage(30, null, false);
+  loadSettlementStats();
+  loadSettlementProofs();
 }, 30000);
 
 // Format timestamp to readable date
 function formatTime(timestamp) {
   const date = new Date((timestamp ?? 0) * 1000);
   return isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
+}
+
+
+// ── Settlement Explorer API ──────────────────────────────────────────────────
+
+const SETTLEMENT_API_BASE = 'https://api.iriumlabs.org';
+
+async function fetchSettlementJson(path) {
+  const url = SETTLEMENT_API_BASE + path;
+  const res = await fetchWithTimeout(url, { cache: 'no-store' });
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  return res.json();
+}
+
+function fmtIrm(atoms) {
+  const n = Number(atoms);
+  if (!isFinite(n) || n === 0) return '0 IRM';
+  const v = n / 1e8;
+  return (Number.isInteger(v) ? v.toString() : v.toFixed(8).replace(/\.?0+$/, '')) + ' IRM';
+}
+
+function fmtShortHash(h) {
+  if (!h || h.length < 12) return h || '—';
+  return h.slice(0, 8) + '…' + h.slice(-4);
+}
+
+function fmtTs(ts) {
+  if (!ts) return '—';
+  const d = new Date(Number(ts) * 1000);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
+}
+
+function settlementStateBadge(state) {
+  const s = (state || 'unknown').toLowerCase();
+  const map = {
+    funded: 'background:rgba(29,78,216,0.6);color:#93c5fd',
+    released: 'background:rgba(20,83,45,0.6);color:#86efac',
+    partially_released: 'background:rgba(20,83,45,0.4);color:#86efac',
+    refunded: 'background:rgba(120,53,15,0.6);color:#fcd34d',
+    draft: 'background:rgba(55,65,81,0.6);color:#9ca3af',
+    proposed: 'background:rgba(55,65,81,0.6);color:#9ca3af',
+    expired: 'background:rgba(127,29,29,0.6);color:#fca5a5',
+    cancelled: 'background:rgba(127,29,29,0.6);color:#fca5a5',
+    satisfied: 'background:rgba(20,83,45,0.6);color:#86efac',
+    active: 'background:rgba(29,78,216,0.6);color:#93c5fd',
+    disputed_metadata_only: 'background:rgba(127,29,29,0.6);color:#fca5a5',
+  };
+  const style = map[s] || 'background:rgba(55,65,81,0.6);color:#9ca3af';
+  const label = s.replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+  return '<span style="' + style + ';display:inline-block;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:700;">' + label + '</span>';
+}
+
+async function loadSettlementStats() {
+  try {
+    const d = await fetchSettlementJson('/explorer/stats');
+    const agEl = document.getElementById('stat-agreements');
+    const prEl = document.getElementById('stat-proofs');
+    if (agEl) agEl.textContent = (d.total_agreements || 0).toLocaleString();
+    if (prEl) prEl.textContent = (d.total_proofs || 0).toLocaleString();
+  } catch (e) {
+    console.warn('Settlement stats error:', e.message);
+  }
+}
+
+let __agPage = 1;
+const __agPageSize = 10;
+
+async function loadSettlementAgreements(page) {
+  page = page || 1;
+  const container = document.getElementById('settlement-agreements');
+  if (!container) return;
+  container.innerHTML = '<div class="x-muted" style="padding:12px 0;font-size:13px;">Loading…</div>';
+  try {
+    const d = await fetchSettlementJson('/explorer/agreements?page=' + page + '&limit=' + __agPageSize);
+    const agreements = d.agreements || [];
+    if (agreements.length === 0) {
+      container.innerHTML = '<div class="x-muted" style="padding:12px 0;font-size:13px;">No agreements anchored yet.</div>';
+      return;
+    }
+    const rows = agreements.map(function(a) {
+      const buyer = (a.parties || []).find(function(p) { return p.role === 'buyer'; });
+      const seller = (a.parties || []).find(function(p) { return p.role === 'seller' || p.role === 'payee'; });
+      const typeLabel = (a.template_type || '').replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+      const buyerHtml = buyer ? ('<span>Buyer: <span style="font-family:monospace;font-size:11px;">' + fmtShortHash(buyer.address) + '</span></span>') : '';
+      const sellerHtml = seller ? ('<span>Seller: <span style="font-family:monospace;font-size:11px;">' + fmtShortHash(seller.address) + '</span></span>') : '';
+      return '<div class="x-block" onclick="location.href=\'agreement.html?hash=' + encodeURIComponent(a.hash) + '\'" style="cursor:pointer;">' +
+        '<div class="x-block-top">' +
+          '<div class="x-block-h" style="font-size:12px;font-family:monospace;">' + fmtShortHash(a.hash) + '</div>' +
+          '<div class="x-block-time">' + fmtTs(a.creation_time) + '</div>' +
+        '</div>' +
+        '<div class="x-block-meta" style="margin-top:6px;">' +
+          '<span style="color:rgba(255,255,255,0.85);">' + typeLabel + '</span>' +
+          '<span class="x-reward">' + fmtIrm(a.total_amount) + '</span>' +
+          buyerHtml + sellerHtml +
+        '</div>' +
+      '</div>';
+    }).join('');
+
+    const total = d.total || 0;
+    const totalPages = Math.ceil(total / __agPageSize);
+    let paginator = '';
+    if (totalPages > 1) {
+      const prevDisabled = page <= 1 ? ' disabled style="opacity:0.4;cursor:default;"' : '';
+      const nextDisabled = page >= totalPages ? ' disabled style="opacity:0.4;cursor:default;"' : '';
+      paginator = '<div style="display:flex;gap:8px;justify-content:center;margin-top:12px;">' +
+        '<button class="x-btn"' + prevDisabled + ' onclick="changeAgPage(-1)" style="padding:6px 14px;">← Prev</button>' +
+        '<span style="padding:6px 12px;font-size:12px;color:rgba(255,255,255,0.6);">Page ' + page + ' of ' + totalPages + ' (' + total + ' total)</span>' +
+        '<button class="x-btn"' + nextDisabled + ' onclick="changeAgPage(1)" style="padding:6px 14px;">Next →</button>' +
+      '</div>';
+    }
+    container.innerHTML = rows + paginator;
+    __agPage = page;
+  } catch (e) {
+    container.innerHTML = '<div style="color:#ff6b6b;font-size:13px;padding:12px 0;">Error: ' + e.message + '</div>';
+  }
+}
+
+function changeAgPage(delta) {
+  loadSettlementAgreements(__agPage + delta);
+}
+
+async function loadSettlementProofs() {
+  const container = document.getElementById('settlement-proofs');
+  if (!container) return;
+  container.innerHTML = '<div class="x-muted" style="padding:12px 0;font-size:13px;">Loading…</div>';
+  try {
+    const d = await fetchSettlementJson('/explorer/proofs?page=1&limit=10');
+    const proofs = d.proofs || [];
+    if (proofs.length === 0) {
+      container.innerHTML = '<div class="x-muted" style="padding:12px 0;font-size:13px;">No proofs submitted yet.</div>';
+      return;
+    }
+    const hdr = '<div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:4px 12px;padding:4px 0 8px;border-bottom:1px solid rgba(255,255,255,0.15);font-size:10px;letter-spacing:0.1em;text-transform:uppercase;color:rgba(255,255,255,0.45);">' +
+      '<div>Type</div><div>Agreement</div><div>Attestor</div><div>Status</div></div>';
+    const rows = proofs.map(function(p) {
+      const typeLabel = (p.proof_type || '').replace(/_/g, ' ');
+      return '<div style="display:grid;grid-template-columns:1fr 1fr 1fr auto;gap:6px 12px;align-items:center;padding:9px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:12px;">' +
+        '<div style="color:rgba(91,177,255,0.9);">' + typeLabel + '</div>' +
+        '<div><a href="agreement.html?hash=' + encodeURIComponent(p.agreement_hash) + '" style="color:rgba(91,177,255,0.65);font-family:monospace;text-decoration:none;">' + fmtShortHash(p.agreement_hash) + '</a></div>' +
+        '<div style="font-family:monospace;color:rgba(255,255,255,0.55);">' + fmtShortHash(p.attested_by) + '</div>' +
+        '<div>' + settlementStateBadge(p.status) + '</div>' +
+      '</div>';
+    }).join('');
+    container.innerHTML = hdr + rows;
+  } catch (e) {
+    container.innerHTML = '<div style="color:#ff6b6b;font-size:13px;padding:12px 0;">Error: ' + e.message + '</div>';
+  }
 }

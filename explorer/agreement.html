@@ -1,0 +1,277 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Irium agreement detail — view the full lifecycle, parties, and proofs for any anchored settlement agreement.">
+<title>Agreement — Irium Explorer</title>
+<link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=4">
+<link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
+<style>
+  :root {
+    --x-accent2: rgba(91,177,255,0.92);
+  }
+  .x-agr .x-wrap { max-width: 1000px; margin: 0 auto; padding: 0 20px; display: grid; gap: 18px; }
+  .x-panel {
+    background: rgba(0,0,0,0.32);
+    border: 1px solid rgba(91,177,255,0.34);
+    border-radius: 14px;
+    padding: 20px;
+    box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 30px rgba(42,171,238,0.20);
+    backdrop-filter: blur(6px);
+    position: relative;
+    overflow: hidden;
+  }
+  .x-panel:before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 14px;
+    pointer-events: none;
+    box-shadow: 0 0 26px rgba(42,171,238,0.20), inset 0 0 18px rgba(42,171,238,0.10);
+    animation: xGridAura 4.2s ease-in-out infinite;
+  }
+  .x-panel > * { position: relative; z-index: 1; }
+  @keyframes xGridAura {
+    0%,100% { opacity:.62; box-shadow:0 0 20px rgba(42,171,238,0.18),inset 0 0 14px rgba(42,171,238,0.08); }
+    50% { opacity:.95; box-shadow:0 0 36px rgba(42,171,238,0.34),inset 0 0 24px rgba(42,171,238,0.16); }
+  }
+  .x-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:16px; }
+  .x-title { display:inline-flex; align-items:center; gap:10px; font-weight:900; letter-spacing:0.10em; font-size:12px; text-transform:uppercase; color:rgba(255,255,255,0.92); }
+  .x-ico { width:26px; height:26px; color:var(--x-accent2); filter:drop-shadow(0 0 14px rgba(91,177,255,0.38)); }
+  .x-ico.float { animation:xFloat 4.2s ease-in-out infinite; }
+  .x-ico.pulse { animation:xPulse 1.8s ease-in-out infinite; }
+  @keyframes xFloat { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
+  @keyframes xPulse { 0%,100%{transform:scale(1);opacity:.95} 50%{transform:scale(1.08);opacity:1} }
+  .x-muted { color:rgba(230,237,243,0.84); }
+  .x-pagehead { margin:0 0 18px; padding:10px 4px 0; }
+  .x-page-title { font-weight:1000; text-transform:uppercase; letter-spacing:0.04em; color:rgba(255,255,255,0.98); font-size:36px; line-height:1.05; margin:0 0 10px; }
+  @media(max-width:560px){.x-page-title{font-size:26px}}
+  .kv-grid { display:grid; grid-template-columns:160px 1fr; gap:8px 16px; font-size:13px; }
+  .kv-grid .key { color:rgba(255,255,255,0.55); }
+  .kv-grid .val { color:rgba(255,255,255,0.92); word-break:break-all; font-family:monospace; }
+  .kv-grid .val.plain { font-family:inherit; }
+  .x-table { width:100%; border-collapse:collapse; font-size:13px; }
+  .x-table th { text-align:left; padding:8px 12px; color:rgba(255,255,255,0.45); font-weight:500; border-bottom:1px solid rgba(255,255,255,0.12); font-size:11px; letter-spacing:0.1em; text-transform:uppercase; }
+  .x-table td { padding:9px 12px; border-bottom:1px solid rgba(255,255,255,0.06); font-size:13px; vertical-align:middle; }
+  .x-table tr:last-child td { border-bottom:none; }
+  .lifecycle-bar { display:flex; gap:6px; margin:14px 0 6px; }
+  .lc-step { flex:1; height:6px; border-radius:3px; background:rgba(255,255,255,0.1); transition:background 0.3s; }
+  .lc-step.done { background:rgba(34,197,94,0.8); box-shadow:0 0 8px rgba(34,197,94,0.4); }
+  .lc-step.active { background:rgba(59,130,246,0.9); box-shadow:0 0 10px rgba(59,130,246,0.5); animation:lcPulse 1.8s ease-in-out infinite; }
+  .lc-step.failed { background:rgba(239,68,68,0.8); }
+  @keyframes lcPulse { 0%,100%{opacity:0.8} 50%{opacity:1} }
+  .lc-labels { display:flex; gap:6px; margin-bottom:10px; }
+  .lc-label { flex:1; font-size:10px; text-align:center; color:rgba(255,255,255,0.4); letter-spacing:0.08em; text-transform:uppercase; }
+  .x-loading { color:rgba(255,255,255,0.6); font-size:14px; padding:32px 0; text-align:center; }
+  .x-error { color:#ff6b6b; font-size:14px; padding:16px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); border-radius:8px; }
+  .x-search-bar { display:flex; gap:10px; }
+  .x-input { flex:1; padding:10px 14px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.14); border-radius:10px; color:#fff; font-size:14px; outline:none; }
+  .x-input:focus { border-color:rgba(91,177,255,0.55); box-shadow:0 0 0 4px rgba(0,102,204,0.18); }
+  .x-btn { padding:10px 18px; background:linear-gradient(180deg,rgba(0,102,204,1),rgba(0,102,204,0.76)); color:#fff; border:1px solid rgba(255,255,255,0.10); border-radius:10px; font-size:12px; cursor:pointer; font-weight:900; letter-spacing:0.08em; text-transform:uppercase; transition:transform 0.16s,filter 0.16s; }
+  .x-btn:hover { filter:brightness(1.06); transform:translateY(-1px); }
+  code { font-family:monospace; font-size:12px; color:rgba(91,177,255,0.9); word-break:break-all; }
+</style>
+<link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
+</head>
+<body class="x-agr">
+<div class="stars"></div>
+
+<nav class="nav">
+  <div class="container">
+    <div class="nav-brand">
+      <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="logo">
+      <span>IRIUM</span>
+    </div>
+    <ul class="nav-links">
+      <li><a href="https://www.iriumlabs.org/">HOME</a></li>
+      <li><a href="https://www.iriumlabs.org/whitepaper.html">WHITEPAPER</a></li>
+      <li><a href="https://www.iriumlabs.org/settlement/">SETTLEMENT</a></li>
+      <li><a href="https://www.iriumlabs.org/explorer/">EXPLORER</a></li>
+      <li><a href="https://www.iriumlabs.org/docs/mining/">MINING</a></li>
+      <li><a href="https://www.iriumlabs.org/pool/">POOL</a></li>
+      <li><a href="https://www.iriumlabs.org/calculator/">CALCULATOR</a></li>
+      <li><a href="https://www.iriumlabs.org/support-us.html">SUPPORT</a></li>
+    </ul>
+    <div class="nav-socials">
+      <a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener" title="GitHub"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></a>
+      <a href="https://x.com/GoIrium" target="_blank" rel="noopener" title="X"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>
+      <a href="https://t.me/iriumlabs" target="_blank" rel="noopener" title="Telegram"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg></a>
+    </div>
+  </div>
+</nav>
+
+<section class="section x-agr" style="min-height:auto;padding:112px 0 64px;">
+  <div class="x-wrap">
+    <div class="x-pagehead">
+      <div style="margin-bottom:8px;"><a href="index.html" style="color:rgba(91,177,255,0.7);font-size:13px;text-decoration:none;">← Explorer</a></div>
+      <h2 class="x-page-title">Agreement</h2>
+    </div>
+
+    <!-- Hash search / navigate -->
+    <div class="x-panel">
+      <div class="x-head" style="margin-bottom:12px;">
+        <div class="x-title">
+          <svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M10 2a8 8 0 105.3 14l4.2 4.2 1.4-1.4-4.2-4.2A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>
+          Lookup
+        </div>
+      </div>
+      <div class="x-search-bar">
+        <input class="x-input" id="hash-input" type="text" placeholder="Agreement hash (64 hex chars)…">
+        <button class="x-btn" onclick="goLookup()">Go</button>
+      </div>
+    </div>
+
+    <!-- Agreement detail rendered here -->
+    <div id="agr-content"><div class="x-loading">Enter a hash above or follow a link from the explorer.</div></div>
+  </div>
+</section>
+
+<footer class="footer">
+<div class="container">
+<div class="footer-content">
+<div class="footer-brand">
+<img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="footer-logo">
+<h4 style="font-family:Orbitron,sans-serif;color:var(--primary);margin:0.2rem 0 0;">Irium</h4>
+<p>Trust-minimized outcomes, not just payments.</p>
+</div>
+<div class="footer-links">
+<h4>Resources</h4>
+<a href="https://www.iriumlabs.org/settlement/">Settlement</a>
+<a href="https://www.iriumlabs.org/whitepaper.html">Whitepaper</a>
+<a href="https://www.iriumlabs.org/docs/mining/">Mining Guide</a>
+<a href="https://www.iriumlabs.org/explorer/">Explorer</a>
+</div>
+<div class="footer-links">
+<h4>Community</h4>
+<a href="https://x.com/GoIrium" target="_blank" rel="noopener">X (Twitter)</a>
+<a href="https://t.me/iriumlabs" target="_blank" rel="noopener">Telegram</a>
+<a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener">GitHub</a>
+</div>
+</div>
+<div class="footer-bottom">
+<p>&copy; 2026 Irium Labs. Open Source - MIT License</p>
+</div>
+</div>
+</footer>
+
+<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=47"></script>
+<script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>
+<script>
+  const SETTLEMENT_BASE = 'https://api.iriumlabs.org';
+  const params = new URLSearchParams(location.search);
+  const initHash = params.get('hash') || '';
+
+  if (initHash) document.getElementById('hash-input').value = initHash;
+
+  function goLookup() {
+    const h = document.getElementById('hash-input').value.trim();
+    if (!h) return;
+    history.replaceState(null, '', '?hash=' + encodeURIComponent(h));
+    loadAgreement(h);
+  }
+
+  document.getElementById('hash-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') goLookup();
+  });
+
+  function lifecycleBar(state) {
+    const steps = ['draft', 'funded', 'released'];
+    const refundTerminal = ['refunded', 'expired', 'cancelled', 'disputed_metadata_only'];
+    const s = (state || '').toLowerCase();
+    if (refundTerminal.includes(s)) {
+      return steps.map(function(step) {
+        return '<div class="lc-step ' + (step === 'draft' ? 'done' : (step === 'funded' ? 'failed' : '')) + '" title="' + step + '"></div>';
+      }).join('');
+    }
+    const idx = steps.indexOf(s);
+    return steps.map(function(step, i) {
+      var cls = '';
+      if (i < idx) cls = 'done';
+      else if (i === idx) cls = 'active';
+      return '<div class="lc-step ' + cls + '" title="' + step + '"></div>';
+    }).join('');
+  }
+
+  async function loadAgreement(hash) {
+    const el = document.getElementById('agr-content');
+    el.innerHTML = '<div class="x-loading">Loading agreement…</div>';
+    try {
+      const res = await fetch(SETTLEMENT_BASE + '/explorer/agreement/' + encodeURIComponent(hash));
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' — agreement not found');
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+
+      const agr = d.agreement || {};
+      const lc = d.lifecycle || {};
+      const proofs = d.proofs || [];
+      const state = (lc.state || 'unknown').toLowerCase();
+      const badge = settlementStateBadge(state);
+
+      document.title = hash.slice(0, 12) + '… — Irium Explorer';
+
+      const parties = (agr.parties || []).map(function(p) {
+        const role = (p.role || '').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+        const addr = p.address || '—';
+        return '<tr>' +
+          '<td>' + role + '</td>' +
+          '<td>' + (p.display_name || '—') + '</td>' +
+          '<td><a href="reputation.html?pubkey=' + encodeURIComponent(addr) + '" style="color:rgba(91,177,255,0.8);"><code>' + addr + '</code></a></td>' +
+        '</tr>';
+      }).join('');
+
+      const proofRows = proofs.map(function(p) {
+        const typeLabel = (p.proof_type || '').replace(/_/g, ' ');
+        const attestor = p.attested_by || '—';
+        return '<tr>' +
+          '<td style="color:rgba(91,177,255,0.9);">' + typeLabel + '</td>' +
+          '<td title="' + attestor + '"><code>' + fmtShortHash(attestor) + '</code></td>' +
+          '<td>' + settlementStateBadge(p.status) + '</td>' +
+          '<td style="color:rgba(255,255,255,0.55);font-size:12px;">' + fmtTs(p.attestation_time) + '</td>' +
+        '</tr>';
+      }).join('');
+
+      const typeLabel = (agr.template_type || '').replace(/_/g, ' ').replace(/\b\w/g, function(c) { return c.toUpperCase(); });
+
+      el.innerHTML =
+        '<div class="x-panel">' +
+          '<div class="x-head">' +
+            '<div class="x-title"><svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8L14 2zm-1 7V3.5L18.5 9H13z"/></svg>Agreement</div>' +
+            badge +
+          '</div>' +
+          '<div class="lifecycle-bar">' + lifecycleBar(state) + '</div>' +
+          '<div class="lc-labels"><div class="lc-label">Draft</div><div class="lc-label">Funded</div><div class="lc-label">Released</div></div>' +
+          '<div class="kv-grid" style="margin-top:16px;">' +
+            '<span class="key">Hash</span><span class="val"><code>' + hash + '</code></span>' +
+            '<span class="key">Agreement ID</span><span class="val plain">' + (agr.agreement_id || '—') + '</span>' +
+            '<span class="key">Type</span><span class="val plain">' + typeLabel + '</span>' +
+            '<span class="key">Total Amount</span><span class="val plain">' + fmtIrm(agr.total_amount) + '</span>' +
+            '<span class="key">Created</span><span class="val plain">' + fmtTs(agr.creation_time) + '</span>' +
+            (lc.funded_amount != null ? '<span class="key">Funded</span><span class="val plain">' + fmtIrm(lc.funded_amount) + '</span>' : '') +
+            (lc.released_amount != null ? '<span class="key">Released</span><span class="val plain">' + fmtIrm(lc.released_amount) + '</span>' : '') +
+            (lc.refunded_amount != null ? '<span class="key">Refunded</span><span class="val plain">' + fmtIrm(lc.refunded_amount) + '</span>' : '') +
+          '</div>' +
+        '</div>' +
+
+        '<div class="x-panel">' +
+          '<div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a5 5 0 110 10 5 5 0 010-10zm0 12c5.33 0 8 2.67 8 4v2H4v-2c0-1.33 2.67-4 8-4z"/></svg>Parties</div></div>' +
+          '<table class="x-table"><thead><tr><th>Role</th><th>Name</th><th>Address</th></tr></thead>' +
+          '<tbody>' + (parties || '<tr><td colspan="3" style="color:rgba(255,255,255,0.4);">No parties</td></tr>') + '</tbody></table>' +
+        '</div>' +
+
+        (proofs.length > 0 ?
+        '<div class="x-panel">' +
+          '<div class="x-head"><div class="x-title"><svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 4v6c0 6-4 10-8 10S4 18 4 12V6l8-4zm-1 13.4l5-5-1.4-1.4L11 12.6l-2.6-2.6L7 11.4l4 4z"/></svg>Proofs (' + proofs.length + ')</div></div>' +
+          '<table class="x-table"><thead><tr><th>Type</th><th>Attestor</th><th>Status</th><th>Time</th></tr></thead>' +
+          '<tbody>' + proofRows + '</tbody></table>' +
+        '</div>' : '');
+
+    } catch (e) {
+      el.innerHTML = '<div class="x-panel"><div class="x-error">Failed to load agreement: ' + e.message + '</div></div>';
+    }
+  }
+
+  if (initHash) loadAgreement(initHash);
+</script>
+</body>
+</html>

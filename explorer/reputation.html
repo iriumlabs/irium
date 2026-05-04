@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="description" content="Irium reputation lookup — view the public settlement reputation profile for any address or pubkey.">
+<title>Reputation — Irium Explorer</title>
+<link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=4">
+<link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
+<style>
+  :root { --x-accent2: rgba(91,177,255,0.92); }
+  .x-rep .x-wrap { max-width: 800px; margin: 0 auto; padding: 0 20px; display: grid; gap: 18px; }
+  .x-panel {
+    background: rgba(0,0,0,0.32);
+    border: 1px solid rgba(91,177,255,0.34);
+    border-radius: 14px;
+    padding: 20px;
+    box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 30px rgba(42,171,238,0.20);
+    backdrop-filter: blur(6px);
+    position: relative;
+    overflow: hidden;
+  }
+  .x-panel:before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: 14px;
+    pointer-events: none;
+    box-shadow: 0 0 26px rgba(42,171,238,0.20), inset 0 0 18px rgba(42,171,238,0.10);
+    animation: xGridAura 4.2s ease-in-out infinite;
+  }
+  .x-panel > * { position: relative; z-index: 1; }
+  @keyframes xGridAura {
+    0%,100% { opacity:.62; box-shadow:0 0 20px rgba(42,171,238,0.18),inset 0 0 14px rgba(42,171,238,0.08); }
+    50% { opacity:.95; box-shadow:0 0 36px rgba(42,171,238,0.34),inset 0 0 24px rgba(42,171,238,0.16); }
+  }
+  .x-head { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-bottom:16px; }
+  .x-title { display:inline-flex; align-items:center; gap:10px; font-weight:900; letter-spacing:0.10em; font-size:12px; text-transform:uppercase; color:rgba(255,255,255,0.92); }
+  .x-ico { width:26px; height:26px; color:var(--x-accent2); filter:drop-shadow(0 0 14px rgba(91,177,255,0.38)); }
+  .x-ico.pulse { animation:xPulse 1.8s ease-in-out infinite; }
+  @keyframes xPulse { 0%,100%{transform:scale(1);opacity:.95} 50%{transform:scale(1.08);opacity:1} }
+  .x-muted { color:rgba(230,237,243,0.84); }
+  .x-page-title { font-weight:1000; text-transform:uppercase; letter-spacing:0.04em; color:rgba(255,255,255,0.98); font-size:36px; line-height:1.05; margin:0 0 10px; }
+  @media(max-width:560px){.x-page-title{font-size:26px}}
+  .kv-grid { display:grid; grid-template-columns:200px 1fr; gap:10px 16px; font-size:14px; }
+  .kv-grid .key { color:rgba(255,255,255,0.55); }
+  .kv-grid .val { color:rgba(255,255,255,0.92); word-break:break-all; }
+  .stat-big { font-size:42px; font-weight:700; color:rgba(91,177,255,0.95); text-shadow:0 0 20px rgba(91,177,255,0.3); font-variant-numeric:tabular-nums; }
+  .x-stats-row { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:16px; }
+  @media(max-width:500px){ .x-stats-row { grid-template-columns:1fr; } }
+  .x-stat-mini { background:rgba(0,0,0,0.22); border:1px solid rgba(255,255,255,0.10); border-radius:10px; padding:16px; }
+  .x-stat-mini .label { font-size:11px; letter-spacing:0.12em; text-transform:uppercase; color:rgba(255,255,255,0.5); margin-bottom:8px; }
+  .x-stat-mini .value { font-size:28px; font-weight:700; color:rgba(91,177,255,0.92); font-variant-numeric:tabular-nums; }
+  .x-loading { color:rgba(255,255,255,0.6); font-size:14px; padding:32px 0; text-align:center; }
+  .x-error { color:#ff6b6b; font-size:14px; padding:16px; background:rgba(239,68,68,0.08); border:1px solid rgba(239,68,68,0.2); border-radius:8px; }
+  .x-note { font-size:12px; color:rgba(255,255,255,0.5); margin-top:16px; padding:12px; background:rgba(0,0,0,0.2); border-radius:8px; border:1px solid rgba(255,255,255,0.08); line-height:1.5; }
+  .x-search-bar { display:flex; gap:10px; }
+  .x-input { flex:1; padding:10px 14px; background:rgba(255,255,255,0.08); border:1px solid rgba(255,255,255,0.14); border-radius:10px; color:#fff; font-size:14px; outline:none; }
+  .x-input:focus { border-color:rgba(91,177,255,0.55); box-shadow:0 0 0 4px rgba(0,102,204,0.18); }
+  .x-btn { padding:10px 18px; background:linear-gradient(180deg,rgba(0,102,204,1),rgba(0,102,204,0.76)); color:#fff; border:1px solid rgba(255,255,255,0.10); border-radius:10px; font-size:12px; cursor:pointer; font-weight:900; letter-spacing:0.08em; text-transform:uppercase; transition:transform 0.16s,filter 0.16s; }
+  .x-btn:hover { filter:brightness(1.06); transform:translateY(-1px); }
+  code { font-family:monospace; font-size:12px; color:rgba(91,177,255,0.9); word-break:break-all; }
+</style>
+<link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
+</head>
+<body class="x-rep">
+<div class="stars"></div>
+
+<nav class="nav">
+  <div class="container">
+    <div class="nav-brand">
+      <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="logo">
+      <span>IRIUM</span>
+    </div>
+    <ul class="nav-links">
+      <li><a href="https://www.iriumlabs.org/">HOME</a></li>
+      <li><a href="https://www.iriumlabs.org/whitepaper.html">WHITEPAPER</a></li>
+      <li><a href="https://www.iriumlabs.org/settlement/">SETTLEMENT</a></li>
+      <li><a href="https://www.iriumlabs.org/explorer/">EXPLORER</a></li>
+      <li><a href="https://www.iriumlabs.org/docs/mining/">MINING</a></li>
+      <li><a href="https://www.iriumlabs.org/pool/">POOL</a></li>
+      <li><a href="https://www.iriumlabs.org/calculator/">CALCULATOR</a></li>
+      <li><a href="https://www.iriumlabs.org/support-us.html">SUPPORT</a></li>
+    </ul>
+    <div class="nav-socials">
+      <a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener" title="GitHub"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></a>
+      <a href="https://x.com/GoIrium" target="_blank" rel="noopener" title="X"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>
+      <a href="https://t.me/iriumlabs" target="_blank" rel="noopener" title="Telegram"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg></a>
+    </div>
+  </div>
+</nav>
+
+<section class="section x-rep" style="min-height:auto;padding:112px 0 64px;">
+  <div class="x-wrap">
+    <div style="margin-bottom:8px;"><a href="index.html" style="color:rgba(91,177,255,0.7);font-size:13px;text-decoration:none;">← Explorer</a></div>
+    <h2 class="x-page-title">Reputation</h2>
+
+    <div class="x-panel">
+      <div class="x-head" style="margin-bottom:12px;">
+        <div class="x-title">
+          <svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M10 2a8 8 0 105.3 14l4.2 4.2 1.4-1.4-4.2-4.2A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>
+          Address or Pubkey Lookup
+        </div>
+      </div>
+      <div class="x-search-bar">
+        <input class="x-input" id="pubkey-input" type="text" placeholder="Irium address or pubkey hex…">
+        <button class="x-btn" onclick="goLookup()">Lookup</button>
+      </div>
+    </div>
+
+    <div id="rep-content"><div class="x-loading">Enter an address or pubkey above to look up reputation.</div></div>
+  </div>
+</section>
+
+<footer class="footer">
+<div class="container">
+<div class="footer-content">
+<div class="footer-brand">
+<img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="footer-logo">
+<h4 style="font-family:Orbitron,sans-serif;color:var(--primary);margin:0.2rem 0 0;">Irium</h4>
+<p>Trust-minimized outcomes, not just payments.</p>
+</div>
+<div class="footer-links">
+<h4>Resources</h4>
+<a href="https://www.iriumlabs.org/settlement/">Settlement</a>
+<a href="https://www.iriumlabs.org/whitepaper.html">Whitepaper</a>
+<a href="https://www.iriumlabs.org/explorer/">Explorer</a>
+</div>
+<div class="footer-links">
+<h4>Community</h4>
+<a href="https://x.com/GoIrium" target="_blank" rel="noopener">X (Twitter)</a>
+<a href="https://t.me/iriumlabs" target="_blank" rel="noopener">Telegram</a>
+<a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener">GitHub</a>
+</div>
+</div>
+<div class="footer-bottom">
+<p>&copy; 2026 Irium Labs. Open Source - MIT License</p>
+</div>
+</div>
+</footer>
+
+<script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>
+<script>
+  const SETTLEMENT_BASE = 'https://api.iriumlabs.org';
+  const params = new URLSearchParams(location.search);
+  const initPubkey = params.get('pubkey') || '';
+
+  if (initPubkey) document.getElementById('pubkey-input').value = initPubkey;
+
+  function goLookup() {
+    const pk = document.getElementById('pubkey-input').value.trim();
+    if (!pk) return;
+    history.replaceState(null, '', '?pubkey=' + encodeURIComponent(pk));
+    loadReputation(pk);
+  }
+
+  document.getElementById('pubkey-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') goLookup();
+  });
+
+  function fmtIrm(atoms) {
+    const n = Number(atoms);
+    if (!isFinite(n) || n === 0) return '0 IRM';
+    const v = n / 1e8;
+    return (Number.isInteger(v) ? v.toString() : v.toFixed(8).replace(/\.?0+$/, '')) + ' IRM';
+  }
+
+  async function loadReputation(pubkey) {
+    const el = document.getElementById('rep-content');
+    el.innerHTML = '<div class="x-loading">Loading reputation…</div>';
+    try {
+      const res = await fetch(SETTLEMENT_BASE + '/explorer/reputation/' + encodeURIComponent(pubkey));
+      if (!res.ok) throw new Error('HTTP ' + res.status + ' — not found');
+      const d = await res.json();
+      if (d.error) throw new Error(d.error);
+
+      document.title = pubkey.slice(0, 14) + '… Reputation — Irium Explorer';
+
+      el.innerHTML =
+        '<div class="x-panel">' +
+          '<div class="x-head">' +
+            '<div class="x-title">' +
+              '<svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2a5 5 0 110 10 5 5 0 010-10zm0 12c5.33 0 8 2.67 8 4v2H4v-2c0-1.33 2.67-4 8-4z"/></svg>' +
+              'Reputation Profile' +
+            '</div>' +
+          '</div>' +
+          '<div class="kv-grid">' +
+            '<span class="key">Address / Pubkey</span><span class="val"><code>' + d.pubkey + '</code></span>' +
+          '</div>' +
+          '<div class="x-stats-row">' +
+            '<div class="x-stat-mini"><div class="label">Agreements as Seller</div><div class="value">' + (d.total_agreements_as_seller || 0) + '</div></div>' +
+            '<div class="x-stat-mini"><div class="label">Proofs Submitted</div><div class="value">' + (d.proofs_submitted || 0) + '</div></div>' +
+          '</div>' +
+          (d.note ? '<div class="x-note">' + d.note + '</div>' : '') +
+        '</div>';
+
+    } catch (e) {
+      el.innerHTML = '<div class="x-panel"><div class="x-error">Failed to load reputation: ' + e.message + '</div></div>';
+    }
+  }
+
+  if (initPubkey) loadReputation(initPubkey);
+</script>
+</body>
+</html>

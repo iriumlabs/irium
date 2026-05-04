@@ -424,6 +424,8 @@
           <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M4 17l5-5 3 3 8-8v4h2V3h-8v2h4l-6 6-3-3-7 7z"/></svg><div class="x-label">Diff Δ</div></div><div class="x-value" id="diff-growth">Loading...</div></div>
           <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a3 3 0 110 6 3 3 0 010-6zM5 9a2.5 2.5 0 110 5 2.5 2.5 0 010-5zm14 0a2.5 2.5 0 110 5 2.5 2.5 0 010-5zM7 20v-1c0-2.2 2.2-4 5-4s5 1.8 5 4v1H7z"/></svg><div class="x-label">Active Peers</div></div><div class="x-value" id="live-peers">Loading...</div></div>
           <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M10 2l4 4-2 2 3 3 1-1 4 4-2 2-4-4-1 1-3-3-2 2-4-4 2-2 4 4 1-1 3 3 2-2-3-3 2-2zM3 20h18v2H3z"/></svg><div class="x-label">Active Miners</div></div><div class="x-value" id="live-miners">Loading...</div></div>
+          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M9 3h6v2H9V3zm0 4h6l2 4h3v2h-3.2l-1.5 8H9.7L8.2 13H5v-2h3L9 7zm1.8 6l.9 4.8h.6l.9-4.8H10.8z"/></svg><div class="x-label">Agreements</div></div><div class="x-value" id="stat-agreements">…</div></div>
+          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 4v6c0 6-4 10-8 10S4 18 4 12V6l8-4zm-1 13.4l5-5-1.4-1.4L11 12.6l-2.6-2.6L7 11.4l4 4z"/></svg><div class="x-label">Proofs</div></div><div class="x-value" id="stat-proofs">…</div></div>
         </div>
       </div>
 
@@ -465,6 +467,32 @@
       </div>
       <div id="blocks-list" class="x-list"><div class="x-muted">Loading blocks...</div></div>
       <div class="x-load" id="load-more-wrap"></div>
+    </div>
+
+    <!-- Settlement Activity -->
+    <div class="x-panel">
+      <div class="x-head">
+        <div class="x-title">
+          <svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M9 3h6v2H9V3zm0 4h6l2 4h3v2h-3.2l-1.5 8H9.7L8.2 13H5v-2h3L9 7z"/></svg>
+          Settlement Activity
+        </div>
+        <a href="agreement.html" style="color:rgba(91,177,255,0.7);font-size:12px;text-decoration:none;letter-spacing:0.06em;" onmouseover="this.style.color='rgba(91,177,255,1)'" onmouseout="this.style.color='rgba(91,177,255,0.7)'">Browse all →</a>
+      </div>
+
+      <!-- Recent Agreements sub-section -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;margin-top:4px;">
+        <svg style="width:16px;height:16px;color:rgba(91,177,255,0.7);flex-shrink:0;" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8L14 2zm-1 7V3.5L18.5 9H13z"/></svg>
+        <span style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.6);font-weight:700;">Recent Agreements</span>
+      </div>
+      <div id="settlement-agreements" class="x-list" style="margin-bottom:24px;"></div>
+
+      <!-- Recent Proofs sub-section -->
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+        <svg style="width:16px;height:16px;color:rgba(91,177,255,0.7);flex-shrink:0;" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 4v6c0 6-4 10-8 10S4 18 4 12V6l8-4zm-1 13.4l5-5-1.4-1.4L11 12.6l-2.6-2.6L7 11.4l4 4z"/></svg>
+        <span style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.6);font-weight:700;">Recent Proofs</span>
+        <a href="reputation.html" style="margin-left:auto;color:rgba(91,177,255,0.7);font-size:11px;text-decoration:none;letter-spacing:0.06em;" onmouseover="this.style.color='rgba(91,177,255,1)'" onmouseout="this.style.color='rgba(91,177,255,0.7)'">Reputation lookup →</a>
+      </div>
+      <div id="settlement-proofs" style=""></div>
     </div>
 
   </div>

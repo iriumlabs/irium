@@ -1769,11 +1769,11 @@ fn mine_once(
                             );
                         } else if elapsed > 0.0 {
                             println!(
-                                "  mining next height {} (tip {}): hashes {} rate {:.2} H/s",
+                                "  mining next height {} (tip {}): hashes {} rate = {:.2} KH/s",
                                 height,
                                 height.saturating_sub(1),
                                 attempts_total,
-                                attempts_total as f64 / elapsed
+                                attempts_total as f64 / elapsed / 1000.0
                             );
                             let _ = std::io::stdout().flush();
                         } else {

@@ -261,6 +261,11 @@ struct SubmitTuple {
     extranonce2_hex: String,
     ntime_hex: String,
     nonce_hex: String,
+    // BIP310 version-rolling submitted as params[5] when the miner rolls
+    // bits in the version field. Bitaxe ESP-Miner v2+ sends this even
+    // after we reply with `version-rolling: false` to mining.configure, so
+    // we accept it and use it as the actual header version on validation.
+    rolled_version_hex: Option<String>,
 }
 
 trait RewardableAdapter {
@@ -1415,10 +1420,17 @@ fn mode_allows_combo(
     b_name: &str,
     n_name: &str,
 ) -> bool {
+    // `v_rolled` / `v_rolled_raw` are the BIP310 version-rolling variants
+    // (LE-encoded and raw-bytes respectively). All non-cpuminer modes treat
+    // them the same way they treat v_be.
+    let v_ok = v_name == "v_be"
+        || v_name == "v_rolled"
+        || v_name == "v_rolled_extra"
+        || v_name == "v_rolled_raw";
     match mode {
-        MinerFamilyMode::Asic => prev_name == "prev_canon" && mr_name == "mr_canon" && v_name == "v_be" && t_name == "t_raw" && b_name == "b_raw" && n_name == "n_raw",
-        MinerFamilyMode::Ccminer => (prev_name == "prev_canon" || prev_name == "prev_rev32") && (mr_name == "mr_canon" || mr_name == "mr_rev32") && v_name == "v_be" && t_name == "t_raw" && b_name == "b_raw" && (n_name == "n_raw" || n_name == "n_rev"),
-        MinerFamilyMode::Auto => (prev_name == "prev_canon" || prev_name == "prev_rev32" || prev_name == "prev_swap4" || prev_name == "prev_rev32_swap4") && (mr_name == "mr_canon" || mr_name == "mr_rev32") && v_name == "v_be" && t_name == "t_raw" && b_name == "b_raw" && (n_name == "n_raw" || n_name == "n_rev"),
+        MinerFamilyMode::Asic => prev_name == "prev_canon" && mr_name == "mr_canon" && v_ok && t_name == "t_raw" && b_name == "b_raw" && n_name == "n_raw",
+        MinerFamilyMode::Ccminer => (prev_name == "prev_canon" || prev_name == "prev_rev32") && (mr_name == "mr_canon" || mr_name == "mr_rev32") && v_ok && t_name == "t_raw" && b_name == "b_raw" && (n_name == "n_raw" || n_name == "n_rev"),
+        MinerFamilyMode::Auto => (prev_name == "prev_canon" || prev_name == "prev_rev32" || prev_name == "prev_swap4" || prev_name == "prev_rev32_swap4") && (mr_name == "mr_canon" || mr_name == "mr_rev32") && v_ok && t_name == "t_raw" && b_name == "b_raw" && (n_name == "n_raw" || n_name == "n_rev"),
         MinerFamilyMode::Cpuminer => true,
     }
 }
@@ -1440,6 +1452,7 @@ async fn handle_submit(
         extranonce2_hex: params[2].as_str().unwrap_or("").to_string(),
         ntime_hex: params[3].as_str().unwrap_or("").to_string(),
         nonce_hex: params[4].as_str().unwrap_or("").to_string(),
+        rolled_version_hex: params.get(5).and_then(|v| v.as_str()).map(String::from),
     };
 
     if submit.job_id != job.job_id {
@@ -1597,7 +1610,22 @@ fn decode_cpuminer_compat_submit(
     let nonce_raw = decode_hex4(&submit.nonce_hex)?;
     let version_be = [0x00, 0x00, 0x00, 0x01];
     let version_le = snapshot.version.to_le_bytes();
-    let version_opts = [("v_be", version_be), ("v_le", version_le)];
+    // BIP310: params[5] carries version-rolling extra bits. Header version
+    // = base | extra (header bytes LE-encoded). Different firmware encodes
+    // params[5] slightly differently, so we test multiple interpretations
+    // and accept whichever matches the miner's actual header.
+    let version_opts: Vec<(&'static str, [u8; 4])> = match &submit.rolled_version_hex {
+        Some(hex) => {
+            let rolled_extra = parse_u32_hex(hex)?;
+            let extra_raw = decode_hex4(hex)?;
+            vec![
+                ("v_rolled", (snapshot.version | rolled_extra).to_le_bytes()),
+                ("v_rolled_extra", rolled_extra.to_le_bytes()),
+                ("v_rolled_raw", extra_raw),
+            ]
+        }
+        None => vec![("v_be", version_be), ("v_le", version_le)],
+    };
     let time_opts = [("t_raw", ntime_raw), ("t_rev", reverse_4(ntime_raw))];
     let bits_opts = [("b_raw", nbits_raw), ("b_rev", reverse_4(nbits_raw))];
     let nonce_opts = [("n_raw", nonce_raw), ("n_rev", reverse_4(nonce_raw))];
@@ -1607,7 +1635,7 @@ fn decode_cpuminer_compat_submit(
 
     for (prev_name, prev_for_header) in prev_variants {
         for &(mr_name, mr_for_header) in merkle_variants.iter() {
-            for (v_name, v_bytes) in version_opts {
+            for &(v_name, v_bytes) in version_opts.iter() {
                 for (t_name, t_bytes) in time_opts {
                     for (b_name, b_bytes) in bits_opts {
                         for (n_name, n_bytes) in nonce_opts {
@@ -2249,14 +2277,27 @@ async fn handle_submit_legacy_rewardable(
     let nonce_raw = decode_hex4(&submit.nonce_hex)?;
     let version_be = [0x00, 0x00, 0x00, 0x01];
     let version_le = version.to_le_bytes();
-    let version_opts = [("v_be", version_be), ("v_le", version_le)];
+    // BIP310: see SubmitTuple.rolled_version_hex and the matching block in
+    // decode_cpuminer_compat_submit for the three-interpretation rationale.
+    let version_opts: Vec<(&'static str, [u8; 4])> = match &submit.rolled_version_hex {
+        Some(hex) => {
+            let rolled_extra = parse_u32_hex(hex)?;
+            let extra_raw = decode_hex4(hex)?;
+            vec![
+                ("v_rolled", (version | rolled_extra).to_le_bytes()),
+                ("v_rolled_extra", rolled_extra.to_le_bytes()),
+                ("v_rolled_raw", extra_raw),
+            ]
+        }
+        None => vec![("v_be", version_be), ("v_le", version_le)],
+    };
     let time_opts = [("t_raw", ntime_raw), ("t_rev", reverse_4(ntime_raw))];
     let bits_opts = [("b_raw", nbits_raw), ("b_rev", reverse_4(nbits_raw))];
     let nonce_opts = [("n_raw", nonce_raw), ("n_rev", reverse_4(nonce_raw))];
 
     for (prev_name, prev_for_header) in prev_variants {
         for &(mr_name, mr_for_header) in merkle_variants.iter() {
-            for (v_name, v_bytes) in version_opts {
+            for &(v_name, v_bytes) in version_opts.iter() {
                 for (t_name, t_bytes) in time_opts {
                     for (b_name, b_bytes) in bits_opts {
                         for (n_name, n_bytes) in nonce_opts {
@@ -2848,6 +2889,7 @@ mod tests {
             extranonce2_hex: "00000000".to_string(),
             ntime_hex: format!("{:08x}", snapshot.base_ntime),
             nonce_hex: "00000001".to_string(),
+            rolled_version_hex: None,
         };
         let adapter = CpuminerCompatibilityAdapter;
         let solve = adapter.decode_submit(&snapshot, &session, &config, &submit).unwrap();
@@ -3143,6 +3185,7 @@ mod tests {
             extranonce2_hex: "00000000".to_string(),
             ntime_hex: format!("{:08x}", snapshot.base_ntime),
             nonce_hex: "00000001".to_string(),
+            rolled_version_hex: None,
         };
         let solve = CpuminerCompatibilityAdapter.decode_submit(&snapshot, &session, &config, &submit).unwrap();
         assert!(!solve.rewardable);

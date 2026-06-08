@@ -463,7 +463,7 @@ return `
 <div class="x-block" onclick="viewBlock(${heightVal})">
   <div class="x-block-top">
     <div class="x-block-h">Block ${heightVal}</div>
-    <div class="x-block-time" title="${formatTime(time)}">${timeAgo(time)}</div>
+    <div class="x-block-time" title="${timeAgo(time)}">${formatTime(time)}</div>
   </div>
   <div class="x-block-hash">${hash}</div>
   <div class="x-block-meta">

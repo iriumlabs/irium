@@ -1703,7 +1703,7 @@ GitHub</a>
   function fmtTime(ts) {
     const t = Number(ts);
     if (!Number.isFinite(t) || t <= 0) return "N/A";
-    return new Date(t * 1000).toLocaleString();
+    return new Date(t * 1000).toLocaleString(undefined, { year: "numeric", month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
   }
 
   function shortHash(s, a = 10, b = 8) {

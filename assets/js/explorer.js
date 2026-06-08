@@ -570,7 +570,8 @@ setInterval(() => {
 // Format timestamp to readable date
 function formatTime(timestamp) {
   const date = new Date((timestamp ?? 0) * 1000);
-  return isNaN(date.getTime()) ? 'N/A' : date.toLocaleString();
+  if (isNaN(date.getTime())) return 'N/A';
+  return date.toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 }
 
 
@@ -600,7 +601,8 @@ function fmtShortHash(h) {
 function fmtTs(ts) {
   if (!ts) return '—';
   const d = new Date(Number(ts) * 1000);
-  return isNaN(d.getTime()) ? '—' : d.toLocaleString();
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
 }
 
 function settlementStateBadge(state) {

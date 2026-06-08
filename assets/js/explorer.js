@@ -463,7 +463,7 @@ return `
 <div class="x-block" onclick="viewBlock(${heightVal})">
   <div class="x-block-top">
     <div class="x-block-h">Block ${heightVal}</div>
-    <div class="x-block-time">${formatTime(time)}</div>
+    <div class="x-block-time" title="${formatTime(time)}">${timeAgo(time)}</div>
   </div>
   <div class="x-block-hash">${hash}</div>
   <div class="x-block-meta">
@@ -567,11 +567,25 @@ setInterval(() => {
   loadSettlementProofs();
 }, 30000);
 
-// Format timestamp to readable date
+// Format timestamp to readable date (absolute, user local timezone)
 function formatTime(timestamp) {
   const date = new Date((timestamp ?? 0) * 1000);
   if (isNaN(date.getTime())) return 'N/A';
-  return date.toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  return date.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+  });
+}
+
+// Relative time display - caps future-dated blocks at 'just now' (miner clock drift)
+function timeAgo(timestamp) {
+  const nowSecs = Math.floor(Date.now() / 1000);
+  const diff = nowSecs - timestamp;
+  if (diff <= 0) return 'just now';
+  if (diff < 60) return diff + 's ago';
+  if (diff < 3600) return Math.floor(diff / 60) + 'm ago';
+  if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+  return Math.floor(diff / 86400) + 'd ago';
 }
 
 
@@ -602,7 +616,10 @@ function fmtTs(ts) {
   if (!ts) return '—';
   const d = new Date(Number(ts) * 1000);
   if (isNaN(d.getTime())) return '—';
-  return d.toLocaleString(undefined, { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+  return d.toLocaleString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric',
+    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
+  });
 }
 
 function settlementStateBadge(state) {

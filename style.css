@@ -1158,32 +1158,36 @@ body {
 
 /* ── Mobile breakpoints ──────────────────────────────────── */
 @media (max-width: 820px) {
-    /* Nav — collapses to hamburger; links drop as absolute overlay */
+    /* Nav — compact bar only; hamburger opens a small right-side dropdown */
     .nav { overflow: visible; }
-    .nav .container { flex-wrap: nowrap; position: relative; }
+    .nav .container { flex-wrap: nowrap; }
     .nav-hamburger  { display: flex !important; }
 
+    /* Hidden by default — only shows when hamburger is tapped */
     .nav-links {
         display: none !important;
         position: absolute !important;
-        top: 100% !important;
-        left: 0 !important;
-        right: 0 !important;
+        top: calc(100% + 4px) !important;
+        right: 1rem !important;
+        left: auto !important;
+        width: 200px !important;
         flex-direction: column !important;
-        background: rgba(10, 10, 28, 0.98) !important;
-        border-top: 1px solid rgba(99, 102, 241, 0.25) !important;
-        padding: 0.5rem 0 1rem !important;
+        background: rgba(10, 10, 28, 0.97) !important;
+        border: 1px solid rgba(99, 102, 241, 0.3) !important;
+        border-radius: 10px !important;
+        padding: 0.4rem 0 0.5rem !important;
         gap: 0 !important;
         margin: 0 !important;
-        z-index: 998 !important;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
+        z-index: 1100 !important;
+        box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6) !important;
     }
     .nav-links.is-open { display: flex !important; }
     .nav-links li { width: 100% !important; }
     .nav-links a {
         display: block !important;
-        padding: 0.7rem 1.5rem !important;
-        font-size: 0.9rem !important;
+        padding: 0.6rem 1.2rem !important;
+        font-size: 0.88rem !important;
+        text-align: right !important;
     }
     .nav-socials { display: none !important; }
 

@@ -3,1265 +3,453 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Irium Pool | Public Mining for a Settlement-First Chain</title>
-<meta name="description" content="Public Irium Stratum pool dashboard for miners securing a settlement-first SHA-256d blockchain.">
+<title>Irium Pool | SHA-256d Mining Pool</title>
+<meta name="description" content="Mine IRM on the official Irium SHA-256d Stratum pool. 0% fee, direct coinbase payout, ASIC / CPU / GPU / solo — pool.iriumlabs.org.">
 <link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=4">
 <link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
 <style>
-  :root {
-    --panel-bg: rgba(6, 8, 22, 0.62);
-    --panel-bg-2: rgba(10, 13, 30, 0.78);
-    --panel-border: rgba(124, 139, 255, 0.26);
-    --panel-glow: rgba(93, 127, 255, 0.20);
-    --ok: #41f0b8;
-    --warn: #ffc766;
-    --bad: #ff7878;
-    --muted: #b4c2df;
-    --ink: #eef4ff;
-  }
-
-  .pool-shell {
-    padding-top: 106px;
-    padding-bottom: 50px;
-  }
-
-  .pool-wrap {
-    width: min(1260px, 95vw);
-    margin: 0 auto;
-  }
-
-  .portal-hero {
-    border: 1px solid var(--panel-border);
-    background: linear-gradient(160deg, rgba(14, 20, 44, 0.92) 0%, rgba(6, 8, 24, 0.9) 100%);
-    border-radius: 18px;
-    box-shadow: 0 12px 34px rgba(0,0,0,0.4), 0 0 40px var(--panel-glow);
-    overflow: hidden;
-    position: relative;
-  }
-
-  .portal-hero::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    background: radial-gradient(circle at 16% 22%, rgba(77, 117, 255, 0.24), transparent 38%),
-                radial-gradient(circle at 84% 18%, rgba(74, 232, 186, 0.18), transparent 30%);
-    pointer-events: none;
-  }
-
-
-  .portal-hero::after {
-    content: "";
-    position: absolute;
-    right: -34px;
-    top: -34px;
-    width: 180px;
-    height: 180px;
-    background: url("https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1") center/contain no-repeat;
-    opacity: 0.09;
-    transform: rotate(0deg);
-    animation: heroLogoSpin 26s linear infinite;
-    pointer-events: none;
-    filter: drop-shadow(0 0 20px rgba(99,102,241,0.35));
-  }
-
-  @keyframes heroLogoSpin {
-    from { transform: rotate(0deg); }
-    to { transform: rotate(360deg); }
-  }
-
-  .hero-brand {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    margin-bottom: 8px;
-  }
-
-  .hero-logo {
-    width: 54px;
-    height: 54px;
-    border-radius: 14px;
-    padding: 6px;
-    object-fit: contain;
-    border: 1px solid rgba(255,255,255,0.15);
-    background: rgba(255,255,255,0.06);
-    box-shadow: 0 0 22px rgba(99,102,241,0.35);
-    animation: logoPulse 2.8s ease-in-out infinite;
-  }
-
-  @keyframes logoPulse {
-    0%,100% { transform: scale(1); box-shadow: 0 0 22px rgba(99,102,241,0.35); }
-    50% { transform: scale(1.06); box-shadow: 0 0 30px rgba(99,102,241,0.5); }
-  }
-
-
-  .kpi, .panel, .endpoint-card {
-    transition: transform .25s ease, box-shadow .25s ease, border-color .25s ease;
-  }
-
-  .kpi:hover, .panel:hover {
-    transform: translateY(-3px);
-    box-shadow: 0 12px 30px rgba(0,0,0,0.36), 0 0 20px rgba(109,134,255,0.18);
-    border-color: rgba(134, 154, 255, 0.45);
-  }
-
-  .endpoint-card:hover {
-    transform: translateY(-2px);
-    border-color: rgba(143,165,255,0.5);
-  }
-
-  .pool-table tbody tr:hover td {
-    background: rgba(96, 126, 255, 0.10);
-  }
-
-
-
-  .hero-grid {
-    display: grid;
-    grid-template-columns: 1.25fr 1fr;
-    gap: 18px;
-    padding: 26px;
-    position: relative;
-    z-index: 1;
-  }
-
-  .hero-grid > * {
-    border: 1px solid rgba(91,177,255,0.30);
-    border-radius: 14px;
-    background: rgba(0,0,0,0.22);
-    box-shadow: 0 10px 26px rgba(0,0,0,0.34), 0 0 20px rgba(42,171,238,0.14);
-    animation: poolTopGridGlow 4.6s ease-in-out infinite;
-  }
-
-  @keyframes poolTopGridGlow {
-    0%,100% { border-color: rgba(91,177,255,0.28); box-shadow: 0 10px 26px rgba(0,0,0,0.34), 0 0 20px rgba(42,171,238,0.14); }
-    50% { border-color: rgba(91,177,255,0.56); box-shadow: 0 14px 34px rgba(0,0,0,0.4), 0 0 34px rgba(42,171,238,0.30); }
-  }
-
-  .hero-grid > div:first-child {
-    padding: 16px;
-  }
-
-  .hero-title {
-    font-family: Orbitron, sans-serif;
-    font-size: clamp(2rem, 4vw, 2.8rem);
-    line-height: 1.08;
-    letter-spacing: 0.04em;
-    margin: 0 0 10px;
-    color: #fff;
-    text-shadow: 0 0 22px rgba(105, 143, 255, 0.48);
-  }
-
-  .hero-sub {
-    margin: 0;
-    color: #d9e4ff;
-    max-width: 780px;
-  }
-
-
-  .hero-eyebrow {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(255,255,255,0.16);
-    background: rgba(255,255,255,0.06);
-    color: #d4e0ff;
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-weight: 700;
-  }
-
-
-
-
-  .hero-eyebrow .dot {
-    position: relative;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #41f0b8;
-    box-shadow: 0 0 10px rgba(65,240,184,0.75);
-  }
-
-  .hero-eyebrow .dot::after {
-    content: "";
-    position: absolute;
-    inset: -4px;
-    border-radius: 999px;
-    border: 2px solid rgba(65,240,184,0.55);
-    animation: heroLivePulse 1.6s ease-out infinite;
-  }
-
-  @keyframes heroLivePulse {
-    0% {
-      transform: scale(0.6);
-      opacity: 0.9;
-    }
-    70% {
-      transform: scale(1.45);
-      opacity: 0;
-    }
-    100% {
-      transform: scale(1.45);
-      opacity: 0;
-    }
-  }
-
-  .hero-title {
-    font-size: clamp(1.8rem, 3.3vw, 2.4rem);
-    line-height: 1.12;
-    letter-spacing: 0.03em;
-  }
-
-  .endpoint-stack {
-    margin-top: 16px;
-    display: grid;
-    gap: 10px;
-  }
-
-  .endpoint-card {
-    display: grid;
-    grid-template-columns: auto 1fr auto;
-    gap: 10px;
-    align-items: center;
-    border: 1px solid rgba(255,255,255,0.14);
-    border-radius: 12px;
-    padding: 10px;
-    background: rgba(0,0,0,0.33);
-  }
-
-  .endpoint-label {
-    font-size: 0.68rem;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: #afc0e9;
-    font-weight: 700;
-    border: 1px solid rgba(255,255,255,0.12);
-    padding: 6px 8px;
-    border-radius: 999px;
-    background: rgba(255,255,255,0.04);
-    white-space: nowrap;
-  }
-
-  .endpoint-main {
-    border-radius: 10px;
-    border: 1px solid rgba(255,255,255,0.14);
-    padding: 10px 12px;
-    background: rgba(0,0,0,0.34);
-    color: #f4f7ff;
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    font-size: 0.93rem;
-    word-break: break-all;
-  }
-
-  .copy-btn {
-    border: 1px solid rgba(108, 131, 255, 0.66);
-    border-radius: 10px;
-    background: linear-gradient(135deg, rgba(99,123,255,0.35), rgba(87,213,255,0.22));
-    color: #fff;
-    padding: 0 12px;
-    min-height: 42px;
-    font-size: 0.8rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-weight: 800;
-    cursor: pointer;
-  }
-
-  .copy-btn.secondary {
-    background: linear-gradient(135deg, rgba(95,116,238,0.18), rgba(95,116,238,0.10));
-    border-color: rgba(120,141,255,0.45);
-  }
-
-  .hero-note {
-    margin-top: 10px;
-    color: #b8c6e6;
-    font-size: 0.82rem;
-  }
-
-  .copy-btn {
-    border: 1px solid rgba(108, 131, 255, 0.56);
-    border-radius: 12px;
-    background: rgba(108, 131, 255, 0.22);
-    color: #fff;
-    padding: 0 14px;
-    min-height: 48px;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .hero-right {
-    border: 0;
-    border-radius: 14px;
-    background: rgba(0,0,0,0.32);
-    padding: 14px;
-    box-shadow: inset 0 0 18px rgba(89, 121, 255, 0.14);
-  }
-
-  .hero-right h3 {
-    margin: 0 0 10px;
-    font-family: Orbitron, sans-serif;
-    font-size: 0.95rem;
-    color: #fff;
-    letter-spacing: 0.07em;
-  }
-
-  .setup-grid {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    display: grid;
-    gap: 7px;
-  }
-
-  .setup-row {
-    display: grid;
-    grid-template-columns: 128px 1fr;
-    gap: 8px;
-    align-items: center;
-    border: 1px solid rgba(255,255,255,0.09);
-    border-radius: 10px;
-    padding: 7px 10px;
-    background: rgba(255,255,255,0.03);
-  }
-
-  .setup-key {
-    color: var(--muted);
-    font-size: 0.74rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .setup-value {
-    color: #e9f1ff;
-    font-size: 0.88rem;
-    font-weight: 600;
-    word-break: break-word;
-  }
-
-  .status-badge {
-    display: inline-block;
-    padding: 5px 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(80, 240, 184, 0.4);
-    background: rgba(80, 240, 184, 0.12);
-    color: #9ff5d7;
-    font-weight: 700;
-    font-size: 0.78rem;
-    letter-spacing: 0.04em;
-  }
-
-  .hero-route-badge {
-    margin-top: 10px;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 6px 12px;
-    border-radius: 999px;
-    border: 1px solid rgba(130, 150, 255, 0.35);
-    background: rgba(82, 108, 255, 0.14);
-    color: #dce8ff;
-    font-size: 0.78rem;
-    letter-spacing: 0.05em;
-    font-weight: 700;
-  }
-
-  .hero-route-badge .dot {
-    position: relative;
-    width: 8px;
-    height: 8px;
-    border-radius: 999px;
-    background: #4cf0b4;
-    box-shadow: 0 0 0 6px rgba(76,240,180,0.15);
-  }
-
-  .hero-route-badge .dot::after {
-    content: "";
-    position: absolute;
-    inset: -4px;
-    border-radius: 999px;
-    border: 2px solid rgba(76,240,180,0.55);
-    animation: routeLivePulse 1.6s ease-out infinite;
-  }
-
-  @keyframes routeLivePulse {
-    0% {
-      transform: scale(0.6);
-      opacity: 0.9;
-    }
-    70% {
-      transform: scale(1.45);
-      opacity: 0;
-    }
-    100% {
-      transform: scale(1.45);
-      opacity: 0;
-    }
-  }
-
-
-  .kpi-grid {
-    margin-top: 18px;
-    display: grid;
-    gap: 12px;
-    grid-template-columns: repeat(6, minmax(0, 1fr));
-  }
-
-  .kpi {
-    background: var(--panel-bg);
-    border: 1px solid var(--panel-border);
-    border-radius: 12px;
-    padding: 12px;
-    box-shadow: inset 0 0 20px rgba(107, 132, 255, 0.07);
-  }
-
-  .kpi .label {
-    color: var(--muted);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .kpi .value {
-    margin-top: 4px;
-    font-weight: 800;
-    font-size: 1.08rem;
-    color: var(--ink);
-    word-break: break-word;
-  }
-
-  .portal-grid {
-    margin-top: 18px;
-    display: grid;
-    gap: 14px;
-    grid-template-columns: 1.1fr 1.1fr 0.9fr;
-  }
-
-  .panel {
-    background: var(--panel-bg-2);
-    border: 1px solid var(--panel-border);
-    border-radius: 14px;
-    box-shadow: 0 8px 26px rgba(0,0,0,0.34), 0 0 16px rgba(109, 134, 255, 0.12);
-    padding: 15px;
-  }
-
-    .panel h3 {
-    margin: 0;
-    font-family: Orbitron, sans-serif;
-    font-size: 0.93rem;
-    letter-spacing: 0.06em;
-    color: #fff;
-  }
-
-  .panel-sub {
-    margin: 6px 0 12px;
-    color: var(--muted);
-    font-size: 0.85rem;
-  }
-
-  .meta-list {
-    margin: 0;
-    padding: 0;
-    list-style: none;
-    display: grid;
-    gap: 8px;
-  }
-
-  .meta-list li {
-    display: grid;
-    grid-template-columns: 140px 1fr;
-    gap: 8px;
-    align-items: baseline;
-    color: #dce7ff;
-    font-size: 0.92rem;
-  }
-
-  .meta-list .key {
-    color: var(--muted);
-    font-size: 0.82rem;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-
-  .table-wrap {
-    border: 1px solid rgba(255,255,255,0.1);
-    border-radius: 12px;
-    overflow: auto;
-    max-height: 420px;
-    background: rgba(0,0,0,0.25);
-  }
-
-  table.pool-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.86rem;
-  }
-
-  .pool-table th,
-  .pool-table td {
-    padding: 9px 10px;
-    border-bottom: 1px solid rgba(255,255,255,0.07);
-    text-align: left;
-    color: #e8efff;
-    vertical-align: middle;
-  }
-
-  .pool-table th {
-    position: sticky;
-    top: 0;
-    background: rgba(13, 18, 42, 0.98);
-    color: #b8c7e6;
-    text-transform: uppercase;
-    font-size: 0.68rem;
-    letter-spacing: 0.08em;
-    z-index: 1;
-    white-space: nowrap;
-  }
-
-  .pool-table td.mono-wrap {
-    white-space: normal;
-    word-break: break-all;
-    overflow-wrap: anywhere;
-    line-height: 1.35;
-    font-size: 0.8rem;
-    max-width: 420px;
-  }
-
-  .mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  }
-
-  .green { color: var(--ok) !important; font-weight: 700; }
-  .amber { color: var(--warn); font-weight: 700; }
-  .red { color: var(--bad); font-weight: 700; }
-  .muted { color: var(--muted); }
-  .reward-value { color: var(--ok) !important; font-weight: 800; }
-  #blocks-table thead th:nth-child(5),
-  #blocks-body td:nth-child(5),
-  #pool-found-table thead th:nth-child(4),
-  #pool-found-body td:nth-child(4) {
-    color: var(--ok) !important;
-    font-weight: 800;
-  }
-  #perf-emission { color: var(--ok) !important; font-weight: 800; }
-  .pool-table td .green { color: var(--ok) !important; }
-
-  .chart-wrap {
-    border: 1px solid rgba(255,255,255,0.10);
-    border-radius: 12px;
-    padding: 10px;
-    background: rgba(0,0,0,0.22);
-  }
-
-  canvas {
-    width: 100%;
-    height: 180px;
-    display: block;
-  }
-
-  .lookup {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px;
-  }
-
-  .lookup input {
-    border-radius: 10px;
-    border: 1px solid rgba(255,255,255,0.2);
-    background: rgba(0,0,0,0.35);
-    color: #eef4ff;
-    padding: 11px;
-    font-size: 0.95rem;
-  }
-
-  .lookup button {
-    border-radius: 10px;
-    border: 1px solid rgba(108,131,255,0.55);
-    background: rgba(108,131,255,0.22);
-    color: #fff;
-    font-weight: 700;
-    cursor: pointer;
-    padding: 0 14px;
-  }
-
-  .lookup-result {
-    margin-top: 10px;
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 10px;
-    background: rgba(0,0,0,0.22);
-    min-height: 88px;
-    padding: 10px;
-    color: #eaf1ff;
-  }
-
-  .span-2 { grid-column: span 2; }
-  .span-3 { grid-column: span 3; }
-
-
-
-  .extended-grid {
-    margin-top: 14px;
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 14px;
-  }
-
-  .badge {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    border-radius: 999px;
-    font-size: 0.75rem;
-    letter-spacing: 0.04em;
-    border: 1px solid rgba(255,255,255,0.18);
-    background: rgba(255,255,255,0.06);
-    color: #d5e3ff;
-  }
-
-  .mini-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-  }
-
-  .mini-stat {
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 10px;
-    padding: 10px;
-    background: rgba(0,0,0,0.22);
-  }
-
-  .mini-stat .k {
-    color: var(--muted);
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.07em;
-  }
-
-  .mini-stat .v {
-    color: #ecf3ff;
-    margin-top: 4px;
-    font-weight: 700;
-  }
-
-  .panel-row {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 8px;
-    align-items: center;
-  }
-
-  .api-docs {
-    margin-top: 14px;
-  }
-
-  .api-docs code {
-    color: #9fd4ff;
-  }
-
-  .api-docs a {
-    text-decoration: none;
-  }
-
-  .api-docs a:hover {
-    text-decoration: none;
-  }
-
-  .tiny {
-    font-size: 0.8rem;
-    color: var(--muted);
-  }
-
-  .incident-list {
-    margin: 0;
-    padding-left: 18px;
-    color: #d8e4ff;
-    display: grid;
-    gap: 6px;
-  }
-
-  .connect-grid {
-    margin-top: 12px;
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: 12px;
-  }
-
-  .cfg-card {
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 12px;
-    padding: 12px;
-    background: rgba(0,0,0,0.24);
-  }
-
-  .cfg-card h4 {
-    margin: 0 0 8px;
-    font-size: 0.88rem;
-    color: #f3f7ff;
-    letter-spacing: 0.04em;
-  }
-
-  .cfg-card pre {
-    margin: 0;
-    padding: 10px;
-    border-radius: 8px;
-    border: 1px solid rgba(255,255,255,0.1);
-    background: rgba(0,0,0,0.32);
-    color: #dce7ff;
-    font-size: 0.78rem;
-    overflow: auto;
-  }
-
-  .cfg-card .copy-btn {
-    margin-top: 8px;
-    width: 100%;
-  }
-
-
-  .legal-box a {
-    color: #9edfff;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-    font-weight: 600;
-  }
-  .legal-box a:hover {
-    color: #c8ebff;
-  }
-  .cfg-card a {
-    color: #9edfff;
-    text-decoration: underline;
-    text-underline-offset: 2px;
-  }
-
-  .legal-grid {
-    margin-top: 10px;
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-  }
-
-  .legal-box {
-    border: 1px solid rgba(255,255,255,0.12);
-    border-radius: 10px;
-    padding: 10px;
-    background: rgba(0,0,0,0.20);
-  }
-
-  .legal-box h5 {
-    margin: 0 0 6px;
-    color: #f2f7ff;
-    font-size: 0.82rem;
-    letter-spacing: 0.04em;
-  }
-
-  .legal-box p { margin: 0; color: #c9d7f5; font-size: 0.84rem; }
-
-  @media (max-width: 1180px) {
-    .hero-grid { grid-template-columns: 1fr; }
-    .kpi-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .portal-grid { grid-template-columns: 1fr 1fr; }
-    .extended-grid { grid-template-columns: 1fr 1fr; }
-    .span-3 { grid-column: span 2; }
-
-  }
-
-  @media (max-width: 820px) {
-    .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .footer-content { grid-template-columns: 1fr; gap: 18px; }
-    .extended-grid, .connect-grid, .legal-grid { grid-template-columns: 1fr; }
-    .portal-grid { grid-template-columns: 1fr; }
-    .span-2, .span-3 { grid-column: span 1; }
-    .meta-list li { grid-template-columns: 1fr; gap: 4px; }
-    .endpoint-card { grid-template-columns: 1fr; }
-  }
-
-  /* Professional Grid Refinement */
-  .kpi-grid, .portal-grid, .extended-grid, .connect-grid, .legal-grid {
-    gap: 16px;
-  }
-
-  .kpi, .panel, .mini-stat, .cfg-card, .legal-box {
-    border-radius: 14px;
-    border-color: rgba(142, 162, 255, 0.24);
-    background: linear-gradient(165deg, rgba(10,14,34,0.88), rgba(8,11,28,0.88));
-    box-shadow: 0 10px 30px rgba(0,0,0,0.34), inset 0 1px 0 rgba(255,255,255,0.04);
-  }
-
-  .panel {
-    padding: 17px;
-  }
-
-  
-
-  .panel h3 {
-    font-size: 0.98rem;
-    letter-spacing: 0.07em;
-    margin-bottom: 2px;
-  }
-
-  .panel-sub {
-    color: #c7d6f5;
-    font-size: 0.86rem;
-    line-height: 1.45;
-  }
-
-  .kpi {
-    padding: 14px;
-    min-height: 86px;
-  }
-
-  .kpi .label {
-    color: #b9c9eb;
-    letter-spacing: 0.1em;
-    font-size: 0.70rem;
-  }
-
-  .kpi .value {
-    margin-top: 6px;
-    font-size: 1.12rem;
-    letter-spacing: 0.01em;
-  }
-
-  .meta-list {
-    gap: 9px;
-  }
-
-  .meta-list li {
-    grid-template-columns: 150px 1fr;
-    padding: 7px 0;
-    border-bottom: 1px solid rgba(255,255,255,0.06);
-  }
-
-  .meta-list li:last-child {
-    border-bottom: 0;
-  }
-
-  .meta-list .key {
-    color: #afc1e7;
-    font-size: 0.79rem;
-    letter-spacing: 0.08em;
-  }
-
-  .meta-list li span:last-child {
-    min-width: 0;
-    white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    line-height: 1.4;
-  }
-
-  #ops-api,
-  #ops-updated {
-    display: inline-block;
-  }
-
-  .table-wrap {
-    border-radius: 14px;
-    border-color: rgba(255,255,255,0.12);
-    box-shadow: inset 0 0 0 1px rgba(255,255,255,0.02);
-  }
-
-  .pool-table th {
-    background: rgba(10, 18, 38, 0.92);
-    color: rgba(255,255,255,0.92);
-  }
-
-  .pool-table td {
-    color: #edf3ff;
-  }
-
-  .lookup input {
-    border-color: rgba(142,162,255,0.32);
-    background: rgba(7,10,25,0.72);
-  }
-
-  .lookup input:focus {
-    outline: none;
-    border-color: rgba(106, 132, 255, 0.72);
-    box-shadow: 0 0 0 4px rgba(106,132,255,0.16);
-  }
-
-  .lookup button,
-  .copy-btn {
-    border-radius: 11px;
-  }
-
-  .mini-stat .k,
-  .tiny {
-    color: #b6c7ea;
-  }
-
-  @media (max-width: 820px) {
-    .panel, .kpi, .cfg-card, .legal-box { border-radius: 12px; }
-    .meta-list li { grid-template-columns: 1fr; gap: 4px; }
-  }
-
-
-  /* Explorer GUI/Typography parity for pool page */
-  .pool-shell {
-    font-family: inherit;
-    color: rgba(255,255,255,0.94);
-  }
-
-  .hero-title,
-  .panel h3,
-  .cfg-card h4,
-  .legal-box h5 {
-    font-family: Orbitron, sans-serif;
-    letter-spacing: 0.06em;
-  }
-
-  .hero-sub,
-  .panel-sub,
-  .meta-list .key,
-  .meta-list .value,
-  .tiny,
-  .muted {
-    color: rgba(230,237,243,0.84);
-  }
-
-  .endpoint-main,
-  .cfg-card pre,
-  .pool-table td.mono-wrap,
-  .mono {
-    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  }
-
-  .kpi,
-  .panel,
-  .cfg-card,
-  .legal-box,
-  .mini-stat,
-  .table-wrap {
-    background: rgba(0,0,0,0.32);
-    border: 1px solid rgba(91,177,255,0.34);
-    box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 30px rgba(42,171,238,0.20);
-    position: relative;
-    overflow: hidden;
-    animation: poolXGridGlow 4.8s ease-in-out infinite;
-  }
-
-  .kpi::before,
-  .panel::before,
-  .cfg-card::before,
-  .legal-box::before,
-  .mini-stat::before,
-  .table-wrap::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    box-shadow: 0 0 26px rgba(42,171,238,0.20), inset 0 0 18px rgba(42,171,238,0.10);
-    animation: poolXGridAura 4.2s ease-in-out infinite;
-  }
-
-  .kpi > *,
-  .panel > *,
-  .cfg-card > *,
-  .legal-box > *,
-  .mini-stat > *,
-  .table-wrap > * {
-    position: relative;
-    z-index: 1;
-  }
-
-  @keyframes poolXGridGlow {
-    0%,100% { border-color: rgba(91,177,255,0.32); box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 26px rgba(42,171,238,0.16); }
-    50% { border-color: rgba(91,177,255,0.60); box-shadow: 0 16px 42px rgba(0,0,0,0.44), 0 0 40px rgba(42,171,238,0.34); }
-  }
-
-  @keyframes poolXGridAura {
-    0%,100% { opacity: .62; box-shadow: 0 0 20px rgba(42,171,238,0.18), inset 0 0 14px rgba(42,171,238,0.08); }
-    50% { opacity: .95; box-shadow: 0 0 36px rgba(42,171,238,0.34), inset 0 0 24px rgba(42,171,238,0.16); }
-  }
-
-  .copy-btn,
-  .lookup button {
-    font-family: inherit;
-    font-weight: 700;
-    letter-spacing: 0.05em;
-  }
-
-  @media (max-width: 820px) {
-    .hero-title { font-size: 1.74rem; }
-    .panel h3 { font-size: 0.9rem; }
-    .kpi .value { font-size: 1.05rem; }
-  }
-
-
-  /* Explorer Parity Override: pool grids + steady glow */
-  .kpi,
-  .panel,
-  .cfg-card,
-  .legal-box,
-  .mini-stat,
-  .table-wrap {
-    background: rgba(0,0,0,0.32) !important;
-    border: 1px solid rgba(91,177,255,0.34) !important;
-    border-radius: 14px !important;
-    box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 30px rgba(42,171,238,0.20) !important;
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    position: relative;
-    overflow: hidden;
-    animation: none !important;
-  }
-
-  .kpi::before,
-  .panel::before,
-  .cfg-card::before,
-  .legal-box::before,
-  .mini-stat::before,
-  .table-wrap::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    box-shadow: 0 0 26px rgba(42,171,238,0.20), inset 0 0 18px rgba(42,171,238,0.10);
-    opacity: 0.95;
-    animation: none !important;
-  }
-
-  .kpi > *,
-  .panel > *,
-  .cfg-card > *,
-  .legal-box > *,
-  .mini-stat > *,
-  .table-wrap > * {
-    position: relative;
-    z-index: 1;
-  }
-
-  .kpi .label,
-  .mini-stat .k,
-  .meta-list .key,
-  .tiny,
-  .muted {
-    color: rgba(230,237,243,0.84) !important;
-  }
-
-  .kpi .value,
-  .mini-stat .v,
-  .pool-table td,
-  .pool-table th,
-  .panel h3,
-  .cfg-card h4,
-  .legal-box h5 {
-    color: rgba(255,255,255,0.94) !important;
-  }
-
-  /* Pool layout hardening: keep cards aligned and prevent perceived missing content */
-  .kpi-grid,
-  .portal-grid,
-  .extended-grid,
-  .connect-grid,
-  .legal-grid,
-  .status-grid,
-  .howto-grid,
-  .api-grid {
-    align-items: stretch;
-  }
-
-  .panel,
-  .cfg-card,
-  .legal-box,
-  .mini-stat,
-  .kpi {
-    min-width: 0;
-  }
-
-  .meta-list li,
-  .mini-list li {
-    align-items: start;
-    gap: 10px;
-  }
-
-  .meta-list .key,
-  .mini-list .k {
-    min-width: 130px;
-  }
-
-  .meta-list li span:last-child,
-  .mini-list li span:last-child,
-  .panel code,
-  .panel .mono,
-  .cfg-card code,
-  .cfg-card .mono {
-    min-width: 0;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-
-  .table-wrap,
-  .lookup,
-  .pool-table {
-    min-width: 0;
-  }
-
-  .live-activity-panel .meta-list li {
-    grid-template-columns: minmax(210px, 36%) 1fr;
-    align-items: start;
-  }
-
-  .live-activity-panel .meta-list .key {
-    min-width: 0;
-  }
-
-  .live-activity-panel .meta-list li span:last-child {
-    min-width: 0;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-
-  /* Compact low-priority informational cards */
-  .portal-grid .card-compact {
-    padding: 8px 10px;
-  }
-
-  .portal-grid .card-compact h3 {
-    font-size: 0.86rem;
-    letter-spacing: 0.05em;
-  }
-
-  .portal-grid .card-compact .panel-sub {
-    margin: 2px 0 4px;
-    font-size: 0.72rem;
-    line-height: 1.25;
-  }
-
-  .portal-grid .card-compact .meta-list {
-    gap: 6px;
-  }
-
-  .portal-grid .card-compact .meta-list li {
-    padding: 4px 0;
-    font-size: 0.84rem;
-    grid-template-columns: 118px 1fr;
-  }
-
-  .portal-grid .card-compact .meta-list .key {
-    font-size: 0.70rem;
-    letter-spacing: 0.07em;
-  }
-
-  /* Compact trend cards */
-  .portal-grid .card-hashrate,
-  .portal-grid .card-difficulty {
-    padding: 6px 8px;
-    min-height: 118px;
-    align-self: start;
-  }
-
-  .portal-grid .card-hashrate h3,
-  .portal-grid .card-difficulty h3 {
-    font-size: 0.76rem;
-    letter-spacing: 0.03em;
-    margin: 0;
-  }
-
-  .portal-grid .card-hashrate .panel-sub,
-  .portal-grid .card-difficulty .panel-sub {
-    margin: 1px 0 3px;
-    font-size: 0.66rem;
-    line-height: 1.15;
-    opacity: 0.86;
-  }
-
-  .portal-grid .card-hashrate .chart-wrap,
-  .portal-grid .card-difficulty .chart-wrap {
-    padding: 2px;
-    border-radius: 8px;
-  }
-
-  .portal-grid .card-hashrate canvas,
-  .portal-grid .card-difficulty canvas {
-    height: 46px !important;
-  }
-
-  .portal-grid .card-legacy {
-    border: 1px solid rgba(80, 240, 184, 0.38);
-    background: linear-gradient(160deg, rgba(12, 24, 34, 0.82), rgba(10, 17, 28, 0.86));
-    box-shadow: 0 0 0 1px rgba(80,240,184,0.14) inset, 0 12px 28px rgba(0,0,0,0.35), 0 0 26px rgba(80,240,184,0.18);
-  }
-
-  .portal-grid .card-legacy h3 {
-    color: #d6ffe9;
-    font-size: 0.98rem;
-    letter-spacing: 0.06em;
-  }
-
-  .portal-grid .card-legacy .panel-sub {
-    color: rgba(214, 255, 233, 0.86);
-  }
-
-  .portal-grid .card-legacy .meta-list .key {
-    color: #9ef3cf;
-  }
-
-  /* Stable portal layout (simple order + spans) */
-  .portal-grid .card-economics { order: 1; grid-column: span 1; }
-  .portal-grid .card-performance { order: 2; grid-column: span 1; }
-  .portal-grid .card-ops { order: 3; grid-column: span 1; }
-
-  .portal-grid .card-hashrate { order: 4; grid-column: span 1; }
-  .portal-grid .card-difficulty { order: 5; grid-column: span 1; }
-  .portal-grid .card-legacy { order: 6; grid-column: 1 / -1; }
-
-  .portal-grid .card-live { order: 7; grid-column: span 3; }
-  .portal-grid .card-miner { order: 8; grid-column: span 3; }
-  .portal-grid .card-blocks { order: 9; grid-column: span 3; }
-  .portal-grid .card-payouts { order: 10; grid-column: span 3; }
-
-  @media (max-width: 1180px) {
-    .portal-grid .card-live,
-    .portal-grid .card-miner,
-    .portal-grid .card-blocks,
-    .portal-grid .card-payouts {
-      grid-column: span 2;
-    }
-
-    .portal-grid .card-economics,
-    .portal-grid .card-performance,
-    .portal-grid .card-ops,
-    .portal-grid .card-hashrate,
-    .portal-grid .card-difficulty {
-      grid-column: span 1;
-    }
-    .portal-grid .card-legacy {
-      grid-column: span 2;
-    }
-  }
-
-  @media (max-width: 820px) {
-    .portal-grid .card-economics,
-    .portal-grid .card-performance,
-    .portal-grid .card-ops,
-    .portal-grid .card-hashrate,
-    .portal-grid .card-live,
-    .portal-grid .card-difficulty,
-    .portal-grid .card-legacy,
-    .portal-grid .card-miner,
-    .portal-grid .card-blocks,
-    .portal-grid .card-payouts {
-      grid-column: span 1;
-    }
-
-    .live-activity-panel .meta-list li {
-      grid-template-columns: 1fr;
-    }
-  }
-
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+:root {
+  --bg:      #05060a;
+  --surf:    #0c1220;
+  --surf2:   #101928;
+  --bd:      rgba(124,139,255,.22);
+  --bd2:     rgba(124,139,255,.38);
+  --ok:      #41f0b8;
+  --warn:    #ffc766;
+  --bad:     #ff7878;
+  --txt:     #eef4ff;
+  --muted:   #8fa4c8;
+  --brand:   #6c8bff;
+  --brand2:  #41f0b8;
+  --mono:    'JetBrains Mono', ui-monospace, monospace;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+
+body {
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--txt);
+  overflow-x: hidden;
+}
+
+.pool-shell { padding-top: 100px; padding-bottom: 60px; }
+.pool-wrap  { width: min(1200px, 96vw); margin: 0 auto; }
+
+/* ─── Hero ─────────────────────────────────────────────── */
+.hero-block {
+  border: 1px solid var(--bd);
+  border-radius: 20px;
+  background: linear-gradient(150deg, rgba(14,20,48,.96) 0%, rgba(6,8,22,.96) 100%);
+  box-shadow: 0 0 60px rgba(108,139,255,.10);
+  overflow: hidden;
+  position: relative;
+  margin-bottom: 16px;
+}
+.hero-block::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(ellipse 60% 50% at 8% 30%, rgba(65,240,184,.09), transparent),
+    radial-gradient(ellipse 50% 40% at 90% 20%, rgba(108,139,255,.10), transparent);
+  pointer-events: none;
+}
+.hero-inner {
+  position: relative;
+  z-index: 1;
+  padding: 28px 32px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 28px;
+  align-items: start;
+}
+.hero-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: rgba(65,240,184,.08);
+  border: 1px solid rgba(65,240,184,.26);
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  color: var(--ok);
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.hero-live .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 8px rgba(65,240,184,.8);
+  animation: livePulse 1.6s ease-out infinite;
+}
+@keyframes livePulse {
+  0%   { box-shadow: 0 0 0 0 rgba(65,240,184,.6); }
+  70%  { box-shadow: 0 0 0 8px rgba(65,240,184,0); }
+  100% { box-shadow: 0 0 0 0 rgba(65,240,184,0); }
+}
+.hero-h1 {
+  font-family: 'Sora', sans-serif;
+  font-size: clamp(1.8rem, 3.2vw, 2.6rem);
+  font-weight: 800;
+  letter-spacing: .03em;
+  margin: 0 0 8px;
+  color: #fff;
+}
+.hero-sub { color: var(--muted); font-size: .96rem; margin: 0 0 20px; max-width: 640px; line-height: 1.6; }
+
+/* endpoints */
+.ep-stack { display: flex; flex-direction: column; gap: 8px; }
+.ep-row {
+  display: grid;
+  grid-template-columns: 110px 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+.ep-tag {
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  padding: 5px 8px;
+  border-radius: 8px;
+  text-align: center;
+  white-space: nowrap;
+}
+.ep-tag.asic  { background: rgba(108,139,255,.12); border: 1px solid rgba(108,139,255,.30); color: #9bb5ff; }
+.ep-tag.cpugpu{ background: rgba(65,240,184,.08); border: 1px solid rgba(65,240,184,.25); color: var(--ok); }
+.ep-tag.solo  { background: rgba(255,199,102,.08); border: 1px solid rgba(255,199,102,.25); color: var(--warn); }
+.ep-tag.fw    { background: rgba(255,120,120,.06); border: 1px solid rgba(255,120,120,.18); color: #ff9999; }
+.ep-tag.fb    { background: rgba(150,150,200,.06); border: 1px solid rgba(150,150,200,.15); color: #aab0cc; }
+.ep-val {
+  font-family: var(--mono);
+  font-size: .84rem;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: rgba(0,0,0,.38);
+  border: 1px solid rgba(255,255,255,.10);
+  color: #dde8ff;
+  word-break: break-all;
+}
+.copy-btn {
+  border: 1px solid rgba(108,139,255,.45);
+  border-radius: 8px;
+  background: rgba(108,139,255,.12);
+  color: #9bb5ff;
+  padding: 0 14px;
+  height: 36px;
+  font-size: .75rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background .18s, border-color .18s;
+}
+.copy-btn:hover  { background: rgba(108,139,255,.22); border-color: rgba(108,139,255,.66); }
+.copy-btn.copied { border-color: rgba(65,240,184,.5); background: rgba(65,240,184,.10); color: var(--ok); }
+
+/* hero right: quick config */
+.hero-right {
+  min-width: 260px;
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  background: rgba(0,0,0,.25);
+  padding: 18px 20px;
+}
+.hero-right h3 {
+  font-family: 'Sora', sans-serif;
+  font-size: .82rem;
+  font-weight: 700;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0 0 14px;
+}
+.cfg-row { display: flex; justify-content: space-between; align-items: center; padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,.05); }
+.cfg-row:last-child { border-bottom: 0; }
+.cfg-k  { font-size: .78rem; color: var(--muted); }
+.cfg-v  { font-family: var(--mono); font-size: .78rem; color: #dde8ff; text-align: right; }
+.cfg-v.green { color: var(--ok); font-weight: 700; }
+.cfg-v.live  { color: var(--ok); }
+
+/* ─── KPI bar ───────────────────────────────────────────── */
+.kpi-bar {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.kpi {
+  border: 1px solid var(--bd);
+  border-radius: 14px;
+  background: var(--surf);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transition: border-color .2s;
+}
+.kpi:hover { border-color: var(--bd2); }
+.kpi .label {
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.kpi .value {
+  font-family: var(--mono);
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #fff;
+  line-height: 1.2;
+}
+.kpi .value.ok   { color: var(--ok); }
+.kpi .value.warn { color: var(--warn); }
+
+/* ─── Layout grid ───────────────────────────────────────── */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+.full-row { grid-column: 1 / -1; }
+
+.panel {
+  border: 1px solid var(--bd);
+  border-radius: 16px;
+  background: var(--surf);
+  padding: 22px 24px;
+  transition: border-color .2s;
+}
+.panel:hover { border-color: var(--bd2); }
+.panel h3 {
+  font-family: 'Sora', sans-serif;
+  font-size: .95rem;
+  font-weight: 700;
+  letter-spacing: .05em;
+  margin: 0 0 4px;
+  color: #ddeaff;
+}
+.panel-sub { color: var(--muted); font-size: .82rem; margin: 0 0 16px; line-height: 1.5; }
+
+/* meta list */
+.meta-list { list-style: none; margin: 0; padding: 0; }
+.meta-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255,255,255,.05);
+  font-size: .84rem;
+}
+.meta-list li:last-child { border-bottom: 0; }
+.meta-list .k { color: var(--muted); flex-shrink: 0; }
+.meta-list .v { color: var(--txt); text-align: right; font-family: var(--mono); font-size: .82rem; word-break: break-all; }
+.meta-list .v.ok   { color: var(--ok); font-weight: 700; }
+.meta-list .v.warn { color: var(--warn); font-weight: 700; }
+.meta-list .v.bad  { color: var(--bad); }
+
+/* port sub-panels in stratum section */
+.port-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-top: 4px; }
+.port-panel {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  background: rgba(0,0,0,.22);
+  padding: 14px 16px;
+}
+.port-panel h4 {
+  font-family: var(--mono);
+  font-size: .78rem;
+  font-weight: 700;
+  margin: 0 0 10px;
+}
+.port-panel h4.asic  { color: #9bb5ff; }
+.port-panel h4.cpugpu{ color: var(--ok); }
+.port-panel h4.solo  { color: var(--warn); }
+.port-stat { display: flex; justify-content: space-between; font-size: .78rem; margin-bottom: 5px; }
+.port-stat .ps-k { color: var(--muted); }
+.port-stat .ps-v { font-family: var(--mono); color: var(--txt); }
+.port-stat .ps-v.ok { color: var(--ok); }
+
+/* table */
+.tbl-wrap { overflow-x: auto; margin-top: 8px; }
+.tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .82rem;
+}
+.tbl thead th {
+  padding: 8px 12px;
+  text-align: left;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .10em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  white-space: nowrap;
+}
+.tbl tbody td {
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255,255,255,.04);
+  color: var(--txt);
+  vertical-align: middle;
+}
+.tbl tbody tr:last-child td { border-bottom: 0; }
+.tbl tbody tr:hover td { background: rgba(108,139,255,.06); }
+.tbl .mono { font-family: var(--mono); font-size: .78rem; }
+.tbl .dim  { color: var(--muted); }
+
+/* worker bar */
+.worker-bar {
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255,255,255,.06);
+  overflow: hidden;
+  width: 70px;
+}
+.worker-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  background: linear-gradient(90deg, #4080ff, #41f0b8);
+}
+
+/* config snippets */
+.cfg-grid { display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; margin-top: 4px; }
+.cfg-card {
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  background: rgba(0,0,0,.25);
+  padding: 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.cfg-card h4 { font-family: 'Sora', sans-serif; font-size: .82rem; font-weight: 700; color: #ddeaff; margin: 0; }
+.cfg-card pre {
+  font-family: var(--mono);
+  font-size: .72rem;
+  background: rgba(0,0,0,.38);
+  border: 1px solid rgba(255,255,255,.07);
+  border-radius: 8px;
+  padding: 12px;
+  color: #c8deff;
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.65;
+  flex: 1;
+}
+
+/* lookup */
+.lookup { display: flex; gap: 8px; margin-bottom: 12px; }
+.lookup input {
+  flex: 1;
+  background: rgba(0,0,0,.35);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 8px;
+  color: var(--txt);
+  font-family: var(--mono);
+  font-size: .82rem;
+  padding: 9px 12px;
+  outline: none;
+  transition: border-color .18s;
+}
+.lookup input:focus { border-color: rgba(108,139,255,.5); }
+.lookup button {
+  background: linear-gradient(135deg, rgba(108,139,255,.35), rgba(65,240,184,.20));
+  border: 1px solid rgba(108,139,255,.45);
+  border-radius: 8px;
+  color: #9bb5ff;
+  padding: 0 16px;
+  font-size: .8rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: background .18s;
+}
+.lookup button:hover { background: linear-gradient(135deg, rgba(108,139,255,.5), rgba(65,240,184,.30)); }
+.lookup-result {
+  font-size: .82rem;
+  color: var(--muted);
+  line-height: 1.6;
+  font-family: var(--mono);
+  min-height: 60px;
+  background: rgba(0,0,0,.22);
+  border: 1px solid rgba(255,255,255,.06);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+/* badge */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: .68rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.badge.ok   { background: rgba(65,240,184,.12); color: var(--ok); border: 1px solid rgba(65,240,184,.28); }
+.badge.warn { background: rgba(255,199,102,.10); color: var(--warn); border: 1px solid rgba(255,199,102,.28); }
+.badge.bad  { background: rgba(255,120,120,.10); color: var(--bad); border: 1px solid rgba(255,120,120,.26); }
+.badge.dim  { background: rgba(255,255,255,.05); color: var(--muted); border: 1px solid rgba(255,255,255,.10); }
+
+/* ─── Mobile ─────────────────────────────────────────────── */
+.nav-hamburger {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 38px; height: 38px;
+  border: 1px solid rgba(149,177,226,.28);
+  border-radius: 8px;
+  background: rgba(16,23,42,.6);
+  cursor: pointer;
+  padding: 0 9px;
+  flex-shrink: 0;
+}
+.nav-hamburger span { display: block; height: 2px; background: #d9e6ff; border-radius: 2px; transition: transform .22s, opacity .22s; }
+.nav-hamburger.is-open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.nav-hamburger.is-open span:nth-child(2) { opacity: 0; }
+.nav-hamburger.is-open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+@media (max-width: 900px) {
+  .kpi-bar { grid-template-columns: repeat(3, 1fr); }
+  .main-grid { grid-template-columns: 1fr; }
+  .hero-inner { grid-template-columns: 1fr; }
+  .hero-right { min-width: 0; }
+  .port-grid { grid-template-columns: 1fr; }
+  .cfg-grid { grid-template-columns: 1fr; }
+  .ep-row { grid-template-columns: 90px 1fr auto; }
+}
+@media (max-width: 600px) {
+  .kpi-bar { grid-template-columns: repeat(2, 1fr); }
+  .pool-shell { padding-top: 80px; }
+  .hero-inner { padding: 20px 18px; }
+  .panel { padding: 16px 16px; }
+  .ep-row { grid-template-columns: 1fr; }
+  .ep-tag { width: fit-content; }
+  .nav-hamburger { display: flex; }
+  .nav-links { display: none !important; flex-direction: column; width: 100%; padding: .6rem 0 .8rem; gap: .1rem; border-top: 1px solid rgba(149,177,226,.18); margin-top: .4rem; }
+  .nav-links.is-open { display: flex !important; }
+  .nav-links a { padding: .55rem .4rem; font-size: .85rem; }
+  .nav-socials { display: none !important; }
+  .nav .container { flex-wrap: wrap; }
+}
 </style>
-<link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=1">
 </head>
 <body>
-<div class="stars"></div>
 
 <nav class="nav">
   <div class="container">
@@ -1269,7 +457,10 @@
       <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="logo">
       <span>IRIUM</span>
     </div>
-    <ul class="nav-links">
+    <button class="nav-hamburger" id="nav-hamburger" aria-label="Toggle navigation" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links" id="nav-links">
       <li><a href="https://www.iriumlabs.org/">HOME</a></li>
       <li><a href="https://www.iriumlabs.org/whitepaper.html">WHITEPAPER</a></li>
       <li><a href="https://www.iriumlabs.org/settlement/">SETTLEMENT</a></li>
@@ -1281,1086 +472,611 @@
     </ul>
     <div class="nav-socials">
       <a href="https://github.com/iriumlabs/irium" target="_blank" title="GitHub" rel="noopener"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></a>
-      <a href="https://x.com/GoIrium" target="_blank" title="X (Twitter)" rel="noopener"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>
+      <a href="https://x.com/GoIrium" target="_blank" title="X" rel="noopener"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg></a>
       <a href="https://t.me/iriumlabs" target="_blank" title="Telegram" rel="noopener"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg></a>
     </div>
   </div>
 </nav>
 
 <main class="pool-shell">
-  <div class="pool-wrap">
-    <section class="portal-hero">
-      <div class="hero-grid">
-        <div>
-          <div class="hero-brand">
-            <img class="hero-logo" src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium">
-            <div class="hero-eyebrow"><span class="dot"></span> Public Stratum Pool</div>
+<div class="pool-wrap">
+
+  <!-- ─── Hero ─────────────────────────────────────────── -->
+  <section class="hero-block">
+    <div class="hero-inner">
+      <div>
+        <div class="hero-live"><span class="dot"></span> Public Stratum Pool — pool.iriumlabs.org</div>
+        <h1 class="hero-h1">Irium Mining Pool</h1>
+        <p class="hero-sub">SHA-256d · 0% fee · Direct coinbase payout · ASIC / CPU / GPU / Solo. Every SHA-256d miner that can mine Bitcoin can mine IRM with no hardware changes.</p>
+        <div class="ep-stack">
+          <div class="ep-row">
+            <span class="ep-tag asic">ASIC &nbsp;3333</span>
+            <div class="ep-val" id="ep-asic">stratum+tcp://pool.iriumlabs.org:3333</div>
+            <button class="copy-btn" data-ep="ep-asic">Copy</button>
           </div>
-          <h1 class="hero-title">Irium Stratum Pool Portal</h1>
-          <p class="hero-sub">Use the public Stratum DNS hostname only. ASIC and modern firmware mine on port 3333; CPU/GPU software miners use the compatibility profile on port 3335.</p>
-
-          <div class="endpoint-stack">
-            <div class="endpoint-card">
-              <span class="endpoint-label">ASIC / Modern</span>
-              <div id="primary-endpoint" class="endpoint-main">stratum+tcp://pool.iriumlabs.org:3333</div>
-              <button class="copy-btn" data-copy="primary-endpoint">Copy</button>
-            </div>
-            <div class="endpoint-card">
-              <span class="endpoint-label">CPU / GPU</span>
-              <div id="legacy-endpoint" class="endpoint-main">stratum+tcp://pool.iriumlabs.org:3335</div>
-              <button class="copy-btn secondary" data-copy="legacy-endpoint">Copy</button>
-            </div>
+          <div class="ep-row">
+            <span class="ep-tag cpugpu">CPU/GPU &nbsp;3335</span>
+            <div class="ep-val" id="ep-cpugpu">stratum+tcp://pool.iriumlabs.org:3335</div>
+            <button class="copy-btn" data-ep="ep-cpugpu">Copy</button>
           </div>
-
-          <div class="hero-note">Backend host IPs are intentionally not published. If DNS has not been cut over yet, wait for operator confirmation before announcing the pool.</div>
-          <div id="hero-route-badge" class="hero-route-badge"><span class="dot"></span><span id="hero-route-text">Active Route: Checking...</span></div>
+          <div class="ep-row">
+            <span class="ep-tag solo">Solo &nbsp;3336</span>
+            <div class="ep-val" id="ep-solo">stratum+tcp://pool.iriumlabs.org:3336</div>
+            <button class="copy-btn" data-ep="ep-solo">Copy</button>
+          </div>
+          <div class="ep-row">
+            <span class="ep-tag fw">FW bypass &nbsp;443</span>
+            <div class="ep-val" id="ep-fw">stratum+tcp://pool.iriumlabs.org:443</div>
+            <button class="copy-btn" data-ep="ep-fw">Copy</button>
+          </div>
+          <div class="ep-row">
+            <span class="ep-tag fb">Fallback &nbsp;80</span>
+            <div class="ep-val" id="ep-fb">stratum+tcp://pool.iriumlabs.org:80</div>
+            <button class="copy-btn" data-ep="ep-fb">Copy</button>
+          </div>
         </div>
-        <aside class="hero-right">
-          <h3>Miner Setup</h3>
-          <ul class="setup-grid">
-            <li class="setup-row"><span class="setup-key">Algorithm</span><span class="setup-value">SHA-256d</span></li>
-            <li class="setup-row"><span class="setup-key">Mode</span><span class="setup-value">SOLO</span></li>
-            <li class="setup-row"><span class="setup-key">Username</span><span class="setup-value mono">YOUR_IRIUM_WALLET_ADDRESS.worker1</span></li>
-            <li class="setup-row"><span class="setup-key">Password</span><span class="setup-value mono">x</span></li>
-            <li class="setup-row"><span class="setup-key">Ports</span><span class="setup-value mono">3333 ASIC, 3335 CPU/GPU</span></li>
-            <li class="setup-row"><span class="setup-key">Status</span><span class="setup-value"><span id="pool-live-pill" class="status-badge">LOADING...</span></span></li>
-            <li class="setup-row"><span class="setup-key">Last Update</span><span id="pool-updated-pill" class="setup-value">--:--:--</span></li>
-          </ul>
-          <p class="panel-sub" style="margin-top:12px;">SOLO payout: when your miner finds a valid block, the coinbase reward is paid directly to the wallet address in your username.</p>
-        </aside>
+        <p style="font-size:.74rem;color:var(--muted);margin-top:10px;">
+          ⚠ Port 443 is plain TCP routed via sslh — use <code>stratum+tcp://</code>, <strong>not</strong> <code>stratum+ssl://</code>. Disable TLS in your miner config when using port 443.
+        </p>
       </div>
-    </section>
-
-    <section class="kpi-grid" aria-label="Top metrics">
-      <article class="kpi"><div class="label">Network Height</div><div id="k-height" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Network Hashrate (Chain Estimate)</div><div id="k-hashrate" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Difficulty</div><div id="k-difficulty" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Active Peers</div><div id="k-peers" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Active Miners (144 blocks)</div><div id="k-miners" class="value">Loading...</div></article>
-      <article class="kpi"><div class="label">Avg Block Time</div><div id="k-blocktime" class="value">Loading...</div></article>
-    </section>
-
-    <section class="portal-grid">
-      <article class="panel card-ops card-compact">
-        <h3>Operational Status</h3>
-        <p class="panel-sub">Public endpoint diagnostics and miner-side checks.</p>
-        <ul class="meta-list">
-          <li><span class="key">ASIC Endpoint</span><span class="mono">pool.iriumlabs.org:3333</span></li>
-          <li><span class="key">CPU/GPU Endpoint</span><span class="mono">pool.iriumlabs.org:3335</span></li>
-          <li><span class="key">Failover Policy</span><span>DNS hostname only; raw backend IPs are not public.</span></li>
-          <li><span class="key">Explorer API</span><span id="ops-api">Loading...</span></li>
-          <li><span class="key">Stratum Health (/health)</span><span id="ops-stratum-health">Checking...</span></li>
-          <li><span class="key">Template Age</span><span id="ops-template-age">Checking...</span></li>
-          <li><span class="key">Last Refresh</span><span id="ops-updated">Loading...</span></li>
-          <li><span class="key">Troubleshoot</span><span>Allow outbound TCP 3333 for ASICs or TCP 3335 for CPU/GPU software miners.</span></li>
-        </ul>
-      </article>
-
-      <article class="panel card-economics card-compact">
-        <h3>Pool Economics</h3>
-        <p class="panel-sub">Production parameters used by miners and listing sites.</p>
-        <ul class="meta-list">
-          <li><span class="key">Fee</span><span><b class="green">0%</b> (solo direct reward model)</span></li>
-          <li><span class="key">Payout Model</span><span><b>SOLO</b> (full coinbase to miner address)</span></li>
-          <li><span class="key">Min Payout</span><span><b>None</b> (on found block, chain maturity rules apply)</span></li>
-          <li><span class="key">Payout Schedule</span><span><b>On-chain</b> when your block is accepted</span></li>
-          <li><span class="key">Public Hostname</span><span>pool.iriumlabs.org</span></li>
-          <li><span class="key">Support</span><span>Telegram + GitHub Issues</span></li>
-        </ul>
-      </article>
-
-      <article class="panel card-legacy card-compact">
-        <h3>Miner Compatibility</h3>
-        <p class="panel-sub">Choose the endpoint by miner class.</p>
-        <ul class="meta-list">
-          <li><span class="key">ASIC / modern firmware</span><span class="mono">stratum+tcp://pool.iriumlabs.org:3333</span></li>
-          <li><span class="key">CPU software miners</span><span class="mono">stratum+tcp://pool.iriumlabs.org:3335</span></li>
-          <li><span class="key">GPU software miners</span><span class="mono">stratum+tcp://pool.iriumlabs.org:3335</span></li>
-          <li><span class="key">Quick Test 3333</span><span class="mono">printf '{"id":1,"method":"mining.subscribe","params":[]}
-' | nc pool.iriumlabs.org 3333</span></li>
-          <li><span class="key">Quick Test 3335</span><span class="mono">printf '{"id":1,"method":"mining.subscribe","params":[]}
-' | nc pool.iriumlabs.org 3335</span></li>
-        </ul>
-      </article>
-
-      <article class="panel card-performance card-compact">
-        <h3>Pool Performance</h3>
-        <p class="panel-sub">Recent throughput and expected production based on live chain pace.</p>
-        <ul class="meta-list">
-          <li><span class="key">Blocks / 24h (network)</span><span id="perf-24h">Loading...</span></li>
-          <li><span class="key">Blocks / 7d (network)</span><span id="perf-7d">Loading...</span></li>
-          <li><span class="key">Expected Blocks / Day</span><span id="perf-exp-day">Loading...</span></li>
-          <li><span class="key">Estimated Daily Emission</span><span id="perf-emission" class="reward-value">Loading...</span></li>
-          <li><span class="key">Difficulty Delta</span><span id="perf-diffdelta">Loading...</span></li>
-          <li><span class="key">Public API Health</span><span id="perf-api">Loading...</span></li>
-        </ul>
-      </article>
-    </section>
-
-    <section class="portal-grid pool-telemetry-grid" aria-label="Live pool dashboard" style="margin-top:14px;">
-      <article class="panel card-live card-compact">
-        <h3>Live Stratum Telemetry <span id="backend-badge" class="status-badge" style="margin-left:8px;">Loading</span></h3>
-        <p id="b-note" class="panel-sub">Loading pool telemetry from the public API.</p>
-        <ul class="meta-list">
-          <li><span class="key">Connected Sessions</span><span id="live-workers">Loading...</span></li>
-          <li><span class="key">Active Miner Addresses</span><span id="live-active-miners">Loading...</span></li>
-          <li><span class="key">Accepted Shares</span><span id="live-accepted">Loading...</span></li>
-          <li><span class="key">Rejected Shares</span><span id="live-rejected">Loading...</span></li>
-          <li><span class="key">Reject Breakdown</span><span id="live-reject-breakdown">Loading...</span></li>
-          <li><span class="key">Share Integrity</span><span id="live-integrity">Loading...</span></li>
-          <li><span class="key">Last Accepted Share</span><span id="live-last-accept">Loading...</span></li>
-          <li><span class="key">Last Rejected Share</span><span id="live-last-reject">Loading...</span></li>
-        </ul>
-      </article>
-
-      <article class="panel card-live card-compact">
-        <h3>Pool Backend Counters</h3>
-        <p class="panel-sub">SOLO pool counters from Stratum metrics and chain attribution.</p>
-        <ul class="meta-list">
-          <li><span class="key">Backend Status</span><span id="live-backend">Loading...</span></li>
-          <li><span class="key">Metrics Connected</span><span id="live-metrics-connected">Loading...</span></li>
-          <li><span class="key">Metrics Source</span><span id="live-metrics-source">Loading...</span></li>
-          <li><span class="key">Pool Hashrate</span><span id="live-pool-hashrate">Loading...</span></li>
-          <li><span class="key">Payout Model</span><span id="live-payout-model">Loading...</span></li>
-          <li><span class="key">Tip Alignment</span><span id="live-tip-align">Loading...</span></li>
-          <li><span class="key">Last Pool Block</span><span id="live-last-found">Loading...</span></li>
-          <li><span class="key">Trust Note</span><span id="live-trust-note">Loading...</span></li>
-        </ul>
-      </article>
-
-      <article class="panel card-live card-compact">
-        <h3>Candidate And Submit Path</h3>
-        <p class="panel-sub">These fields prove whether shares are becoming block candidates and whether submits are accepted by the node.</p>
-        <ul class="meta-list">
-          <li><span class="key">Candidates Detected</span><span id="live-candidates-detected">Loading...</span></li>
-          <li><span class="key">Candidates Submitted</span><span id="live-candidates-submitted">Loading...</span></li>
-          <li><span class="key">Blocks Accepted</span><span id="live-blocks-accepted">Loading...</span></li>
-          <li><span class="key">Submit Rejected</span><span id="live-submit-rejected">Loading...</span></li>
-          <li><span class="key">Pool Blocks On Chain</span><span id="live-chain-attributed">Loading...</span></li>
-          <li><span class="key">Round Effort</span><span id="live-round-effort">Loading...</span></li>
-          <li><span class="key">Round Luck</span><span id="live-round-luck">Loading...</span></li>
-        </ul>
-      </article>
-
-      <article class="panel card-live card-compact">
-        <h3>Dashboard Summary</h3>
-        <p class="panel-sub">Compact counters for quick operator checks.</p>
-        <ul class="meta-list">
-          <li><span class="key">Workers / Sessions</span><span id="b-workers">Loading...</span></li>
-          <li><span class="key">Accepted</span><span id="b-accepted">Loading...</span></li>
-          <li><span class="key">Rejected</span><span id="b-rejected">Loading...</span></li>
-          <li><span class="key">Pending Payouts</span><span id="b-pending">Loading...</span></li>
-          <li><span class="key">Last Template</span><span id="b-last-template">Loading...</span></li>
-          <li><span class="key">Last Accept</span><span id="b-last-accept">Loading...</span></li>
-          <li><span class="key">Last Reject</span><span id="b-last-reject">Loading...</span></li>
-        </ul>
-      </article>
-
-      <article class="panel card-live card-compact">
-        <h3>Miner Distribution</h3>
-        <p class="panel-sub">Chain-derived miner distribution over the public API window.</p>
-        <ul class="meta-list">
-          <li><span class="key">Unique Miners</span><span id="live-unique-miners">Loading...</span></li>
-          <li><span class="key">Top Miner Share</span><span id="live-top1-share">Loading...</span></li>
-          <li><span class="key">Top 5 Share</span><span id="live-top5-share">Loading...</span></li>
-          <li><span class="key">Top Address</span><span id="live-top-address" class="mono">Loading...</span></li>
-        </ul>
-      </article>
-
-      <article class="panel card-live card-compact">
-        <h3>Status Signals</h3>
-        <p class="panel-sub">API freshness, watchdog, and incident indicators.</p>
-        <ul class="meta-list">
-          <li><span class="key">Dashboard Health</span><span id="s-health">Loading...</span></li>
-          <li><span class="key">Pool Health API</span><span id="s-health-api">Loading...</span></li>
-          <li><span class="key">Freshness</span><span id="s-freshness">Loading...</span></li>
-          <li><span class="key">API Latency</span><span id="s-latency">Loading...</span></li>
-          <li><span class="key">Watchdog</span><span id="s-watchdog">Loading...</span></li>
-          <li><span class="key">Uptime Signal</span><span id="s-uptime">Loading...</span></li>
-          <li><span class="key">Health Reason</span><span id="s-health-reason">Loading...</span></li>
-        </ul>
-        <ul id="incident-list" class="m-list" style="margin-top:10px;"><li>Loading incidents...</li></ul>
-      </article>
-
-      <article class="panel card-miner card-compact">
-        <h3>Miner Block Lookup</h3>
-        <p class="panel-sub">Check recent chain blocks mined by a payout address.</p>
-        <div class="lookup">
-          <input id="miner-input" type="text" placeholder="Enter IRM address">
-          <button id="miner-btn" type="button">Lookup</button>
+      <aside class="hero-right">
+        <h3>Pool Config</h3>
+        <div class="cfg-row"><span class="cfg-k">Algorithm</span><span class="cfg-v">SHA-256d</span></div>
+        <div class="cfg-row"><span class="cfg-k">Fee</span><span class="cfg-v green">0%</span></div>
+        <div class="cfg-row"><span class="cfg-k">Payout</span><span class="cfg-v">Direct coinbase</span></div>
+        <div class="cfg-row"><span class="cfg-k">Min payout</span><span class="cfg-v">On block found</span></div>
+        <div class="cfg-row"><span class="cfg-k">Username</span><span class="cfg-v">IRM_ADDRESS.worker</span></div>
+        <div class="cfg-row"><span class="cfg-k">Password</span><span class="cfg-v">x</span></div>
+        <div class="cfg-row"><span class="cfg-k">Maturity</span><span class="cfg-v">100 blocks (~3 h)</span></div>
+        <div class="cfg-row"><span class="cfg-k">API status</span><span class="cfg-v live" id="hero-api-status">Loading…</span></div>
+        <div class="cfg-row"><span class="cfg-k">Updated</span><span class="cfg-v" id="hero-updated">—</span></div>
+        <div style="margin-top:14px;">
+          <a href="https://www.iriumlabs.org/docs/mining/" style="display:block;text-align:center;padding:9px;border-radius:8px;background:rgba(108,139,255,.14);border:1px solid rgba(108,139,255,.35);color:#9bb5ff;font-size:.78rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;">Full Mining Guide ↗</a>
         </div>
-        <div id="miner-result" class="lookup-result">Enter a miner address to search the loaded block window.</div>
-      </article>
+      </aside>
+    </div>
+  </section>
 
-      <article class="panel card-miner card-compact">
-        <h3>Pool Account Lookup</h3>
-        <p class="panel-sub">Check pool-account attribution when public account records are available.</p>
-        <div class="lookup">
-          <input id="acct-input" type="text" placeholder="Enter IRM address">
-          <button id="acct-btn" type="button">Lookup</button>
-        </div>
-        <div id="acct-result" class="lookup-result">Enter a payout address.</div>
-      </article>
-
-      <article class="panel card-blocks card-compact">
-        <h3>Recent Network Blocks</h3>
-        <p class="panel-sub">Latest blocks from the public explorer API.</p>
-        <div class="table-wrap">
-          <table id="blocks-table" class="pool-table">
-            <thead><tr><th>Height</th><th>Time</th><th>Hash</th><th>Miner</th><th>Reward</th><th>Txs</th></tr></thead>
-            <tbody id="blocks-body"><tr><td colspan="6">Loading blocks...</td></tr></tbody>
-          </table>
-        </div>
-      </article>
-
-      <article class="panel card-payouts card-compact">
-        <h3>Pool-Attributed Blocks</h3>
-        <p class="panel-sub">Blocks submitted through the public Stratum pool. SOLO rewards pay directly on chain.</p>
-        <div class="table-wrap">
-          <table id="pool-found-table" class="pool-table">
-            <thead><tr><th>Height</th><th>Time</th><th>Miner</th><th>Reward</th><th>Status</th><th>Reference</th></tr></thead>
-            <tbody id="pool-found-body"><tr><td colspan="6">Loading pool block attribution...</td></tr></tbody>
-          </table>
-        </div>
-      </article>
-    </section>
-
-    <section class="panel" style="margin-top:14px;">
-      <h3>Miner Config Quickstart</h3>
-      <p class="panel-sub">Ready-to-use snippets. Replace <code>YOUR_IRIUM_WALLET_ADDRESS</code> with your own IRM address.</p>
-      <div class="connect-grid">
-        <div class="cfg-card">
-          <h4>ASIC Miner UI</h4>
-          <pre id="cfg-asic-ui">Algorithm: SHA-256d
-Pool URL: stratum+tcp://pool.iriumlabs.org:3333
-Worker: YOUR_IRIUM_WALLET_ADDRESS.worker1
-Password: x</pre>
-          <button class="copy-btn" data-copy="cfg-asic-ui">Copy Setup</button>
-        </div>
-        <div class="cfg-card">
-          <h4>Windows CPU Miner (cpuminer-opt)</h4>
-          <pre id="cfg-win-soft">dir *.exe
-.\cpuminer-&lt;your-cpu-build&gt;.exe -a sha256d ^
-  -o stratum+tcp://pool.iriumlabs.org:3335 ^
-  -u YOUR_IRIUM_WALLET_ADDRESS.worker1 ^
-  -p x ^
-  -t 4</pre>
-          <p class="tiny">Use the executable that exists in your extracted folder, such as cpuminer-avx2.exe, cpuminer-avx2-sha-vaes.exe, or cpuminer-sse2.exe.</p>
-          <button class="copy-btn" data-copy="cfg-win-soft">Copy Command</button>
-        </div>
-        <div class="cfg-card">
-          <h4>Linux / macOS CPU Miner (cpuminer-opt)</h4>
-          <pre id="cfg-unix-soft">./cpuminer -a sha256d \
-  -o stratum+tcp://pool.iriumlabs.org:3335 \
-  -u YOUR_IRIUM_WALLET_ADDRESS.worker1 \
-  -p x \
-  -t 4</pre>
-          <p class="tiny">cpuminer-opt is CPU-only. GPU miners need a separate SHA-256d-capable Stratum client on the same 3335 endpoint.</p>
-          <button class="copy-btn" data-copy="cfg-unix-soft">Copy Command</button>
-        </div>
-      </div>
-      <p class="tiny" style="margin-top:10px;">Do not point public-pool miners at <code>127.0.0.1:38300</code>; that is local node RPC/template mining.</p>
-    </section>
-
-    <section class="panel" style="margin-top:14px;">
-      <h3>Miner Compatibility Matrix</h3>
-      <div class="table-wrap">
-        <table class="pool-table">
-          <thead><tr><th>Miner Type</th><th>OS</th><th>Status</th><th>Notes</th></tr></thead>
-          <tbody>
-            <tr><td>Antminer / Whatsminer ASIC</td><td>Embedded Linux</td><td><span class="green">Recommended</span></td><td>Use SHA-256d on port 3333.</td></tr>
-            <tr><td>CPU software miner</td><td>Windows/Linux/macOS</td><td><span class="amber">Supported</span></td><td>Use port 3335; typically useful for testing and onboarding.</td></tr>
-            <tr><td>GPU software miner</td><td>Windows/Linux</td><td><span class="amber">Supported</span></td><td>Use port 3335 with a SHA-256d-capable client.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel" style="margin-top:14px;" id="sha256d-compatibility">
-      <h3>SHA-256d Hardware Compatibility</h3>
-      <p class="panel-sub">Irium uses SHA-256d &mdash; the same double-SHA256 algorithm as Bitcoin. Every SHA-256d ASIC mines Irium with no firmware or hardware changes required.</p>
-      <div class="table-wrap">
-        <table class="pool-table">
-          <thead><tr><th>Hardware</th><th>Endpoint</th><th>Status</th></tr></thead>
-          <tbody>
-            <tr><td>Antminer S19 / S21 series</td><td>stratum+tcp://pool.iriumlabs.org:3333</td><td><span class="green">Full compatibility</span></td></tr>
-            <tr><td>Whatsminer M50 / M60 series</td><td>stratum+tcp://pool.iriumlabs.org:3333</td><td><span class="green">Full compatibility</span></td></tr>
-            <tr><td>Any SHA-256d ASIC</td><td>stratum+tcp://pool.iriumlabs.org:3333</td><td><span class="green">Full compatibility</span></td></tr>
-            <tr><td>CPU software miner (cpuminer-opt)</td><td>stratum+tcp://pool.iriumlabs.org:3335</td><td><span class="amber">Supported</span></td></tr>
-          </tbody>
-        </table>
-      </div>
-    </section>
-
-    <section class="panel" style="margin-top:14px;" id="merged-mining-status">
-      <h3>Merged Mining (AuxPoW)</h3>
-      <p class="panel-sub">Mining Irium alongside Bitcoin at zero extra energy cost &mdash; status and roadmap.</p>
-      <ul class="meta-list">
-        <li><span class="key">AuxPoW status</span><span><b style="color:var(--warn)">Not yet implemented</b> &mdash; planned future addition</span></li>
-        <li><span class="key">What works today</span><span>Any SHA-256d ASIC mines Irium as a standalone chain</span></li>
-        <li><span class="key">When AuxPoW lands</span><span>SHA-256d ASICs will mine IRM alongside BTC with zero extra energy</span></li>
-        <li><span class="key">Algorithm confirmed</span><span>SHA-256d &mdash; block header is standard Bitcoin 80-byte format</span></li>
-        <li><span class="key">Merged mining guide</span><span><a href="https://github.com/iriumlabs/irium/blob/main/docs/MERGED-MINING.md" target="_blank" rel="noopener">docs/MERGED-MINING.md</a></span></li>
-      </ul>
-    </section>
-
-    <section class="panel" style="margin-top:14px;" id="block-economics">
-      <h3>Block Economics</h3>
-      <p class="panel-sub">Live block reward and emission data.</p>
-      <ul class="meta-list">
-        <li><span class="key">Current block reward</span><span id="econ-reward"><b>50 IRM</b></span></li>
-        <li><span class="key">Next halving at block</span><span>210,000 (first halving)</span></li>
-        <li><span class="key">Max supply</span><span>100,000,000 IRM</span></li>
-        <li><span class="key">Halving schedule</span><span>Every 210,000 blocks &mdash; identical to Bitcoin</span></li>
-        <li><span class="key">Pool fee (iriumlabs.org)</span><span><b class="green">0%</b> &mdash; SOLO payout model</span></li>
-        <li><span class="key">Coinbase maturity</span><span>100 blocks before reward is spendable</span></li>
-        <li><span class="key">Network hashrate</span><span id="econ-hashrate"><b>Loading...</b></span></li>
-        <li><span class="key">Current difficulty</span><span id="econ-difficulty"><b>Loading...</b></span></li>
-      </ul>
-    </section>
-
-    <section class="panel" style="margin-top:14px;">
-      <h3>Troubleshooting Payload</h3>
-      <p class="panel-sub">Share miner software/version, endpoint port, wallet worker name, and 30-50 lines of miner logs if mining fails.</p>
-    </section>
+  <!-- ─── KPI bar ─────────────────────────────────────── -->
+  <div class="kpi-bar">
+    <div class="kpi"><div class="label">Network Height</div><div class="value" id="k-height">—</div></div>
+    <div class="kpi"><div class="label">Network Hashrate</div><div class="value" id="k-hashrate">—</div></div>
+    <div class="kpi"><div class="label">Difficulty</div><div class="value" id="k-diff">—</div></div>
+    <div class="kpi"><div class="label">Miners Online</div><div class="value ok" id="k-miners">—</div></div>
+    <div class="kpi"><div class="label">Pool Blocks Accepted</div><div class="value" id="k-blocks">—</div></div>
+    <div class="kpi"><div class="label">Circulating Supply</div><div class="value" id="k-supply">—</div></div>
   </div>
+
+  <!-- ─── Two-column: Stratum telemetry + block economics ─ -->
+  <div class="main-grid">
+
+    <!-- Stratum telemetry -->
+    <article class="panel">
+      <h3>Live Stratum Telemetry</h3>
+      <p class="panel-sub">Real-time data from <code>api.iriumlabs.org/api/pool/stats</code> — refreshes every 15 s.</p>
+      <div class="port-grid">
+        <div class="port-panel">
+          <h4 class="asic">ASIC · :3333</h4>
+          <div class="port-stat"><span class="ps-k">Miners</span><span class="ps-v ok" id="pt-asic-miners">—</span></div>
+          <div class="port-stat"><span class="ps-k">Accepted</span><span class="ps-v" id="pt-asic-acc">—</span></div>
+          <div class="port-stat"><span class="ps-k">Rejected</span><span class="ps-v" id="pt-asic-rej">—</span></div>
+          <div class="port-stat"><span class="ps-k">Blocks</span><span class="ps-v" id="pt-asic-blk">—</span></div>
+          <div class="port-stat"><span class="ps-k">Hashrate</span><span class="ps-v" id="pt-asic-hr">—</span></div>
+        </div>
+        <div class="port-panel">
+          <h4 class="cpugpu">CPU/GPU · :3335</h4>
+          <div class="port-stat"><span class="ps-k">Miners</span><span class="ps-v" id="pt-cpu-miners">—</span></div>
+          <div class="port-stat"><span class="ps-k">Accepted</span><span class="ps-v" id="pt-cpu-acc">—</span></div>
+          <div class="port-stat"><span class="ps-k">Rejected</span><span class="ps-v" id="pt-cpu-rej">—</span></div>
+          <div class="port-stat"><span class="ps-k">Blocks</span><span class="ps-v" id="pt-cpu-blk">—</span></div>
+          <div class="port-stat"><span class="ps-k">Hashrate</span><span class="ps-v" id="pt-cpu-hr">—</span></div>
+        </div>
+        <div class="port-panel">
+          <h4 class="solo">Solo · :3336</h4>
+          <div class="port-stat"><span class="ps-k">Miners</span><span class="ps-v" id="pt-solo-miners">—</span></div>
+          <div class="port-stat"><span class="ps-k">Accepted</span><span class="ps-v" id="pt-solo-acc">—</span></div>
+          <div class="port-stat"><span class="ps-k">Rejected</span><span class="ps-v" id="pt-solo-rej">—</span></div>
+          <div class="port-stat"><span class="ps-k">Blocks</span><span class="ps-v" id="pt-solo-blk">—</span></div>
+          <div class="port-stat"><span class="ps-k">Hashrate</span><span class="ps-v" id="pt-solo-hr">—</span></div>
+        </div>
+      </div>
+      <ul class="meta-list" style="margin-top:16px;">
+        <li><span class="k">Total miners online</span><span class="v ok" id="tl-total-miners">—</span></li>
+        <li><span class="k">Total blocks found (all time)</span><span class="v" id="tl-total-blocks">—</span></li>
+        <li><span class="k">Blocks found today</span><span class="v" id="tl-today-blocks">—</span></li>
+        <li><span class="k">Pool hashrate (chain-derived)</span><span class="v" id="tl-pool-hr">—</span></li>
+        <li><span class="k">Share integrity</span><span class="v" id="tl-integrity">—</span></li>
+        <li><span class="k">Rejected share rate</span><span class="v" id="tl-rej-rate">—</span></li>
+        <li><span class="k">Candidates detected / submitted</span><span class="v" id="tl-candidates">—</span></li>
+        <li><span class="k">Chain-attributed blocks</span><span class="v" id="tl-chain-attr">—</span></li>
+        <li><span class="k">Last accepted share</span><span class="v" id="tl-last-acc">—</span></li>
+      </ul>
+    </article>
+
+    <!-- Block economics + network -->
+    <article class="panel">
+      <h3>Block Economics &amp; Network</h3>
+      <p class="panel-sub">Consensus parameters and live network metrics from <code>/api/stats</code>.</p>
+      <ul class="meta-list">
+        <li><span class="k">Block reward</span><span class="v ok">50 IRM</span></li>
+        <li><span class="k">Block time target</span><span class="v">2 min (120 s) — V2 active at block 24,250</span></li>
+        <li><span class="k">Difficulty adjustment</span><span class="v">LWMA v2, 30-block window (active block 19,740)</span></li>
+        <li><span class="k">Halving interval</span><span class="v">1,050,000 blocks (~4 yr)</span></li>
+        <li><span class="k">Next halving at block</span><span class="v" id="econ-next-halving">1,050,000</span></li>
+        <li><span class="k">Blocks until halving</span><span class="v" id="econ-blocks-to-halving">—</span></li>
+        <li><span class="k">Total supply cap</span><span class="v">100,000,000 IRM</span></li>
+        <li><span class="k">Current circulating supply</span><span class="v" id="econ-supply">—</span></li>
+        <li><span class="k">Coinbase maturity</span><span class="v">100 blocks (~3 h at 2 min blocks)</span></li>
+        <li><span class="k">Algorithm</span><span class="v">SHA-256d (identical to Bitcoin)</span></li>
+        <li><span class="k">Consensus</span><span class="v">Objective-only PoW — no admin keys</span></li>
+        <li><span class="k">AuxPoW merged mining</span><span class="v warn">Activates at block 26,500</span></li>
+        <li><span class="k">Current height</span><span class="v" id="econ-height">—</span></li>
+        <li><span class="k">Live difficulty</span><span class="v" id="econ-diff">—</span></li>
+        <li><span class="k">Network peers</span><span class="v" id="econ-peers">—</span></li>
+        <li><span class="k">Expected blocks / 24 h</span><span class="v">720</span></li>
+        <li><span class="k">Expected daily emission</span><span class="v">36,000 IRM</span></li>
+      </ul>
+    </article>
+
+    <!-- Workers leaderboard -->
+    <article class="panel full-row">
+      <h3>Active Miners — Last 144 Blocks</h3>
+      <p class="panel-sub">From <code>/api/pool/workers?window=144&amp;limit=20</code>. Hashrate estimated from blocks found in window. Refresh every 30 s.</p>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr>
+            <th>#</th>
+            <th>Address</th>
+            <th>Blocks Found</th>
+            <th>Share %</th>
+            <th>Est. Hashrate</th>
+            <th>Distribution</th>
+          </tr></thead>
+          <tbody id="workers-body"><tr><td colspan="6" class="dim" style="padding:18px 12px;">Loading miners…</td></tr></tbody>
+        </table>
+      </div>
+    </article>
+
+    <!-- Pool blocks -->
+    <article class="panel full-row">
+      <h3>Recent Pool Blocks</h3>
+      <p class="panel-sub">Blocks submitted and accepted through the public Stratum pool from <code>/api/pool/blocks</code>. Direct coinbase payout to miner address on each block.</p>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr>
+            <th>Height</th>
+            <th>Time</th>
+            <th>Miner Address</th>
+            <th>Reward</th>
+            <th>Status</th>
+            <th>Block Hash</th>
+          </tr></thead>
+          <tbody id="pool-blocks-body"><tr><td colspan="6" class="dim" style="padding:18px 12px;">Loading pool blocks…</td></tr></tbody>
+        </table>
+      </div>
+    </article>
+
+    <!-- Network recent blocks -->
+    <article class="panel full-row">
+      <h3>Recent Network Blocks</h3>
+      <p class="panel-sub">Latest blocks from <code>/api/blocks?limit=15</code> — includes all miners, pool and non-pool.</p>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr>
+            <th>Height</th>
+            <th>Time</th>
+            <th>Miner Address</th>
+            <th>Block Hash</th>
+            <th>Source</th>
+          </tr></thead>
+          <tbody id="net-blocks-body"><tr><td colspan="5" class="dim" style="padding:18px 12px;">Loading network blocks…</td></tr></tbody>
+        </table>
+      </div>
+    </article>
+
+    <!-- Miner lookup -->
+    <article class="panel">
+      <h3>Miner Account Lookup</h3>
+      <p class="panel-sub">Fetch your block history, paid total, pending balance, and last found block from <code>/api/pool/account/{address}</code>.</p>
+      <div class="lookup">
+        <input id="acct-input" type="text" placeholder="Enter IRM address (starts with Q or P)…">
+        <button id="acct-btn">Lookup</button>
+      </div>
+      <div id="acct-result" class="lookup-result">Enter a miner address above to fetch pool account data.</div>
+    </article>
+
+    <!-- Quick config snippets -->
+    <article class="panel">
+      <h3>Quick Connect Snippets</h3>
+      <p class="panel-sub">Replace <code>YOUR_IRM_ADDRESS</code> with your wallet address. Worker suffix (<code>.rig1</code>) is for labelling only.</p>
+      <div class="cfg-grid">
+        <div class="cfg-card">
+          <h4>ASIC Firmware (any SHA-256d)</h4>
+          <pre id="cfg-asic">Algorithm: SHA-256d
+Pool URL:  stratum+tcp://pool.iriumlabs.org:3333
+Worker:    YOUR_IRM_ADDRESS.rig1
+Password:  x</pre>
+          <button class="copy-btn" data-copy="cfg-asic">Copy</button>
+        </div>
+        <div class="cfg-card">
+          <h4>CPU Miner — cpuminer-opt (Linux/macOS)</h4>
+          <pre id="cfg-cpu">./cpuminer -a sha256d \
+  -o stratum+tcp://pool.iriumlabs.org:3335 \
+  -u YOUR_IRM_ADDRESS.cpu1 \
+  -p x -t 4</pre>
+          <button class="copy-btn" data-copy="cfg-cpu">Copy</button>
+        </div>
+        <div class="cfg-card">
+          <h4>CPU Miner — cpuminer-opt (Windows)</h4>
+          <pre id="cfg-win">.\cpuminer-avx2.exe -a sha256d ^
+  -o stratum+tcp://pool.iriumlabs.org:3335 ^
+  -u YOUR_IRM_ADDRESS.cpu1 ^
+  -p x -t 4</pre>
+          <button class="copy-btn" data-copy="cfg-win">Copy</button>
+        </div>
+      </div>
+    </article>
+
+    <!-- Hardware compatibility -->
+    <article class="panel full-row">
+      <h3>Hardware Compatibility</h3>
+      <p class="panel-sub">Any SHA-256d hardware that mines Bitcoin will mine Irium at full rated efficiency — no firmware changes, no extra configuration.</p>
+      <div class="tbl-wrap">
+        <table class="tbl">
+          <thead><tr><th>Hardware / Software</th><th>Port</th><th>Status</th><th>Notes</th></tr></thead>
+          <tbody>
+            <tr><td>Antminer S19 / S21 family</td><td class="mono">3333</td><td><span class="badge ok">Recommended</span></td><td>SHA-256d ASIC — full efficiency, no changes needed.</td></tr>
+            <tr><td>Whatsminer M50 / M60 family</td><td class="mono">3333</td><td><span class="badge ok">Recommended</span></td><td>SHA-256d ASIC — full efficiency, no changes needed.</td></tr>
+            <tr><td>Bitaxe (open-source ASIC)</td><td class="mono">3333</td><td><span class="badge ok">Supported</span></td><td>Set pool URL + worker in AxeOS web UI.</td></tr>
+            <tr><td>Avalon A13 / A14 family</td><td class="mono">3333</td><td><span class="badge ok">Supported</span></td><td>Full SHA-256d compatibility.</td></tr>
+            <tr><td>Any SHA-256d ASIC</td><td class="mono">3333</td><td><span class="badge ok">Supported</span></td><td>If it mines Bitcoin, it mines Irium.</td></tr>
+            <tr><td>cpuminer-opt</td><td class="mono">3335</td><td><span class="badge warn">Supported</span></td><td>Use <code>-a sha256d</code>. Low hashrate but functional for testing.</td></tr>
+            <tr><td>GPU (T-Rex, lolMiner, NBMiner)</td><td class="mono">3335</td><td><span class="badge warn">Supported</span></td><td>SHA-256d GPU mining. Use <code>stratum+tcp://</code>, disable TLS.</td></tr>
+            <tr><td>Irium Core desktop app</td><td class="mono">3335</td><td><span class="badge ok">Bundled</span></td><td>CPU + GPU miner bundled in Irium Core v1.0.77. One-click setup.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <!-- AuxPoW status -->
+    <article class="panel">
+      <h3>AuxPoW Merged Mining</h3>
+      <p class="panel-sub">Mine IRM alongside Bitcoin at zero extra energy cost.</p>
+      <ul class="meta-list">
+        <li><span class="k">Status</span><span class="v warn">Activates at block 26,500</span></li>
+        <li><span class="k">Current height</span><span class="v" id="auxpow-height">—</span></li>
+        <li><span class="k">Blocks remaining</span><span class="v" id="auxpow-remaining">—</span></li>
+        <li><span class="k">What it means</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">SHA-256d ASICs mine IRM as a secondary chain alongside BTC — zero extra electricity, zero extra hardware</span></li>
+        <li><span class="k">Docs</span><span class="v"><a href="https://github.com/iriumlabs/irium/blob/main/docs/MERGED-MINING.md" target="_blank" rel="noopener" style="color:#9bb5ff;">MERGED-MINING.md ↗</a></span></li>
+      </ul>
+    </article>
+
+    <!-- Troubleshoot -->
+    <article class="panel">
+      <h3>Troubleshooting</h3>
+      <p class="panel-sub">Common issues and how to fix them.</p>
+      <ul class="meta-list">
+        <li><span class="k">Port 3333 blocked by ISP</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Use port 443 — same Stratum, plain TCP via sslh. Disable TLS in miner config.</span></li>
+        <li><span class="k">Port 443 also blocked</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Use port 80 — second fallback.</span></li>
+        <li><span class="k">Shares rejected (stale)</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Check your internet latency to pool.iriumlabs.org. Use <code>ping pool.iriumlabs.org</code>.</span></li>
+        <li><span class="k">Firmware auto-enables TLS on port 443</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Find the SSL/TLS toggle in your miner UI and disable it explicitly.</span></li>
+        <li><span class="k">Reward not received</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Coinbase outputs mature after 100 blocks (~3 h). Check the lookup tool above.</span></li>
+        <li><span class="k">Get help</span><span class="v"><a href="https://t.me/iriumlabs" target="_blank" rel="noopener" style="color:#9bb5ff;">Telegram ↗</a></span></li>
+      </ul>
+    </article>
+
+  </div><!-- /main-grid -->
+</div><!-- /pool-wrap -->
 </main>
 
 <footer class="footer">
 <div class="container">
 <div class="footer-content">
 <div class="footer-brand">
-<img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="footer-logo">
-<h4 style="font-family: Orbitron, sans-serif; color: var(--primary); margin: 0.2rem 0 0;">Irium</h4>
-<p>Trust-minimized outcomes, not just payments.</p>
+  <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="footer-logo">
+  <h4 style="font-family:Orbitron,sans-serif;color:var(--primary);margin:.2rem 0 0;">Irium</h4>
+  <p>Trust-minimized outcomes, not just payments.</p>
 </div>
 <div class="footer-links">
-<h4>Resources</h4>
-<a href="https://www.iriumlabs.org/settlement/">Settlement</a>
-<a href="https://www.iriumlabs.org/whitepaper.html">Whitepaper</a>
-<a href="https://www.iriumlabs.org/docs/mining/">Mining Guide</a>
-<a href="https://www.iriumlabs.org/explorer/">Explorer</a>
-<a href="https://www.iriumlabs.org/pool/">Pool Portal</a>
+  <h4>Resources</h4>
+  <a href="https://www.iriumlabs.org/settlement/">Settlement</a>
+  <a href="https://www.iriumlabs.org/whitepaper.html">Whitepaper</a>
+  <a href="https://www.iriumlabs.org/docs/mining/">Mining Guide</a>
+  <a href="https://www.iriumlabs.org/explorer/">Explorer</a>
+  <a href="https://www.iriumlabs.org/pool/">Pool</a>
 </div>
 <div class="footer-links">
-<h4>Community</h4>
-<a href="https://x.com/GoIrium" target="_blank" rel="noopener">
-<svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
-X (Twitter)</a>
-<a href="https://t.me/iriumlabs" target="_blank" rel="noopener">
-<svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg>
-Telegram</a>
-<a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener">
-<svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-GitHub</a>
+  <h4>Community</h4>
+  <a href="https://x.com/GoIrium" target="_blank" rel="noopener"><svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg> X (Twitter)</a>
+  <a href="https://t.me/iriumlabs" target="_blank" rel="noopener"><svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/></svg> Telegram</a>
+  <a href="https://github.com/iriumlabs/irium" target="_blank" rel="noopener"><svg class="footer-icon" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg> GitHub</a>
 </div>
 </div>
 <div class="footer-bottom">
-<p>&copy; 2026 Irium Labs. Open Source - MIT License</p>
-<p>Settlement-first infrastructure for escrow, agreements, and proof-based commerce.</p>
+  <p>&copy; 2026 Irium Labs. Open Source — MIT License</p>
+  <p>Settlement-first infrastructure for escrow, agreements, and proof-based commerce.</p>
 </div>
 </div>
 </footer>
 
-
 <script>
-  const API_BACKENDS = [
-    { name: "api.iriumlabs.org", base: "https://api.iriumlabs.org/api" }
-  ];
-  const POLL_MS = 10000;
+const API = 'https://api.iriumlabs.org/api';
+const STRATUM_STATS = 'http://pool.iriumlabs.org:3337/stats';
+const HALVING = 1050000;
 
-  let ACTIVE_API = API_BACKENDS[0];
+// ─── formatters ──────────────────────────────────────────
+function fmtHr(hs) {
+  const n = Number(hs);
+  if (!Number.isFinite(n) || n <= 0) return '—';
+  const units = ['H/s','KH/s','MH/s','GH/s','TH/s','PH/s','EH/s'];
+  let v = n, i = 0;
+  while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
+  return `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)} ${units[i]}`;
+}
+function fmtNum(n, d = 0) {
+  const v = Number(n);
+  if (!Number.isFinite(v)) return '—';
+  return v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function fmtTime(ts) {
+  const t = Number(ts);
+  if (!t) return '—';
+  const d = new Date(t * 1000);
+  const age = Math.floor((Date.now() - d) / 1000);
+  if (age < 120) return `${age}s ago`;
+  if (age < 3600) return `${Math.floor(age/60)}m ago`;
+  if (age < 86400) return `${Math.floor(age/3600)}h ago`;
+  return d.toLocaleDateString();
+}
+function fmtAbsTime(ts) {
+  const t = Number(ts);
+  if (!t) return '—';
+  return new Date(t * 1000).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false });
+}
+function shortAddr(a) {
+  if (!a || a.length < 16) return a || '—';
+  return a.slice(0, 10) + '…' + a.slice(-6);
+}
+function shortHash(h) {
+  if (!h || h.length < 20) return h || '—';
+  return h.slice(0, 14) + '…' + h.slice(-8);
+}
+function set(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
 
-  let statsCache = null;
-  let miningCache = null;
-  let blocksCache = [];
+// ─── fetch helpers ────────────────────────────────────────
+async function getJson(url) {
+  const r = await fetch(url, { cache: 'no-store' });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
 
-  function fmtNum(v, d = 2) {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return "N/A";
-    return n.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
-  }
-
-  function fmtInt(v) {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return "N/A";
-    return n.toLocaleString();
-  }
-
-  function fmtHashrate(hs) {
-    const n = Number(hs);
-    if (!Number.isFinite(n) || n <= 0) return "N/A";
-    const units = ["H/s","KH/s","MH/s","GH/s","TH/s","PH/s"];
-    let v = n, i = 0;
-    while (v >= 1000 && i < units.length - 1) {
-      v /= 1000;
-      i++;
-    }
-    const digits = v >= 100 ? 0 : (v >= 10 ? 1 : 2);
-    return `${v.toFixed(digits)} ${units[i]}`;
-  }
-
-  function fmtTime(ts) {
-    const t = Number(ts);
-    if (!Number.isFinite(t) || t <= 0) return "N/A";
-    return new Date(t * 1000).toLocaleString(undefined, {
-      year: "numeric", month: "short", day: "numeric",
-      hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true
+// ─── copy buttons ─────────────────────────────────────────
+document.querySelectorAll('[data-ep]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const el = document.getElementById(btn.dataset.ep);
+    if (!el) return;
+    navigator.clipboard.writeText(el.textContent.trim()).then(() => {
+      const prev = btn.textContent;
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 2000);
     });
-  }
-
-  function shortHash(s, a = 10, b = 8) {
-    if (!s || typeof s !== "string") return "N/A";
-    if (s.length <= a + b + 3) return s;
-    return `${s.slice(0, a)}...${s.slice(-b)}`;
-  }
-
-  function setText(id, v) {
-    const e = document.getElementById(id);
-    if (e) e.textContent = v;
-  }
-
-  async function fetchFromBackends(path, optional = false) {
-    const errors = [];
-    for (const backend of API_BACKENDS) {
-      try {
-        const res = await fetch(`${backend.base}${path}`, { cache: "no-store" });
-        if (!res.ok) {
-          errors.push(`${backend.name}: HTTP ${res.status}`);
-          continue;
-        }
-        const txt = await res.text();
-        if (!txt || !txt.trim()) {
-          if (optional) {
-            ACTIVE_API = backend;
-            return null;
-          }
-          errors.push(`${backend.name}: empty response`);
-          continue;
-        }
-        const data = JSON.parse(txt);
-        ACTIVE_API = backend;
-        return data;
-      } catch (err) {
-        errors.push(`${backend.name}: ${String(err && err.message ? err.message : err)}`);
-      }
-    }
-    if (optional) return null;
-    throw new Error(`All API backends failed for ${path} -> ${errors.join(' | ')}`);
-  }
-
-  async function fetchJson(path) {
-    return fetchFromBackends(path, false);
-  }
-
-  function readVarInt(hex, pos) {
-    const prefix = parseInt(hex.slice(pos, pos + 2), 16);
-    if (!Number.isFinite(prefix)) throw new Error("bad varint");
-    if (prefix < 0xfd) return { value: prefix, next: pos + 2 };
-    if (prefix === 0xfd) {
-      const b0 = parseInt(hex.slice(pos + 2, pos + 4), 16);
-      const b1 = parseInt(hex.slice(pos + 4, pos + 6), 16);
-      return { value: (b1 << 8) | b0, next: pos + 6 };
-    }
-    if (prefix === 0xfe) {
-      const bytes = [];
-      for (let i = 0; i < 4; i++) bytes.push(parseInt(hex.slice(pos + 2 + i * 2, pos + 4 + i * 2), 16));
-      const v = bytes[0] + bytes[1] * 256 + bytes[2] * 65536 + bytes[3] * 16777216;
-      return { value: v, next: pos + 10 };
-    }
-    throw new Error("unsupported varint size");
-  }
-
-  function readU64LEAsNumber(hex, pos) {
-    let val = 0;
-    for (let i = 0; i < 8; i++) {
-      const b = parseInt(hex.slice(pos + i * 2, pos + i * 2 + 2), 16);
-      if (!Number.isFinite(b)) throw new Error("bad u64");
-      val += b * Math.pow(256, i);
-    }
-    return val;
-  }
-
-  function coinbaseRewardFromTxHex(txHex) {
-    if (!txHex || typeof txHex !== "string") return null;
-    const hex = txHex.toLowerCase().trim();
-    if (!/^[0-9a-f]+$/.test(hex) || hex.length < 20) return null;
-
-    try {
-      let pos = 0;
-      pos += 8;
-      const vin = readVarInt(hex, pos);
-      pos = vin.next;
-
-      for (let i = 0; i < vin.value; i++) {
-        pos += 64;
-        pos += 8;
-        const script = readVarInt(hex, pos);
-        pos = script.next + script.value * 2;
-        pos += 8;
-      }
-
-      const vout = readVarInt(hex, pos);
-      pos = vout.next;
-
-      let total = 0;
-      for (let i = 0; i < vout.value; i++) {
-        total += readU64LEAsNumber(hex, pos);
-        pos += 16;
-        const pk = readVarInt(hex, pos);
-        pos = pk.next + pk.value * 2;
-      }
-
-      if (!Number.isFinite(total) || total <= 0) return null;
-      return total / 1e8;
-    } catch (_) {
-      return null;
-    }
-  }
-
-  function rewardIrm(block) {
-    const h = Number(block?.height || 0);
-    const raw = Number(block?.reward ?? block?.subsidy ?? block?.block_reward ?? 0);
-    if (Number.isFinite(raw) && raw > 0) {
-      if (raw > 1e9) return raw / 1e8;
-      if (raw > 1e6) return raw / 1e8;
-      if (raw > 1000) return raw / 1e8;
-      return raw;
-    }
-
-    const txHex = Array.isArray(block?.tx_hex) ? block.tx_hex[0] : null;
-    const fromCoinbase = coinbaseRewardFromTxHex(txHex);
-    if (Number.isFinite(fromCoinbase) && fromCoinbase >= 0) return fromCoinbase;
-
-    if (h === 0) return 0;
-    return 50;
-  }
-
-  function sourceLabel(source) {
-    const s = String(source || '').toLowerCase();
-    if (s === 'pool_stratum') return 'Found via Pool';
-    if (s === 'direct_node') return 'Found via Official Miner';
-    if (s === 'direct_node_legacy') return 'Found via Official Miner (Legacy)';
-    return 'Unknown (pre-attribution)';
-  }
-
-  function drawLine(canvasId, points, color, label) {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    const W = canvas.width, H = canvas.height;
-    ctx.clearRect(0, 0, W, H);
-
-    if (!Array.isArray(points) || points.length < 2) {
-      ctx.fillStyle = "#9fb2d8";
-      ctx.font = "14px sans-serif";
-      ctx.fillText("No chart data", 16, 28);
-      return;
-    }
-
-    const vals = points.map(p => Number(p)).filter(v => Number.isFinite(v));
-    if (vals.length < 2) return;
-    const min = Math.min(...vals);
-    const max = Math.max(...vals);
-    const padX = 28, padY = 22;
-    const range = (max - min) || 1;
-
-    ctx.strokeStyle = "rgba(255,255,255,0.14)";
-    ctx.lineWidth = 1;
-    for (let i = 0; i < 4; i++) {
-      const y = padY + (i * (H - padY * 2) / 3);
-      ctx.beginPath();
-      ctx.moveTo(padX, y);
-      ctx.lineTo(W - padX, y);
-      ctx.stroke();
-    }
-
-    ctx.strokeStyle = color;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    vals.forEach((v, i) => {
-      const x = padX + i * ((W - padX * 2) / (vals.length - 1));
-      const y = H - padY - ((v - min) / range) * (H - padY * 2);
-      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
-    });
-    ctx.stroke();
-
-    ctx.fillStyle = color;
-    ctx.font = "12px sans-serif";
-    ctx.fillText(label, padX, 14);
-    ctx.fillStyle = "#c9d8f7";
-    ctx.fillText(`min ${fmtNum(min, 2)} | max ${fmtNum(max, 2)}`, W - 220, 14);
-  }
-
-  function renderBlocks(blocks) {
-    const body = document.getElementById("blocks-body");
-    if (!body) return;
-    if (!Array.isArray(blocks) || blocks.length === 0) {
-      body.innerHTML = "<tr><td colspan=\"6\">No blocks</td></tr>";
-      return;
-    }
-    body.innerHTML = blocks.map((b) => {
-      const hash = b?.header?.hash || "";
-      const miner = b?.miner_address || b?.miner || "N/A";
-      const reward = rewardIrm(b);
-      const txCount = Array.isArray(b?.tx_hex) ? b.tx_hex.length : (Array.isArray(b?.txs) ? b.txs.length : "N/A");
-      return `<tr>
-        <td>${fmtInt(b.height)}</td>
-        <td>${fmtTime(b?.header?.time)}</td>
-        <td class=\"mono mono-wrap\" title=\"${hash}\">${hash}</td>
-        <td class=\"mono mono-wrap\" title=\"${miner}\">${miner}</td>
-        <td class=\"reward-value\">${fmtNum(reward, 2)} IRM</td>
-        <td>${txCount}</td>
-      </tr>`;
-    }).join("");
-  }
-
-  function renderPoolFoundBlocks(data, stats) {
-    const body = document.getElementById("pool-found-body");
-    if (!body) return;
-
-    const blocksAccepted = Number.isFinite(Number(stats?.blocks_accepted)) ? Number(stats.blocks_accepted) : 0;
-    if (blocksAccepted <= 0) {
-      body.innerHTML = '<tr><td colspan="6">No pool-attributed blocks reported by live Stratum metrics yet.</td></tr>';
-      return;
-    }
-
-    const payouts = Array.isArray(data?.payouts) ? data.payouts : [];
-    if (!payouts.length) {
-      body.innerHTML = '<tr><td colspan="6">Pool blocks were detected, but payout attribution rows are not yet available.</td></tr>';
-      return;
-    }
-
-    body.innerHTML = payouts.slice(0, Math.max(1, blocksAccepted)).map((p) => {
-      const miner = p?.address || p?.miner_address || p?.miner || "N/A";
-      const reward = Number(p?.reward_irm ?? p?.reward ?? 0);
-      const ref = p?.hash || p?.block_hash || "";
-      const status = p?.status || "on_chain";
-      const source = p?.source || '';
-      const sourceText = sourceLabel(source);
-      const height = Number(p?.height || 0);
-      const ts = Number(p?.time || 0);
-      return `<tr>
-        <td>${fmtInt(height)}</td>
-        <td>${ts > 0 ? fmtTime(ts) : "N/A"}</td>
-        <td class="mono mono-wrap" title="${miner}">${miner}</td>
-        <td class="reward-value">${fmtNum(reward, 2)} IRM</td>
-        <td><span class="green">${status === "on_chain" ? "On-chain" : status}</span><div class="tiny">${sourceText}</div></td>
-        <td class="mono mono-wrap" title="${ref}">${ref}</td>
-      </tr>`;
-    }).join("");
-  }
-
-
-
-  function applyKpis(stats, mining) {
-    setText("k-height", fmtInt(stats?.height));
-    setText("k-hashrate", fmtHashrate(mining?.hashrate));
-    setText("k-difficulty", fmtNum(mining?.difficulty, 4));
-    setText("k-peers", fmtInt(stats?.peers_connected ?? stats?.peer_count));
-    setText("k-miners", fmtInt(stats?.active_miners));
-    setText("k-blocktime", `${fmtNum(mining?.avg_block_time, 1)} s`);
-  }
-
-  function applyRouteBadge() {
-    const badge = document.getElementById('hero-route-badge');
-    const text = document.getElementById('hero-route-text');
-    if (!badge || !text) return;
-
-    const isPrimary = ACTIVE_API?.name === 'api.iriumlabs.org';
-    if (isPrimary) {
-      text.textContent = 'Active Route: PRIMARY API';
-      badge.style.borderColor = 'rgba(80,240,184,0.45)';
-      badge.style.background = 'rgba(80,240,184,0.12)';
-      badge.style.color = '#c8ffe8';
-    } else {
-      text.textContent = `Active Route: FALLBACK (${ACTIVE_API?.name || 'unknown'})`;
-      badge.style.borderColor = 'rgba(255,199,102,0.48)';
-      badge.style.background = 'rgba(255,199,102,0.14)';
-      badge.style.color = '#ffe2b3';
-    }
-  }
-
-  function applyPerformance(stats, mining, blocks) {
-    const now = Date.now() / 1000;
-    const dayAgo = now - 86400;
-    const weekAgo = now - 86400 * 7;
-
-    const in24h = blocks.filter(b => Number(b?.header?.time || 0) >= dayAgo).length;
-    const in7d = blocks.filter(b => Number(b?.header?.time || 0) >= weekAgo).length;
-
-    const avgBlockTime = Number(mining?.avg_block_time || 0);
-    const expectedBlocksDay = avgBlockTime > 0 ? (86400 / avgBlockTime) : 0;
-    const latestReward = blocks.length ? rewardIrm(blocks[0]) : 0;
-    const emission = expectedBlocksDay * (latestReward || 50);
-
-    setText("perf-24h", in24h ? String(in24h) : "N/A");
-    setText("perf-7d", in7d ? String(in7d) : "N/A");
-    setText("perf-exp-day", expectedBlocksDay ? fmtNum(expectedBlocksDay, 2) : "N/A");
-    setText("perf-emission", emission ? `${fmtNum(emission, 2)} IRM/day` : "N/A");
-
-    const d1 = Number(mining?.difficulty_change_1h_pct ?? 0);
-    const d24 = Number(mining?.difficulty_change_24h_pct ?? 0);
-    const diffText = `${fmtNum(d1, 2)}% / ${fmtNum(d24, 2)}%`;
-    setText("perf-diffdelta", diffText);
-    setText("perf-api", "Online");
-
-    setText("ops-api", `Pool API Online (${ACTIVE_API.name})`);
-    applyRouteBadge();
-    const t = new Date().toLocaleTimeString();
-    setText("ops-updated", t);
-    setText("pool-updated-pill", `Updated: ${t}`);
-  }
-
-  function applyStatus(ok) {
-    const pill = document.getElementById("pool-live-pill");
-    if (!pill) return;
-    pill.textContent = ok ? "ONLINE" : "DEGRADED";
-    pill.style.borderColor = ok ? "rgba(80, 240, 184, 0.4)" : "rgba(255, 120, 120, 0.45)";
-    pill.style.background = ok ? "rgba(80, 240, 184, 0.12)" : "rgba(255, 120, 120, 0.14)";
-    pill.style.color = ok ? "#9ff5d7" : "#ffd1d1";
-  }
-
-  function renderMinerLookup() {
-    const input = document.getElementById("miner-input");
-    const result = document.getElementById("miner-result");
-    if (!input || !result) return;
-    const addr = (input.value || "").trim();
-    if (!addr) {
-      result.textContent = "Enter a miner address.";
-      return;
-    }
-
-    const hits = blocksCache.filter((b) => (b?.miner_address || b?.miner || "") === addr);
-    if (!hits.length) {
-      result.innerHTML = `No blocks found for <span class="mono">${addr}</span> in current feed window (${blocksCache.length} blocks loaded).`;
-      return;
-    }
-
-    hits.sort((a, b) => Number(b.height || 0) - Number(a.height || 0));
-    const total = hits.reduce((acc, b) => acc + rewardIrm(b), 0);
-    const latest = hits[0];
-
-    result.innerHTML = `
-      <div><span class="green">Address found in live chain feed.</span></div>
-      <div style="margin-top:6px;">Blocks in window: <b>${hits.length}</b></div>
-      <div>Total rewards in window: <b class="green">${fmtNum(total, 2)} IRM</b></div>
-      <div>Latest block: <b>${fmtInt(latest.height)}</b> at ${fmtTime(latest?.header?.time)}</div>
-      <div class="muted" style="margin-top:8px;">Pool share counters are shown in the live telemetry cards when exposed by the public API. Use the miner local dashboard for per-device counters.</div>
-    `;
-  }
-
-
-
-  async function fetchOptional(path) {
-    return fetchFromBackends(path, true);
-  }
-
-  async function updateBackendTelemetry() {
-    const stats = await fetchOptional('/pool/stats');
-    const payouts = await fetchOptional('/pool/payouts?limit=20');
-    const workers = await fetchOptional('/pool/workers?window=144&limit=500');
-    const health = await fetchOptional('/pool/health');
-    const distribution = await fetchOptional('/pool/distribution?window=4000&limit=5');
-
-    const hasData = !!stats;
-    const pendingCount = Number.isFinite(Number(payouts?.pending_count))
-      ? Number(payouts.pending_count)
-      : null;
-
-    const acceptedShares = stats?.accepted_shares;
-    const rejectedShares = stats?.rejected_shares;
-    const blocksAccepted = Number.isFinite(Number(stats?.blocks_accepted)) ? Number(stats.blocks_accepted) : null;
-    const staleShares = stats?.stale_shares;
-    const rejectedStale = Number.isFinite(Number(stats?.rejected_stale)) ? Number(stats.rejected_stale) : null;
-    const rejectedLow = Number.isFinite(Number(stats?.rejected_low_difficulty)) ? Number(stats.rejected_low_difficulty) : null;
-    const rejectedInvalid = Number.isFinite(Number(stats?.rejected_invalid)) ? Number(stats.rejected_invalid) : null;
-    const rejectedDup = Number.isFinite(Number(stats?.rejected_duplicate)) ? Number(stats.rejected_duplicate) : null;
-
-    const acceptedText = Number.isFinite(Number(acceptedShares)) ? fmtInt(acceptedShares) : 'Not exposed';
-    const rejectedBase = Number.isFinite(Number(rejectedShares)) ? Number(rejectedShares) : null;
-    const staleBase = Number.isFinite(Number(staleShares)) ? Number(staleShares) : null;
-    const rejectedText = rejectedBase === null && staleBase === null
-      ? 'Not exposed'
-      : fmtInt((rejectedBase || 0) + (staleBase || 0));
-
-    const tmplTs = stats?.template_updated_at ?? stats?.last_template_update_ts ?? null;
-    const lastAcceptTs = stats?.last_share_accepted_at ?? stats?.last_share_accept_ts ?? null;
-    const lastRejectTs = stats?.last_share_rejected_at ?? stats?.last_share_reject_ts ?? null;
-
-    const tcpSessions = Number.isFinite(Number(stats?.active_tcp_sessions)) ? Number(stats.active_tcp_sessions) : null;
-    const workersOnline = Number.isFinite(Number(stats?.workers_online)) ? Number(stats.workers_online) : null;
-    const workersList = Array.isArray(workers?.workers) ? workers.workers : [];
-    const activeMiners = workersList.length > 0 ? workersList.length : null;
-    const activeWindow = Number.isFinite(Number(workers?.window_scanned))
-      ? Number(workers.window_scanned)
-      : (Number.isFinite(Number(stats?.active_miners_window_blocks)) ? Number(stats.active_miners_window_blocks) : null);
-
-    const networkHeightPool = Number(stats?.network_height || 0);
-    const networkHeightCore = Number(statsCache?.height || 0);
-    const tipDelta = networkHeightPool && networkHeightCore ? Math.abs(networkHeightPool - networkHeightCore) : null;
-
-    const payoutRows = Array.isArray(payouts?.payouts) ? payouts.payouts : [];
-    const lastFound = payoutRows.length ? payoutRows[0] : null;
-
-    setText('b-workers', workersOnline ?? tcpSessions ?? 'N/A');
-    setText('b-accepted', acceptedText);
-    setText('b-rejected', rejectedText);
-    setText('b-pending', pendingCount === null ? 'N/A (solo on-chain)' : fmtInt(pendingCount));
-    setText('b-last-template', tmplTs ? fmtTime(tmplTs) : 'N/A');
-    setText('b-last-accept', (Number.isFinite(Number(lastAcceptTs)) && Number(lastAcceptTs) > 0) ? fmtTime(lastAcceptTs) : 'No accepted share yet');
-    setText('b-last-reject', (Number.isFinite(Number(lastRejectTs)) && Number(lastRejectTs) > 0) ? fmtTime(lastRejectTs) : 'No rejected share yet');
-
-    setText('live-workers', tcpSessions === null ? 'N/A' : `${fmtInt(tcpSessions)} sessions`);
-    setText('live-active-miners', activeMiners === null
-      ? 'N/A (window not exposed)'
-      : `${fmtInt(activeMiners)} addresses / ${fmtInt(activeWindow || 0)} blocks`);
-    const distRows = Array.isArray(distribution?.distribution) ? distribution.distribution : [];
-    const top1 = Number.isFinite(Number(distribution?.top1_share_pct)) ? Number(distribution.top1_share_pct) : null;
-    const top5 = Number.isFinite(Number(distribution?.top5_share_pct)) ? Number(distribution.top5_share_pct) : null;
-    const unique = Number.isFinite(Number(distribution?.unique_addresses)) ? Number(distribution.unique_addresses) : null;
-    const topAddr = distRows.length ? (distRows[0]?.address || '') : '';
-    setText('live-top1-share', top1 === null ? 'N/A' : `${fmtNum(top1, 2)}%`);
-    setText('live-top5-share', top5 === null ? 'N/A' : `${fmtNum(top5, 2)}%`);
-    setText('live-unique-miners', unique === null ? 'N/A' : fmtInt(unique));
-    setText('live-top-address', topAddr ? shortHash(topAddr, 10, 6) : 'N/A');
-    setText('live-accepted', acceptedText);
-    setText('live-blocks-accepted', blocksAccepted === null ? 'Not exposed' : fmtInt(blocksAccepted));
-    setText('live-rejected', rejectedText);
-    setText('live-candidates-detected', Number.isFinite(Number(stats?.candidates_detected)) ? fmtInt(stats.candidates_detected) : 'Not exposed');
-    setText('live-candidates-submitted', Number.isFinite(Number(stats?.candidates_submitted)) ? fmtInt(stats.candidates_submitted) : 'Not exposed');
-    setText('live-submit-rejected', Number.isFinite(Number(stats?.submit_rejected)) ? fmtInt(stats.submit_rejected) : 'Not exposed');
-    setText('live-chain-attributed', Number.isFinite(Number(stats?.pool_blocks_accepted_chain_attributed)) ? fmtInt(stats.pool_blocks_accepted_chain_attributed) : 'Not exposed');
-    setText('live-metrics-connected', stats?.stratum_metrics_connected === true ? 'Connected' : (stats?.stratum_metrics_connected === false ? 'Not connected' : 'Unknown'));
-    setText('live-metrics-source', stats?.source || 'N/A');
-    setText('live-pool-hashrate', fmtHashrate(stats?.pool_hashrate));
-    setText('live-payout-model', stats?.payout_model ? String(stats.payout_model).toUpperCase() : 'N/A');
-    setText('live-round-effort', Number.isFinite(Number(stats?.round_effort)) ? fmtNum(stats.round_effort, 2) : 'N/A');
-    setText('live-round-luck', Number.isFinite(Number(stats?.round_luck)) ? fmtNum(stats.round_luck, 2) : 'N/A');
-    const breakdownText = [
-      rejectedLow === null ? null : `low: ${fmtInt(rejectedLow)}`,
-      rejectedStale === null ? null : `stale: ${fmtInt(rejectedStale)}`,
-      rejectedInvalid === null ? null : `invalid: ${fmtInt(rejectedInvalid)}`,
-      rejectedDup === null ? null : `dup: ${fmtInt(rejectedDup)}`,
-    ].filter(Boolean).join(' • ');
-    setText('live-reject-breakdown', breakdownText || 'Not exposed');
-    const canonicalShares = Number.isFinite(Number(stats?.canonical_shares)) ? Number(stats.canonical_shares) : null;
-    const compatShares = Number.isFinite(Number(stats?.compat_shares)) ? Number(stats.compat_shares) : null;
-    const submittedShares = ((Number.isFinite(Number(acceptedShares)) ? Number(acceptedShares) : 0) + (Number.isFinite(Number(rejectedShares)) ? Number(rejectedShares) : 0));
-    const invalidRatio = (submittedShares > 0 && rejectedInvalid !== null) ? (rejectedInvalid / submittedShares) : null;
-    const staleRatio = (submittedShares > 0 && rejectedStale !== null) ? (rejectedStale / submittedShares) : null;
-    let integrityText = 'Unknown';
-    if (submittedShares >= 10) {
-      const compatOk = (compatShares === null) ? true : (compatShares === 0);
-      const invalidOk = (invalidRatio === null) ? true : (invalidRatio <= 0.05);
-      const staleOk = (staleRatio === null) ? true : (staleRatio <= 0.35);
-      integrityText = (compatOk && invalidOk && staleOk)
-        ? `Healthy • invalid ${invalidRatio === null ? 'n/a' : fmtNum(invalidRatio * 100, 2) + '%'} • stale ${staleRatio === null ? 'n/a' : fmtNum(staleRatio * 100, 2) + '%'}${canonicalShares === null ? '' : ' • canonical ' + fmtInt(canonicalShares)}`
-        : `Degraded • invalid ${invalidRatio === null ? 'n/a' : fmtNum(invalidRatio * 100, 2) + '%'} • stale ${staleRatio === null ? 'n/a' : fmtNum(staleRatio * 100, 2) + '%'}${compatShares === null ? '' : ' • compat ' + fmtInt(compatShares)}`;
-    }
-    setText('live-integrity', integrityText);
-    setText('live-last-accept', (Number.isFinite(Number(lastAcceptTs)) && Number(lastAcceptTs) > 0) ? fmtTime(lastAcceptTs) : 'No accepted share yet');
-    setText('live-last-reject', (Number.isFinite(Number(lastRejectTs)) && Number(lastRejectTs) > 0) ? fmtTime(lastRejectTs) : 'No rejected share yet');
-    setText('live-backend', stats?.backend_connected === true ? 'Connected' : (hasData ? 'Partial' : 'Unavailable'));
-    setText('live-tip-align', tipDelta === null
-      ? 'Unknown'
-      : (tipDelta === 0 ? `Aligned @ ${fmtInt(networkHeightCore)}` : `${fmtInt(tipDelta)} blocks drift`));
-    const hasPoolBlocks = Number.isFinite(Number(blocksAccepted)) && Number(blocksAccepted) > 0;
-    setText('live-last-found', (hasPoolBlocks && lastFound)
-      ? `#${fmtInt(lastFound.height)} • ${fmtTime(lastFound.time)} • ${shortHash(lastFound.address || '', 8, 6)}`
-      : 'No pool-attributed block yet');
-
-    const rawHealth = String((health && (health.stratum_status || health.freshness_state || (health.healthy === true ? 'ok' : 'stale'))) || 'unknown').toLowerCase();
-    const stratumHealth = (rawHealth === 'ok' || rawHealth === 'fresh' || rawHealth === 'healthy') ? 'ok' : ((rawHealth === 'stale' || rawHealth === 'degraded' || rawHealth === 'down') ? 'stale' : 'unknown');
-    const nowTs = Math.floor(Date.now() / 1000);
-    const templateAge = (Number.isFinite(Number(health?.stratum_age_seconds)) ? Number(health.stratum_age_seconds) : (Number.isFinite(Number(health?.age_seconds)) ? Number(health.age_seconds) : (Number.isFinite(Number(tmplTs)) && Number(tmplTs) > 0 ? Math.max(0, nowTs - Number(tmplTs)) : null)));
-    setText('ops-stratum-health', stratumHealth);
-    setText('ops-template-age', templateAge === null ? 'Unknown' : (fmtInt(templateAge) + 's'));
-
-    const badge = document.getElementById('backend-badge');
-    if (badge) {
-      badge.textContent = hasData ? 'Exposed' : 'Limited';
-      badge.style.borderColor = hasData ? 'rgba(80,240,184,0.45)' : 'rgba(255,199,102,0.45)';
-      badge.style.color = hasData ? '#9ff5d7' : '#ffdca1';
-      badge.style.background = hasData ? 'rgba(80,240,184,0.12)' : 'rgba(255,199,102,0.12)';
-    }
-
-    const note = document.getElementById('b-note');
-    if (note) {
-      note.textContent = hasData
-        ? 'Backend telemetry is live from /api/pool/stats and /api/pool/payouts. In SOLO mode pending payouts should usually remain N/A or 0.'
-        : 'Direct pool backend metrics are not publicly exposed; chain-derived telemetry is shown above.';
-    }
-
-    const trust = document.getElementById('live-trust-note');
-    if (trust) {
-      const maturity = lastFound?.maturity_remaining;
-      const maturityText = Number.isFinite(Number(maturity)) ? `Coinbase maturity remaining: ${fmtInt(maturity)} blocks.` : 'Coinbase maturity progress is shown after pool-attributed blocks are recorded.';
-      const healthState = health?.healthy === true ? 'Health API reports healthy.' : (health ? 'Health API reports degraded.' : 'Health API unavailable.');
-      trust.textContent = `Trust check: ${healthState} ${maturityText}`;
-    }
-  }
-
-
-  async function updateStatusSignals() {
-    const nowSec = Date.now() / 1000;
-    const latestTs = Number(blocksCache?.[0]?.header?.time || 0);
-    const lag = latestTs > 0 ? Math.max(0, nowSec - latestTs) : null;
-
-    setText('s-freshness', lag === null ? 'Unknown' : `${fmtNum(lag, 0)}s behind latest block`);
-    setText('s-health', lag !== null && lag < 1800 ? 'Healthy' : 'Monitor');
-    setText('s-uptime', lag !== null && lag < 1800 ? 'Operational signal: Good' : 'Reduced confidence');
-
-    const health = await fetchOptional('/pool/health');
-    const healthy = health?.healthy === true;
-    const issues = Array.isArray(health?.issues) ? health.issues : [];
-    setText('s-health-api', healthy ? 'Healthy' : (health ? 'Degraded' : 'Unavailable'));
-    setText('s-watchdog', healthy ? 'OK (no active alerts)' : (health ? 'Alerting/Investigate' : 'Unavailable'));
-    setText('s-health-reason', issues.length ? issues.join('; ') : (healthy ? 'No active pool-health issues' : 'No health details'));
-
-    const incidents = document.getElementById('incident-list');
-    if (incidents && lag !== null) {
-      if (lag < 1800) {
-        incidents.innerHTML = '<li>No active incidents reported.</li>';
-      } else {
-        incidents.innerHTML = `<li>Data freshness lag detected (${fmtNum(lag,0)}s). Investigating upstream/API latency.</li>`;
-      }
-    }
-  }
-
-  async function measureApiLatency() {
-    const t0 = performance.now();
-    try {
-      await fetchJson('/stats');
-      const dt = performance.now() - t0;
-      setText('s-latency', `${fmtNum(dt, 0)} ms`);
-    } catch (_) {
-      setText('s-latency', 'Unavailable');
-    }
-  }
-
-  async function renderAccountPortal() {
-    const input = document.getElementById('acct-input');
-    const out = document.getElementById('acct-result');
-    if (!input || !out) return;
-
-    const addr = (input.value || '').trim();
-    if (!addr) {
-      out.textContent = 'Enter a payout address.';
-      return;
-    }
-
-    out.textContent = 'Loading account...';
-    try {
-      const data = await fetchJson(`/pool/account/${encodeURIComponent(addr)}?window=5000&limit=12`);
-      const rows = Array.isArray(data?.records) ? data.records : [];
-      const latest = data?.last_found;
-
-      let table = '<div style="margin-top:8px;"><b>Recent records</b></div>';
-      if (!rows.length) {
-        table += '<div class="muted" style="margin-top:6px;">No records found in current account window.</div>';
-      } else {
-        table += '<div class="table-wrap" style="margin-top:8px;"><table class="pool-table"><thead><tr><th>Height</th><th>Reward</th><th>Status</th><th>Source</th><th>Hash</th></tr></thead><tbody>';
-        table += rows.map((r) => `<tr><td>${fmtInt(r?.height)}</td><td class="reward-value">${fmtNum(Number(r?.reward_irm ?? 0),2)} IRM</td><td>${r?.status || 'on_chain'}</td><td>${sourceLabel(r?.source)}</td><td class="mono mono-wrap" title="${r?.hash || ''}">${r?.hash || ''}</td></tr>`).join('');
-        table += '</tbody></table></div>';
-      }
-
-      out.innerHTML = `
-        <div><b class="mono">${data?.address || addr}</b></div>
-        <div style="margin-top:6px;">Blocks found: <b>${fmtInt(data?.blocks_found ?? 0)}</b></div>
-        <div>Total rewards: <b class="green">${fmtNum(Number(data?.total_rewards_irm ?? 0),2)} IRM</b></div>
-        <div>Paid total: <b class="green">${fmtNum(Number(data?.paid_total_irm ?? 0),2)} IRM</b></div>
-        <div>Pending: <b>${data?.pending_balance_irm == null ? 'N/A (solo on-chain)' : `${fmtNum(Number(data?.pending_balance_irm),2)} IRM`}</b></div>
-        <div>Last found block: <b>${latest?.height ? fmtInt(latest.height) : 'None in window'}</b></div>
-        ${table}
-      `;
-    } catch (err) {
-      out.innerHTML = `<span class="muted">Account lookup failed for <span class="mono">${addr}</span>: ${String(err?.message || err)}</span>`;
-    }
-  }
-
-
-  async function refresh() {
-    try {
-      const [stats, mining, blocksResp, poolPayouts, poolStats] = await Promise.all([
-        fetchOptional("/stats"),
-        fetchOptional("/mining"),
-        fetchOptional("/blocks?limit=120"),
-        fetchOptional("/pool/payouts?limit=80"),
-        fetchOptional("/pool/stats")
-      ]);
-
-      if (stats) statsCache = stats;
-      if (mining) miningCache = mining;
-      if (Array.isArray(blocksResp?.blocks)) blocksCache = blocksResp.blocks;
-
-      if (!statsCache || !miningCache || !Array.isArray(blocksCache)) {
-        throw new Error('insufficient data from API backends');
-      }
-
-      applyKpis(statsCache, miningCache);
-      applyPerformance(statsCache, miningCache, blocksCache);
-      renderBlocks(blocksCache.slice(0, 80));
-      renderPoolFoundBlocks(poolPayouts, poolStats || {});
-
-      const hsSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0) ? Number(miningCache?.hashrate || 0) : Number(miningCache?.hashrate || 0));
-      const diffSeries = (miningCache?.series || []).map((p) => Number(p?.difficulty || 0));
-
-      const hashratePlot = hsSeries.length ? hsSeries : [Number(miningCache?.hashrate || 0), Number(miningCache?.hashrate || 0)];
-
-      applyStatus(true);
-      await updateStatusSignals();
-      await updateBackendTelemetry();
-      await measureApiLatency();
-    } catch (err) {
-      console.error("Pool dashboard refresh failed", err);
-      applyStatus(false);
-      setText("perf-api", "Degraded");
-      setText("ops-api", `API fetch error (${ACTIVE_API.name})`);
-      setText("ops-stratum-health", "unknown");
-      setText("ops-template-age", "Unknown");
-      applyRouteBadge();
-      setText("ops-updated", `${new Date().toLocaleTimeString()} (error)`);
-      setText("pool-updated-pill", `Updated: ${new Date().toLocaleTimeString()} (error)`);
-      setText("s-latency", "Unavailable");
-      setText("s-health", "Degraded");
-      setText("s-watchdog", "Unavailable");
-      try { await updateBackendTelemetry(); } catch (_) {}
-    }
-  }
-
-  function setupCopyButtons() {
-    document.querySelectorAll(".copy-btn").forEach((btn) => {
-      btn.addEventListener("click", async () => {
-        const id = btn.getAttribute("data-copy");
-        const source = document.getElementById(id);
-        if (!source) return;
-        const value = source.textContent.trim();
-        try {
-          await navigator.clipboard.writeText(value);
-          const old = btn.textContent;
-          btn.textContent = "COPIED";
-          setTimeout(() => { btn.textContent = old; }, 1200);
-        } catch (_) {
-          alert(value);
-        }
-      });
-    });
-  }
-
-  document.getElementById("miner-btn")?.addEventListener("click", renderMinerLookup);
-  document.getElementById("miner-input")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") renderMinerLookup();
   });
-  document.getElementById("acct-btn")?.addEventListener("click", renderAccountPortal);
-  document.getElementById("acct-input")?.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") renderAccountPortal();
+});
+document.querySelectorAll('[data-copy]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const el = document.getElementById(btn.dataset.copy);
+    if (!el) return;
+    navigator.clipboard.writeText(el.textContent.trim()).then(() => {
+      const prev = btn.textContent;
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 2000);
+    });
   });
+});
 
-  setupCopyButtons();
-  refresh();
-  setInterval(refresh, POLL_MS);
+// ─── mobile hamburger ────────────────────────────────────
+const hbtn = document.getElementById('nav-hamburger');
+const hmenu = document.getElementById('nav-links');
+if (hbtn && hmenu) {
+  hbtn.addEventListener('click', () => {
+    const open = hmenu.classList.toggle('is-open');
+    hbtn.classList.toggle('is-open', open);
+    hbtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+  hmenu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
+    hmenu.classList.remove('is-open');
+    hbtn.classList.remove('is-open');
+  }));
+}
+
+// ─── main data load ───────────────────────────────────────
+async function loadAll() {
+  try {
+    // parallel fetch
+    const [stats, netStats, workersData, poolBlocks, netBlocks] = await Promise.allSettled([
+      getJson(`${API}/pool/stats`),
+      getJson(`${API}/stats`),
+      getJson(`${API}/pool/workers?window=144&limit=20`),
+      getJson(`${API}/pool/blocks?limit=15`),
+      getJson(`${API}/blocks?limit=15`),
+    ]);
+
+    const now = new Date().toLocaleTimeString();
+
+    // ── Pool stats ──────────────────────────────────────
+    if (stats.status === 'fulfilled') {
+      const s = stats.value;
+      set('k-miners',  fmtNum(s.workers_online));
+      set('k-blocks',  fmtNum(s.blocks_accepted));
+      set('k-hashrate', fmtHr(s.pool_hashrate));
+      set('k-diff',    fmtNum(s.difficulty, 0));
+      set('k-height',  fmtNum(s.network_height));
+      set('tl-total-miners',  `${fmtNum(s.workers_online)} online`);
+      set('tl-total-blocks',  fmtNum(s.blocks_accepted));
+      set('tl-today-blocks',  s.blocks_found_today != null ? fmtNum(s.blocks_found_today) : '—');
+      set('tl-pool-hr',  fmtHr(s.pool_hashrate));
+      set('tl-candidates', `${fmtNum(s.candidates_detected)} / ${fmtNum(s.candidates_submitted)}`);
+      set('tl-chain-attr', fmtNum(s.pool_blocks_accepted_chain_attributed));
+      set('tl-last-acc',   s.last_share_accepted_at ? fmtAbsTime(s.last_share_accepted_at) : '—');
+      set('tl-rej-rate',   s.rejected_shares != null && s.accepted_shares
+        ? `${((s.rejected_shares / (s.accepted_shares + s.rejected_shares)) * 100).toFixed(2)}%`
+        : '—');
+      set('tl-integrity', s.stratum_metrics_connected ? '✓ Connected' : '⚠ Degraded');
+      set('hero-api-status', s.backend_connected ? '✓ Online' : '⚠ Degraded');
+      set('hero-updated', now);
+    }
+
+    // ── Network stats ───────────────────────────────────
+    if (netStats.status === 'fulfilled') {
+      const n = netStats.value;
+      set('k-supply',  fmtNum(n.supply_irm, 0) + ' IRM');
+      set('econ-supply', fmtNum(n.supply_irm, 0) + ' IRM');
+      set('econ-height', fmtNum(n.height));
+      set('econ-diff',   fmtNum(n.difficulty || 0, 0));
+      set('econ-peers',  fmtNum(n.peers_connected));
+      if (n.height) {
+        const halvingBlock = Math.ceil(n.height / HALVING) * HALVING;
+        const remaining = halvingBlock - n.height;
+        set('econ-next-halving', fmtNum(halvingBlock));
+        set('econ-blocks-to-halving', `${fmtNum(remaining)} blocks (~${Math.round(remaining * 2 / 60 / 24)} days)`);
+        set('k-height', fmtNum(n.height));
+        set('auxpow-height', fmtNum(n.height));
+        set('auxpow-remaining', n.height < 26500 ? `${fmtNum(26500 - n.height)} blocks (~${Math.round((26500 - n.height) * 2 / 60 / 24)} days)` : 'Active');
+      }
+      if (n.difficulty) set('k-diff', fmtNum(n.difficulty, 0));
+    }
+
+    // ── Stratum stats (from pool:3337) ──────────────────
+    try {
+      const st = await getJson(STRATUM_STATS);
+      const fillPort = (prefix, obj) => {
+        if (!obj) return;
+        set(`pt-${prefix}-miners`, fmtNum(obj.active_miners));
+        set(`pt-${prefix}-acc`,    fmtNum(obj.accepted_shares));
+        set(`pt-${prefix}-rej`,    fmtNum(obj.rejected_shares));
+        set(`pt-${prefix}-blk`,    fmtNum(obj.blocks_found));
+        set(`pt-${prefix}-hr`,     fmtHr(obj.hashrate_estimate_hps));
+      };
+      fillPort('asic', st.asic);
+      fillPort('cpu',  st.cpu_gpu);
+      fillPort('solo', st.solo);
+      if (stats.status !== 'fulfilled') {
+        set('k-miners', fmtNum(st.total_miners));
+        set('k-blocks', fmtNum(st.total_blocks_found));
+      }
+    } catch (_) { /* stratum proxy may be blocked by CORS; pool/stats is the main source */ }
+
+    // ── Workers table ────────────────────────────────────
+    if (workersData.status === 'fulfilled') {
+      const wd = workersData.value;
+      const tbody = document.getElementById('workers-body');
+      if (tbody && wd.workers && wd.workers.length) {
+        tbody.innerHTML = wd.workers.map((w, i) => {
+          const pct = (w.share_pct || 0).toFixed(1);
+          return `<tr>
+            <td class="dim">${i + 1}</td>
+            <td><span class="mono">${shortAddr(w.address)}</span></td>
+            <td><b>${fmtNum(w.blocks_found)}</b></td>
+            <td>${pct}%</td>
+            <td>${fmtHr(w.estimated_hashrate_hs)}</td>
+            <td><div class="worker-bar"><div class="worker-bar-fill" style="width:${Math.min(100, parseFloat(pct))}%"></div></div></td>
+          </tr>`;
+        }).join('');
+      } else if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="6" class="dim" style="padding:18px 12px;">No active miners in current window.</td></tr>';
+      }
+    }
+
+    // ── Pool blocks table ────────────────────────────────
+    if (poolBlocks.status === 'fulfilled') {
+      const pb = poolBlocks.value;
+      const tbody = document.getElementById('pool-blocks-body');
+      const rows = (pb.blocks || pb || []).slice(0, 15);
+      if (tbody && rows.length) {
+        tbody.innerHTML = rows.map(b => {
+          const mature = b.header ? null : (b.mature != null ? b.mature : null);
+          const status = b.status === 'on_chain' ? '<span class="badge ok">On-chain</span>'
+                       : b.status === 'orphan'   ? '<span class="badge bad">Orphan</span>'
+                       : '<span class="badge dim">Pending</span>';
+          const addr = b.miner_address || '—';
+          const hash = b.header ? b.header.hash : (b.hash || '—');
+          const ts   = b.header ? b.header.time : (b.time || 0);
+          const ht   = b.height || '—';
+          return `<tr>
+            <td><b>${fmtNum(ht)}</b></td>
+            <td>${fmtTime(ts)}</td>
+            <td><span class="mono">${shortAddr(addr)}</span></td>
+            <td class="ok">50 IRM</td>
+            <td>${status}</td>
+            <td><span class="mono dim">${shortHash(hash)}</span></td>
+          </tr>`;
+        }).join('');
+      } else if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="6" class="dim" style="padding:18px 12px;">No pool blocks found.</td></tr>';
+      }
+    }
+
+    // ── Network blocks table ─────────────────────────────
+    if (netBlocks.status === 'fulfilled') {
+      const nb = netBlocks.value;
+      const tbody = document.getElementById('net-blocks-body');
+      const rows = (nb.blocks || nb || []).slice(0, 15);
+      if (tbody && rows.length) {
+        tbody.innerHTML = rows.map(b => {
+          const addr = b.miner_address || '—';
+          const hash = b.header ? b.header.hash : '—';
+          const ts   = b.header ? b.header.time : 0;
+          const src  = b.submit_source ? `<span class="badge dim">${b.submit_source.replace('_', ' ')}</span>` : '<span class="badge dim">unknown</span>';
+          return `<tr>
+            <td><b>${fmtNum(b.height)}</b></td>
+            <td>${fmtTime(ts)}</td>
+            <td><span class="mono">${shortAddr(addr)}</span></td>
+            <td><span class="mono dim">${shortHash(hash)}</span></td>
+            <td>${src}</td>
+          </tr>`;
+        }).join('');
+      } else if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="5" class="dim" style="padding:18px 12px;">No blocks loaded.</td></tr>';
+      }
+    }
+
+  } catch (err) {
+    console.error('Pool dashboard error:', err);
+    set('hero-api-status', '⚠ Error');
+  }
+}
+
+// ── Account lookup ─────────────────────────────────────────
+document.getElementById('acct-btn').addEventListener('click', async () => {
+  const addr = document.getElementById('acct-input').value.trim();
+  const out   = document.getElementById('acct-result');
+  if (!addr) { out.textContent = 'Please enter an IRM address.'; return; }
+  out.textContent = 'Loading…';
+  try {
+    const d = await getJson(`${API}/pool/account/${encodeURIComponent(addr)}`);
+    const last = d.last_found;
+    out.innerHTML = [
+      `<b>Address:</b> ${d.address}`,
+      `<b>Blocks found:</b> ${fmtNum(d.blocks_found)}`,
+      `<b>Paid total:</b> ${fmtNum(d.paid_total_irm, 2)} IRM`,
+      `<b>Pending balance:</b> ${fmtNum(d.pending_balance_irm, 2)} IRM`,
+      `<b>Est. hashrate:</b> ${fmtHr(d.estimated_hashrate_hs)}`,
+      last ? [
+        `<b>Last block:</b> #${fmtNum(last.height)} — ${fmtAbsTime(last.time)}`,
+        `  Status: ${last.status} | Confirmations: ${fmtNum(last.confirmations)} | Mature in: ${last.mature ? 'spendable' : `${last.maturity_remaining} blocks`}`,
+        `  Hash: ${shortHash(last.hash)}`,
+      ].join('\n') : '',
+    ].filter(Boolean).join('\n');
+  } catch (err) {
+    out.textContent = `Error: ${err.message}`;
+  }
+});
+
+// ── Initial load + polling ─────────────────────────────────
+loadAll();
+setInterval(loadAll, 15000);
 </script>
-<script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>
 </body>
 </html>

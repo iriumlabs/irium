@@ -1125,3 +1125,92 @@ body {
         grid-template-columns: 1fr;
     }
 }
+
+/* ── Global mobile nav hamburger ─────────────────────────── */
+.nav-hamburger {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    gap: 5px;
+    width: 40px;
+    height: 40px;
+    border: 1px solid rgba(99, 102, 241, 0.35);
+    border-radius: 8px;
+    background: rgba(15, 15, 35, 0.7);
+    cursor: pointer;
+    padding: 0 10px;
+    flex-shrink: 0;
+}
+
+.nav-hamburger span {
+    display: block;
+    width: 100%;
+    height: 2px;
+    background: #d9e6ff;
+    border-radius: 2px;
+    transition: transform 0.22s ease, opacity 0.22s ease;
+}
+
+.nav-hamburger.is-open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+.nav-hamburger.is-open span:nth-child(2) { opacity: 0; }
+.nav-hamburger.is-open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+/* ── Mobile breakpoints ──────────────────────────────────── */
+@media (max-width: 820px) {
+    /* Nav */
+    .nav .container { flex-wrap: wrap; row-gap: 0; }
+    .nav-hamburger  { display: flex !important; }
+
+    .nav-links {
+        display: none !important;
+        flex-direction: column !important;
+        width: 100% !important;
+        gap: 0 !important;
+        padding: 0.4rem 0 0.8rem !important;
+        border-top: 1px solid rgba(99, 102, 241, 0.2) !important;
+        margin-top: 0.5rem !important;
+        order: 3 !important;
+    }
+    .nav-links.is-open { display: flex !important; }
+    .nav-links li { width: 100% !important; }
+    .nav-links a {
+        display: block !important;
+        padding: 0.55rem 0.4rem !important;
+        font-size: 0.85rem !important;
+    }
+    .nav-socials { display: none !important; }
+
+    /* Spacing & typography */
+    .container   { padding: 0 1.2rem; }
+    .section     { padding: 3.5rem 0; }
+    .section-title   { font-size: 2rem !important; }
+    .hero-subtitle   { font-size: 1.4rem !important; }
+    .hero-tagline    { font-size: 1rem !important; }
+    .glitch          { font-size: 2.8rem !important; }
+
+    /* Buttons */
+    .btn  { font-size: 0.9rem !important; padding: 0.8rem 1.6rem !important; }
+    .hero-cta { flex-direction: column !important; align-items: center !important; gap: 0.8rem !important; }
+    .hero-stats { gap: 2rem !important; }
+
+    /* Grids — collapse problematic minmax values */
+    .features-grid  { grid-template-columns: 1fr !important; }
+    .support-grid   { grid-template-columns: 1fr !important; }
+    .install-steps  { grid-template-columns: 1fr !important; }
+    .commands-grid  { grid-template-columns: 1fr !important; }
+    .specs-grid     { grid-template-columns: repeat(2, 1fr) !important; }
+
+    /* Download */
+    .download-box   { padding: 1.5rem !important; }
+    .download-header h3 { font-size: 1.4rem !important; }
+}
+
+@media (max-width: 480px) {
+    .specs-grid     { grid-template-columns: 1fr !important; }
+    .section-title  { font-size: 1.6rem !important; }
+    .glitch         { font-size: 2.1rem !important; }
+    .hero-stats     { gap: 1.2rem !important; }
+    .container      { padding: 0 1rem; }
+    .stat-value     { font-size: 1.8rem !important; }
+}

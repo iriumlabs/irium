@@ -461,8 +461,6 @@
       <li><a href="https://www.iriumlabs.org/explorer/">EXPLORER</a></li>
       <li><a href="https://www.iriumlabs.org/docs/mining/">MINING</a></li>
       <li><a href="https://www.iriumlabs.org/pool/">POOL</a></li>
-      <li><a href="https://www.iriumlabs.org/calculator/">CALCULATOR</a></li>
-      <li><a href="https://www.iriumlabs.org/support-us.html">SUPPORT</a></li>
     </ul>
     <div class="nav-socials">
       <a href="https://github.com/iriumlabs/irium" target="_blank" title="GitHub" rel="noopener"><svg width="20" height="20" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg></a>
@@ -509,9 +507,9 @@
             <h3>Mining Overview</h3>
             <ul class="m-list">
               <li><b>Algorithm:</b> SHA-256d</li>
-              <li><b>Block time:</b> 600 seconds</li>
+              <li><b>Block time:</b> 2 min (120 s) — V2 fork at block 24,250</li>
               <li><b>Block reward:</b> 50 IRM</li>
-              <li><b>Halving:</b> Every 210,000 blocks</li>
+              <li><b>Halving:</b> Every 1,050,000 blocks</li>
               <li><b>Coinbase maturity:</b> 100 blocks</li>
               <li><b>Max supply:</b> 100,000,000 IRM</li>
             </ul>
@@ -557,7 +555,7 @@
         </a>
         <a class="m-method-card" href="#merged-mining">
           <h3>Merged Mining</h3>
-          <p class="m-muted">Mine IRM alongside Bitcoin with the same work. Activates height 26,347 (~June 2026).</p>
+          <p class="m-muted">Mine IRM alongside Bitcoin with the same work. Activates at block 26,500.</p>
         </a>
       </div>
     </div>
@@ -760,7 +758,7 @@ curl -k -sS $IRIUM_NODE_RPC/status</code></pre></article>
       <div class="m-grid" style="margin-top:12px;">
         <article class="m-card">
           <h3>Mine IRM alongside Bitcoin — free</h3>
-          <p class="m-muted">Irium uses SHA-256d, the same algorithm as Bitcoin. AuxPoW merged mining activates at block <strong>26,347</strong> (~12 June 2026). After that, any SHA-256d pool mining Bitcoin can simultaneously mine IRM at <strong>zero additional energy cost</strong>. The same work counts for both chains.</p>
+          <p class="m-muted">Irium uses SHA-256d, the same algorithm as Bitcoin. AuxPoW merged mining activates at block <strong>26,500</strong>. After that, any SHA-256d pool mining Bitcoin can simultaneously mine IRM at <strong>zero additional energy cost</strong>. The same work counts for both chains.</p>
         </article>
         <article class="m-card">
           <h3>All SHA-256d hardware works</h3>
@@ -770,7 +768,7 @@ curl -k -sS $IRIUM_NODE_RPC/status</code></pre></article>
       <div class="m-grid" style="margin-top:12px;">
         <article class="m-card">
           <h3>Block reward: 50 IRM per block</h3>
-          <p class="m-muted">Current block reward is 50 IRM. First halving at block 210,000 — the chain is at height ~20,299. Merge mining earns this reward on top of Bitcoin mining revenue.</p>
+          <p class="m-muted">Current block reward is 50 IRM. First halving at block 1,050,000. Merge mining earns this reward on top of Bitcoin mining revenue.</p>
         </article>
         <article class="m-card">
           <h3>Live network stats</h3>
@@ -790,7 +788,7 @@ cargo build --release
 export IRIUM_RPC_BASE=http://localhost:38300
 export IRIUM_RPC_TOKEN=your_token_here
 export STRATUM_BIND=0.0.0.0:3333
-export IRIUM_AUXPOW_ACTIVATION_HEIGHT=26347
+export IRIUM_AUXPOW_ACTIVATION_HEIGHT=26500
 ./target/release/irium-stratum</code></pre>
           <p class="m-muted" style="margin-top:8px;">The server handles both standard and AuxPoW modes automatically — it switches at activation height with no manual intervention.</p>
         </article>
@@ -911,5 +909,6 @@ GitHub</a>
 </script>
 
 <script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>
+<script src="https://www.iriumlabs.org/nav.js"></script>
 </body>
 </html>

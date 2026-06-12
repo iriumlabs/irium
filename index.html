@@ -108,12 +108,15 @@
   }
 
   .nav-links {
-    display: flex;
+    display: none;
     align-items: center;
     gap: 1rem;
     list-style: none;
     margin: 0;
     padding: 0;
+  }
+  @media (min-width: 821px) {
+    .nav-links { display: flex; }
   }
 
   .nav-links a {

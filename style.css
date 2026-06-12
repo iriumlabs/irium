@@ -92,9 +92,15 @@ body {
 }
 
 .nav-links {
-    display: flex;
+    display: none;
     list-style: none;
     gap: 2rem;
+}
+
+@media (min-width: 821px) {
+    .nav-links {
+        display: flex;
+    }
 }
 
 .nav-links a {

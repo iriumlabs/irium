@@ -1158,26 +1158,32 @@ body {
 
 /* ── Mobile breakpoints ──────────────────────────────────── */
 @media (max-width: 820px) {
-    /* Nav */
-    .nav .container { flex-wrap: wrap; row-gap: 0; }
+    /* Nav — collapses to hamburger; links drop as absolute overlay */
+    .nav { overflow: visible; }
+    .nav .container { flex-wrap: nowrap; position: relative; }
     .nav-hamburger  { display: flex !important; }
 
     .nav-links {
         display: none !important;
+        position: absolute !important;
+        top: 100% !important;
+        left: 0 !important;
+        right: 0 !important;
         flex-direction: column !important;
-        width: 100% !important;
+        background: rgba(10, 10, 28, 0.98) !important;
+        border-top: 1px solid rgba(99, 102, 241, 0.25) !important;
+        padding: 0.5rem 0 1rem !important;
         gap: 0 !important;
-        padding: 0.4rem 0 0.8rem !important;
-        border-top: 1px solid rgba(99, 102, 241, 0.2) !important;
-        margin-top: 0.5rem !important;
-        order: 3 !important;
+        margin: 0 !important;
+        z-index: 998 !important;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5) !important;
     }
     .nav-links.is-open { display: flex !important; }
     .nav-links li { width: 100% !important; }
     .nav-links a {
         display: block !important;
-        padding: 0.55rem 0.4rem !important;
-        font-size: 0.85rem !important;
+        padding: 0.7rem 1.5rem !important;
+        font-size: 0.9rem !important;
     }
     .nav-socials { display: none !important; }
 

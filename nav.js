@@ -38,6 +38,16 @@
         btn.setAttribute('aria-expanded', 'false');
       });
     });
+
+    document.addEventListener('click', function (e) {
+      if (navLinks.classList.contains('is-open') &&
+          !btn.contains(e.target) &&
+          !navLinks.contains(e.target)) {
+        navLinks.classList.remove('is-open');
+        btn.classList.remove('is-open');
+        btn.setAttribute('aria-expanded', 'false');
+      }
+    });
   }
 
   if (document.readyState === 'loading') {

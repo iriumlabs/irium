@@ -533,3 +533,11 @@ button {
 .support-page .feature-card p {
   overflow-wrap: anywhere !important;
 }
+
+/* Mobile nav — collapse links, show only on hamburger tap */
+@media (max-width: 820px) {
+  .nav-links { display: none !important; }
+  .nav-links.is-open { display: flex !important; flex-direction: column !important; width: 100% !important; }
+  .nav-socials { display: none !important; }
+  .nav .container { flex-wrap: wrap !important; }
+}

@@ -131,14 +131,14 @@
 
 <div class="wp-body">
 <div class="wp-header">
-<h1>Irium: DNS-Free Proof-of-Work Mainnet</h1>
-<p class="wp-subtitle">Technical Whitepaper - Version 1.0</p>
+<h1>Irium: A Settlement-First Proof-of-Work Blockchain</h1>
+<p class="wp-subtitle">Technical Whitepaper — Version 2.2 (May 2026)</p>
 <div class="wp-badges"><span class="badge">** LIVE on Mainnet</span> <span class="badge" style="background: rgba(99, 102, 241, 0.3);">Genesis Hash: ** 0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd10a3</span> <span class="badge" style="background: rgba(99, 102, 241, 0.3);">Launch: ** January 5, 2026</span></div>
 </div>
 <div class="wp-section"><h2>Abstract</h2>
-<p>Irium is a purpose-built proof-of-work blockchain designed to maximize network independence and long-term survivability. The protocol eliminates reliance on DNS infrastructure, enforces transparent founder vesting via on-chain timelocks, incentivizes transaction relay quality without inflation, and prioritizes light client usability from genesis. This whitepaper outlines the core design principles, system architecture, monetary policy, and implementation status of the IRM asset and its supporting network.</p>
-<p><strong>Current Implementation:</strong> Production mainnet is LIVE; core innovations are operational, with NiPoPoW proofs implemented.</p>
-
+<p>Irium is a SHA-256d proof-of-work blockchain purpose-built for trustless commerce. Rather than requiring smart contract programming, it implements a deterministic settlement layer as a first-class protocol primitive, enabling buyers and sellers to create binding agreements, submit cryptographic proofs, and release funds without intermediaries. The protocol also maximises network independence through DNS-free bootstrapping, enforces transparent founder vesting via on-chain CLTV timelocks, and prioritises light-client usability from genesis.</p>
+<p>Every settlement outcome is determined by on-chain observable data with no external oracles, governance mechanisms, or privileged actors: <em>agreement + proofs + height → outcome</em>.</p>
+<p><strong>Current Status:</strong> Mainnet live (launched January 5, 2026, node v1.9.49). Settlement layer, reputation system, BTC atomic swaps, marketplace, and all core features operational.</p>
 </div>
 <div class="wp-section"><h2>1. Introduction</h2>
 <p>Most established proof-of-work networks inherit architectural assumptions from Bitcoin, including DNS-based bootstrapping, addrman-driven peer discovery, and an absence of protocol-level incentives for fast relay. Irium rethinks these components to produce a mainnet that can launch and sustain itself even if all founding infrastructure disappears.</p>
@@ -149,14 +149,15 @@
 - All services operational</p>
 <h3>1.1 Goals</h3>
 <ol>
+<li><strong>Settlement-first design</strong> — deterministic escrow, proof submission, and fund release as base-layer protocol primitives</li>
 <li><strong>Permanent bootstrap viability</strong> without DNS dependencies or trusted third-party domains</li>
-<li><strong>Transparent founder vesting</strong> with consensus-enforced, irreversible timelocks</li>
+<li><strong>Transparent founder vesting</strong> with consensus-enforced, irreversible CLTV timelocks</li>
 <li><strong>Incentivized relay network</strong> with optional fee-sharing rewards for propagation quality</li>
 <li><strong>Sybil-resistant peer discovery</strong> hardened against botnet saturation</li>
 <li><strong>Mobile-first architecture</strong> with NiPoPoW-ready light clients from block 1</li>
 <li><strong>On-chain notarization</strong> layer for off-chain metadata commitments</li>
 </ol>
-<p><strong>Status:</strong> 6/6 implemented.</p>
+<p><strong>Status:</strong> 7/7 implemented and live.</p>
 <h3>1.2 Technical Specifications</h3>
 <table class="wp-table">
 <thead>
@@ -188,7 +189,7 @@
 </tr>
 <tr>
 <td>Block Time</td>
-<td>600 seconds (10 minutes)</td>
+<td>120 seconds (2 min) — V2 fork active at block 24,250</td>
 </tr>
 <tr>
 <td>Initial Reward</td>
@@ -196,11 +197,23 @@
 </tr>
 <tr>
 <td>Halving Interval</td>
-<td>210,000 blocks (~4 years)</td>
+<td>1,050,000 blocks (~4 years at V2 block time)</td>
 </tr>
 <tr>
 <td>Difficulty Retarget</td>
-<td>2016-block retarget until height 16,462, then LWMA</td>
+<td>LWMA v2, 30-block window (activated block 19,740)</td>
+</tr>
+<tr>
+<td>Node Version</td>
+<td>v1.9.49</td>
+</tr>
+<tr>
+<td>Desktop App</td>
+<td>Irium Core v1.0.77</td>
+</tr>
+<tr>
+<td>AuxPoW Merged Mining</td>
+<td>Activates at block 26,500</td>
 </tr>
 <tr>
 <td>Coinbase Maturity</td>
@@ -219,6 +232,14 @@
 
 </div>
 <div class="wp-section"><h2>2. System Architecture</h2>
+<p>Irium is structured across five protocol layers:</p>
+<ol>
+<li><strong>Base chain</strong> — SHA-256d PoW with 2-minute blocks, UTXO model, DNS-free bootstrap</li>
+<li><strong>Settlement layer</strong> — cryptographically anchored agreements with encoded spend paths</li>
+<li><strong>Proof automation</strong> — three standardised templates (software delivery, service completion, physical delivery) with on-chain schema validation</li>
+<li><strong>Marketplace</strong> — decentralised P2P offer discovery and matching</li>
+<li><strong>Reputation</strong> — locally-derived trust signals derived from agreement outcomes, anchored on-chain via <code>rep1:</code> OP_RETURN prefix</li>
+</ol>
 <p>Irium separates responsibilities into modular subsystems:</p>
 <h3>2.1 Core Modules (src/)</h3>
 <ul>
@@ -239,11 +260,13 @@
 </ul>
 <h3>2.2 Binaries</h3>
 <ul>
-<li><strong>iriumd</strong> - Full node with HTTP API and P2P networking</li>
-<li><strong>irium-miner</strong> - PoW miner with block broadcasting</li>
-<li><strong>irium-wallet</strong> - Wallet CLI (address creation, balance queries)</li>
-<li><strong>irium-spv</strong> - SPV proof verification tool</li>
-<li><strong>irium-p2p</strong> - P2P-only diagnostic node</li>
+<li><strong>iriumd</strong> — Full node with HTTP API, P2P networking, settlement engine</li>
+<li><strong>irium-miner</strong> — CPU PoW miner with block broadcasting</li>
+<li><strong>irium-miner-gpu</strong> — GPU miner with OpenCL support (NVIDIA, AMD, Intel)</li>
+<li><strong>irium-wallet</strong> — Wallet CLI (address creation, balance, BIP32/BIP39, multisig)</li>
+<li><strong>irium-spv</strong> — SPV proof verification tool</li>
+<li><strong>irium-p2p</strong> — P2P-only diagnostic node</li>
+<li><strong>irium-core</strong> — Desktop app (Tauri-based, v1.0.77) bundling node + miner + wallet</li>
 </ul>
 
 </div>
@@ -263,15 +286,15 @@ valid_block = block_hash &lt; target
 - Hash: 0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd10a3 (valid mainnet PoW)
 - Mined: January 5, 2026</p>
 <h3>3.2 Difficulty Adjustment</h3>
-<p><strong>Target:</strong> 600 seconds per block (10 minutes)
-<strong>Retarget:</strong> Bitcoin-style 2016-block adjustment until mainnet height 16,462, then LWMA</p>
-<p><strong>Implementation note:</strong> Mainnet keeps SHA-256d and the 10-minute target. The scheduled code-defined activation height for LWMA is 16,462.</p>
-<p><strong>Pre-activation algorithm:</strong></p>
-<pre><code class="language-text">expected_time = 2016 * 600  # 1,209,600 seconds
-actual_time = last_block_time - first_block_time
-new_difficulty = old_difficulty * (actual_time / expected_time)
-</code></pre>
-<p>After activation, LWMA derives the next target from recent solve times while preserving the same PoW and block target cadence.</p>
+<p><strong>Target:</strong> 120 seconds per block (2 min) — V2 fork active since block 24,250.</p>
+<p><strong>Retarget history:</strong></p>
+<ul>
+<li>Genesis to block 16,462: Bitcoin-style 2016-block retarget at 600s target</li>
+<li>Block 16,462 to 19,739: LWMA v1</li>
+<li>Block 19,740 onward: LWMA v2, 30-block window (current)</li>
+<li>Block 24,250 onward: Block time target reduced to 120s via V2 fork</li>
+</ul>
+<p>LWMA v2 derives the next target from recent per-block solve times using a linearly-weighted moving average, providing rapid and stable response to hashrate changes without the oscillation of simple retargets.</p>
 <h3>3.3 Block Validation</h3>
 <p>Each block must satisfy:
 1. <code>block_hash &lt; target</code> (proof-of-work)
@@ -292,12 +315,13 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 - 1,250,000 IRM unlocks at block 157,680 (~3 years)</p>
 <p><strong>Mineable Supply (96.5%):</strong> 96,500,000 IRM
 - Distributed via block rewards
-- Halves every 210,000 blocks
+- Halves every 1,050,000 blocks (~4 years at 2-min block time)
 - Fair distribution through mining</p>
 <h3>4.2 Block Rewards Schedule</h3>
 <table class="wp-table">
 <thead>
 <tr>
+<th>Era</th>
 <th>Block Range</th>
 <th>Reward</th>
 <th>Blocks</th>
@@ -306,38 +330,43 @@ new_difficulty = old_difficulty * (actual_time / expected_time)
 </thead>
 <tbody>
 <tr>
-<td>1 - 210,000</td>
+<td>1 (current)</td>
+<td>1 – 1,050,000</td>
 <td>50 IRM</td>
-<td>210,000</td>
-<td>10,500,000</td>
+<td>1,050,000</td>
+<td>52,500,000</td>
 </tr>
 <tr>
-<td>210,001 - 420,000</td>
+<td>2</td>
+<td>1,050,001 – 2,100,000</td>
 <td>25 IRM</td>
-<td>210,000</td>
-<td>5,250,000</td>
+<td>1,050,000</td>
+<td>26,250,000</td>
 </tr>
 <tr>
-<td>420,001 - 630,000</td>
+<td>3</td>
+<td>2,100,001 – 3,150,000</td>
 <td>12.5 IRM</td>
-<td>210,000</td>
-<td>2,625,000</td>
+<td>1,050,000</td>
+<td>13,125,000</td>
 </tr>
 <tr>
-<td>630,001 - 840,000</td>
+<td>4</td>
+<td>3,150,001 – 4,200,000</td>
 <td>6.25 IRM</td>
-<td>210,000</td>
-<td>1,312,500</td>
+<td>1,050,000</td>
+<td>6,562,500</td>
 </tr>
 <tr>
-<td>...</td>
+<td>…</td>
 <td>Continues halving</td>
-<td>...</td>
-<td>...</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Total mineable:</strong> 96,500,000 IRM over ~80 years</p>
+<p><strong>Total mineable:</strong> 96,500,000 IRM converging over ~80 years. Genesis vesting (3.5M IRM) + mineable supply = 100M hard cap.</p>
 <h3>4.3 Transaction Fees</h3>
 <p><strong>Minimum Fee:</strong> 0.0001 IRM (10,000 satoshis)</p>
 <p><strong>Fee Distribution:</strong>
@@ -582,8 +611,47 @@ Nonce (4 bytes)
 - ✅ Wallet: Secure</p>
 
 </div>
-<div class="wp-section"><h2>9. Implementation Status</h2>
-<h3>9.1 Completed (100%)</h3>
+<div class="wp-section"><h2>9. Settlement Layer</h2>
+<p>The settlement layer is Irium's primary differentiator. It implements trustless commerce as a first-class protocol primitive without requiring Turing-complete smart contracts.</p>
+<h3>9.1 Agreement Model</h3>
+<p>Agreements encode: parties (buyer + seller addresses), locked amount, deadline, release conditions, and proof type. Policy evaluation is a <strong>pure function</strong>: <em>agreement + proofs + height → outcome</em>, identical across all full nodes. Release requires a verified proof; refund triggers on timeout.</p>
+<ul>
+<li>Milestone payments: per-milestone independent fund and release</li>
+<li>Proof finality depth: 6 blocks by default, with reorg protection</li>
+<li>Dispute window: 144 blocks (auto-generated policy)</li>
+<li>Escrow receipts: signed, non-repudiable</li>
+</ul>
+<h3>9.2 Proof Templates (live)</h3>
+<table class="wp-table">
+<thead><tr><th>Template</th><th>Use Case</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Software Delivery</td><td>Repo commit hash, CI pass</td><td>✅ Live</td></tr>
+<tr><td>Service Completion</td><td>Contractor work delivery</td><td>✅ Live</td></tr>
+<tr><td>Physical Delivery</td><td>Shipping tracking proof</td><td>✅ Live</td></tr>
+</tbody>
+</table>
+<h3>9.3 Settlement Features (v1.9.49)</h3>
+<ul>
+<li>✅ Auto-release watcher daemon (proof-triggered release)</li>
+<li>✅ Schema validation for five canonical proof types</li>
+<li>✅ Auto-policy generation with 144-block dispute windows</li>
+<li>✅ Signed escrow receipts (non-repudiation)</li>
+<li>✅ Per-milestone fund and release</li>
+<li>✅ On-chain reputation anchoring via OP_RETURN (<code>rep1:</code> prefix)</li>
+<li>✅ BTC atomic swaps — live since block 23,850 (SPV-verified, no custodian, no bridge)</li>
+<li>✅ Marketplace — decentralised P2P offer discovery</li>
+<li>✅ Multisig (2-of-2, 2-of-3) and BIP32/BIP39 HD derivation</li>
+</ul>
+<h3>9.4 Key Management</h3>
+<ul>
+<li>P2PKH addresses (version 0x39) begin with <code>Q</code></li>
+<li>Multisig addresses (version 0x28) begin with <code>P</code></li>
+<li>BIP32/BIP39 HD derivation with custom-scheme support</li>
+<li>WIF import/export for hardware wallet compatibility</li>
+</ul>
+</div>
+<div class="wp-section"><h2>10. Implementation Status</h2>
+<h3>10.1 Completed</h3>
 <p><strong>Core Blockchain:</strong>
 - ✅ Genesis block specification and mining
 - ✅ Block validation and chain state
@@ -636,7 +704,15 @@ Nonce (4 bytes)
 - ✅ Relay reward system
 - ✅ Anchor verification
 - ✅ SPV + NiPoPoW proofs</p>
-<h3>9.2 Network Launch</h3>
+<p><strong>Settlement &amp; Commerce:</strong>
+- ✅ Settlement layer (escrow, auto-release, milestone, multisig)
+- ✅ Three proof templates (software, service, physical delivery)
+- ✅ Marketplace (decentralised P2P offer discovery)
+- ✅ Reputation system (on-chain anchoring, rep1: prefix)
+- ✅ BTC atomic swaps (SPV-verified, no custodian, live since block 23,850)
+- ✅ Python SDK and TypeScript SDK
+- ✅ WebSocket streaming API</p>
+<h3>10.2 Network Launch</h3>
 <p><strong>Mainnet Status:</strong> ✅ LIVE</p>
 <ul>
 <li>Genesis mined: January 5, 2026</li>
@@ -661,21 +737,31 @@ Nonce (4 bytes)
 <p>No on-chain governance; decisions made through code and consensus.</p>
 
 </div>
-<div class="wp-section"><h2>11. Future Roadmap</h2>
+<div class="wp-section"><h2>11. Roadmap</h2>
+<p><strong>Live (as of v1.9.49):</strong></p>
 <ul>
-<li>[x] Core blockchain implementation</li>
-<li>[x] PoW mining system</li>
-<li>[x] P2P networking</li>
-<li>[x] All 8 innovations</li>
-<li>[x] Mainnet genesis</li>
-<li>[x] Network launch</li>
-<li>[ ] Mobile wallet app</li>
-<li>[ ] Mining pool software</li>
-<li>[ ] Hardware wallet integration</li>
-<li>[ ] Exchange listings</li>
-<li>[ ] Block explorer web UI</li>
+<li>✅ Core blockchain, SHA-256d PoW, UTXO model</li>
+<li>✅ DNS-free bootstrapping (signed seedlist, anchors)</li>
+<li>✅ All 8 network innovations</li>
+<li>✅ Mainnet genesis and launch (January 5, 2026)</li>
+<li>✅ Public mining pool (<code>pool.iriumlabs.org</code>) — ASIC, CPU/GPU, solo, firewall bypass</li>
+<li>✅ Block explorer and API</li>
+<li>✅ Settlement layer (escrow, proof templates, auto-release, milestone)</li>
+<li>✅ Marketplace and reputation system</li>
+<li>✅ BTC atomic swaps (block 23,850)</li>
+<li>✅ Desktop app: Irium Core v1.0.77 (Windows, macOS, Linux)</li>
+<li>✅ Python SDK + TypeScript SDK</li>
 </ul>
-
+<p><strong>Upcoming:</strong></p>
+<ul>
+<li>🔄 AuxPoW merged mining — activates at block 26,500</li>
+<li>🔄 Web wallet</li>
+<li>🔄 Mobile wallet app</li>
+<li>🔄 LTC atomic swaps</li>
+<li>🔄 Additional proof templates</li>
+<li>🔄 Hardware wallet integration</li>
+<li>🔄 Exchange listings</li>
+</ul>
 </div>
 <div class="wp-section wp-pool-ui">
   <div class="wp-pool-head">
@@ -714,11 +800,9 @@ Nonce (4 bytes)
 </div>
 
 <div class="wp-section"><h2>12. Conclusion</h2>
-<p>Irium represents a new generation of blockchain technology that addresses fundamental challenges in decentralization, security, and accessibility. With all 8 core innovations implemented and operational, Irium is ready to serve as a foundation for the next era of cryptocurrency.</p>
-<p><strong>Network Status:</strong> Mainnet LIVE and operational
-<strong>Code Status:</strong> Production-ready, open source
-<strong>Community:</strong> Welcome to join and contribute</p>
-
+<p>Irium is a production-ready proof-of-work blockchain built for trustless commerce. The base layer provides SHA-256d PoW security with 2-minute blocks, DNS-free bootstrapping, and NiPoPoW light-client support. The settlement layer adds deterministic escrow, proof-triggered release, on-chain reputation, BTC atomic swaps, and a decentralised marketplace — all live on mainnet as of v1.9.49.</p>
+<p>Every outcome is determined by on-chain data alone. No oracles, no admin keys, no privileged actors.</p>
+<p><strong>Mainnet:</strong> Live since January 5, 2026 &nbsp;|&nbsp; <strong>Node:</strong> v1.9.49 &nbsp;|&nbsp; <strong>App:</strong> Irium Core v1.0.77 &nbsp;|&nbsp; <strong>License:</strong> MIT</p>
 </div>
 <div class="wp-section"><h2>13. References</h2>
 <ol>
@@ -745,17 +829,15 @@ Nonce (4 bytes)
 <strong>MIT License - Open Source</strong></p>
 <p><em>Built for true decentralization</em></p>
 </div>
-<div class="wp-section"><h2>9. Difficulty Adjustment (Mainnet)</h2>
-<p><strong>Genesis launched at standard Bitcoin difficulty:</strong> 0x1d00ffff</p>
-<p>The genesis block was mined with proper Bitcoin-standard difficulty calculation:</p>
+<div class="wp-section"><h2>Appendix B: Difficulty History</h2>
+<p><strong>Genesis (block 0):</strong> Standard Bitcoin difficulty 0x1d00ffff (mined at ~212,670 H/s over 7 hours)</p>
 <ul>
-<li><strong>Difficulty bits</strong>: 0x1d00ffff (standard Bitcoin genesis difficulty)</li>
-<li><strong>Expected block time</strong>: ~10 minutes</li>
-<li><strong>Proper PoW validation</strong>: No hardcoded overrides</li>
-<li><strong>Automatic adjustment</strong>: Bitcoin-style retarget until height 16,462, then LWMA</li>
+<li><strong>Block 0 → 16,461</strong>: Bitcoin-style 2016-block retarget, 600s target</li>
+<li><strong>Block 16,462 → 19,739</strong>: LWMA v1 activated</li>
+<li><strong>Block 19,740 → present</strong>: LWMA v2, 30-block window</li>
+<li><strong>Block 24,250 → present</strong>: V2 fork — block time target reduced to 120s</li>
 </ul>
-<h3>Technical Implementation</h3>
-<pre><code class="language-text"># Standard Bitcoin compact target calculation
+<pre><code class="language-text"># Standard Bitcoin compact target (genesis calculation)
 def to_target(bits: int) -&gt; int:
     exponent = bits &gt;&gt; 24
     mantissa = bits &amp; 0xFFFFFF

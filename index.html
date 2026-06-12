@@ -716,14 +716,53 @@
   @keyframes otcPulse { 0%,100%{box-shadow:0 16px 34px rgba(0,0,0,.36),0 0 0 1px rgba(93,211,255,.14) inset;} 50%{box-shadow:0 16px 34px rgba(0,0,0,.36),0 0 0 1px rgba(93,211,255,.26) inset;} }
   @keyframes otcAppear { from { opacity:0; transform:translateX(-50%) translateY(-8px);} to { opacity:1; transform:translateX(-50%) translateY(0);} }
 
-  @media (max-width: 1080px) {
-    .nav .container { flex-wrap: wrap; padding: .55rem 0; }
-    .nav-links { flex-wrap: wrap; justify-content: center; width: 100%; }
-    .nav-socials { width: 100%; justify-content: center; }
+  /* hamburger button */
+  .nav-hamburger {
+    display: none;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    width: 38px;
+    height: 38px;
+    border: 1px solid rgba(149,177,226,.28);
+    border-radius: 8px;
+    background: rgba(16,23,42,.6);
+    cursor: pointer;
+    padding: 0 9px;
+    flex-shrink: 0;
+  }
+  .nav-hamburger span {
+    display: block;
+    height: 2px;
+    background: #d9e6ff;
+    border-radius: 2px;
+    transition: transform .22s ease, opacity .22s ease;
+  }
+  .nav-hamburger.is-open span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+  .nav-hamburger.is-open span:nth-child(2) { opacity: 0; }
+  .nav-hamburger.is-open span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+  @media (max-width: 820px) {
+    .nav-hamburger { display: flex; }
+    .nav-links {
+      display: none;
+      flex-direction: column;
+      width: 100%;
+      padding: .6rem 0 .8rem;
+      gap: .1rem;
+      border-top: 1px solid rgba(149,177,226,.18);
+      margin-top: .4rem;
+    }
+    .nav-links.is-open { display: flex; }
+    .nav-links a {
+      padding: .55rem .4rem;
+      font-size: .85rem;
+    }
+    .nav-socials { display: none; }
+    .nav .container { flex-wrap: wrap; }
   }
 
   @media (max-width: 860px) {
-
     .hero { padding-top: 9rem; }
     .hero .hero-content { padding: .9rem 0 0; }
     .hero .coin-container { margin-bottom: 1.6rem; }
@@ -738,6 +777,21 @@
       padding: .62rem .68rem;
       gap: .56rem;
     }
+    .features-grid, .specs-grid {
+      grid-template-columns: 1fr;
+    }
+    .section { padding: 3.2rem 0; }
+  }
+
+  @media (max-width: 480px) {
+    .glitch { font-size: clamp(2.4rem,13vw,4rem) !important; }
+    .hero-subtitle { font-size: 1rem; }
+    .hero-tagline { font-size: .93rem; }
+    .hero-keyline { font-size: .75rem; }
+    .section-title { font-size: 1.5rem !important; }
+    .btn { font-size: .8rem; padding: .72rem 1rem; }
+    .feature-icon { font-size: 1.6rem; }
+    .spec-card { padding: .85rem .75rem; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -825,7 +879,10 @@
       <img src="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1" alt="Irium" class="logo">
       <span>IRIUM</span>
     </div>
-    <ul class="nav-links">
+    <button class="nav-hamburger" id="nav-hamburger" aria-label="Toggle navigation" aria-expanded="false">
+      <span></span><span></span><span></span>
+    </button>
+    <ul class="nav-links" id="nav-links">
       <li><a href="https://www.iriumlabs.org/">HOME</a></li>
       <li><a href="https://www.iriumlabs.org/whitepaper.html">WHITEPAPER</a></li>
       <li><a href="https://www.iriumlabs.org/settlement/">SETTLEMENT</a></li>
@@ -890,12 +947,12 @@
     <div style="margin-top:10px;"><a href="https://www.iriumlabs.org/docs/mining/" class="btn btn-primary">Start Mining</a></div>
   </div>
   <div class="spec-card">
-    <div class="spec-label">Settlement Direction</div>
-    <div class="spec-value" style="font-size:1rem; line-height:1.4;">See how the live chain, settlement primitives in development, and roadmap fit together without overstating what is already in production.</div>
-    <div style="margin-top:10px;"><a href="https://www.iriumlabs.org/settlement/" class="btn btn-primary">Why Irium</a></div>
+    <div class="spec-label">Settlement &amp; Atomic Swaps</div>
+    <div class="spec-value" style="font-size:1rem; line-height:1.4;">Settlement layer and marketplace are live on mainnet. BTC atomic swaps (SPV-verified, no custodian) live since block 23,850. LTC / DOGE coming soon.</div>
+    <div style="margin-top:10px;"><a href="https://www.iriumlabs.org/settlement/" class="btn btn-primary">Explore Settlement</a></div>
   </div>
 </div>
-<p class="section-subtitle" style="margin-top:16px;">Block Time: 10 min • Reward: 50 IRM • Halving: 210k blocks • Max Supply: ~24.5M • Mainnet Launch: January 5, 2026</p>
+<p class="section-subtitle" style="margin-top:16px;">Block Time: 2 min (120 s) • Reward: 50 IRM • Halving: 1.05M blocks • Supply Cap: 100M IRM • Mainnet Launch: Jan 5, 2026 • Node: v1.9.49</p>
 </div>
 </section>
 
@@ -903,9 +960,9 @@
 <div class="container">
 <h2 class="section-title">WHY IRIUM EXISTS</h2>
 <div class="about-content">
-<p>Most blockchains optimize for transfers, speculation, or generic payment rails. Irium is being built around a narrower and more practical goal: trust-minimized settlement for agreements, escrow, and proof-based commerce.</p>
-<p>The chain is already live as an independent SHA-256d Proof-of-Work network built from scratch in Rust. That base layer matters because settlement only works if the underlying consensus stays narrow, objective, mineable, and resistant to administrative override.</p>
-<p>Irium is not a fork, does not rely on admin keys, and does not include freeze, seizure, or centralized dispute powers in consensus. The broader direction is real-world commercial settlement with objective on-chain outcomes, not vague crypto marketing.</p>
+<p>Most blockchains optimize for transfers, speculation, or generic payment rails. Irium is built around a narrower and more practical goal: trust-minimized settlement for agreements, escrow, and proof-based commerce — and that settlement layer is live on mainnet today.</p>
+<p>The chain runs as an independent SHA-256d Proof-of-Work network built from scratch in Rust. Its settlement layer, marketplace, reputation system, and BTC atomic swaps (SPV-verified, no custodian) are all live since block 23,850. Block time is 2 minutes (120 s), activated at the V2 hard fork at block 24,250. Difficulty adjustment uses LWMA v2 with a 30-block window, active since block 19,740.</p>
+<p>Irium is not a fork, does not rely on admin keys, and does not include freeze, seizure, or centralized dispute powers in consensus. The desktop app (Irium Core v1.0.77) bundles the node, wallet, miner, settlement hub, and marketplace in a single install for Windows, macOS, and Linux.</p>
 <div class="highlight-box">
 <strong>Network Status: LIVE MAINNET</strong><br>
 Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd10a3</code>
@@ -941,8 +998,8 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
 
 <section id="features" class="section section-dark">
 <div class="container">
-<h2 class="section-title">FOUNDATIONS AND SETTLEMENT DIRECTION</h2>
-<p class="section-subtitle">The live chain and network stack are already operational. Settlement-specific primitives are being layered in carefully, with live features separated from active development and future roadmap items.</p>
+<h2 class="section-title">WHAT IS LIVE TODAY</h2>
+<p class="section-subtitle">Chain, mining, settlement, marketplace, reputation, multisig, BTC atomic swaps, and the desktop wallet are all live on mainnet. v1.9.49 is the current node release; Irium Core v1.0.77 is the current desktop app.</p>
 
 <div style="margin-top:24px;">
 <h3 style="text-align:center; margin-bottom:18px; letter-spacing:.08em;">CORE CHAIN AND NETWORK FOUNDATIONS</h3>
@@ -998,40 +1055,45 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
 <h3>Agreement Anchoring</h3>
 <p>Agreement-hash anchoring is part of the settlement-first direction so counterparties can bind commercial terms to an objective chain reference.</p>
 </div>
-<div class="feature-card" role="button" tabindex="0" data-title="Escrow and Settlement Outputs" data-icon="🤝" data-detail="Native settlement outputs are part of the active direction.|Designed for escrow, controlled release, and defined outcomes.|Presented as in development, not fully live.">
+<div class="feature-card" role="button" tabindex="0" data-title="Escrow and Settlement — Live" data-icon="🤝" data-detail="Settlement layer is live on mainnet (v1.9.28+).|Escrow outputs, controlled release, and defined outcomes enforced by consensus.|Signed receipt export, per-template auto-policy, and 144-block dispute window all live.">
 <div class="feature-icon">🤝</div>
-<h3>Escrow and Settlement Outputs</h3>
-<p>Native escrow and settlement outputs are part of the foundation being built, aimed at trust-minimized commercial release flows.</p>
+<h3>Escrow and Settlement — Live</h3>
+<p>The full settlement layer is live on mainnet. Buyers and sellers lock funds on-chain; an attestor submits a proof of delivery; the chain enforces automatic release or refund.</p>
 </div>
-<div class="feature-card" role="button" tabindex="0" data-title="Timeout Refund Logic" data-icon="⏱️" data-detail="Refund paths are designed around objective timeout conditions.|Supports predictable exits when required actions do not occur.|Part of settlement primitive design work.">
+<div class="feature-card" role="button" tabindex="0" data-title="Auto-Release Watcher — Live" data-icon="⏱️" data-detail="Auto-release watcher (irium-wallet watch --auto-release) ships in v1.9.28+.|Refund paths are enforced by objective timeout conditions.|No human arbitration inside consensus.">
 <div class="feature-icon">⏱️</div>
-<h3>Timeout Refund Logic</h3>
-<p>Timeout-based refunds are part of the settlement design so funds can resolve by objective conditions instead of subjective intervention.</p>
+<h3>Auto-Release Watcher — Live</h3>
+<p>The <code>irium-wallet watch --auto-release</code> command monitors open settlements and triggers release or refund automatically when the on-chain conditions are met.</p>
 </div>
-<div class="feature-card" role="button" tabindex="0" data-title="Milestone Settlement" data-icon="📍" data-detail="Milestone-oriented settlement is a roadmap direction.|Supports staged releases and holdbacks.|Relevant to contractor and business flows.">
+<div class="feature-card" role="button" tabindex="0" data-title="Milestone Settlement — Live" data-icon="📍" data-detail="Per-milestone fund and release wallet aliases ship in v1.9.28 (Group G).|144-block dispute window live.|Staged releases and holdbacks enforced on-chain.">
 <div class="feature-icon">📍</div>
-<h3>Milestone Settlement Direction</h3>
-<p>Milestone releases, delayed holdbacks, and staged settlement are active design directions for contractor and business payment flows.</p>
+<h3>Milestone Settlement — Live</h3>
+<p>Per-milestone fund and release wallet aliases let contractors and clients stage payments against defined deliverables — enforced by the chain, not by a platform.</p>
 </div>
-<div class="feature-card" role="button" tabindex="0" data-title="Objective Proof Validation" data-icon="✅" data-detail="Objective proofs, signatures, or approved attestations are part of the roadmap.|Consensus is intended to stay narrow and deterministic.|Human judgment stays out of consensus.">
+<div class="feature-card" role="button" tabindex="0" data-title="BTC Atomic Swaps — Live" data-icon="⚡" data-detail="BTC atomic swaps (SPV-verified, no custodian) live since block 23,850.|Irium validates Bitcoin headers in-chain — no oracle, no bridge.|LTC / DOGE coming soon.">
+<div class="feature-icon">⚡</div>
+<h3>BTC Atomic Swaps — Live</h3>
+<p>Trustless IRM ↔ BTC swaps using SPV header relay. Live since block 23,850. No wrapped tokens, no bridge, no custodian. LTC and DOGE support coming soon.</p>
+</div>
+<div class="feature-card" role="button" tabindex="0" data-title="Proof Schema Registry — Live" data-icon="✅" data-detail="5 standard proof kinds shipped in v1.9.28 (Group D).|On-chain reputation event anchoring (rep1: prefix) live since Group H.|Approved attestor paths validate delivery proofs deterministically.">
 <div class="feature-icon">✅</div>
-<h3>Objective Proof Direction</h3>
-<p>Irium is being developed around objective proofs and verifiable conditions, not human arbitration inside consensus.</p>
+<h3>Proof Schema Registry — Live</h3>
+<p>Five standard proof kinds and an on-chain reputation anchoring system are live. Approved attestors submit cryptographic delivery proofs; consensus validates deterministically.</p>
 </div>
-<div class="feature-card" role="button" tabindex="0" data-title="Approved Attestors" data-icon="🧾" data-detail="Approved attestor flows are directional and future-facing.|Used only where objective proof paths can be checked.|Not presented as already live.">
-<div class="feature-icon">🧾</div>
-<h3>Attestor and Verifiable Proof Direction</h3>
-<p>Approved attestors and signature-based proof paths are roadmap work for cases where objective third-party evidence can be checked deterministically.</p>
+<div class="feature-card" role="button" tabindex="0" data-title="Multisig and BIP32/BIP39 — Live" data-icon="🔐" data-detail="2-of-2 and 2-of-3 multisig live on mainnet.|BIP32/BIP39 HD key derivation live.|Confidential agreements live.">
+<div class="feature-icon">🔐</div>
+<h3>Multisig and BIP32/BIP39 — Live</h3>
+<p>2-of-2 and 2-of-3 multisig wallets, BIP32/BIP39 hierarchical key derivation, and confidential agreement anchoring are all live on mainnet.</p>
 </div>
-<div class="feature-card" role="button" tabindex="0" data-title="No-Response Auto-Settlement" data-icon="⛓️" data-detail="No-response resolution paths are planned around timeouts and predefined rules.|Designed to stay rule-based.|Not a live production feature today.">
-<div class="feature-icon">⛓️</div>
-<h3>No-Response Auto-Settlement</h3>
-<p>No-response settlement paths are planned so defined commercial flows can resolve on objective timeout and proof rules.</p>
+<div class="feature-card" role="button" tabindex="0" data-title="Marketplace and Reputation — Live" data-icon="🏪" data-detail="On-chain marketplace live.|Portable reputation system live.|Offer discovery, offer feed, and offer ranking all shipped.">
+<div class="feature-icon">🏪</div>
+<h3>Marketplace and Reputation — Live</h3>
+<p>The on-chain marketplace, offer registry, and reputation system are live. Sellers list offers; buyers take them; settlement enforces the outcome — all without a central platform.</p>
 </div>
-<div class="feature-card" role="button" tabindex="0" data-title="Commercial Use Cases" data-icon="🏗️" data-detail="OTC escrow, deposits, contractor payments, and milestone flows are key use cases.|Templates and broader business tooling remain roadmap work.|Mining secures the base layer for this direction.">
-<div class="feature-icon">🏗️</div>
-<h3>Commercial Use Cases</h3>
-<p>Target use cases include OTC escrow, deposits, preorders, contractor payments, milestone releases, and proof-based business settlement.</p>
+<div class="feature-card" role="button" tabindex="0" data-title="AuxPoW Merged Mining — Upcoming" data-icon="⛏️" data-detail="AuxPoW merged mining activates at block 26,500.|SHA-256d miners will be able to mine Irium as a secondary chain alongside Bitcoin.|No new hardware required.">
+<div class="feature-icon">⛏️</div>
+<h3>AuxPoW Merged Mining — Block 26,500</h3>
+<p>Auxiliary Proof-of-Work merged mining activates at block 26,500. Existing SHA-256d ASIC operators can mine IRM as a secondary chain alongside Bitcoin at zero extra electricity cost.</p>
 </div>
 </div>
 </div>
@@ -1044,16 +1106,16 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
 <p class="section-subtitle">Irium separates production reality from development direction and future roadmap work.</p>
 <div class="specs-grid">
 <div class="spec-card">
-<div class="spec-label">LIVE NOW</div>
-<div class="spec-value" style="font-size:1rem; line-height:1.45;">Independent SHA-256d mainnet, Rust implementation, public mining and pool access, explorer, calculator, DNS-free bootstrap approach, self-healing peer discovery, anchor checkpoints, relay incentives, metadata support, and transparent founder vesting.</div>
+<div class="spec-label">LIVE — BASE LAYER</div>
+<div class="spec-value" style="font-size:1rem; line-height:1.45;">SHA-256d mainnet, Rust node (v1.9.49), 2-min blocks (V2), LWMA v2 difficulty, public pool (3333 ASIC / 3335 CPU+GPU / 3336 solo), explorer, DNS-free bootstrap, self-healing peer discovery, multisig, BIP32/BIP39, WebSocket API.</div>
 </div>
 <div class="spec-card">
-<div class="spec-label">ACTIVE DIRECTION</div>
-<div class="spec-value" style="font-size:1rem; line-height:1.45;">Settlement-first primitives including agreement-hash anchoring, escrow and settlement outputs, timeout refunds, and basic flows for OTC escrow, deposits, and contractor-style settlement.</div>
+<div class="spec-label">LIVE — SETTLEMENT &amp; COMMERCE</div>
+<div class="spec-value" style="font-size:1rem; line-height:1.45;">Full settlement layer, escrow outputs, auto-release watcher, milestone payments, dispute window, proof schema registry, reputation system, marketplace, offer discovery, confidential agreements, signed receipt export, BTC atomic swaps (block 23,850+).</div>
 </div>
 <div class="spec-card">
-<div class="spec-label">ROADMAP</div>
-<div class="spec-value" style="font-size:1rem; line-height:1.45;">Objective proof automation, approved attestor paths, no-response auto-settlement, milestone proofs, commercial templates, portable reputation, and broader business integrations are planned phases, not fully live features.</div>
+<div class="spec-label">UPCOMING</div>
+<div class="spec-value" style="font-size:1rem; line-height:1.45;">AuxPoW merged mining (block 26,500), LTC atomic swaps, DOGE atomic swaps, web wallet, mobile wallet. Desktop wallet (Irium Core v1.0.77) ships now for Windows, macOS, and Linux.</div>
 </div>
 </div>
 </div>
@@ -1067,10 +1129,13 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
 <div class="spec-card"><div class="spec-label">TICKER</div><div class="spec-value">IRM</div></div>
 <div class="spec-card"><div class="spec-label">ALGORITHM</div><div class="spec-value">SHA-256d</div></div>
 <div class="spec-card"><div class="spec-label">MAX SUPPLY</div><div class="spec-value">100M IRM</div></div>
-<div class="spec-card"><div class="spec-label">BLOCK TIME</div><div class="spec-value">10 min</div></div>
+<div class="spec-card"><div class="spec-label">BLOCK TIME</div><div class="spec-value">2 min (120 s)</div></div>
 <div class="spec-card"><div class="spec-label">BLOCK REWARD</div><div class="spec-value">50 IRM</div></div>
-<div class="spec-card"><div class="spec-label">HALVING</div><div class="spec-value">210k blocks</div></div>
+<div class="spec-card"><div class="spec-label">HALVING</div><div class="spec-value">1,050,000 blocks</div></div>
+<div class="spec-card"><div class="spec-label">NODE VERSION</div><div class="spec-value">v1.9.49</div></div>
 <div class="spec-card"><div class="spec-label">IMPLEMENTATION</div><div class="spec-value">Rust, not a fork</div></div>
+<div class="spec-card"><div class="spec-label">BTC ATOMIC SWAPS</div><div class="spec-value">Live (block 23,850+)</div></div>
+<div class="spec-card"><div class="spec-label">AUXPOW</div><div class="spec-value">Activates block 26,500</div></div>
 <div class="spec-card"><div class="spec-label">CONSENSUS</div><div class="spec-value">Objective-only rules</div></div>
 </div>
 </div>
@@ -1093,7 +1158,7 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
   <div class="spec-card"><div class="spec-label">What are miners securing?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">Miners secure an independent settlement-first chain intended for escrow, agreement anchoring, and proof-based commerce.</div></div>
   <div class="spec-card"><div class="spec-label">What keeps Irium fair?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">No premine, no ICO, no presale, no VC control, public mining access, and transparent founder vesting enforced on-chain.</div></div>
   <div class="spec-card"><div class="spec-label">Does Irium include admin override powers?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">No. There are no admin keys, no freeze or seizure path, and no centralized dispute authority inside consensus.</div></div>
-  <div class="spec-card"><div class="spec-label">Is settlement fully live today?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">The base chain is live today. Settlement-specific primitives and automation are being built in phases and are marked on the site as active direction or roadmap where appropriate.</div></div>
+  <div class="spec-card"><div class="spec-label">Is settlement fully live today?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">Yes. The settlement layer, marketplace, reputation system, proof registry, auto-release watcher, milestone payments, and BTC atomic swaps are all live on mainnet as of v1.9.49. AuxPoW merged mining activates at block 26,500; LTC/DOGE swaps and mobile wallet are upcoming.</div></div>
   <div class="spec-card"><div class="spec-label">Where can I start?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">Read the whitepaper, explore the settlement page, inspect the explorer, or start mining through the public guide and pool.</div></div>
 </div>
 </div>
@@ -1194,6 +1259,25 @@ GitHub</a>
 
 
 <script src="script.js"></script>
+<script>
+  (function(){
+    const btn = document.getElementById('nav-hamburger');
+    const menu = document.getElementById('nav-links');
+    if (!btn || !menu) return;
+    btn.addEventListener('click', function(){
+      const open = menu.classList.toggle('is-open');
+      btn.classList.toggle('is-open', open);
+      btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+    });
+    menu.querySelectorAll('a').forEach(function(a){
+      a.addEventListener('click', function(){
+        menu.classList.remove('is-open');
+        btn.classList.remove('is-open');
+        btn.setAttribute('aria-expanded', 'false');
+      });
+    });
+  })();
+</script>
 
 <script>
   (function(){

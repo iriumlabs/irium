@@ -566,11 +566,14 @@
       <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>IRIUM OFFICIAL POOL</div></div>
       <ul class="m-list">
         <li><b>ASIC / modern firmware:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
-        <li><b>CPU/GPU third-party miners:</b> <code>stratum+tcp://pool.iriumlabs.org:3335</code></li>
-        <li><b>Algorithm:</b> SHA-256d</li>
-        <li><b>Network:</b> Irium mainnet</li>
+        <li><b>CPU/GPU software miners:</b> <code>stratum+tcp://pool.iriumlabs.org:3335</code></li>
+        <li><b>Solo mining (full reward to finder):</b> <code>stratum+tcp://pool.iriumlabs.org:3336</code></li>
+        <li><b>Firewall bypass (ISP blocks high ports):</b> <code>stratum+tcp://pool.iriumlabs.org:443</code> — plain TCP only, <em>not</em> TLS</li>
+        <li><b>Second fallback:</b> <code>stratum+tcp://pool.iriumlabs.org:80</code></li>
+        <li><b>Algorithm:</b> SHA-256d &nbsp;|&nbsp; <b>Fee:</b> 0% (direct coinbase payout)</li>
+        <li><b>Stats:</b> <code>https://pool.iriumlabs.org/stats</code> &nbsp;|&nbsp; <b>Stats JSON:</b> <code>http://pool.iriumlabs.org:3337/stats</code></li>
       </ul>
-      <p class="m-muted" style="margin-top:8px;"><b>Recommended miners:</b> Irium CPU miner, ASIC SHA256 miners, and compatible SHA-256d software miners. Mining keeps the live settlement base layer objective, public, and miner-secured.</p>
+      <p class="m-muted" style="margin-top:8px;"><b>Recommended miners:</b> Irium CPU/GPU miner (bundled in Irium Core v1.0.77), ASIC SHA-256d hardware, T-Rex, lolMiner, NBMiner, cpuminer-opt. Mining secures the live settlement base layer.</p>
       <div class="m-step" style="margin-top:12px;">
         <div class="m-step-head"><span class="m-step-num">1</span><span class="m-step-title">Example CPU miner command</span></div>
         <pre class="m-cmd"><code>./irium-miner \
@@ -601,11 +604,13 @@
 <div class="x-panel" id="asic-pool-quick-config">
       <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>ASIC / Pool Quick Config</div></div>
       <div class="m-copy-grid">
-        <div class="m-copy-row"><span class="m-copy-label">Pool URL</span><code class="m-copy-value" id="pool-url">stratum+tcp://pool.iriumlabs.org:3333</code><button class="m-copy-btn" data-copy-target="pool-url">Copy</button></div>
-        <div class="m-copy-row"><span class="m-copy-label">CPU/GPU URL</span><code class="m-copy-value" id="pool-software">stratum+tcp://pool.iriumlabs.org:3335</code><button class="m-copy-btn" data-copy-target="pool-software">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">ASIC (port 3333)</span><code class="m-copy-value" id="pool-url">stratum+tcp://pool.iriumlabs.org:3333</code><button class="m-copy-btn" data-copy-target="pool-url">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">CPU/GPU (port 3335)</span><code class="m-copy-value" id="pool-software">stratum+tcp://pool.iriumlabs.org:3335</code><button class="m-copy-btn" data-copy-target="pool-software">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">Solo (port 3336)</span><code class="m-copy-value" id="pool-solo">stratum+tcp://pool.iriumlabs.org:3336</code><button class="m-copy-btn" data-copy-target="pool-solo">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">Fallback (port 443)</span><code class="m-copy-value" id="pool-fw">stratum+tcp://pool.iriumlabs.org:443</code><button class="m-copy-btn" data-copy-target="pool-fw">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Worker Format</span><code class="m-copy-value" id="pool-worker">YOUR_IRM_ADDRESS.worker1</code><button class="m-copy-btn" data-copy-target="pool-worker">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Password</span><code class="m-copy-value" id="pool-pass">x</code><button class="m-copy-btn" data-copy-target="pool-pass">Copy</button></div>
-        <div class="m-copy-row"><span class="m-copy-label">Mode</span><code class="m-copy-value" id="pool-mode">SOLO (full block reward goes to the IRM address in the username)</code><button class="m-copy-btn" data-copy-target="pool-mode">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">Fee</span><code class="m-copy-value" id="pool-mode">0% — full 50 IRM block reward paid directly to the miner's IRM address</code><button class="m-copy-btn" data-copy-target="pool-mode">Copy</button></div>
       </div>
 
       <div class="m-step" style="margin-top:12px;">

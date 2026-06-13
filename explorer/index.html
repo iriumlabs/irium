@@ -308,24 +308,14 @@ body {
 /* --- rich list design -------------------------------------- */
 .rl-hdr { margin-bottom: 20px; }
 .rl-h1  { font-size: 24px; font-weight: 800; color: var(--xp-t1); margin: 0 0 4px; font-family: 'Space Grotesk', system-ui, sans-serif; letter-spacing: 0.02em; }
-.rl-sub { font-size: 13px; color: var(--xp-t2); margin: 0 0 16px; font-family: 'Space Grotesk', system-ui, sans-serif; }
-.rl-supply {
-  display: flex; flex-wrap: wrap;
-  background: rgba(4,7,18,0.92);
-  border: 1px solid rgba(110,198,255,0.18);
-  border-radius: 12px; overflow: hidden;
-  isolation: isolate;
-}
-.rl-supply-item {
-  flex: 1; min-width: 200px;
-  padding: 14px 20px;
-  border-right: 1px solid rgba(110,198,255,0.12);
-  display: flex; flex-direction: column; gap: 5px;
-}
-.rl-supply-item:last-child { border-right: none; }
-.rl-supply-lbl  { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--xp-t2); font-family: 'Space Grotesk', system-ui, sans-serif; }
-.rl-supply-val  { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--xp-t1); }
-.rl-supply-note { font-size: 12px; color: var(--xp-t2); font-variant-numeric: tabular-nums; }
+.rl-sub { font-size: 13px; color: var(--xp-t2); margin: 0 0 14px; font-family: 'Space Grotesk', system-ui, sans-serif; }
+
+/* --- rich list compact supply lines ------------------------ */
+.rl-supply-lines { margin-bottom: 18px; display: flex; flex-direction: column; gap: 6px; }
+.rl-sl-row  { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; font-size: 13px; font-family: 'Space Grotesk', system-ui, sans-serif; line-height: 1.5; }
+.rl-sl-lbl  { color: rgba(255,255,255,0.55); }
+.rl-sl-val  { font-weight: 600; font-variant-numeric: tabular-nums; }
+.rl-sl-meta { color: rgba(255,255,255,0.55); font-variant-numeric: tabular-nums; }
 
 .rl-locked-row { background: rgba(245,158,11,0.05) !important; }
 .rl-locked-row td { border-bottom-color: rgba(245,158,11,0.15) !important; }
@@ -362,6 +352,51 @@ body {
 
 /* --- rich list supply % ------------------------------------ */
 .xp-pct { color: var(--xp-t2); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+/* --- detail modal ------------------------------------------ */
+#xp-modal {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(4,7,18,0.88);
+  backdrop-filter: blur(6px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 60px 20px 40px;
+  overflow-y: auto;
+}
+.xp-modal-panel {
+  position: relative;
+  width: 100%; max-width: 820px;
+  background: rgba(4,7,18,0.97);
+  border: 1px solid rgba(110,198,255,0.18);
+  border-radius: 16px;
+  padding: 32px;
+  box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(110,198,255,0.08);
+}
+.xp-modal-close {
+  position: absolute; top: 18px; right: 18px;
+  width: 32px; height: 32px;
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 50%;
+  color: var(--xp-t2);
+  font-size: 20px; line-height: 1;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.xp-modal-close:hover { background: rgba(255,255,255,0.14); color: var(--xp-t1); }
+.xp-modal-h1   { font-size: 20px; font-weight: 800; color: var(--xp-t1); margin: 0 0 6px; font-family: 'Space Grotesk', system-ui, sans-serif; }
+.xp-modal-sub  { font-size: 12px; color: var(--xp-t2); margin: 0 0 20px; font-family: var(--xp-mono); word-break: break-all; }
+.xp-modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
+@media (max-width: 600px) { .xp-modal-grid { grid-template-columns: 1fr; } }
+.xp-modal-cell { background: rgba(110,198,255,0.04); border: 1px solid rgba(110,198,255,0.10); border-radius: 10px; padding: 12px 14px; }
+.xp-modal-cell-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--xp-t2); margin-bottom: 4px; font-family: 'Space Grotesk', system-ui, sans-serif; }
+.xp-modal-cell-val { font-size: 14px; font-weight: 600; color: var(--xp-t1); font-variant-numeric: tabular-nums; word-break: break-all; }
+.xp-modal-shdr { font-size: 10px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--xp-t3); margin: 18px 0 8px; font-family: 'Space Grotesk', system-ui, sans-serif; }
+.xp-modal-hash { font-family: var(--xp-mono); font-size: 12px; color: var(--xp-t2); word-break: break-all; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
+.xp-modal-tx-row { font-size: 12px; font-family: var(--xp-mono); color: var(--xp-bdim); padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.05); word-break: break-all; cursor: pointer; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.xp-modal-tx-row:hover { color: var(--xp-brand); }
+.xp-modal-tx-row:last-child { border-bottom: none; }
+.xp-modal-err { color: rgba(248,113,113,0.8); font-size: 13px; padding: 20px; text-align: center; }
 </style>
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=2">
 </head>
@@ -467,12 +502,12 @@ body {
           </table>
         </div>
         <div class="xp-pager">
-          <button class="xp-pb" id="xp-newer" onclick="xpPage(-1)" disabled>← Previous</button>
+          <button class="xp-pb" id="xp-newer" onclick="xpPage(-1)" disabled>&#8592; Previous</button>
           <div class="xp-pager-info">
             <span id="xp-plabel">—</span>
             <span id="xp-ptotal" class="xp-pager-sub">—</span>
           </div>
-          <button class="xp-pb" id="xp-older" onclick="xpPage(1)">Next →</button>
+          <button class="xp-pb" id="xp-older" onclick="xpPage(1)">Next &#8594;</button>
         </div>
       </div>
 
@@ -484,19 +519,21 @@ body {
       <div class="rl-hdr">
         <h2 class="rl-h1">Top IRM Holders</h2>
         <p class="rl-sub">Ranked by spendable balance on the current chain tip</p>
-        <div class="rl-supply">
-          <div class="rl-supply-item">
-            <span class="rl-supply-lbl">Circulating supply</span>
-            <span class="rl-supply-val xp-gv" id="rl-circulating">—</span>
+        <div class="rl-supply-lines">
+          <div class="rl-sl-row">
+            <span class="rl-sl-lbl">Circulating supply:</span>
+            <span class="rl-sl-val xp-gv" id="rl-circulating">—</span>
+            <span class="rl-sl-meta" id="rl-supply-updated"></span>
           </div>
-          <div class="rl-supply-item">
-            <span class="rl-supply-lbl">Minted supply (incl. vested)</span>
-            <span class="rl-supply-val xp-gv" id="rl-minted">—</span>
+          <div class="rl-sl-row">
+            <span class="rl-sl-lbl">Minted supply (incl. vested):</span>
+            <span class="rl-sl-val xp-gv" id="rl-minted">—</span>
+            <span class="rl-sl-meta" id="rl-minted-at"></span>
           </div>
-          <div class="rl-supply-item">
-            <span class="rl-supply-lbl">Maximum supply</span>
-            <span class="rl-supply-val">100,000,000 IRM</span>
-            <span class="rl-supply-note"><span id="rl-minted-pct">—</span> minted</span>
+          <div class="rl-sl-row">
+            <span class="rl-sl-lbl">Maximum supply:</span>
+            <span class="rl-sl-val">100,000,000 IRM</span>
+            <span class="rl-sl-meta">(hard cap) &middot; <span id="rl-minted-pct">—</span> minted</span>
           </div>
         </div>
       </div>
@@ -549,6 +586,14 @@ body {
   </div>
 </section>
 
+<!-- ===== DETAIL MODAL ===== -->
+<div id="xp-modal" style="display:none" onclick="closeModal()">
+  <div class="xp-modal-panel" onclick="event.stopPropagation()">
+    <button class="xp-modal-close" onclick="closeModal()" aria-label="Close">&times;</button>
+    <div id="xp-modal-body"><div class="xp-ldg">Loading...</div></div>
+  </div>
+</div>
+
 <footer class="footer">
 <div class="container">
 <div class="footer-content">
@@ -600,14 +645,18 @@ GitHub</a>
   var REWARD_DENOM = 1e8;
   var BLOCKS_DAY   = 288;
 
-  var st = { offset: 0, pool: null, rlDone: false, activeTab: 'ov', tipHeight: 0 };
+  var st = { offset: 0, pool: null, rlDone: false, activeTab: 'ov', tipHeight: 0, lastOverviewTs: 0, lastBlocks: [] };
 
   function $id(id) { return document.getElementById(id); }
   function set(id, v) { var e = $id(id); if (e) e.textContent = v; }
 
   function fmtN(n)  { return n != null ? Number(n).toLocaleString() : '—'; }
   function fmtAge(ts) {
-    var s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+    var t = new Date(ts).getTime();
+    if (t > Date.now()) {
+      return new Date(ts).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+    }
+    var s = Math.floor((Date.now() - t) / 1000);
     if (s < 60)    return s + 's ago';
     if (s < 3600)  return Math.floor(s / 60) + 'm ago';
     if (s < 86400) return Math.floor(s / 3600) + 'h ago';
@@ -621,6 +670,9 @@ GitHub</a>
   }
   function fmtIRM(n) {
     return Number(n).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' IRM';
+  }
+  function fmtIRM2(n) {
+    return Number(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' IRM';
   }
   function fmtHps(h) {
     if (!h || h <= 0) return '0 H/s';
@@ -664,6 +716,7 @@ GitHub</a>
       var status = res[0], blocks = res[1];
 
       st.tipHeight = status.synced_height;
+      st.lastOverviewTs = Date.now();
       set('xp-status', 'Block #' + fmtN(status.synced_height) + ' · Synced');
       set('s-height', fmtN(status.synced_height));
       set('s-tiphash', status.synced_block_hash
@@ -744,19 +797,22 @@ GitHub</a>
 
   /* --- block table --- */
   function renderBlocks(blocks) {
+    st.lastBlocks = blocks || [];
     var tbody = $id('xp-tbody');
     if (!tbody) return;
     if (!blocks || !blocks.length) {
       tbody.innerHTML = '<tr><td colspan="6" class="xp-ldg">No blocks found</td></tr>';
     } else {
       tbody.innerHTML = blocks.map(function (b) {
+        var minerCell = b.miner_address
+          ? '<span class="xp-adr" style="cursor:pointer" onclick="showAddr(\'' + b.miner_address + '\')">' + b.miner_address + '</span>'
+          : '—';
         return '<tr>' +
-          '<td><a href="https://explorer.iriumlabs.org/block/height/' + b.height +
-          '" target="_blank" rel="noopener" class="xp-hl">' + fmtN(b.height) + '</a></td>' +
-          '<td><span class="xp-hsh">' + fmtHash(b.hash) + '</span></td>' +
+          '<td><span class="xp-hl" style="cursor:pointer" onclick="showBlock(' + b.height + ')">' + fmtN(b.height) + '</span></td>' +
+          '<td><span style="font-family:var(--xp-mono);font-size:11px;color:rgba(255,255,255,0.45);word-break:break-all;">' + (b.hash || '—') + '</span></td>' +
           '<td class="xp-age">' + fmtAge(b.timestamp) + '</td>' +
           '<td>' + (b.tx_count || 0) + '</td>' +
-          '<td><span class="xp-adr">' + (b.miner_address || '—') + '</span></td>' +
+          '<td>' + minerCell + '</td>' +
           '<td class="xp-rwd" style="color:#34d399">' + fmtRwd(b.total_reward) + '</td>' +
           '</tr>';
       }).join('');
@@ -808,10 +864,14 @@ GitHub</a>
       var mintedPct = mintedIrm > 0 ? (mintedIrm / MAX_SUPPLY_IRM * 100).toFixed(4) + '%' : '—';
       var lockedPct = (FOUNDER_LOCK_IRM / MAX_SUPPLY_IRM * 100).toFixed(4) + '%';
 
-      set('rl-circulating', fmtIRM(miningIrm));
+      set('rl-circulating', fmtIRM2(miningIrm));
       set('rl-minted',      fmtIRM(mintedIrm));
       set('rl-minted-pct',  mintedPct);
       set('rl-locked-pct',  lockedPct);
+
+      var ageS = st.lastOverviewTs ? Math.floor((Date.now() - st.lastOverviewTs) / 1000) : 0;
+      set('rl-supply-updated', '· Updated ' + (ageS < 5 ? 'just now' : ageS + 's ago'));
+      set('rl-minted-at', 'at height #' + fmtN(st.tipHeight));
 
       var founderPct = (FOUNDER_LOCK_IRM / MAX_SUPPLY_IRM * 100).toFixed(4) + '%';
 
@@ -829,7 +889,7 @@ GitHub</a>
               '<div class="rl-unlock-note">unlocks at height #' + FOUNDER_UNLOCK.toLocaleString() + '</div>' +
             '</div>' +
           '</td>' +
-          '<td><span style="font-family:var(--xp-mono);font-size:12px;color:rgba(255,255,255,0.55);">' + FOUNDER_ADDR + '</span></td>' +
+          '<td><span style="font-family:var(--xp-mono);font-size:12px;color:rgba(255,255,255,0.55);cursor:pointer" onclick="showAddr(\'' + FOUNDER_ADDR + '\')">' + FOUNDER_ADDR + '</span></td>' +
           '<td class="rl-locked-bal">3,502,608.00 IRM</td>' +
           '<td class="xp-pct">' + founderPct + '</td>' +
           '<td class="xp-age">—</td>' +
@@ -847,8 +907,7 @@ GitHub</a>
           var balStr  = balIrm.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' IRM';
           return '<tr>' +
             '<td class="' + rankCls + '">' + rank + '</td>' +
-            '<td><a href="https://explorer.iriumlabs.org/address/' + m.address +
-            '" target="_blank" rel="noopener" class="xp-al">' + m.address + '</a></td>' +
+            '<td><span class="xp-al" style="cursor:pointer" onclick="showAddr(\'' + m.address + '\')">' + m.address + '</span></td>' +
             '<td style="color:#34d399;font-weight:600;font-variant-numeric:tabular-nums;">' + balStr + '</td>' +
             '<td class="xp-pct">' + pct + '</td>' +
             '<td style="color:rgba(255,255,255,0.55);font-variant-numeric:tabular-nums;">' + fmtN(m.blocks_mined) + '</td>' +
@@ -873,6 +932,163 @@ GitHub</a>
     });
   }
 
+  /* --- modal --- */
+  function closeModal() {
+    var m = $id('xp-modal');
+    if (m) { m.style.display = 'none'; document.body.style.overflow = ''; }
+  }
+
+  function openModal(html) {
+    var body = $id('xp-modal-body');
+    var m    = $id('xp-modal');
+    if (body) body.innerHTML = html;
+    if (m)   { m.style.display = 'flex'; document.body.style.overflow = 'hidden'; }
+  }
+
+  function mkCell(lbl, val) {
+    return '<div class="xp-modal-cell"><div class="xp-modal-cell-lbl">' + lbl +
+           '</div><div class="xp-modal-cell-val">' + val + '</div></div>';
+  }
+
+  function renderBlockModal(b) {
+    var ts     = b.timestamp ? new Date(b.timestamp).toLocaleString() : '—';
+    var reward = b.total_reward != null ? fmtRwd(b.total_reward) : '—';
+    var diff   = b.difficulty  != null ? Number(b.difficulty).toFixed(4) : '—';
+    var nonce  = b.nonce       != null ? fmtN(b.nonce) : '—';
+
+    var grid =
+      mkCell('Height',    '<span style="color:#34d399;font-weight:800;">' + fmtN(b.height) + '</span>') +
+      mkCell('Timestamp', ts) +
+      mkCell('Reward',    '<span style="color:#34d399;font-weight:700;">' + reward + '</span>') +
+      mkCell('Tx Count',  fmtN(b.tx_count)) +
+      mkCell('Difficulty', diff) +
+      mkCell('Nonce',     nonce);
+
+    var minerRow = b.miner_address
+      ? '<div class="xp-modal-shdr">Miner Address</div>' +
+        '<div class="xp-modal-hash" style="color:var(--xp-bdim);cursor:pointer" onclick="showAddr(\'' + b.miner_address + '\')">' +
+        b.miner_address + '</div>'
+      : '';
+
+    var hashRows =
+      '<div class="xp-modal-shdr">Block Hash</div><div class="xp-modal-hash">' + (b.hash || '—') + '</div>' +
+      '<div class="xp-modal-shdr">Prev Hash</div><div class="xp-modal-hash">' + (b.prev_hash || b.previous_hash || '—') + '</div>' +
+      '<div class="xp-modal-shdr">Merkle Root</div><div class="xp-modal-hash" style="border-bottom:none">' + (b.merkle_root || '—') + '</div>';
+
+    var txRows = '';
+    var txids = b.txids || b.tx_ids || [];
+    if (txids.length) {
+      txRows = '<div class="xp-modal-shdr">Transactions (' + txids.length + ')</div>' +
+        txids.map(function (txid) {
+          return '<div class="xp-modal-tx-row" onclick="showTx(\'' + txid + '\')">' +
+            '<span>' + txid + '</span></div>';
+        }).join('');
+    }
+
+    openModal(
+      '<div class="xp-modal-h1">Block #' + fmtN(b.height) + '</div>' +
+      '<div class="xp-modal-sub">' + (b.hash || '') + '</div>' +
+      '<div class="xp-modal-grid">' + grid + '</div>' +
+      minerRow + hashRows + txRows
+    );
+  }
+
+  function showBlock(height) {
+    openModal('<div class="xp-ldg">Loading block #' + height + '...</div>');
+    get(API + '/block/height/' + height).then(renderBlockModal).catch(function () {
+      openModal('<div class="xp-modal-err">Could not load block #' + height + '</div>');
+    });
+  }
+
+  function showBlockByHash(hash) {
+    openModal('<div class="xp-ldg">Loading block...</div>');
+    get(API + '/block/hash/' + hash).then(renderBlockModal).catch(function () {
+      openModal('<div class="xp-modal-err">Could not load block</div>');
+    });
+  }
+
+  function showAddr(addr) {
+    openModal('<div class="xp-ldg">Loading address...</div>');
+    get(API + '/address/' + encodeURIComponent(addr)).then(function (d) {
+      var bal  = d.balance        != null ? fmtRwd(d.balance)        : '—';
+      var recv = d.total_received != null ? fmtRwd(d.total_received) : '—';
+      var sent = d.total_sent     != null ? fmtRwd(d.total_sent)     : '—';
+
+      var grid =
+        mkCell('Balance',        '<span style="color:#34d399;font-weight:700;">' + bal + '</span>') +
+        mkCell('Total Received', recv) +
+        mkCell('Total Sent',     sent) +
+        mkCell('Transactions',   fmtN(d.tx_count)) +
+        mkCell('Blocks Mined',   d.blocks_mined != null ? fmtN(d.blocks_mined) : '—');
+
+      var txs = d.transactions || [];
+      var txRows = '';
+      if (txs.length) {
+        txRows = '<div class="xp-modal-shdr">Recent Transactions</div>' +
+          txs.slice(0, 25).map(function (tx) {
+            var txid = typeof tx === 'string' ? tx : (tx.txid || tx.hash || '');
+            return '<div class="xp-modal-tx-row" onclick="showTx(\'' + txid + '\')">' +
+              '<span>' + txid + '</span></div>';
+          }).join('');
+      }
+
+      openModal(
+        '<div class="xp-modal-h1">Address</div>' +
+        '<div class="xp-modal-sub">' + addr + '</div>' +
+        '<div class="xp-modal-grid">' + grid + '</div>' +
+        txRows
+      );
+    }).catch(function () {
+      openModal('<div class="xp-modal-err">Could not load address data</div>');
+    });
+  }
+
+  function showTx(txid) {
+    openModal('<div class="xp-ldg">Loading transaction...</div>');
+    get(API + '/tx/' + txid).then(function (tx) {
+      var inputs  = tx.inputs  || tx.vin  || [];
+      var outputs = tx.outputs || tx.vout || [];
+
+      var inRows;
+      if (inputs.length === 0) {
+        inRows = '<div style="font-size:12px;color:var(--xp-t2);padding:6px 0;">Coinbase (mining reward)</div>';
+      } else {
+        inRows = inputs.map(function (inp) {
+          var addr = inp.address || inp.prev_address || inp.prev_out || '—';
+          var val  = inp.value != null ? fmtRwd(inp.value) : '';
+          return '<div class="xp-modal-tx-row">' +
+            '<span>' + addr + '</span>' +
+            (val ? '<span style="color:#34d399;flex-shrink:0;">' + val + '</span>' : '') +
+            '</div>';
+        }).join('');
+      }
+
+      var outRows = outputs.map(function (out) {
+        var addr = out.address || out.scriptpubkey_address || '—';
+        var val  = out.value != null ? fmtRwd(out.value) : '—';
+        return '<div class="xp-modal-tx-row" onclick="showAddr(\'' + addr + '\')">' +
+          '<span>' + addr + '</span>' +
+          '<span style="color:#34d399;flex-shrink:0;">' + val + '</span>' +
+          '</div>';
+      }).join('');
+
+      openModal(
+        '<div class="xp-modal-h1">Transaction</div>' +
+        '<div class="xp-modal-sub">' + txid + '</div>' +
+        '<div class="xp-modal-shdr">Inputs (' + inputs.length + ')</div>' + inRows +
+        '<div class="xp-modal-shdr">Outputs (' + outputs.length + ')</div>' + outRows
+      );
+    }).catch(function () {
+      openModal('<div class="xp-modal-err">Could not load transaction data</div>');
+    });
+  }
+
+  window.closeModal    = closeModal;
+  window.showBlock     = showBlock;
+  window.showBlockByHash = showBlockByHash;
+  window.showAddr      = showAddr;
+  window.showTx        = showTx;
+
   /* --- mining calculator --- */
   function updateCalc() {
     var hrEl = $id('xp-hr'), huEl = $id('xp-hu'), dayEl = $id('calc-daily');
@@ -894,14 +1110,13 @@ GitHub</a>
     var q = ($id('xp-q') || {}).value || '';
     q = q.trim();
     if (!q) return;
-    var base = 'https://explorer.iriumlabs.org';
-    if (/^\d+$/.test(q)) { window.open(base + '/block/height/' + q, '_blank'); return; }
+    if (/^\d+$/.test(q)) { showBlock(parseInt(q, 10)); return; }
     get(API + '/search?q=' + encodeURIComponent(q)).then(function (r) {
       if (!r) return;
-      if      (r.result_type === 'block_height') window.open(base + '/block/height/' + r.value, '_blank');
-      else if (r.result_type === 'block_hash')   window.open(base + '/block/hash/'   + r.value, '_blank');
-      else if (r.result_type === 'tx')           window.open(base + '/tx/'           + r.value, '_blank');
-      else if (r.result_type === 'address')      window.open(base + '/address/'      + r.value, '_blank');
+      if      (r.result_type === 'block_height') showBlock(parseInt(r.value, 10));
+      else if (r.result_type === 'block_hash')   showBlockByHash(r.value);
+      else if (r.result_type === 'tx')           showTx(r.value);
+      else if (r.result_type === 'address')      showAddr(r.value);
     }).catch(function () {
       var inp = $id('xp-q');
       if (inp) { inp.style.borderColor = 'rgba(248,113,113,0.7)'; setTimeout(function () { inp.style.borderColor = ''; }, 2000); }
@@ -920,8 +1135,11 @@ GitHub</a>
   var rlBtn = $id('rl-load-btn');
   if (rlBtn) rlBtn.addEventListener('click', function () { rlFetch(500); });
 
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
+
   setInterval(loadOverview,  15000);
   setInterval(loadPoolStats, 30000);
+  setInterval(function () { if (st.lastBlocks.length) renderBlocks(st.lastBlocks); }, 30000);
 
 })();
 </script>

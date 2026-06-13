@@ -353,50 +353,8 @@ body {
 /* --- rich list supply % ------------------------------------ */
 .xp-pct { color: var(--xp-t2); font-size: 12px; font-variant-numeric: tabular-nums; }
 
-/* --- detail modal ------------------------------------------ */
-#xp-modal {
-  position: fixed; inset: 0; z-index: 9999;
-  background: rgba(4,7,18,0.88);
-  backdrop-filter: blur(6px);
-  display: flex; align-items: flex-start; justify-content: center;
-  padding: 60px 20px 40px;
-  overflow-y: auto;
-}
-.xp-modal-panel {
-  position: relative;
-  width: 100%; max-width: 820px;
-  background: rgba(4,7,18,0.97);
-  border: 1px solid rgba(110,198,255,0.18);
-  border-radius: 16px;
-  padding: 32px;
-  box-shadow: 0 24px 80px rgba(0,0,0,0.6), 0 0 0 1px rgba(110,198,255,0.08);
-}
-.xp-modal-close {
-  position: absolute; top: 18px; right: 18px;
-  width: 32px; height: 32px;
-  background: rgba(255,255,255,0.07);
-  border: 1px solid rgba(255,255,255,0.12);
-  border-radius: 50%;
-  color: var(--xp-t2);
-  font-size: 20px; line-height: 1;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: background 0.15s, color 0.15s;
-}
-.xp-modal-close:hover { background: rgba(255,255,255,0.14); color: var(--xp-t1); }
-.xp-modal-h1   { font-size: 20px; font-weight: 800; color: var(--xp-t1); margin: 0 0 6px; font-family: 'Space Grotesk', system-ui, sans-serif; }
-.xp-modal-sub  { font-size: 12px; color: var(--xp-t2); margin: 0 0 20px; font-family: var(--xp-mono); word-break: break-all; }
-.xp-modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 20px; }
-@media (max-width: 600px) { .xp-modal-grid { grid-template-columns: 1fr; } }
-.xp-modal-cell { background: rgba(110,198,255,0.04); border: 1px solid rgba(110,198,255,0.10); border-radius: 10px; padding: 12px 14px; }
-.xp-modal-cell-lbl { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--xp-t2); margin-bottom: 4px; font-family: 'Space Grotesk', system-ui, sans-serif; }
-.xp-modal-cell-val { font-size: 14px; font-weight: 600; color: var(--xp-t1); font-variant-numeric: tabular-nums; word-break: break-all; }
-.xp-modal-shdr { font-size: 10px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; color: var(--xp-t3); margin: 18px 0 8px; font-family: 'Space Grotesk', system-ui, sans-serif; }
-.xp-modal-hash { font-family: var(--xp-mono); font-size: 12px; color: var(--xp-t2); word-break: break-all; padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.06); }
-.xp-modal-tx-row { font-size: 12px; font-family: var(--xp-mono); color: var(--xp-bdim); padding: 7px 0; border-bottom: 1px solid rgba(255,255,255,0.05); word-break: break-all; cursor: pointer; display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.xp-modal-tx-row:hover { color: var(--xp-brand); }
-.xp-modal-tx-row:last-child { border-bottom: none; }
-.xp-modal-err { color: rgba(248,113,113,0.8); font-size: 13px; padding: 20px; text-align: center; }
+/* --- detail modal (original v4 design) --------------------- */
+/* overlay and panel styled inline to match original exactly  */
 </style>
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=2">
 </head>
@@ -586,11 +544,14 @@ body {
   </div>
 </section>
 
-<!-- ===== DETAIL MODAL ===== -->
-<div id="xp-modal" style="display:none" onclick="closeModal()">
-  <div class="xp-modal-panel" onclick="event.stopPropagation()">
-    <button class="xp-modal-close" onclick="closeModal()" aria-label="Close">&times;</button>
-    <div id="xp-modal-body"><div class="xp-ldg">Loading...</div></div>
+<!-- Block Details Modal (original v4 design) -->
+<div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
+  <div id="block-modal-content" style="background:#10131a; color:#fff; width:90%; max-width:720px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 10px 25px rgba(0,0,0,0.5); max-height:90vh; overflow-y:auto;">
+    <div style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.1); position:sticky; top:0; background:#10131a; z-index:1;">
+      <h3 style="margin:0; font-size:18px;">Lookup Details</h3>
+      <button id="block-modal-close" aria-label="Close" style="background:transparent; color:#fff; border:none; font-size:20px; cursor:pointer;">&times;</button>
+    </div>
+    <div id="block-modal-body" style="padding:20px; line-height:1.5; font-size:14px;"></div>
   </div>
 </div>
 
@@ -932,162 +893,179 @@ GitHub</a>
     });
   }
 
-  /* --- modal --- */
+  /* --- modal (original v4 design) --- */
   function closeModal() {
-    var m = $id('xp-modal');
-    if (m) { m.style.display = 'none'; document.body.style.overflow = ''; }
+    var m = $id('block-modal');
+    if (m) m.style.display = 'none';
+    var body = $id('block-modal-body');
+    if (body) body.innerHTML = '';
   }
 
-  function openModal(html) {
-    var body = $id('xp-modal-body');
-    var m    = $id('xp-modal');
-    if (body) body.innerHTML = html;
-    if (m)   { m.style.display = 'flex'; document.body.style.overflow = 'hidden'; }
+  window.__showBlockModal = function (contentHtml) {
+    var body = $id('block-modal-body');
+    var m    = $id('block-modal');
+    if (body) body.innerHTML = contentHtml;
+    if (m)   m.style.display = 'flex';
+  };
+
+  window.__showBlockError = function (message) {
+    var body = $id('block-modal-body');
+    var m    = $id('block-modal');
+    if (body) body.innerHTML = '<div style="color:#ff6b6b;">' + (message || 'Unknown error') + '</div>';
+    if (m)   m.style.display = 'flex';
+  };
+
+  function mdRow(lbl, val) {
+    return '<tr>' +
+      '<td style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.07);color:rgba(255,255,255,0.55);width:170px;vertical-align:top;">' + lbl + '</td>' +
+      '<td style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.07);word-break:break-all;">' + val + '</td>' +
+    '</tr>';
   }
 
-  function mkCell(lbl, val) {
-    return '<div class="xp-modal-cell"><div class="xp-modal-cell-lbl">' + lbl +
-           '</div><div class="xp-modal-cell-val">' + val + '</div></div>';
+  function mdSect(title) {
+    return '<div style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.45);margin:14px 0 8px;">' + title + '</div>';
+  }
+
+  function mdHash(val) {
+    return '<div style="font-family:monospace;font-size:12px;color:rgba(255,255,255,0.75);word-break:break-all;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.07);">' + val + '</div>';
+  }
+
+  function mdTxRow(txid, onclick) {
+    return '<div style="font-family:monospace;font-size:12px;color:rgba(91,177,255,0.75);padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);word-break:break-all;cursor:pointer;" onclick="' + onclick + '">' + txid + '</div>';
   }
 
   function renderBlockModal(b) {
-    var ts     = b.timestamp ? new Date(b.timestamp).toLocaleString() : '—';
+    var ts     = b.timestamp  ? new Date(b.timestamp).toLocaleString() : '—';
     var reward = b.total_reward != null ? fmtRwd(b.total_reward) : '—';
-    var diff   = b.difficulty  != null ? Number(b.difficulty).toFixed(4) : '—';
-    var nonce  = b.nonce       != null ? fmtN(b.nonce) : '—';
+    var diff   = b.difficulty   != null ? Number(b.difficulty).toFixed(4) : '—';
+    var nonce  = b.nonce        != null ? fmtN(b.nonce) : '—';
 
-    var grid =
-      mkCell('Height',    '<span style="color:#34d399;font-weight:800;">' + fmtN(b.height) + '</span>') +
-      mkCell('Timestamp', ts) +
-      mkCell('Reward',    '<span style="color:#34d399;font-weight:700;">' + reward + '</span>') +
-      mkCell('Tx Count',  fmtN(b.tx_count)) +
-      mkCell('Difficulty', diff) +
-      mkCell('Nonce',     nonce);
+    var tbl = '<table style="width:100%;border-collapse:collapse;">' +
+      mdRow('Height',     '<span style="color:#4ade80;font-weight:700;">' + fmtN(b.height) + '</span>') +
+      mdRow('Timestamp',  ts) +
+      mdRow('Reward',     '<span style="color:#4ade80;">' + reward + '</span>') +
+      mdRow('Tx count',   fmtN(b.tx_count)) +
+      mdRow('Difficulty', diff) +
+      mdRow('Nonce',      nonce) +
+    '</table>';
 
-    var minerRow = b.miner_address
-      ? '<div class="xp-modal-shdr">Miner Address</div>' +
-        '<div class="xp-modal-hash" style="color:var(--xp-bdim);cursor:pointer" onclick="showAddr(\'' + b.miner_address + '\')">' +
-        b.miner_address + '</div>'
+    var minerHtml = b.miner_address
+      ? mdSect('Miner address') +
+        '<div style="font-family:monospace;font-size:12px;color:rgba(91,177,255,0.8);word-break:break-all;padding:6px 0;cursor:pointer;" onclick="showAddr(\'' + b.miner_address + '\')">' + b.miner_address + '</div>'
       : '';
 
-    var hashRows =
-      '<div class="xp-modal-shdr">Block Hash</div><div class="xp-modal-hash">' + (b.hash || '—') + '</div>' +
-      '<div class="xp-modal-shdr">Prev Hash</div><div class="xp-modal-hash">' + (b.prev_hash || b.previous_hash || '—') + '</div>' +
-      '<div class="xp-modal-shdr">Merkle Root</div><div class="xp-modal-hash" style="border-bottom:none">' + (b.merkle_root || '—') + '</div>';
+    var hashHtml =
+      mdSect('Block hash')  + mdHash(b.hash || '—') +
+      mdSect('Prev hash')   + mdHash(b.prev_hash || b.previous_hash || '—') +
+      mdSect('Merkle root') + mdHash(b.merkle_root || '—');
 
-    var txRows = '';
     var txids = b.txids || b.tx_ids || [];
+    var txHtml = '';
     if (txids.length) {
-      txRows = '<div class="xp-modal-shdr">Transactions (' + txids.length + ')</div>' +
-        txids.map(function (txid) {
-          return '<div class="xp-modal-tx-row" onclick="showTx(\'' + txid + '\')">' +
-            '<span>' + txid + '</span></div>';
-        }).join('');
+      txHtml = mdSect('Transactions (' + txids.length + ')') +
+        txids.map(function (id) { return mdTxRow(id, 'showTx(\'' + id + '\')'); }).join('');
     }
 
-    openModal(
-      '<div class="xp-modal-h1">Block #' + fmtN(b.height) + '</div>' +
-      '<div class="xp-modal-sub">' + (b.hash || '') + '</div>' +
-      '<div class="xp-modal-grid">' + grid + '</div>' +
-      minerRow + hashRows + txRows
+    window.__showBlockModal(
+      '<h4 style="margin:0 0 14px;font-size:16px;">Block #' + fmtN(b.height) + '</h4>' +
+      tbl + minerHtml + hashHtml + txHtml
     );
   }
 
   function showBlock(height) {
-    openModal('<div class="xp-ldg">Loading block #' + height + '...</div>');
+    window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading block #' + height + '...</div>');
     get(API + '/block/height/' + height).then(renderBlockModal).catch(function () {
-      openModal('<div class="xp-modal-err">Could not load block #' + height + '</div>');
+      window.__showBlockError('Could not load block #' + height);
     });
   }
 
   function showBlockByHash(hash) {
-    openModal('<div class="xp-ldg">Loading block...</div>');
+    window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading block...</div>');
     get(API + '/block/hash/' + hash).then(renderBlockModal).catch(function () {
-      openModal('<div class="xp-modal-err">Could not load block</div>');
+      window.__showBlockError('Could not load block');
     });
   }
 
   function showAddr(addr) {
-    openModal('<div class="xp-ldg">Loading address...</div>');
+    window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading address...</div>');
     get(API + '/address/' + encodeURIComponent(addr)).then(function (d) {
       var bal  = d.balance        != null ? fmtRwd(d.balance)        : '—';
       var recv = d.total_received != null ? fmtRwd(d.total_received) : '—';
       var sent = d.total_sent     != null ? fmtRwd(d.total_sent)     : '—';
 
-      var grid =
-        mkCell('Balance',        '<span style="color:#34d399;font-weight:700;">' + bal + '</span>') +
-        mkCell('Total Received', recv) +
-        mkCell('Total Sent',     sent) +
-        mkCell('Transactions',   fmtN(d.tx_count)) +
-        mkCell('Blocks Mined',   d.blocks_mined != null ? fmtN(d.blocks_mined) : '—');
+      var tbl = '<table style="width:100%;border-collapse:collapse;">' +
+        mdRow('Balance',        '<span style="color:#4ade80;font-weight:700;">' + bal + '</span>') +
+        mdRow('Total received', recv) +
+        mdRow('Total sent',     sent) +
+        mdRow('Transactions',   fmtN(d.tx_count)) +
+        mdRow('Blocks mined',   d.blocks_mined != null ? fmtN(d.blocks_mined) : '—') +
+      '</table>';
 
       var txs = d.transactions || [];
-      var txRows = '';
+      var txHtml = '';
       if (txs.length) {
-        txRows = '<div class="xp-modal-shdr">Recent Transactions</div>' +
+        txHtml = mdSect('Recent transactions') +
           txs.slice(0, 25).map(function (tx) {
             var txid = typeof tx === 'string' ? tx : (tx.txid || tx.hash || '');
-            return '<div class="xp-modal-tx-row" onclick="showTx(\'' + txid + '\')">' +
-              '<span>' + txid + '</span></div>';
+            return mdTxRow(txid, 'showTx(\'' + txid + '\')');
           }).join('');
       }
 
-      openModal(
-        '<div class="xp-modal-h1">Address</div>' +
-        '<div class="xp-modal-sub">' + addr + '</div>' +
-        '<div class="xp-modal-grid">' + grid + '</div>' +
-        txRows
+      window.__showBlockModal(
+        '<h4 style="margin:0 0 4px;font-size:16px;">Address</h4>' +
+        '<p style="margin:0 0 14px;font-family:monospace;font-size:11px;color:rgba(255,255,255,0.5);word-break:break-all;">' + addr + '</p>' +
+        tbl + txHtml
       );
     }).catch(function () {
-      openModal('<div class="xp-modal-err">Could not load address data</div>');
+      window.__showBlockError('Could not load address data');
     });
   }
 
   function showTx(txid) {
-    openModal('<div class="xp-ldg">Loading transaction...</div>');
+    window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading transaction...</div>');
     get(API + '/tx/' + txid).then(function (tx) {
       var inputs  = tx.inputs  || tx.vin  || [];
       var outputs = tx.outputs || tx.vout || [];
 
-      var inRows;
+      var inHtml;
       if (inputs.length === 0) {
-        inRows = '<div style="font-size:12px;color:var(--xp-t2);padding:6px 0;">Coinbase (mining reward)</div>';
+        inHtml = '<div style="font-size:13px;color:rgba(255,255,255,0.55);padding:6px 0;">Coinbase (mining reward)</div>';
       } else {
-        inRows = inputs.map(function (inp) {
+        inHtml = inputs.map(function (inp) {
           var addr = inp.address || inp.prev_address || inp.prev_out || '—';
           var val  = inp.value != null ? fmtRwd(inp.value) : '';
-          return '<div class="xp-modal-tx-row">' +
+          return '<div style="font-family:monospace;font-size:12px;color:rgba(255,255,255,0.75);padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.06);word-break:break-all;display:flex;justify-content:space-between;gap:8px;">' +
             '<span>' + addr + '</span>' +
-            (val ? '<span style="color:#34d399;flex-shrink:0;">' + val + '</span>' : '') +
-            '</div>';
+            (val ? '<span style="color:#4ade80;flex-shrink:0;">' + val + '</span>' : '') +
+          '</div>';
         }).join('');
       }
 
-      var outRows = outputs.map(function (out) {
+      var outHtml = outputs.map(function (out) {
         var addr = out.address || out.scriptpubkey_address || '—';
         var val  = out.value != null ? fmtRwd(out.value) : '—';
-        return '<div class="xp-modal-tx-row" onclick="showAddr(\'' + addr + '\')">' +
+        return '<div style="font-family:monospace;font-size:12px;color:rgba(91,177,255,0.75);padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.06);word-break:break-all;cursor:pointer;display:flex;justify-content:space-between;gap:8px;" onclick="showAddr(\'' + addr + '\')">' +
           '<span>' + addr + '</span>' +
-          '<span style="color:#34d399;flex-shrink:0;">' + val + '</span>' +
-          '</div>';
+          '<span style="color:#4ade80;flex-shrink:0;">' + val + '</span>' +
+        '</div>';
       }).join('');
 
-      openModal(
-        '<div class="xp-modal-h1">Transaction</div>' +
-        '<div class="xp-modal-sub">' + txid + '</div>' +
-        '<div class="xp-modal-shdr">Inputs (' + inputs.length + ')</div>' + inRows +
-        '<div class="xp-modal-shdr">Outputs (' + outputs.length + ')</div>' + outRows
+      window.__showBlockModal(
+        '<h4 style="margin:0 0 4px;font-size:16px;">Transaction</h4>' +
+        '<p style="margin:0 0 14px;font-family:monospace;font-size:11px;color:rgba(255,255,255,0.5);word-break:break-all;">' + txid + '</p>' +
+        mdSect('Inputs (' + inputs.length + ')') + inHtml +
+        mdSect('Outputs (' + outputs.length + ')') + outHtml
       );
     }).catch(function () {
-      openModal('<div class="xp-modal-err">Could not load transaction data</div>');
+      window.__showBlockError('Could not load transaction data');
     });
   }
 
-  window.closeModal    = closeModal;
-  window.showBlock     = showBlock;
+  window.closeModal      = closeModal;
+  window.showBlock       = showBlock;
   window.showBlockByHash = showBlockByHash;
-  window.showAddr      = showAddr;
-  window.showTx        = showTx;
+  window.showAddr        = showAddr;
+  window.showTx          = showTx;
 
   /* --- mining calculator --- */
   function updateCalc() {
@@ -1135,6 +1113,11 @@ GitHub</a>
   var rlBtn = $id('rl-load-btn');
   if (rlBtn) rlBtn.addEventListener('click', function () { rlFetch(500); });
 
+  var bModal = $id('block-modal'), bClose = $id('block-modal-close');
+  if (bModal && bClose) {
+    bClose.addEventListener('click', closeModal);
+    bModal.addEventListener('click', function (e) { if (e.target === bModal) closeModal(); });
+  }
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
 
   setInterval(loadOverview,  15000);

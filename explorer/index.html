@@ -415,11 +415,11 @@ body {
       <div class="xp-sl">NETWORK STATS</div>
       <div class="xp-g6">
         <div class="xp-sc"><div class="xp-sc-label">Best Block</div><div class="xp-sc-val" id="s-height">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Block Reward</div><div class="xp-sc-val xp-gv" id="s-reward">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Pool Hashrate</div><div class="xp-sc-val xp-gv" id="s-hashrate">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Active Miners</div><div class="xp-sc-val" id="s-miners">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Est. Supply</div><div class="xp-sc-val xp-gv" id="s-supply">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Blocks Today</div><div class="xp-sc-val" id="s-today">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Circulating Supply</div><div class="xp-sc-val xp-gv" id="s-supply">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Network Hashrate</div><div class="xp-sc-val xp-gv" id="s-nethash">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Difficulty</div><div class="xp-sc-val" id="s-diff">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Active Peers</div><div class="xp-sc-val" id="s-peers">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Total TXs</div><div class="xp-sc-val" id="s-txcount">—</div></div>
       </div>
 
       <div class="xp-2col">
@@ -436,7 +436,7 @@ body {
             </select>
           </div>
           <div class="xp-rr xp-rr-algo"><span>Algorithm</span><span>PoW SHA-256d</span></div>
-          <div class="xp-rr xp-rr-pool"><span>Pool hashrate</span><span id="calc-nethash">—</span></div>
+          <div class="xp-rr xp-rr-pool"><span>Network hashrate</span><span id="calc-nethash">—</span></div>
           <div class="xp-rr xp-rr-daily"><span>Est. daily earnings</span><span id="calc-daily">enter hashrate</span></div>
         </div>
 
@@ -608,7 +608,7 @@ GitHub</a>
   var REWARD_DENOM = 1e8;
   var BLOCKS_DAY   = 288;
 
-  var st = { offset: 0, pool: null, rlDone: false, activeTab: 'ov', tipHeight: 0, lastOverviewTs: 0, lastBlocks: [] };
+  var st = { offset: 0, pool: null, chainHashrate: 0, rlDone: false, activeTab: 'ov', tipHeight: 0, lastOverviewTs: 0, lastBlocks: [] };
 
   function $id(id) { return document.getElementById(id); }
   function set(id, v) { var e = $id(id); if (e) e.textContent = v; }
@@ -703,7 +703,6 @@ GitHub</a>
 
       if (blocks && blocks.length) {
         var b0 = blocks[0];
-        set('s-reward',    fmtRwd(b0.total_reward));
         set('s-lastblock', fmtAge(b0.timestamp));
         var supM = (status.synced_height * (b0.total_reward / REWARD_DENOM)) / 1e6;
         set('s-supply', supM.toFixed(2) + 'M IRM');
@@ -720,18 +719,32 @@ GitHub</a>
   function loadPoolStats() {
     return get(POOL).then(function (p) {
       st.pool = p;
-      var totalHps = (p.asic    ? p.asic.hashrate_estimate_hps    : 0)
-                   + (p.cpu_gpu ? p.cpu_gpu.hashrate_estimate_hps : 0);
-      set('s-hashrate',  fmtHps(totalHps));
-      set('s-miners',    fmtN(p.total_miners));
-      set('s-today',     fmtN(p.blocks_found_today));
-      set('s-poolurl',   p.url           || '—');
-      set('s-asicport',  p.asic_port     || '—');
-      set('s-cpuport',   p.cpu_gpu_port  || '—');
-      set('calc-nethash', fmtHps(totalHps));
-      updateCalc();
+      set('s-poolurl',  p.url          || '—');
+      set('s-asicport', p.asic_port    || '—');
+      set('s-cpuport',  p.cpu_gpu_port || '—');
       if (st.activeTab === 'ps') renderPoolStats(p);
     }).catch(function (e) { console.error('pool:', e); });
+  }
+
+  /* --- chain stats (network hashrate, difficulty, peers, total txs) --- */
+  function loadChainStats() {
+    var t = Date.now();
+    return get(API + '/stats?_=' + t).then(function (stats) {
+      if (!stats) return;
+      if (stats.network_hashrate != null) {
+        st.chainHashrate = stats.network_hashrate;
+        set('s-nethash',    fmtHps(stats.network_hashrate));
+        set('calc-nethash', fmtHps(stats.network_hashrate));
+        updateCalc();
+      }
+      if (stats.difficulty        != null) set('s-diff',    fmtN(stats.difficulty));
+      if (stats.peer_count        != null) set('s-peers',   fmtN(stats.peer_count));
+      if (stats.total_txs         != null) set('s-txcount', fmtN(stats.total_txs));
+      if (stats.circulating_supply != null) {
+        var supM = (stats.circulating_supply / REWARD_DENOM) / 1e6;
+        set('s-supply', supM.toFixed(2) + 'M IRM');
+      }
+    }).catch(function () {});
   }
 
   /* --- render pool stats panel --- */
@@ -1149,12 +1162,8 @@ GitHub</a>
     if (!hrEl || !huEl || !dayEl) return;
     var hrVal = parseFloat(hrEl.value), huVal = parseInt(huEl.value || '1000000', 10);
     if (!hrVal || isNaN(hrVal) || hrVal <= 0) { dayEl.textContent = 'enter hashrate'; return; }
-    var p = st.pool;
-    if (!p) { dayEl.textContent = '—'; return; }
-    var netHps = (p.asic    ? p.asic.hashrate_estimate_hps    : 0)
-               + (p.cpu_gpu ? p.cpu_gpu.hashrate_estimate_hps : 0);
-    if (!netHps) { dayEl.textContent = '—'; return; }
-    var daily = (hrVal * huVal / netHps) * BLOCKS_DAY * 50;
+    if (!st.chainHashrate) { dayEl.textContent = '—'; return; }
+    var daily = (hrVal * huVal / st.chainHashrate) * BLOCKS_DAY * 50;
     dayEl.textContent = daily < 0.0001 ? '< 0.0001 IRM' : daily.toFixed(4) + ' IRM';
   }
   window.updateCalc = updateCalc;
@@ -1179,7 +1188,7 @@ GitHub</a>
   window.xpSearch = xpSearch;
 
   /* --- init --- */
-  Promise.all([loadOverview(), loadPoolStats()]).then(updateCalc);
+  Promise.all([loadOverview(), loadPoolStats(), loadChainStats()]).then(updateCalc);
 
   var hrEl = $id('xp-hr'), huEl = $id('xp-hu'), qEl = $id('xp-q');
   if (hrEl) hrEl.addEventListener('input', updateCalc);
@@ -1202,6 +1211,7 @@ GitHub</a>
     loadOverview();
   }, 15000);
   setInterval(loadPoolStats, 30000);
+  setInterval(loadChainStats, 60000);
   setInterval(function () { if (st.lastBlocks.length) renderBlocks(st.lastBlocks); }, 30000);
 
 })();

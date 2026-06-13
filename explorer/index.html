@@ -44,6 +44,8 @@ body {
   margin: 0 auto;
   padding: 0 24px;
   font-family: 'Space Grotesk', system-ui, sans-serif;
+  position: relative;
+  z-index: 1;
 }
 @media (max-width: 600px) { .xp-wrap { padding: 0 14px; } }
 
@@ -169,6 +171,7 @@ body {
   border-radius: 14px;
   padding: 18px 14px;
   transition: border-color 0.2s, transform 0.2s;
+  isolation: isolate;
 }
 .xp-sc:hover { border-color: var(--xp-bhi); transform: translateY(-2px); }
 .xp-sc-label { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--xp-t2); margin-bottom: 8px; font-family: 'Space Grotesk', system-ui, sans-serif; }
@@ -184,6 +187,7 @@ body {
   border: 1px solid var(--xp-border);
   border-radius: 14px;
   padding: 20px;
+  isolation: isolate;
 }
 .xp-ctitle {
   font-size: 11px; font-weight: 700;
@@ -264,6 +268,7 @@ body {
 .xp-hsh { color: var(--xp-t2); font-size: 12px; font-family: var(--xp-mono); }
 .xp-age { color: var(--xp-t3); }
 .xp-rwd { color: var(--xp-green); font-weight: 600; }
+.xp-tbl td.xp-rwd { color: var(--xp-green) !important; font-weight: 600; }
 .xp-adr { color: var(--xp-t2); font-size: 12px; font-family: var(--xp-mono); }
 .xp-al  { color: var(--xp-bdim); text-decoration: none; font-family: var(--xp-mono); font-size: 12px; }
 .xp-al:hover { color: var(--xp-brand); }
@@ -300,19 +305,55 @@ body {
 .xp-pager-info { display: flex; flex-direction: column; align-items: center; gap: 3px; }
 .xp-pager-sub  { font-size: 11px; color: var(--xp-t3); font-variant-numeric: tabular-nums; }
 
-/* --- rich list meta bar ------------------------------------ */
-.xp-rl-meta {
-  display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
-}
-.xp-rl-meta-item {
+/* --- rich list design -------------------------------------- */
+.rl-hdr { margin-bottom: 20px; }
+.rl-h1  { font-size: 24px; font-weight: 800; color: var(--xp-t1); margin: 0 0 4px; font-family: 'Space Grotesk', system-ui, sans-serif; letter-spacing: 0.02em; }
+.rl-sub { font-size: 13px; color: var(--xp-t2); margin: 0 0 16px; font-family: 'Space Grotesk', system-ui, sans-serif; }
+.rl-supply {
+  display: flex; flex-wrap: wrap;
   background: rgba(4,7,18,0.92);
   border: 1px solid rgba(110,198,255,0.18);
-  border-radius: 10px;
-  padding: 12px 20px;
-  display: flex; flex-direction: column; gap: 4px;
+  border-radius: 12px; overflow: hidden;
+  isolation: isolate;
 }
-.xp-rl-meta-label { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--xp-t2); font-family: 'Space Grotesk', system-ui, sans-serif; }
-.xp-rl-meta-val   { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--xp-t1); }
+.rl-supply-item {
+  flex: 1; min-width: 200px;
+  padding: 14px 20px;
+  border-right: 1px solid rgba(110,198,255,0.12);
+  display: flex; flex-direction: column; gap: 5px;
+}
+.rl-supply-item:last-child { border-right: none; }
+.rl-supply-lbl  { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--xp-t2); font-family: 'Space Grotesk', system-ui, sans-serif; }
+.rl-supply-val  { font-size: 16px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--xp-t1); }
+.rl-supply-note { font-size: 12px; color: var(--xp-t2); font-variant-numeric: tabular-nums; }
+
+.rl-locked-row { background: rgba(245,158,11,0.05) !important; }
+.rl-locked-row td { border-bottom-color: rgba(245,158,11,0.15) !important; }
+.rl-locked-row:hover td { background: rgba(245,158,11,0.09) !important; }
+.rl-locked-cell { display: flex; flex-direction: column; gap: 3px; }
+.rl-locked-label { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; color: #F59E0B; font-family: 'Space Grotesk', system-ui, sans-serif; flex-wrap: wrap; }
+.rl-badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; letter-spacing: 0.10em; background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.45); color: #F59E0B; white-space: nowrap; }
+.rl-unlock-note { font-size: 11px; color: rgba(245,158,11,0.65); }
+.rl-locked-bal  { color: #F59E0B !important; font-weight: 700 !important; font-variant-numeric: tabular-nums; }
+
+.rl-locked-panel {
+  margin-top: 14px;
+  background: rgba(4,7,18,0.92);
+  border: 1px solid rgba(245,158,11,0.30);
+  border-radius: 12px;
+  padding: 18px 22px;
+  isolation: isolate;
+}
+.rl-locked-panel-hdr { display: flex; align-items: center; gap: 9px; font-size: 13px; font-weight: 700; color: #F59E0B; margin-bottom: 8px; font-family: 'Space Grotesk', system-ui, sans-serif; }
+.rl-locked-amount { font-size: 20px; font-weight: 800; color: #F59E0B; font-variant-numeric: tabular-nums; margin-bottom: 6px; font-family: 'Space Grotesk', system-ui, sans-serif; }
+.rl-locked-desc { font-size: 13px; color: var(--xp-t2); line-height: 1.55; }
+
+.rl-pq-note { margin-top: 12px; padding: 14px 18px; background: rgba(110,198,255,0.04); border: 1px solid rgba(110,198,255,0.12); border-radius: 10px; font-size: 12px; color: var(--xp-t2); line-height: 1.55; font-family: 'Space Grotesk', system-ui, sans-serif; isolation: isolate; }
+
+.rl-load-wrap { display: flex; justify-content: center; padding: 16px 0 4px; border-top: 1px solid rgba(255,255,255,0.06); }
+.rl-load-btn { padding: 10px 28px; background: linear-gradient(135deg, rgba(110,198,255,0.15), rgba(167,139,250,0.10)); border: 1px solid rgba(110,198,255,0.35); border-radius: 10px; color: var(--xp-brand); font-family: 'Space Grotesk', system-ui, sans-serif; font-size: 13px; font-weight: 700; letter-spacing: 0.06em; cursor: pointer; transition: filter 0.15s; }
+.rl-load-btn:hover:not(:disabled) { filter: brightness(1.15); }
+.rl-load-btn:disabled { opacity: 0.45; cursor: default; filter: none; }
 
 /* --- rich list rank medals --------------------------------- */
 .rl-gold   { font-weight: 800; color: #FFD700; text-shadow: 0 0 10px rgba(255,215,0,0.40); font-variant-numeric: tabular-nums; }
@@ -439,27 +480,52 @@ body {
 
     <!-- ===== RICH LIST ===== -->
     <div id="xp-rl" style="display:none">
-      <div class="xp-sl">TOP MINERS BY TOTAL REWARD</div>
-      <div class="xp-rl-meta">
-        <div class="xp-rl-meta-item">
-          <span class="xp-rl-meta-label">Est. Total Supply</span>
-          <span class="xp-rl-meta-val xp-gv" id="rl-supply-val">—</span>
-        </div>
-        <div class="xp-rl-meta-item">
-          <span class="xp-rl-meta-label">Miners shown</span>
-          <span class="xp-rl-meta-val" id="rl-count-val">—</span>
+
+      <div class="rl-hdr">
+        <h2 class="rl-h1">Top IRM Holders</h2>
+        <p class="rl-sub">Ranked by spendable balance on the current chain tip</p>
+        <div class="rl-supply">
+          <div class="rl-supply-item">
+            <span class="rl-supply-lbl">Circulating supply</span>
+            <span class="rl-supply-val xp-gv" id="rl-circulating">—</span>
+          </div>
+          <div class="rl-supply-item">
+            <span class="rl-supply-lbl">Minted supply (incl. vested)</span>
+            <span class="rl-supply-val xp-gv" id="rl-minted">—</span>
+          </div>
+          <div class="rl-supply-item">
+            <span class="rl-supply-lbl">Maximum supply</span>
+            <span class="rl-supply-val">100,000,000 IRM</span>
+            <span class="rl-supply-note"><span id="rl-minted-pct">—</span> minted</span>
+          </div>
         </div>
       </div>
+
       <div class="xp-card">
         <div class="xp-tw">
           <table class="xp-tbl">
             <thead><tr>
-              <th>#</th><th>ADDRESS</th><th>BLOCKS MINED</th><th>TOTAL REWARD</th><th>SUPPLY %</th>
+              <th>RANK</th><th>ADDRESS</th><th>BALANCE (IRM)</th><th>% OF SUPPLY</th><th>UTXOs</th>
             </tr></thead>
             <tbody id="xp-rl-body"><tr><td colspan="5" class="xp-ldg">Loading...</td></tr></tbody>
           </table>
         </div>
+        <div class="rl-load-wrap">
+          <button class="rl-load-btn" id="rl-load-btn" disabled>Load top 500</button>
+        </div>
       </div>
+
+      <div class="rl-locked-panel">
+        <div class="rl-locked-panel-hdr">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>
+          Locked / Vested Funds
+        </div>
+        <div class="rl-locked-amount">3,502,608.00 IRM (<span id="rl-locked-pct">3.5026%</span> of total supply)</div>
+        <div class="rl-locked-desc">Includes the 3,500,000 IRM founder allocation, locked on-chain by CLTV at genesis</div>
+      </div>
+
+      <div class="rl-pq-note">Both P and Q prefix addresses are standard single-signature wallet addresses using the same version byte 0x39. The leading character difference is a base58 encoding property of the underlying public key hash — not a type difference.</div>
+
     </div><!-- /xp-rl -->
 
     <!-- ===== POOL STATS ===== -->
@@ -552,6 +618,9 @@ GitHub</a>
   function fmtRwd(u)  {
     var irm = u / REWARD_DENOM;
     return (irm % 1 === 0 ? irm.toFixed(0) : irm.toFixed(2)) + ' IRM';
+  }
+  function fmtIRM(n) {
+    return Number(n).toLocaleString('en-US', {minimumFractionDigits: 0, maximumFractionDigits: 0}) + ' IRM';
   }
   function fmtHps(h) {
     if (!h || h <= 0) return '0 H/s';
@@ -688,7 +757,7 @@ GitHub</a>
           '<td class="xp-age">' + fmtAge(b.timestamp) + '</td>' +
           '<td>' + (b.tx_count || 0) + '</td>' +
           '<td><span class="xp-adr">' + (b.miner_address || '—') + '</span></td>' +
-          '<td class="xp-rwd">' + fmtRwd(b.total_reward) + '</td>' +
+          '<td class="xp-rwd" style="color:#34d399">' + fmtRwd(b.total_reward) + '</td>' +
           '</tr>';
       }).join('');
     }
@@ -718,36 +787,90 @@ GitHub</a>
   window.xpPage = xpPage;
 
   /* --- rich list --- */
-  function loadRichList() {
-    get(API + '/miners?limit=100').then(function (miners) {
+  var MAX_SUPPLY_IRM   = 100000000;
+  var FOUNDER_LOCK_IRM = 3502608;
+  var FOUNDER_ADDR     = 'PxG1FmGiSnvfXJUcryLna2L5MB4iGG1KD7';
+  var FOUNDER_UNLOCK   = 158704;
+
+  function loadRichList() { rlFetch(100); }
+
+  function rlFetch(limit) {
+    var btn = $id('rl-load-btn');
+    if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
+
+    get(API + '/miners?limit=' + limit).then(function (miners) {
       st.rlDone = true;
       var tbody = $id('xp-rl-body');
       if (!tbody) return;
+
+      var miningIrm = st.tipHeight > 0 ? st.tipHeight * 50 : 0;
+      var mintedIrm = miningIrm + FOUNDER_LOCK_IRM;
+      var mintedPct = mintedIrm > 0 ? (mintedIrm / MAX_SUPPLY_IRM * 100).toFixed(4) + '%' : '—';
+      var lockedPct = (FOUNDER_LOCK_IRM / MAX_SUPPLY_IRM * 100).toFixed(4) + '%';
+
+      set('rl-circulating', fmtIRM(miningIrm));
+      set('rl-minted',      fmtIRM(mintedIrm));
+      set('rl-minted-pct',  mintedPct);
+      set('rl-locked-pct',  lockedPct);
+
+      var founderPct = (FOUNDER_LOCK_IRM / MAX_SUPPLY_IRM * 100).toFixed(4) + '%';
+
+      var LOCK_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="flex-shrink:0"><path d="M18 8h-1V6c0-2.76-2.24-5-5-5S7 3.24 7 6v2H6c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V10c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3.1-9H8.9V6c0-1.71 1.39-3.1 3.1-3.1 1.71 0 3.1 1.39 3.1 3.1v2z"/></svg>';
+
+      var lockedRow =
+        '<tr class="rl-locked-row">' +
+          '<td>' +
+            '<div class="rl-locked-cell">' +
+              '<div class="rl-locked-label">' +
+                LOCK_SVG +
+                'Founder Vesting (CLTV-locked at genesis)' +
+                '<span class="rl-badge">LOCKED</span>' +
+              '</div>' +
+              '<div class="rl-unlock-note">unlocks at height #' + FOUNDER_UNLOCK.toLocaleString() + '</div>' +
+            '</div>' +
+          '</td>' +
+          '<td><span style="font-family:var(--xp-mono);font-size:12px;color:rgba(255,255,255,0.55);">' + FOUNDER_ADDR + '</span></td>' +
+          '<td class="rl-locked-bal">3,502,608.00 IRM</td>' +
+          '<td class="xp-pct">' + founderPct + '</td>' +
+          '<td class="xp-age">—</td>' +
+        '</tr>';
+
       if (!miners || !miners.length) {
-        tbody.innerHTML = '<tr><td colspan="5" class="xp-ldg">No data</td></tr>';
-        return;
+        tbody.innerHTML = lockedRow + '<tr><td colspan="5" class="xp-ldg">No miner data</td></tr>';
+      } else {
+        var MEDALS = ['rl-gold', 'rl-silver', 'rl-bronze'];
+        var rows = miners.map(function (m, i) {
+          var rank    = i + 1;
+          var rankCls = rank <= 3 ? MEDALS[i] : 'xp-rk';
+          var balIrm  = m.total_reward / REWARD_DENOM;
+          var pct     = (balIrm / MAX_SUPPLY_IRM * 100).toFixed(4) + '%';
+          var balStr  = balIrm.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' IRM';
+          return '<tr>' +
+            '<td class="' + rankCls + '">' + rank + '</td>' +
+            '<td><a href="https://explorer.iriumlabs.org/address/' + m.address +
+            '" target="_blank" rel="noopener" class="xp-al">' + m.address + '</a></td>' +
+            '<td style="color:#34d399;font-weight:600;font-variant-numeric:tabular-nums;">' + balStr + '</td>' +
+            '<td class="xp-pct">' + pct + '</td>' +
+            '<td style="color:rgba(255,255,255,0.55);font-variant-numeric:tabular-nums;">' + fmtN(m.blocks_mined) + '</td>' +
+            '</tr>';
+        }).join('');
+        tbody.innerHTML = lockedRow + rows;
       }
-      var totalSupplyIrm = st.tipHeight > 0 ? st.tipHeight * 50 : 0;
-      set('rl-supply-val', totalSupplyIrm > 0
-        ? (totalSupplyIrm / 1e6).toFixed(2) + 'M IRM' : '—');
-      set('rl-count-val', miners.length.toString());
-      var MEDALS = ['rl-gold', 'rl-silver', 'rl-bronze'];
-      tbody.innerHTML = miners.map(function (m, i) {
-        var rank = i + 1;
-        var rankCls = rank <= 3 ? MEDALS[i] : 'xp-rk';
-        var pct = totalSupplyIrm > 0
-          ? ((m.total_reward / REWARD_DENOM / totalSupplyIrm) * 100).toFixed(3) + '%'
-          : '—';
-        return '<tr>' +
-          '<td class="' + rankCls + '">' + rank + '</td>' +
-          '<td><a href="https://explorer.iriumlabs.org/address/' + m.address +
-          '" target="_blank" rel="noopener" class="xp-al">' + m.address + '</a></td>' +
-          '<td>' + fmtN(m.blocks_mined) + '</td>' +
-          '<td class="xp-rwd">' + fmtRwd(m.total_reward) + '</td>' +
-          '<td class="xp-pct">' + pct + '</td>' +
-          '</tr>';
-      }).join('');
-    }).catch(function (e) { console.error('richlist:', e); });
+
+      if (btn) {
+        if (limit >= 500 || !miners || miners.length < limit) {
+          btn.disabled = true;
+          btn.textContent = limit >= 500 ? 'Showing top 500' : 'All entries loaded';
+        } else {
+          btn.disabled = false;
+          btn.textContent = 'Load top 500';
+        }
+      }
+    }).catch(function (e) {
+      console.error('richlist:', e);
+      var b = $id('rl-load-btn');
+      if (b) { b.disabled = false; b.textContent = 'Load top 500'; }
+    });
   }
 
   /* --- mining calculator --- */
@@ -793,6 +916,9 @@ GitHub</a>
   if (hrEl) hrEl.addEventListener('input', updateCalc);
   if (huEl) huEl.addEventListener('change', updateCalc);
   if (qEl)  qEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') xpSearch(); });
+
+  var rlBtn = $id('rl-load-btn');
+  if (rlBtn) rlBtn.addEventListener('click', function () { rlFetch(500); });
 
   setInterval(loadOverview,  15000);
   setInterval(loadPoolStats, 30000);

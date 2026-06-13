@@ -14,11 +14,11 @@
 /* --- design tokens ------------------------------------------ */
 :root {
   --xp-bg:     #0A1226;
-  --xp-elev1:  rgba(8,11,22,0.94);
+  --xp-elev1:  rgba(4,7,18,0.92);
   --xp-brand:  #6ec6ff;
   --xp-bdim:   rgba(110,198,255,0.55);
   --xp-bline:  rgba(110,198,255,0.14);
-  --xp-border: rgba(110,198,255,0.10);
+  --xp-border: rgba(110,198,255,0.18);
   --xp-bhi:    rgba(110,198,255,0.40);
   --xp-acc2:   #a78bfa;
   --xp-green:  #34d399;
@@ -223,6 +223,8 @@ body {
 .xp-rr-algo  { border-left: 3px solid var(--xp-acc2); background: rgba(167,139,250,0.06); }
 .xp-rr-pool  { border-left: 3px solid var(--xp-brand); background: rgba(110,198,255,0.06); }
 .xp-rr-daily { border-left: 3px solid var(--xp-green); background: rgba(52,211,153,0.06); }
+.xp-rr-daily span:last-child { color: var(--xp-green); }
+.xp-gv { color: var(--xp-green) !important; }
 
 /* --- summary rows ------------------------------------------- */
 .xp-sr {
@@ -293,6 +295,32 @@ body {
 /* --- pool 2-col --------------------------------------------- */
 .xp-p2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
 @media (max-width: 700px) { .xp-p2 { grid-template-columns: 1fr; } }
+
+/* --- pager 2-line info -------------------------------------- */
+.xp-pager-info { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+.xp-pager-sub  { font-size: 11px; color: var(--xp-t3); font-variant-numeric: tabular-nums; }
+
+/* --- rich list meta bar ------------------------------------ */
+.xp-rl-meta {
+  display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.xp-rl-meta-item {
+  background: rgba(4,7,18,0.92);
+  border: 1px solid rgba(110,198,255,0.18);
+  border-radius: 10px;
+  padding: 12px 20px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.xp-rl-meta-label { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--xp-t2); font-family: 'Space Grotesk', system-ui, sans-serif; }
+.xp-rl-meta-val   { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; color: var(--xp-t1); }
+
+/* --- rich list rank medals --------------------------------- */
+.rl-gold   { font-weight: 800; color: #FFD700; text-shadow: 0 0 10px rgba(255,215,0,0.40); font-variant-numeric: tabular-nums; }
+.rl-silver { font-weight: 800; color: #C8D6E0; text-shadow: 0 0 8px rgba(200,214,224,0.30); font-variant-numeric: tabular-nums; }
+.rl-bronze { font-weight: 800; color: #CD8B4A; text-shadow: 0 0 8px rgba(205,139,74,0.30); font-variant-numeric: tabular-nums; }
+
+/* --- rich list supply % ------------------------------------ */
+.xp-pct { color: var(--xp-t2); font-size: 12px; font-variant-numeric: tabular-nums; }
 </style>
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=2">
 </head>
@@ -351,10 +379,10 @@ body {
       <div class="xp-sl">NETWORK STATS</div>
       <div class="xp-g6">
         <div class="xp-sc"><div class="xp-sc-label">Best Block</div><div class="xp-sc-val" id="s-height">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Block Reward</div><div class="xp-sc-val" id="s-reward">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Pool Hashrate</div><div class="xp-sc-val" id="s-hashrate">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Block Reward</div><div class="xp-sc-val xp-gv" id="s-reward">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Pool Hashrate</div><div class="xp-sc-val xp-gv" id="s-hashrate">—</div></div>
         <div class="xp-sc"><div class="xp-sc-label">Active Miners</div><div class="xp-sc-val" id="s-miners">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Est. Supply</div><div class="xp-sc-val" id="s-supply">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Est. Supply</div><div class="xp-sc-val xp-gv" id="s-supply">—</div></div>
         <div class="xp-sc"><div class="xp-sc-label">Blocks Today</div><div class="xp-sc-val" id="s-today">—</div></div>
       </div>
 
@@ -398,9 +426,12 @@ body {
           </table>
         </div>
         <div class="xp-pager">
-          <button class="xp-pb" id="xp-newer" onclick="xpPage(-1)" disabled>Newer</button>
-          <span id="xp-plabel">—</span>
-          <button class="xp-pb" id="xp-older" onclick="xpPage(1)">Older</button>
+          <button class="xp-pb" id="xp-newer" onclick="xpPage(-1)" disabled>← Previous</button>
+          <div class="xp-pager-info">
+            <span id="xp-plabel">—</span>
+            <span id="xp-ptotal" class="xp-pager-sub">—</span>
+          </div>
+          <button class="xp-pb" id="xp-older" onclick="xpPage(1)">Next →</button>
         </div>
       </div>
 
@@ -409,13 +440,23 @@ body {
     <!-- ===== RICH LIST ===== -->
     <div id="xp-rl" style="display:none">
       <div class="xp-sl">TOP MINERS BY TOTAL REWARD</div>
+      <div class="xp-rl-meta">
+        <div class="xp-rl-meta-item">
+          <span class="xp-rl-meta-label">Est. Total Supply</span>
+          <span class="xp-rl-meta-val xp-gv" id="rl-supply-val">—</span>
+        </div>
+        <div class="xp-rl-meta-item">
+          <span class="xp-rl-meta-label">Miners shown</span>
+          <span class="xp-rl-meta-val" id="rl-count-val">—</span>
+        </div>
+      </div>
       <div class="xp-card">
         <div class="xp-tw">
           <table class="xp-tbl">
             <thead><tr>
-              <th>#</th><th>ADDRESS</th><th>BLOCKS MINED</th><th>TOTAL REWARD</th>
+              <th>#</th><th>ADDRESS</th><th>BLOCKS MINED</th><th>TOTAL REWARD</th><th>SUPPLY %</th>
             </tr></thead>
-            <tbody id="xp-rl-body"><tr><td colspan="4" class="xp-ldg">Loading...</td></tr></tbody>
+            <tbody id="xp-rl-body"><tr><td colspan="5" class="xp-ldg">Loading...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -493,7 +534,7 @@ GitHub</a>
   var REWARD_DENOM = 1e8;
   var BLOCKS_DAY   = 288;
 
-  var st = { offset: 0, pool: null, rlDone: false, activeTab: 'ov' };
+  var st = { offset: 0, pool: null, rlDone: false, activeTab: 'ov', tipHeight: 0 };
 
   function $id(id) { return document.getElementById(id); }
   function set(id, v) { var e = $id(id); if (e) e.textContent = v; }
@@ -553,6 +594,7 @@ GitHub</a>
     ]).then(function (res) {
       var status = res[0], blocks = res[1];
 
+      st.tipHeight = status.synced_height;
       set('xp-status', 'Block #' + fmtN(status.synced_height) + ' · Synced');
       set('s-height', fmtN(status.synced_height));
       set('s-tiphash', status.synced_block_hash
@@ -645,17 +687,24 @@ GitHub</a>
           '<td><span class="xp-hsh">' + fmtHash(b.hash) + '</span></td>' +
           '<td class="xp-age">' + fmtAge(b.timestamp) + '</td>' +
           '<td>' + (b.tx_count || 0) + '</td>' +
-          '<td><span class="xp-adr">' + fmtAddr(b.miner_address) + '</span></td>' +
+          '<td><span class="xp-adr">' + (b.miner_address || '—') + '</span></td>' +
           '<td class="xp-rwd">' + fmtRwd(b.total_reward) + '</td>' +
           '</tr>';
       }).join('');
     }
-    var newer = $id('xp-newer'), older = $id('xp-older'), lbl = $id('xp-plabel');
+    var newer = $id('xp-newer'), older = $id('xp-older');
+    var lbl = $id('xp-plabel'), totalLbl = $id('xp-ptotal');
     if (newer) newer.disabled = st.offset === 0;
     if (older) older.disabled = !blocks || blocks.length < PER_PAGE;
-    if (lbl && blocks && blocks.length) {
-      lbl.textContent = '#' + fmtN(blocks[0].height) +
-        ' – #' + fmtN(blocks[blocks.length - 1].height);
+    if (lbl) {
+      var curPage = Math.floor(st.offset / PER_PAGE) + 1;
+      var totPages = st.tipHeight > 0 ? Math.ceil((st.tipHeight + 1) / PER_PAGE) : '?';
+      lbl.textContent = 'Page ' + fmtN(curPage) + ' of ' + fmtN(totPages);
+    }
+    if (totalLbl && blocks && blocks.length) {
+      totalLbl.textContent = 'Blocks #' + fmtN(blocks[0].height) +
+        ' – #' + fmtN(blocks[blocks.length - 1].height) +
+        ' of ' + fmtN(st.tipHeight + 1);
     }
   }
 
@@ -675,16 +724,27 @@ GitHub</a>
       var tbody = $id('xp-rl-body');
       if (!tbody) return;
       if (!miners || !miners.length) {
-        tbody.innerHTML = '<tr><td colspan="4" class="xp-ldg">No data</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" class="xp-ldg">No data</td></tr>';
         return;
       }
+      var totalSupplyIrm = st.tipHeight > 0 ? st.tipHeight * 50 : 0;
+      set('rl-supply-val', totalSupplyIrm > 0
+        ? (totalSupplyIrm / 1e6).toFixed(2) + 'M IRM' : '—');
+      set('rl-count-val', miners.length.toString());
+      var MEDALS = ['rl-gold', 'rl-silver', 'rl-bronze'];
       tbody.innerHTML = miners.map(function (m, i) {
+        var rank = i + 1;
+        var rankCls = rank <= 3 ? MEDALS[i] : 'xp-rk';
+        var pct = totalSupplyIrm > 0
+          ? ((m.total_reward / REWARD_DENOM / totalSupplyIrm) * 100).toFixed(3) + '%'
+          : '—';
         return '<tr>' +
-          '<td class="xp-rk">' + (i + 1) + '</td>' +
+          '<td class="' + rankCls + '">' + rank + '</td>' +
           '<td><a href="https://explorer.iriumlabs.org/address/' + m.address +
-          '" target="_blank" rel="noopener" class="xp-al">' + fmtAddr(m.address) + '</a></td>' +
+          '" target="_blank" rel="noopener" class="xp-al">' + m.address + '</a></td>' +
           '<td>' + fmtN(m.blocks_mined) + '</td>' +
           '<td class="xp-rwd">' + fmtRwd(m.total_reward) + '</td>' +
+          '<td class="xp-pct">' + pct + '</td>' +
           '</tr>';
       }).join('');
     }).catch(function (e) { console.error('richlist:', e); });

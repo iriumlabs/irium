@@ -3,367 +3,303 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="Explore the live Irium chain, a mineable settlement-first network for escrow, agreements, and proof-based commerce.">
-<title>Irium Explorer | Settlement-First Network</title>
+<meta name="description" content="Explore live blocks, miners, and network stats for the Irium settlement-first blockchain.">
+<title>Explorer | Irium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=9">
 <link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
-
-
-
-
-
 <style>
-  /* Explorer v4 */
-  /* Mining-page style panels (scoped to explorer) */
-  .x-explorer .x-wrap {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 20px;
-    display: grid;
-    gap: 18px;
-  }
-
-  .x-explorer .x-topgrid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.65fr);
-    gap: 18px;
-    align-items: stretch;
-  }
-  @media (max-width: 1040px) {
-    .x-explorer .x-topgrid { grid-template-columns: 1fr; }
-  }
-
-  .x-explorer .x-panel {
-    background: rgba(0,0,0,0.32);
-    border: 1px solid rgba(91,177,255,0.34);
-    border-radius: 14px;
-    padding: 18px;
-    box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 30px rgba(42,171,238,0.20);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    position: relative;
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-  }
-  .x-explorer .x-panel:before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: 14px;
-    pointer-events: none;
-    box-shadow: 0 0 26px rgba(42,171,238,0.20), inset 0 0 18px rgba(42,171,238,0.10);
-    animation: xGridAura 4.2s ease-in-out infinite;
-  }
-  .x-explorer .x-panel > * { position: relative; z-index: 1; }
-
-  @media (max-width: 560px) {
-    .x-explorer .x-wrap { padding: 0 14px; }
-    .x-explorer .x-panel { padding: 16px; }
-  }
-
-  :root {
-    --x-bg: rgba(0,0,0,0.20);
-    --x-border: rgba(255,255,255,0.12);
-    --x-accent: #0066cc;
-    --x-accent2: rgba(91,177,255,0.92);
-    --x-text: rgba(255,255,255,0.94);
-    --x-muted: rgba(230,237,243,0.84);
-    --x-glow: rgba(91,177,255,0.22);
-  }
-
-  .x-muted { color: var(--x-muted); }
-
-  .x-stagger { opacity: 0; transform: translateY(10px); animation: xIn 0.7s ease forwards; }
-  .x-stagger:nth-child(1) { animation-delay: 0.04s; }
-  .x-stagger:nth-child(2) { animation-delay: 0.10s; }
-  @keyframes xIn { to { opacity: 1; transform: translateY(0); } }
-
-  .x-pagehead {
-    margin: 0 0 18px;
-    padding: 10px 4px 0;
-    display: grid;
-    gap: 10px;
-    position: relative;
-    z-index: 1;
-  }
-
-  .glow-title {
-    position: relative;
-    display: inline-block;
-    text-shadow: 0 0 18px rgba(99,102,241,0.55), 0 0 38px rgba(99,102,241,0.35);
-  }
-  .glow-title::after {
-    content: attr(data-text);
-    position: absolute;
-    left: 0;
-    top: 0;
-    width: 100%;
-    color: transparent;
-    text-shadow: 0 0 28px rgba(91,177,255,0.6), 0 0 60px rgba(91,177,255,0.45);
-    opacity: 0.85;
-    pointer-events: none;
-    mix-blend-mode: screen;
-  }
-
-.x-page-title {
-    font-weight: 1000;
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-    color: rgba(255,255,255,0.98);
-    font-size: 46px;
-    line-height: 1.05;
-    margin: 0;
-  }
-  @media (max-width: 560px) { .x-page-title { font-size: 32px; } }
-
-  @keyframes xGlow {
-    0%, 100% { filter: brightness(1); }
-    50% { filter: brightness(1.16); }
-  }
-
-  .x-page-sub {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-    color: rgba(255,255,255,0.72);
-    font-size: 12px;
-  }
-
-  .x-sep { opacity: 0.55; }
-
-
-  .x-live { display: inline-flex; align-items: center; gap: 8px; }
-  .x-live-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
-    background: rgba(255, 59, 48, 0.95);
-    box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.55), 0 0 18px rgba(255, 59, 48, 0.35);
-    animation: xLivePulse 1.35s ease-in-out infinite;
-  }
-  @keyframes xLivePulse {
-    0%   { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.55), 0 0 18px rgba(255, 59, 48, 0.35); }
-    60%  { transform: scale(1.08); box-shadow: 0 0 0 10px rgba(255, 59, 48, 0.00), 0 0 26px rgba(255, 59, 48, 0.45); }
-    100% { transform: scale(0.92); box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.00), 0 0 18px rgba(255, 59, 48, 0.35); }
-  }
-
-  .x-techbar {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 2px;
-  }
-
-  .x-techpill {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 7px 10px;
-    border-radius: 999px;
-    border: 1px solid rgba(255,255,255,0.14);
-    background: rgba(0,0,0,0.20);
-  }
-
-  .x-techpill svg {
-    width: 24px;
-    height: 24px;
-    color: rgba(91,177,255,0.92);
-    filter: drop-shadow(0 0 12px rgba(91,177,255,0.25));
-  }
-
-  .x-techpill span {
-    font-size: 11px;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.78);
-  }
-
-  .x-field { display: grid; gap: 6px; }
-  .x-field-label { font-size: 11px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,0.72); }
-
-  @keyframes glowPulse {
-    0%,100% { box-shadow: 0 0 26px rgba(99,102,241,0.18), inset 0 0 22px rgba(99,102,241,0.08); }
-    50%     { box-shadow: 0 0 40px rgba(99,102,241,0.28), inset 0 0 26px rgba(99,102,241,0.12); }
-  }
-
-  @keyframes xGridGlow {
-    0%,100% { border-color: rgba(91,177,255,0.32); box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 26px rgba(42,171,238,0.16); }
-    50% { border-color: rgba(91,177,255,0.60); box-shadow: 0 16px 42px rgba(0,0,0,0.44), 0 0 40px rgba(42,171,238,0.34); }
-  }
-  @keyframes xGridAura {
-    0%,100% { opacity: .62; box-shadow: 0 0 20px rgba(42,171,238,0.18), inset 0 0 14px rgba(42,171,238,0.08); }
-    50% { opacity: .95; box-shadow: 0 0 36px rgba(42,171,238,0.34), inset 0 0 24px rgba(42,171,238,0.16); }
-  }
-
-  .x-head {
-    position: relative;
-    z-index: 1;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    margin-bottom: 14px;
-  }
-
-  .x-note { margin: -6px 0 14px; font-size: 12px; line-height: 1.35; }
-  .x-title {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 900;
-    letter-spacing: 0.10em;
-    font-size: 12px;
-    text-transform: uppercase;
-    color: rgba(255,255,255,0.92);
-  }
-  .x-meta { color: rgba(255,255,255,0.65); font-size: 12px; font-variant-numeric: tabular-nums; }
-
-  .x-ico { width: 26px; height: 26px; color: var(--x-accent2); filter: drop-shadow(0 0 14px rgba(91,177,255,0.38)); }
-  .x-ico.spin { animation: xSpin 7s linear infinite; }
-  .x-ico.pulse { animation: xPulse 1.8s ease-in-out infinite; }
-  .x-ico.float { animation: xFloat 4.2s ease-in-out infinite; }
-  @keyframes xSpin { to { transform: rotate(360deg); } }
-  @keyframes xPulse { 0%,100% { transform: scale(1); opacity: 0.95; } 50% { transform: scale(1.08); opacity: 1; } }
-  @keyframes xFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
-
-  .x-search { position: relative; z-index: 1; display: grid; gap: 10px; flex: 1; align-content: start; }
-  .x-row { display: grid; grid-template-columns: 1fr 128px; gap: 10px; align-items: center; }
-  @media (max-width: 560px) { .x-row { grid-template-columns: 1fr; } }
-
-  .x-input { width: 100%; padding: 12px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.14); border-radius: 10px; color: #fff; font-size: 15px; outline: none; }
-  .x-input:focus { border-color: rgba(91,177,255,0.55); box-shadow: 0 0 0 4px rgba(0,102,204,0.18); }
-
-  .x-btn { padding: 9px 10px; background: linear-gradient(180deg, rgba(0,102,204,1), rgba(0,102,204,0.76)); color: #fff; border: 1px solid rgba(255,255,255,0.10); border-radius: 10px; font-size: 12px; cursor: pointer; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; transition: transform 0.16s ease, filter 0.16s ease; }
-  .x-btn:hover { filter: brightness(1.06); transform: translateY(-1px); }
-
-  .x-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; flex: 1; align-content: start; }
-  @media (max-width: 1100px) { .x-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-  @media (max-width: 900px) { .x-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-
-  .x-stat {
-  border-radius: 12px;
-  padding: 16px;
-  border: 1px solid rgba(255,255,255,0.12);
-  background: rgba(0,0,0,0.22);
-  box-shadow: inset 0 0 18px rgba(0,0,0,0.20);
-  transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
-  min-height: 88px;
-}
-.x-stat:hover {
-  transform: translateY(-3px);
-  border-color: rgba(91,177,255,0.55);
-  box-shadow: 0 14px 30px rgba(0,0,0,0.35), 0 0 30px rgba(42,171,238,0.35), inset 0 0 18px rgba(0,0,0,0.20);
-}
-.x-stat {
-  animation: xGridGlow 4.6s ease-in-out infinite;
+/* --- design tokens ------------------------------------------ */
+:root {
+  --xp-bg:     #0A1226;
+  --xp-elev1:  rgba(8,11,22,0.94);
+  --xp-brand:  #6ec6ff;
+  --xp-bdim:   rgba(110,198,255,0.55);
+  --xp-bline:  rgba(110,198,255,0.14);
+  --xp-border: rgba(110,198,255,0.10);
+  --xp-bhi:    rgba(110,198,255,0.40);
+  --xp-acc2:   #a78bfa;
+  --xp-green:  #34d399;
+  --xp-t1:     #eef0ff;
+  --xp-t2:     rgba(255,255,255,0.55);
+  --xp-t3:     rgba(255,255,255,0.30);
+  --xp-mono:   'JetBrains Mono', monospace;
 }
 
-  .x-stat-top { display:flex; align-items:center; gap:10px; margin-bottom: 10px; }
-  .x-label { letter-spacing: 0.14em; font-size: 11px; color: rgba(255,255,255,0.72); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .x-value { font-size: 18px; font-weight: 950; letter-spacing: 0.01em; color: var(--x-text); font-variant-numeric: tabular-nums; line-height: 1.2; overflow-wrap: anywhere; }
+/* --- background --------------------------------------------- */
+body {
+  background-color: var(--xp-bg) !important;
+  background-image:
+    radial-gradient(ellipse 65% 55% at 12% 18%, rgba(59,59,255,0.22) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 65% at 88% 78%, rgba(167,139,250,0.18) 0%, transparent 65%),
+    radial-gradient(ellipse 40% 40% at 60% 40%, rgba(110,198,255,0.12) 0%, transparent 55%) !important;
+  background-attachment: fixed !important;
+}
 
-  .x-main { display: grid; grid-template-columns: 1fr; gap: 18px; }
+/* --- layout ------------------------------------------------- */
+.xp-wrap {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 0 24px;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+@media (max-width: 600px) { .xp-wrap { padding: 0 14px; } }
 
+/* --- page header -------------------------------------------- */
+.xp-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.xp-title {
+  font-weight: 800;
+  font-size: clamp(28px, 5vw, 44px);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--xp-t1);
+  margin: 0;
+  text-shadow: 0 0 30px rgba(110,198,255,0.25);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+.xp-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: rgba(8,11,22,0.80);
+  border: 1px solid var(--xp-bline);
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--xp-t2);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+.xp-dot {
+  width: 8px; height: 8px;
+  border-radius: 50%;
+  background: var(--xp-green);
+  box-shadow: 0 0 8px var(--xp-green);
+  flex-shrink: 0;
+  animation: xpDotPulse 1.8s ease-in-out infinite;
+}
+@keyframes xpDotPulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
 
-  .x-otc-panel {
-    border: 1px solid rgba(42,171,238,0.36);
-    background: linear-gradient(135deg, rgba(7,20,40,0.84), rgba(8,14,26,0.8));
-    box-shadow: 0 12px 32px rgba(0,0,0,0.34), 0 0 26px rgba(42,171,238,0.16);
-    animation: xOtcGlow 3.8s ease-in-out infinite;
-  }
-  .x-otc-panel::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: 14px;
-    pointer-events: none;
-    box-shadow: 0 0 18px rgba(42,171,238,0.18), inset 0 0 14px rgba(42,171,238,0.08);
-    animation: xOtcAura 3.8s ease-in-out infinite;
-  }
-  @keyframes xOtcGlow {
-    0%,100% { border-color: rgba(42,171,238,0.34); box-shadow: 0 12px 32px rgba(0,0,0,0.34), 0 0 24px rgba(42,171,238,0.14); }
-    50% { border-color: rgba(91,177,255,0.62); box-shadow: 0 16px 40px rgba(0,0,0,0.42), 0 0 38px rgba(42,171,238,0.34); }
-  }
-  @keyframes xOtcAura {
-    0%,100% { opacity: .58; box-shadow: 0 0 18px rgba(42,171,238,0.18), inset 0 0 14px rgba(42,171,238,0.08); }
-    50% { opacity: .95; box-shadow: 0 0 32px rgba(42,171,238,0.36), inset 0 0 22px rgba(42,171,238,0.16); }
-  }
+/* --- search ------------------------------------------------- */
+.xp-search { display: flex; gap: 10px; margin-bottom: 22px; }
+.xp-search input {
+  flex: 1;
+  padding: 12px 16px;
+  background: var(--xp-elev1);
+  border: 1px solid var(--xp-bhi);
+  border-radius: 10px;
+  color: var(--xp-t1);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.xp-search input:focus {
+  border-color: var(--xp-brand);
+  box-shadow: 0 0 0 3px rgba(110,198,255,0.12);
+}
+.xp-search input::placeholder { color: var(--xp-t3); }
+.xp-sbtn {
+  padding: 12px 24px;
+  background: linear-gradient(135deg, rgba(110,198,255,0.20), rgba(167,139,250,0.14));
+  border: 1px solid var(--xp-bhi);
+  border-radius: 10px;
+  color: var(--xp-brand);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 13px; font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer; white-space: nowrap;
+  transition: filter 0.15s;
+}
+.xp-sbtn:hover { filter: brightness(1.15); }
 
-  .x-otc-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
-  }
-  .x-otc-left { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
-  .x-otc-tele {
-    width: 26px;
-    height: 26px;
-    min-width: 26px;
-    color: #2AABEE;
-    filter: drop-shadow(0 0 10px rgba(42,171,238,0.45));
-  }
-  .x-otc-title {
-    margin: 0 0 6px;
-    font-size: 13px;
-    letter-spacing: .11em;
-    text-transform: uppercase;
-    font-weight: 900;
-    color: rgba(255,255,255,0.96);
-  }
-  .x-otc-text {
-    margin: 0;
-    color: rgba(226,236,248,0.9);
-    line-height: 1.5;
-    font-size: 14px;
-  }
-  .x-otc-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 9px 14px;
-    border-radius: 10px;
-    border: 1px solid rgba(42,171,238,0.52);
-    text-decoration: none;
-    color: #9edfff;
-    font-weight: 700;
-    white-space: nowrap;
-    transition: transform .16s ease, background .16s ease;
-  }
-  .x-otc-btn:hover { transform: translateY(-1px); background: rgba(42,171,238,0.12); }
+/* --- tabs --------------------------------------------------- */
+.xp-tabs { display: flex; gap: 6px; margin-bottom: 22px; flex-wrap: wrap; }
+.xp-tab {
+  padding: 8px 22px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.10);
+  border-radius: 8px;
+  color: var(--xp-t2);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 13px; font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.xp-tab:hover { color: var(--xp-t1); border-color: var(--xp-bline); }
+.xp-active {
+  background: linear-gradient(135deg, rgba(110,198,255,0.20), rgba(167,139,250,0.14));
+  border-color: var(--xp-bhi) !important;
+  color: #d4eeff !important;
+}
 
+/* --- section label ------------------------------------------ */
+.xp-sl {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--xp-t3);
+  margin: 28px 0 12px;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
 
-  .x-list { display: grid; gap: 10px; }
-  .x-block { background: rgba(0,0,0,0.18); border: 1px solid rgba(91,177,255,0.30); border-radius: 16px; padding: 14px; cursor: pointer; transition: transform 0.16s ease, border-color 0.16s ease; animation: xRise 0.38s ease both, xGridGlow 4.8s ease-in-out infinite; }
-  .x-block:hover { transform: translateY(-2px); border-color: rgba(91,177,255,0.34); }
-  @keyframes xRise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+/* --- stat cards grid ---------------------------------------- */
+.xp-g6 {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 12px;
+}
+@media (max-width: 1100px) { .xp-g6 { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 600px)  { .xp-g6 { grid-template-columns: repeat(2, 1fr); } }
 
-  .x-block-top { display:flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
-  .x-block-h { font-weight: 950; color: var(--x-accent2); }
-  .x-block-time { color: rgba(255,255,255,0.65); font-size: 12px; }
-  .x-block-hash { font-family: monospace; font-size: 12px; color: rgba(255,255,255,0.86); word-break: break-all; }
-  .x-block-meta { display:flex; flex-wrap: wrap; gap: 14px; color: rgba(255,255,255,0.72); font-size: 12px; margin-top: 10px; }
+.xp-sc {
+  background: var(--xp-elev1);
+  border: 1px solid var(--xp-border);
+  border-radius: 14px;
+  padding: 18px 14px;
+  transition: border-color 0.2s, transform 0.2s;
+}
+.xp-sc:hover { border-color: var(--xp-bhi); transform: translateY(-2px); }
+.xp-sc-label { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--xp-t2); margin-bottom: 8px; font-family: 'Space Grotesk', system-ui, sans-serif; }
+.xp-sc-val   { font-size: 16px; font-weight: 800; color: var(--xp-t1); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; line-height: 1.3; }
 
-  .x-reward { color: #4ade80; font-weight: 950; text-shadow: 0 0 16px rgba(74,222,128,0.22); }
+/* --- two-col ------------------------------------------------ */
+.xp-2col { display: grid; grid-template-columns: 1.45fr 0.55fr; gap: 14px; margin: 20px 0; }
+@media (max-width: 900px) { .xp-2col { grid-template-columns: 1fr; } }
 
-  .x-load { margin-top: 12px; display: grid; gap: 8px; }
+/* --- card --------------------------------------------------- */
+.xp-card {
+  background: var(--xp-elev1);
+  border: 1px solid var(--xp-border);
+  border-radius: 14px;
+  padding: 20px;
+}
+.xp-ctitle {
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--xp-bdim);
+  margin: 0 0 16px;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
 
-  .x-chip { display: inline-flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.14); background: rgba(0,0,0,0.20); }
-  .x-dot { width: 9px; height: 9px; border-radius: 999px; background: rgba(91,177,255,0.95); box-shadow: 0 0 18px rgba(91,177,255,0.55); animation: xDot 1.5s ease-in-out infinite; }
-  @keyframes xDot { 0%,100% { transform: scale(1); opacity: 0.75; } 50% { transform: scale(1.4); opacity: 1; } }
+/* --- mining calculator -------------------------------------- */
+.xp-crow { display: flex; gap: 8px; margin-bottom: 14px; }
+.xp-crow input {
+  flex: 1; padding: 10px 12px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--xp-bhi); border-radius: 8px;
+  color: var(--xp-t1);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 14px; outline: none;
+}
+.xp-crow input:focus { border-color: var(--xp-brand); }
+.xp-crow select {
+  padding: 10px 8px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--xp-bhi); border-radius: 8px;
+  color: var(--xp-t1);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 13px; outline: none; cursor: pointer;
+}
+.xp-rr {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 9px 12px; border-radius: 8px;
+  font-size: 13px; margin-bottom: 8px;
+}
+.xp-rr span:first-child { color: var(--xp-t2); }
+.xp-rr span:last-child  { font-weight: 700; color: var(--xp-t1); }
+.xp-rr-algo  { border-left: 3px solid var(--xp-acc2); background: rgba(167,139,250,0.06); }
+.xp-rr-pool  { border-left: 3px solid var(--xp-brand); background: rgba(110,198,255,0.06); }
+.xp-rr-daily { border-left: 3px solid var(--xp-green); background: rgba(52,211,153,0.06); }
+
+/* --- summary rows ------------------------------------------- */
+.xp-sr {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 13px; gap: 12px;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+.xp-sr:last-child { border-bottom: none; }
+.xp-sr span:first-child { color: var(--xp-t2); white-space: nowrap; }
+.xp-sr span:last-child  { color: var(--xp-t1); font-weight: 500; text-align: right; word-break: break-all; }
+
+/* --- table -------------------------------------------------- */
+.xp-tw { overflow-x: auto; }
+.xp-tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
+.xp-tbl th {
+  text-align: left; padding: 10px 12px;
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: rgba(110,198,255,0.70);
+  background: rgba(110,198,255,0.06);
+  white-space: nowrap;
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+.xp-tbl td {
+  padding: 10px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  vertical-align: middle;
+  color: var(--xp-t1);
+}
+.xp-tbl tbody tr:last-child td { border-bottom: none; }
+.xp-tbl tbody tr:hover td { background: rgba(110,198,255,0.04); }
+
+.xp-hl  { color: var(--xp-brand); text-decoration: none; font-weight: 700; font-variant-numeric: tabular-nums; }
+.xp-hl:hover { text-decoration: underline; }
+.xp-hsh { color: var(--xp-t2); font-size: 12px; font-family: var(--xp-mono); }
+.xp-age { color: var(--xp-t3); }
+.xp-rwd { color: var(--xp-green); font-weight: 600; }
+.xp-adr { color: var(--xp-t2); font-size: 12px; font-family: var(--xp-mono); }
+.xp-al  { color: var(--xp-bdim); text-decoration: none; font-family: var(--xp-mono); font-size: 12px; }
+.xp-al:hover { color: var(--xp-brand); }
+.xp-rk  { color: var(--xp-t3); font-variant-numeric: tabular-nums; }
+.xp-ldg { color: var(--xp-t3); padding: 22px; text-align: center; font-style: italic; }
+
+/* --- pagination --------------------------------------------- */
+.xp-pager {
+  display: flex; align-items: center; justify-content: center;
+  gap: 16px; padding: 14px 0 0;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  font-size: 13px; color: var(--xp-t2);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+}
+.xp-pb {
+  padding: 7px 18px;
+  background: rgba(110,198,255,0.08);
+  border: 1px solid var(--xp-bhi); border-radius: 8px;
+  color: var(--xp-brand);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 12px; font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.xp-pb:hover:not(:disabled) { background: rgba(110,198,255,0.15); }
+.xp-pb:disabled { opacity: 0.35; cursor: default; }
+
+/* --- pool 2-col --------------------------------------------- */
+.xp-p2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 18px; }
+@media (max-width: 700px) { .xp-p2 { grid-template-columns: 1fr; } }
 </style>
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=2">
 </head>
-<body class="x-explorer">
+<body>
 
-<!-- Animated Background -->
 <div class="stars"></div>
 
-<!-- Navigation -->
 <nav class="nav">
   <div class="container">
     <div class="nav-brand">
@@ -387,116 +323,124 @@
   </div>
 </nav>
 
-<!-- Explorer Content -->
+<section style="padding: 112px 0 80px;">
+  <div class="xp-wrap">
 
-<section class="section explorer-section x-explorer" style="min-height:auto; padding: 112px 0 64px;">
-  <div class="x-wrap">
-
-    <div class="x-pagehead x-stagger">
-      <h2 class="section-title glow-title x-page-title" data-text="BLOCK EXPLORER">BLOCK EXPLORER</h2>
-      <div class="x-page-sub">
-        <span class="x-chip"><span class="x-dot"></span><span class="x-meta" id="stats-updated">Loading...</span></span>
-        <span class="x-sep">•</span>
-        <span class="x-meta">Inspect a live settlement-first network built for more than transfers</span>
-      </div>
-      <div class="x-techbar">
-        <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 4a3 3 0 100 6 3 3 0 000-6zm-8 16v-1c0-3 4-5 8-5s8 2 8 5v1H4z"/></svg><span>P2P</span></div>
-        <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 3h12v2H6V3zm4 4h4l1 4h4v2h-4.5l-1.2 6H9.7L8.5 13H4v-2h4l2-4z"/></svg><span>PoW</span></div>
-        <div class="x-techpill"><svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 4v6c0 6-4 10-8 10S4 18 4 12V6l8-4zm0 6a2 2 0 00-2 2v2H9v6h6v-6h-1v-2a2 2 0 00-2-2z"/></svg><span>Settlement</span></div>
-      </div>
+    <!-- page header -->
+    <div class="xp-hdr">
+      <h1 class="xp-title">BLOCK EXPLORER</h1>
+      <div class="xp-live"><span class="xp-dot"></span><span id="xp-status">Connecting...</span></div>
     </div>
 
-    <div class="x-topgrid">
-      <div class="x-panel x-panel-metrics">
-        <div class="x-head">
-          <div class="x-title"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M4 20V4h2v14h14v2H4zm4-4l3-4 3 3 4-6 2 1-5 7-4-4-3 4-3 0z"/></svg>Network Metrics</div>
-          <div class="x-meta x-muted x-live"><span class="x-live-dot" aria-hidden="true"></span>Live</div>
-        </div>
-        <div class="x-note x-muted">This explorer tracks the live Irium base layer: blocks, miners, peers, and settlement-adjacent chain activity. Agreement anchoring and broader settlement tooling build on this same objective chain state; future proof-based flows will extend the network without changing what is already live today.</div>
-
-        <div class="x-stats">
-          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M7 2h10v2H7V2zm0 4h10v2H7V6zm2 4h6v10H9V10zm-4 10h14v2H5v-2z"/></svg><div class="x-label">Height</div></div><div class="x-value" id="current-height">Loading...</div></div>
-          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M3 7l9-4 9 4-9 4-9-4zm0 5l9 4 9-4v5l-9 4-9-4v-5z"/></svg><div class="x-label">Total Blocks</div></div><div class="x-value" id="total-blocks">Loading...</div></div>
-          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C7.6 2 4 4.7 4 8s3.6 6 8 6 8-2.7 8-6-3.6-6-8-6zm0 2c3.4 0 6 1.8 6 4s-2.6 4-6 4-6-1.8-6-4 2.6-4 6-4zm-6 10h12v2H6v-2zm0 4h12v2H6v-2z"/></svg><div class="x-label">Supply</div></div><div class="x-value" id="total-supply">Loading...</div></div>
-          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4 14h6l-1 8 9-12h-6l1-8z"/></svg><div class="x-label">Net Hashrate</div></div><div class="x-value" id="net-hashrate">Loading...</div></div>
-          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 4v6c0 5.6-3.8 9.6-8 10-4.2-.4-8-4.4-8-10V6l8-4zm0 5a5 5 0 100 10 5 5 0 000-10zm0 2.2a2.8 2.8 0 110 5.6 2.8 2.8 0 010-5.6z"/></svg><div class="x-label">Difficulty</div></div><div class="x-value" id="net-difficulty">Loading...</div></div>
-          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M4 17l5-5 3 3 8-8v4h2V3h-8v2h4l-6 6-3-3-7 7z"/></svg><div class="x-label">Diff Δ</div></div><div class="x-value" id="diff-growth">Loading...</div></div>
-          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3a3 3 0 110 6 3 3 0 010-6zM5 9a2.5 2.5 0 110 5 2.5 2.5 0 010-5zm14 0a2.5 2.5 0 110 5 2.5 2.5 0 010-5zM7 20v-1c0-2.2 2.2-4 5-4s5 1.8 5 4v1H7z"/></svg><div class="x-label">Active Peers</div></div><div class="x-value" id="live-peers">Loading...</div></div>
-          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M10 2l4 4-2 2 3 3 1-1 4 4-2 2-4-4-1 1-3-3-2 2-4-4 2-2 4 4 1-1 3 3 2-2-3-3 2-2zM3 20h18v2H3z"/></svg><div class="x-label">Active Miners</div></div><div class="x-value" id="live-miners">Loading...</div></div>
-          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M9 3h6v2H9V3zm0 4h6l2 4h3v2h-3.2l-1.5 8H9.7L8.2 13H5v-2h3L9 7zm1.8 6l.9 4.8h.6l.9-4.8H10.8z"/></svg><div class="x-label">Agreements</div></div><div class="x-value" id="stat-agreements">…</div></div>
-          <div class="x-stat"><div class="x-stat-top"><svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 4v6c0 6-4 10-8 10S4 18 4 12V6l8-4zm-1 13.4l5-5-1.4-1.4L11 12.6l-2.6-2.6L7 11.4l4 4z"/></svg><div class="x-label">Proofs</div></div><div class="x-value" id="stat-proofs">…</div></div>
-        </div>
-      </div>
-
-      <div class="x-panel x-panel-search">
-        <div class="x-head">
-          <div class="x-title"><svg class="x-ico spin" viewBox="0 0 24 24" fill="currentColor"><path d="M10 2a8 8 0 105.3 14l4.2 4.2 1.4-1.4-4.2-4.2A8 8 0 0010 2zm0 2a6 6 0 110 12 6 6 0 010-12z"/></svg>Search</div>
-          <div class="x-meta x-muted">Block / Tx / Address</div>
-        </div>
-        <div class="x-search">
-          <div class="x-field"><div class="x-field-label">Search by block height or hash</div><div class="x-row"><input type="text" id="block-search-input" placeholder="Block height or 64-char hash" class="x-input"><button onclick="searchBlock()" class="x-btn">Block</button></div></div>
-          <div class="x-field"><div class="x-field-label">Search by transaction id (txid)</div><div class="x-row"><input type="text" id="tx-search-input" placeholder="64-char txid" class="x-input"><button onclick="searchTx()" class="x-btn">Tx</button></div></div>
-          <div class="x-field"><div class="x-field-label">Search by address</div><div class="x-row"><input type="text" id="address-search-input" placeholder="Wallet address" class="x-input"><button onclick="searchAddress()" class="x-btn">Address</button></div></div>
-        </div>
-      </div>
+    <!-- search -->
+    <div class="xp-search">
+      <input id="xp-q" type="text" placeholder="Block height, block hash, txid, or address">
+      <button class="xp-sbtn" onclick="xpSearch()">Search</button>
     </div>
 
+    <!-- tabs -->
+    <div class="xp-tabs" role="tablist">
+      <button class="xp-tab xp-active" id="xp-tab-ov" onclick="xpTab('ov')">Overview</button>
+      <button class="xp-tab" id="xp-tab-rl" onclick="xpTab('rl')">Rich List</button>
+      <button class="xp-tab" id="xp-tab-ps" onclick="xpTab('ps')">Pool Stats</button>
+    </div>
 
-    <div class="x-panel x-otc-panel">
-      <div class="x-otc-row">
-        <div class="x-otc-left">
-          <span class="x-otc-tele" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="currentColor" width="26" height="26">
-              <path d="M12 0C5.373 0 0 5.373 0 12s5.373 12 12 12 12-5.373 12-12S18.627 0 12 0zm5.894 8.221l-1.97 9.28c-.145.658-.537.818-1.084.508l-3-2.21-1.446 1.394c-.14.18-.357.295-.6.295l.213-3.054 5.56-5.022c.24-.213-.054-.334-.373-.121l-6.869 4.326-2.96-.924c-.64-.203-.654-.64.135-.954l11.566-4.458c.538-.196 1.006.128.832.941z"/>
-            </svg>
-          </span>
-          <div>
-            <h3 class="x-otc-title">Settlement-First Commerce Starts With Verifiable State</h3>
-            <p class="x-otc-text">The live explorer shows the base chain that OTC escrow references, agreement anchoring, and future proof-based settlement tooling rely on. OTC trading is already available in the official Telegram group with escrow-supported flow for safer deals.</p>
+    <!-- ===== OVERVIEW ===== -->
+    <div id="xp-ov">
+
+      <div class="xp-sl">NETWORK STATS</div>
+      <div class="xp-g6">
+        <div class="xp-sc"><div class="xp-sc-label">Best Block</div><div class="xp-sc-val" id="s-height">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Block Reward</div><div class="xp-sc-val" id="s-reward">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Pool Hashrate</div><div class="xp-sc-val" id="s-hashrate">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Active Miners</div><div class="xp-sc-val" id="s-miners">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Est. Supply</div><div class="xp-sc-val" id="s-supply">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Blocks Today</div><div class="xp-sc-val" id="s-today">—</div></div>
+      </div>
+
+      <div class="xp-2col">
+
+        <div class="xp-card">
+          <p class="xp-ctitle">MINING CALCULATOR</p>
+          <div class="xp-crow">
+            <input type="number" id="xp-hr" placeholder="Your hashrate" min="0" step="any">
+            <select id="xp-hu">
+              <option value="1">H/s</option>
+              <option value="1000">KH/s</option>
+              <option value="1000000" selected>MH/s</option>
+              <option value="1000000000">GH/s</option>
+            </select>
           </div>
+          <div class="xp-rr xp-rr-algo"><span>Algorithm</span><span>PoW SHA-256d</span></div>
+          <div class="xp-rr xp-rr-pool"><span>Pool hashrate</span><span id="calc-nethash">—</span></div>
+          <div class="xp-rr xp-rr-daily"><span>Est. daily earnings</span><span id="calc-daily">enter hashrate</span></div>
         </div>
-        <a class="x-otc-btn" href="https://t.me/irium_otc_trading" target="_blank" rel="noopener noreferrer">Join OTC Telegram</a>
-      </div>
-    </div>
 
-    <div class="x-panel x-panel-blocks">
-      <div class="x-head">
-        <div class="x-title"><svg class="x-ico pulse" viewBox="0 0 24 24" fill="currentColor"><path d="M5 4h14v4H5V4zm0 6h14v10H5V10zm2 2v6h10v-6H7z"/></svg>Blocks</div>
-        <div class="x-meta x-muted" id="blocks-progress">Loading...</div>
-      </div>
-      <div id="blocks-list" class="x-list"><div class="x-muted">Loading blocks...</div></div>
-      <div class="x-load" id="load-more-wrap"></div>
-    </div>
-
-    <!-- Settlement Activity -->
-    <div class="x-panel">
-      <div class="x-head">
-        <div class="x-title">
-          <svg class="x-ico float" viewBox="0 0 24 24" fill="currentColor"><path d="M9 3h6v2H9V3zm0 4h6l2 4h3v2h-3.2l-1.5 8H9.7L8.2 13H5v-2h3L9 7z"/></svg>
-          Settlement Activity
+        <div class="xp-card">
+          <p class="xp-ctitle">NETWORK INFO</p>
+          <div class="xp-sr"><span>Last block</span><span id="s-lastblock">—</span></div>
+          <div class="xp-sr"><span>Tip hash</span><span id="s-tiphash" style="font-family:var(--xp-mono);font-size:11px;">—</span></div>
+          <div class="xp-sr"><span>Pool URL</span><span id="s-poolurl">—</span></div>
+          <div class="xp-sr"><span>ASIC port</span><span id="s-asicport">—</span></div>
+          <div class="xp-sr"><span>CPU/GPU port</span><span id="s-cpuport">—</span></div>
         </div>
-        <a href="agreement.html" style="color:rgba(91,177,255,0.7);font-size:12px;text-decoration:none;letter-spacing:0.06em;" onmouseover="this.style.color='rgba(91,177,255,1)'" onmouseout="this.style.color='rgba(91,177,255,0.7)'">Browse all →</a>
+
       </div>
 
-      <!-- Recent Agreements sub-section -->
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;margin-top:4px;">
-        <svg style="width:16px;height:16px;color:rgba(91,177,255,0.7);flex-shrink:0;" viewBox="0 0 24 24" fill="currentColor"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8L14 2zm-1 7V3.5L18.5 9H13z"/></svg>
-        <span style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.6);font-weight:700;">Recent Agreements</span>
+      <div class="xp-sl">LATEST BLOCKS</div>
+      <div class="xp-card">
+        <div class="xp-tw">
+          <table class="xp-tbl">
+            <thead><tr>
+              <th>HEIGHT</th><th>HASH</th><th>AGE</th><th>TXS</th><th>MINER</th><th>REWARD</th>
+            </tr></thead>
+            <tbody id="xp-tbody"><tr><td colspan="6" class="xp-ldg">Loading blocks...</td></tr></tbody>
+          </table>
+        </div>
+        <div class="xp-pager">
+          <button class="xp-pb" id="xp-newer" onclick="xpPage(-1)" disabled>Newer</button>
+          <span id="xp-plabel">—</span>
+          <button class="xp-pb" id="xp-older" onclick="xpPage(1)">Older</button>
+        </div>
       </div>
-      <div id="settlement-agreements" class="x-list" style="margin-bottom:24px;"></div>
 
-      <!-- Recent Proofs sub-section -->
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
-        <svg style="width:16px;height:16px;color:rgba(91,177,255,0.7);flex-shrink:0;" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l8 4v6c0 6-4 10-8 10S4 18 4 12V6l8-4zm-1 13.4l5-5-1.4-1.4L11 12.6l-2.6-2.6L7 11.4l4 4z"/></svg>
-        <span style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.6);font-weight:700;">Recent Proofs</span>
-        <a href="reputation.html" style="margin-left:auto;color:rgba(91,177,255,0.7);font-size:11px;text-decoration:none;letter-spacing:0.06em;" onmouseover="this.style.color='rgba(91,177,255,1)'" onmouseout="this.style.color='rgba(91,177,255,0.7)'">Reputation lookup →</a>
+    </div><!-- /xp-ov -->
+
+    <!-- ===== RICH LIST ===== -->
+    <div id="xp-rl" style="display:none">
+      <div class="xp-sl">TOP MINERS BY TOTAL REWARD</div>
+      <div class="xp-card">
+        <div class="xp-tw">
+          <table class="xp-tbl">
+            <thead><tr>
+              <th>#</th><th>ADDRESS</th><th>BLOCKS MINED</th><th>TOTAL REWARD</th>
+            </tr></thead>
+            <tbody id="xp-rl-body"><tr><td colspan="4" class="xp-ldg">Loading...</td></tr></tbody>
+          </table>
+        </div>
       </div>
-      <div id="settlement-proofs" style=""></div>
-    </div>
+    </div><!-- /xp-rl -->
+
+    <!-- ===== POOL STATS ===== -->
+    <div id="xp-ps" style="display:none">
+      <div class="xp-sl">POOL OVERVIEW</div>
+      <div class="xp-g6" id="xp-ps-grid">
+        <div class="xp-sc" style="grid-column:1/-1"><div class="xp-ldg">Loading pool stats...</div></div>
+      </div>
+      <div class="xp-p2">
+        <div class="xp-card">
+          <p class="xp-ctitle">ASIC POOL</p>
+          <div id="xp-ps-asic"><div class="xp-ldg">Loading...</div></div>
+        </div>
+        <div class="xp-card">
+          <p class="xp-ctitle">CPU / GPU POOL</p>
+          <div id="xp-ps-cpu"><div class="xp-ldg">Loading...</div></div>
+        </div>
+      </div>
+    </div><!-- /xp-ps -->
 
   </div>
 </section>
-
 
 <footer class="footer">
 <div class="container">
@@ -537,41 +481,263 @@ GitHub</a>
 </div>
 </footer>
 
-
-<script src="https://www.iriumlabs.org/assets/js/explorer.js?v=49"></script>
-<script>console.log("Script tag found - explorer.js should be loaded");</script>
-<!-- Block Details Modal -->
-<div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
-  <div id="block-modal-content" style="background:#10131a; color:#fff; width:90%; max-width:720px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 10px 25px rgba(0,0,0,0.5);">
-    <div style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.1);">
-      <h3 style="margin:0; font-size:18px;">Lookup Details</h3>
-      <button id="block-modal-close" aria-label="Close" style="background:transparent; color:#fff; border:none; font-size:20px; cursor:pointer;">×</button>
-    </div>
-    <div id="block-modal-body" style="padding:20px; line-height:1.5; font-size:14px;"></div>
-  </div>
-</div>
-<script>
-  (function(){
-    const modal = document.getElementById('block-modal');
-    const body = document.getElementById('block-modal-body');
-    const closeBtn = document.getElementById('block-modal-close');
-    function close() { modal.style.display = 'none'; body.innerHTML=''; }
-    if (modal && closeBtn) {
-      closeBtn.addEventListener('click', close);
-      modal.addEventListener('click', (e)=>{ if (e.target === modal) close(); });
-      window.addEventListener('keydown', (e)=>{ if (e.key === 'Escape') close(); });
-      window.__showBlockModal = function(contentHtml){
-        body.innerHTML = contentHtml;
-        modal.style.display = 'flex';
-      };
-      window.__showBlockError = function(message){
-        body.innerHTML = '<div style="color:#ff6b6b;">' + (message||'Unknown error') + '</div>';
-        modal.style.display = 'flex';
-      };
-    }
-  })();
-</script>
 <script src="https://www.iriumlabs.org/assets/js/elite-theme.js?v=1"></script>
 <script src="https://www.iriumlabs.org/nav.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var API          = 'https://explorer.iriumlabs.org/api';
+  var POOL         = 'https://explorer.iriumlabs.org/pool-stats/';
+  var PER_PAGE     = 20;
+  var REWARD_DENOM = 1e8;
+  var BLOCKS_DAY   = 288;
+
+  var st = { offset: 0, pool: null, rlDone: false, activeTab: 'ov' };
+
+  function $id(id) { return document.getElementById(id); }
+  function set(id, v) { var e = $id(id); if (e) e.textContent = v; }
+
+  function fmtN(n)  { return n != null ? Number(n).toLocaleString() : '—'; }
+  function fmtAge(ts) {
+    var s = Math.floor((Date.now() - new Date(ts).getTime()) / 1000);
+    if (s < 60)    return s + 's ago';
+    if (s < 3600)  return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    return Math.floor(s / 86400) + 'd ago';
+  }
+  function fmtAddr(a) { return a ? a.slice(0,10) + '…' + a.slice(-6) : '—'; }
+  function fmtHash(h) { return h ? h.slice(0,16) + '…' : '—'; }
+  function fmtRwd(u)  {
+    var irm = u / REWARD_DENOM;
+    return (irm % 1 === 0 ? irm.toFixed(0) : irm.toFixed(2)) + ' IRM';
+  }
+  function fmtHps(h) {
+    if (!h || h <= 0) return '0 H/s';
+    if (h >= 1e12) return (h/1e12).toFixed(2) + ' TH/s';
+    if (h >= 1e9)  return (h/1e9).toFixed(2)  + ' GH/s';
+    if (h >= 1e6)  return (h/1e6).toFixed(2)  + ' MH/s';
+    if (h >= 1e3)  return (h/1e3).toFixed(1)  + ' KH/s';
+    return h.toFixed(0) + ' H/s';
+  }
+
+  function get(url) {
+    return fetch(url, { cache: 'no-store' }).then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    });
+  }
+
+  /* --- tabs --- */
+  function xpTab(tab) {
+    st.activeTab = tab;
+    ['ov','rl','ps'].forEach(function (t) {
+      var p = $id('xp-' + t);
+      var b = $id('xp-tab-' + t);
+      if (p) p.style.display = t === tab ? '' : 'none';
+      if (b) {
+        if (t === tab) b.classList.add('xp-active');
+        else b.classList.remove('xp-active');
+      }
+    });
+    if (tab === 'rl' && !st.rlDone) loadRichList();
+    if (tab === 'ps') renderPoolStats(st.pool);
+  }
+  window.xpTab = xpTab;
+
+  /* --- overview --- */
+  function loadOverview() {
+    return Promise.all([
+      get(API + '/status'),
+      get(API + '/blocks?limit=' + PER_PAGE + '&offset=' + st.offset),
+    ]).then(function (res) {
+      var status = res[0], blocks = res[1];
+
+      set('xp-status', 'Block #' + fmtN(status.synced_height) + ' · Synced');
+      set('s-height', fmtN(status.synced_height));
+      set('s-tiphash', status.synced_block_hash
+        ? status.synced_block_hash.slice(0,22) + '…' : '—');
+
+      if (blocks && blocks.length) {
+        var b0 = blocks[0];
+        set('s-reward',    fmtRwd(b0.total_reward));
+        set('s-lastblock', fmtAge(b0.timestamp));
+        var supM = (status.synced_height * (b0.total_reward / REWARD_DENOM)) / 1e6;
+        set('s-supply', supM.toFixed(2) + 'M IRM');
+      }
+
+      renderBlocks(blocks);
+    }).catch(function (e) {
+      console.error('overview:', e);
+      set('xp-status', 'API error');
+    });
+  }
+
+  /* --- pool stats --- */
+  function loadPoolStats() {
+    return get(POOL).then(function (p) {
+      st.pool = p;
+      var totalHps = (p.asic    ? p.asic.hashrate_estimate_hps    : 0)
+                   + (p.cpu_gpu ? p.cpu_gpu.hashrate_estimate_hps : 0);
+      set('s-hashrate',  fmtHps(totalHps));
+      set('s-miners',    fmtN(p.total_miners));
+      set('s-today',     fmtN(p.blocks_found_today));
+      set('s-poolurl',   p.url           || '—');
+      set('s-asicport',  p.asic_port     || '—');
+      set('s-cpuport',   p.cpu_gpu_port  || '—');
+      set('calc-nethash', fmtHps(totalHps));
+      updateCalc();
+      if (st.activeTab === 'ps') renderPoolStats(p);
+    }).catch(function (e) { console.error('pool:', e); });
+  }
+
+  /* --- render pool stats panel --- */
+  function renderPoolStats(p) {
+    if (!p) return;
+    var grid = $id('xp-ps-grid');
+    if (grid) {
+      var items = [
+        ['Pool',         p.pool             || '—'],
+        ['Total Miners', fmtN(p.total_miners)],
+        ['Total Blocks', fmtN(p.total_blocks_found)],
+        ['Blocks Today', fmtN(p.blocks_found_today)],
+        ['ASIC Port',    p.asic_port        || '—'],
+        ['CPU/GPU Port', p.cpu_gpu_port     || '—'],
+      ];
+      grid.innerHTML = items.map(function (c) {
+        return '<div class="xp-sc"><div class="xp-sc-label">' + c[0] +
+               '</div><div class="xp-sc-val">' + c[1] + '</div></div>';
+      }).join('');
+    }
+    renderPoolSect('xp-ps-asic', p.asic);
+    renderPoolSect('xp-ps-cpu',  p.cpu_gpu);
+  }
+
+  function renderPoolSect(elId, d) {
+    var el = $id(elId);
+    if (!el || !d) return;
+    var rows = [
+      ['Active miners',  fmtN(d.active_miners)],
+      ['Hashrate',       fmtHps(d.hashrate_estimate_hps)],
+      ['Current diff',   d.current_diff != null ? Number(d.current_diff).toFixed(2) : '—'],
+      ['Accepted shares',fmtN(d.accepted_shares)],
+      ['Rejected shares',fmtN(d.rejected_shares)],
+      ['Blocks found',   fmtN(d.blocks_found)],
+      ['Reject rate',    d.recent_reject_rate_pct != null
+                           ? d.recent_reject_rate_pct.toFixed(1) + '%' : '—'],
+    ];
+    el.innerHTML = rows.map(function (r) {
+      return '<div class="xp-sr"><span>' + r[0] + '</span><span>' + r[1] + '</span></div>';
+    }).join('');
+  }
+
+  /* --- block table --- */
+  function renderBlocks(blocks) {
+    var tbody = $id('xp-tbody');
+    if (!tbody) return;
+    if (!blocks || !blocks.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="xp-ldg">No blocks found</td></tr>';
+    } else {
+      tbody.innerHTML = blocks.map(function (b) {
+        return '<tr>' +
+          '<td><a href="https://explorer.iriumlabs.org/block/height/' + b.height +
+          '" target="_blank" rel="noopener" class="xp-hl">' + fmtN(b.height) + '</a></td>' +
+          '<td><span class="xp-hsh">' + fmtHash(b.hash) + '</span></td>' +
+          '<td class="xp-age">' + fmtAge(b.timestamp) + '</td>' +
+          '<td>' + (b.tx_count || 0) + '</td>' +
+          '<td><span class="xp-adr">' + fmtAddr(b.miner_address) + '</span></td>' +
+          '<td class="xp-rwd">' + fmtRwd(b.total_reward) + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+    var newer = $id('xp-newer'), older = $id('xp-older'), lbl = $id('xp-plabel');
+    if (newer) newer.disabled = st.offset === 0;
+    if (older) older.disabled = !blocks || blocks.length < PER_PAGE;
+    if (lbl && blocks && blocks.length) {
+      lbl.textContent = '#' + fmtN(blocks[0].height) +
+        ' – #' + fmtN(blocks[blocks.length - 1].height);
+    }
+  }
+
+  function xpPage(dir) {
+    var next = st.offset + dir * PER_PAGE;
+    if (next < 0) return;
+    st.offset = next;
+    loadOverview();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  window.xpPage = xpPage;
+
+  /* --- rich list --- */
+  function loadRichList() {
+    get(API + '/miners?limit=100').then(function (miners) {
+      st.rlDone = true;
+      var tbody = $id('xp-rl-body');
+      if (!tbody) return;
+      if (!miners || !miners.length) {
+        tbody.innerHTML = '<tr><td colspan="4" class="xp-ldg">No data</td></tr>';
+        return;
+      }
+      tbody.innerHTML = miners.map(function (m, i) {
+        return '<tr>' +
+          '<td class="xp-rk">' + (i + 1) + '</td>' +
+          '<td><a href="https://explorer.iriumlabs.org/address/' + m.address +
+          '" target="_blank" rel="noopener" class="xp-al">' + fmtAddr(m.address) + '</a></td>' +
+          '<td>' + fmtN(m.blocks_mined) + '</td>' +
+          '<td class="xp-rwd">' + fmtRwd(m.total_reward) + '</td>' +
+          '</tr>';
+      }).join('');
+    }).catch(function (e) { console.error('richlist:', e); });
+  }
+
+  /* --- mining calculator --- */
+  function updateCalc() {
+    var hrEl = $id('xp-hr'), huEl = $id('xp-hu'), dayEl = $id('calc-daily');
+    if (!hrEl || !huEl || !dayEl) return;
+    var hrVal = parseFloat(hrEl.value), huVal = parseInt(huEl.value || '1000000', 10);
+    if (!hrVal || isNaN(hrVal) || hrVal <= 0) { dayEl.textContent = 'enter hashrate'; return; }
+    var p = st.pool;
+    if (!p) { dayEl.textContent = '—'; return; }
+    var netHps = (p.asic    ? p.asic.hashrate_estimate_hps    : 0)
+               + (p.cpu_gpu ? p.cpu_gpu.hashrate_estimate_hps : 0);
+    if (!netHps) { dayEl.textContent = '—'; return; }
+    var daily = (hrVal * huVal / netHps) * BLOCKS_DAY * 50;
+    dayEl.textContent = daily < 0.0001 ? '< 0.0001 IRM' : daily.toFixed(4) + ' IRM';
+  }
+  window.updateCalc = updateCalc;
+
+  /* --- search --- */
+  function xpSearch() {
+    var q = ($id('xp-q') || {}).value || '';
+    q = q.trim();
+    if (!q) return;
+    var base = 'https://explorer.iriumlabs.org';
+    if (/^\d+$/.test(q)) { window.open(base + '/block/height/' + q, '_blank'); return; }
+    get(API + '/search?q=' + encodeURIComponent(q)).then(function (r) {
+      if (!r) return;
+      if      (r.result_type === 'block_height') window.open(base + '/block/height/' + r.value, '_blank');
+      else if (r.result_type === 'block_hash')   window.open(base + '/block/hash/'   + r.value, '_blank');
+      else if (r.result_type === 'tx')           window.open(base + '/tx/'           + r.value, '_blank');
+      else if (r.result_type === 'address')      window.open(base + '/address/'      + r.value, '_blank');
+    }).catch(function () {
+      var inp = $id('xp-q');
+      if (inp) { inp.style.borderColor = 'rgba(248,113,113,0.7)'; setTimeout(function () { inp.style.borderColor = ''; }, 2000); }
+    });
+  }
+  window.xpSearch = xpSearch;
+
+  /* --- init --- */
+  Promise.all([loadOverview(), loadPoolStats()]).then(updateCalc);
+
+  var hrEl = $id('xp-hr'), huEl = $id('xp-hu'), qEl = $id('xp-q');
+  if (hrEl) hrEl.addEventListener('input', updateCalc);
+  if (huEl) huEl.addEventListener('change', updateCalc);
+  if (qEl)  qEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') xpSearch(); });
+
+  setInterval(loadOverview,  15000);
+  setInterval(loadPoolStats, 30000);
+
+})();
+</script>
 </body>
 </html>

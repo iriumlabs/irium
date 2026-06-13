@@ -262,6 +262,8 @@ body {
 }
 .xp-tbl tbody tr:last-child td { border-bottom: none; }
 .xp-tbl tbody tr:hover td { background: rgba(110,198,255,0.04); }
+.xp-tbl tbody tr.xp-click { cursor: pointer; }
+.xp-tbl tbody tr.xp-click:hover td { background: rgba(110,198,255,0.08) !important; }
 
 .xp-hl  { color: var(--xp-brand); text-decoration: none; font-weight: 700; font-variant-numeric: tabular-nums; }
 .xp-hl:hover { text-decoration: underline; }
@@ -613,15 +615,27 @@ GitHub</a>
 
   function fmtN(n)  { return n != null ? Number(n).toLocaleString() : '—'; }
   function fmtAge(ts) {
-    var t = new Date(ts).getTime();
-    if (t > Date.now()) {
-      return new Date(ts).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+    var t;
+    // Detect unix timestamps in seconds (< 1e10 keeps us safe through year 2286)
+    if (typeof ts === 'number' && ts > 0 && ts < 1e10) {
+      if (ts > Date.now() / 1000) {
+        // Block timestamp is ahead of real clock (chain drift) — show absolute
+        return new Date(ts * 1000).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+      }
+      t = ts * 1000;
+    } else {
+      t = new Date(ts).getTime();
+      if (isNaN(t)) return '—';
+      if (t > Date.now()) {
+        return new Date(t).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+      }
     }
     var s = Math.floor((Date.now() - t) / 1000);
+    if (s < 5)     return 'just now';
     if (s < 60)    return s + 's ago';
-    if (s < 3600)  return Math.floor(s / 60) + 'm ago';
-    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-    return Math.floor(s / 86400) + 'd ago';
+    if (s < 600)   return Math.floor(s / 60) + 'm ago';
+    // Older than 10 min: show absolute time to avoid confusion from chain-clock drift
+    return new Date(t).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
   }
   function fmtAddr(a) { return a ? a.slice(0,10) + '…' + a.slice(-6) : '—'; }
   function fmtHash(h) { return h ? h.slice(0,16) + '…' : '—'; }
@@ -678,6 +692,7 @@ GitHub</a>
 
       st.tipHeight = status.synced_height;
       st.lastOverviewTs = Date.now();
+      console.log('[loadOverview] tipHeight=' + st.tipHeight + (blocks && blocks.length ? ' latestBlock=' + blocks[0].height : ' blocks=none'));
       set('xp-status', 'Block #' + fmtN(status.synced_height) + ' · Synced');
       set('s-height', fmtN(status.synced_height));
       set('s-tiphash', status.synced_block_hash
@@ -766,10 +781,10 @@ GitHub</a>
     } else {
       tbody.innerHTML = blocks.map(function (b) {
         var minerCell = b.miner_address
-          ? '<span class="xp-adr" style="cursor:pointer" onclick="showAddr(\'' + b.miner_address + '\')">' + b.miner_address + '</span>'
+          ? '<span class="xp-adr" style="cursor:pointer" onclick="event.stopPropagation();showAddr(\'' + b.miner_address + '\')">' + b.miner_address + '</span>'
           : '—';
-        return '<tr>' +
-          '<td><span class="xp-hl" style="cursor:pointer" onclick="showBlock(' + b.height + ')">' + fmtN(b.height) + '</span></td>' +
+        return '<tr class="xp-click" onclick="showBlock(' + b.height + ')">' +
+          '<td><span class="xp-hl">' + fmtN(b.height) + '</span></td>' +
           '<td><span style="font-family:var(--xp-mono);font-size:11px;color:rgba(255,255,255,0.45);word-break:break-all;">' + (b.hash || '—') + '</span></td>' +
           '<td class="xp-age">' + fmtAge(b.timestamp) + '</td>' +
           '<td>' + (b.tx_count || 0) + '</td>' +
@@ -859,15 +874,19 @@ GitHub</a>
       if (!miners || !miners.length) {
         tbody.innerHTML = lockedRow + '<tr><td colspan="5" class="xp-ldg">No miner data</td></tr>';
       } else {
-        var MEDALS = ['rl-gold', 'rl-silver', 'rl-bronze'];
+        var MEDALS     = ['rl-gold', 'rl-silver', 'rl-bronze'];
+        var MEDAL_ICONS = ['🥇', '🥈', '🥉']; // 🥇🥈🥉
         var rows = miners.map(function (m, i) {
-          var rank    = i + 1;
-          var rankCls = rank <= 3 ? MEDALS[i] : 'xp-rk';
+          var rank     = i + 1;
+          var rankCls  = rank <= 3 ? MEDALS[i] : 'xp-rk';
+          var rankDisp = rank <= 3
+            ? '<span style="font-size:15px;vertical-align:middle;margin-right:4px;">' + MEDAL_ICONS[i] + '</span>' + rank
+            : rank;
           var balIrm  = m.total_reward / REWARD_DENOM;
           var pct     = (balIrm / MAX_SUPPLY_IRM * 100).toFixed(4) + '%';
           var balStr  = balIrm.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' IRM';
           return '<tr>' +
-            '<td class="' + rankCls + '">' + rank + '</td>' +
+            '<td class="' + rankCls + '">' + rankDisp + '</td>' +
             '<td><span class="xp-al" style="cursor:pointer" onclick="showAddr(\'' + m.address + '\')">' + m.address + '</span></td>' +
             '<td style="color:#34d399;font-weight:600;font-variant-numeric:tabular-nums;">' + balStr + '</td>' +
             '<td class="xp-pct">' + pct + '</td>' +
@@ -974,21 +993,34 @@ GitHub</a>
 
   function showBlock(height) {
     window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading block #' + height + '...</div>');
-    get(API + '/block/height/' + height).then(renderBlockModal).catch(function () {
-      window.__showBlockError('Could not load block #' + height);
+    var cached = st.lastBlocks.filter(function (b) { return b.height === height; })[0];
+    var url = API + '/block/height/' + height;
+    console.log('[showBlock] GET', url);
+    get(url).then(renderBlockModal).catch(function (err) {
+      console.error('[showBlock] failed:', url, err && err.message);
+      if (cached) {
+        renderBlockModal(cached);
+      } else {
+        window.__showBlockError('Could not load block #' + height + (err && err.message ? ' — ' + err.message : ''));
+      }
     });
   }
 
   function showBlockByHash(hash) {
     window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading block...</div>');
-    get(API + '/block/hash/' + hash).then(renderBlockModal).catch(function () {
-      window.__showBlockError('Could not load block');
+    var url = API + '/block/hash/' + hash;
+    console.log('[showBlockByHash] GET', url);
+    get(url).then(renderBlockModal).catch(function (err) {
+      console.error('[showBlockByHash] failed:', url, err && err.message);
+      window.__showBlockError('Could not load block' + (err && err.message ? ' — ' + err.message : ''));
     });
   }
 
   function showAddr(addr) {
     window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading address...</div>');
-    get(API + '/address/' + encodeURIComponent(addr)).then(function (d) {
+    var url = API + '/address/' + encodeURIComponent(addr);
+    console.log('[showAddr] GET', url);
+    get(url).then(function (d) {
       var bal  = d.balance        != null ? fmtRwd(d.balance)        : '—';
       var recv = d.total_received != null ? fmtRwd(d.total_received) : '—';
       var sent = d.total_sent     != null ? fmtRwd(d.total_sent)     : '—';
@@ -1016,14 +1048,17 @@ GitHub</a>
         '<p style="margin:0 0 14px;font-family:monospace;font-size:11px;color:rgba(255,255,255,0.5);word-break:break-all;">' + addr + '</p>' +
         tbl + txHtml
       );
-    }).catch(function () {
-      window.__showBlockError('Could not load address data');
+    }).catch(function (err) {
+      console.error('[showAddr] failed:', url, err && err.message);
+      window.__showBlockError('Could not load address' + (err && err.message ? ' — ' + err.message : ''));
     });
   }
 
   function showTx(txid) {
     window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading transaction...</div>');
-    get(API + '/tx/' + txid).then(function (tx) {
+    var txUrl = API + '/tx/' + txid;
+    console.log('[showTx] GET', txUrl);
+    get(txUrl).then(function (tx) {
       var inputs  = tx.inputs  || tx.vin  || [];
       var outputs = tx.outputs || tx.vout || [];
 
@@ -1056,8 +1091,9 @@ GitHub</a>
         mdSect('Inputs (' + inputs.length + ')') + inHtml +
         mdSect('Outputs (' + outputs.length + ')') + outHtml
       );
-    }).catch(function () {
-      window.__showBlockError('Could not load transaction data');
+    }).catch(function (err) {
+      console.error('[showTx] failed:', txUrl, err && err.message);
+      window.__showBlockError('Could not load transaction' + (err && err.message ? ' — ' + err.message : ''));
     });
   }
 
@@ -1120,7 +1156,10 @@ GitHub</a>
   }
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
 
-  setInterval(loadOverview,  15000);
+  setInterval(function () {
+    st.offset = 0; // always refresh back to the latest page
+    loadOverview();
+  }, 15000);
   setInterval(loadPoolStats, 30000);
   setInterval(function () { if (st.lastBlocks.length) renderBlocks(st.lastBlocks); }, 30000);
 

@@ -616,25 +616,26 @@ GitHub</a>
   function fmtN(n)  { return n != null ? Number(n).toLocaleString() : '—'; }
   function fmtAge(ts) {
     var t;
-    // Detect unix timestamps in seconds (< 1e10 keeps us safe through year 2286)
+    // Detect unix timestamps in seconds: current year ~1.78e9 seconds, safely below 1e10
     if (typeof ts === 'number' && ts > 0 && ts < 1e10) {
-      if (ts > Date.now() / 1000) {
-        // Block timestamp is ahead of real clock (chain drift) — show absolute
-        return new Date(ts * 1000).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
-      }
       t = ts * 1000;
     } else {
       t = new Date(ts).getTime();
       if (isNaN(t)) return '—';
-      if (t > Date.now()) {
-        return new Date(t).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
-      }
     }
-    var s = Math.floor((Date.now() - t) / 1000);
+    var diff = Date.now() - t; // positive = past, negative = future
+    // Chain drift: block timestamp slightly ahead of real clock
+    // Treat up to 1 hour in the future as "just now"; beyond that is a data error
+    if (diff < 0) {
+      return (-diff < 3600000) ? 'just now'
+        : new Date(t).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+    }
+    var s = Math.floor(diff / 1000);
     if (s < 5)     return 'just now';
     if (s < 60)    return s + 's ago';
-    if (s < 600)   return Math.floor(s / 60) + 'm ago';
-    // Older than 10 min: show absolute time to avoid confusion from chain-clock drift
+    if (s < 3600)  return Math.floor(s / 60) + 'm ago';
+    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+    // More than 24 hours old: show absolute date
     return new Date(t).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
   }
   function fmtAddr(a) { return a ? a.slice(0,10) + '…' + a.slice(-6) : '—'; }
@@ -684,12 +685,14 @@ GitHub</a>
 
   /* --- overview --- */
   function loadOverview() {
+    var t = Date.now(); // cache-buster: forces unique URL past proxy/CDN cache
     return Promise.all([
-      get(API + '/status'),
-      get(API + '/blocks?limit=' + PER_PAGE + '&offset=' + st.offset),
+      get(API + '/status?_=' + t),
+      get(API + '/blocks?limit=' + PER_PAGE + '&offset=' + st.offset + '&_=' + t),
     ]).then(function (res) {
       var status = res[0], blocks = res[1];
 
+      console.log('[status raw]', JSON.stringify(status));
       st.tipHeight = status.synced_height;
       st.lastOverviewTs = Date.now();
       console.log('[loadOverview] tipHeight=' + st.tipHeight + (blocks && blocks.length ? ' latestBlock=' + blocks[0].height : ' blocks=none'));
@@ -953,11 +956,44 @@ GitHub</a>
     return '<div style="font-family:monospace;font-size:12px;color:rgba(91,177,255,0.75);padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);word-break:break-all;cursor:pointer;" onclick="' + onclick + '">' + txid + '</div>';
   }
 
-  function renderBlockModal(b) {
-    var ts     = b.timestamp  ? new Date(b.timestamp).toLocaleString() : '—';
+  function renderBlockModal(raw) {
+    console.log('[block detail] raw:', JSON.stringify(raw));
+    // Unwrap: API may return {block:{...}} or {block:{header:{...},...}} or flat {height:...}
+    var b      = (raw && raw.block) ? raw.block : raw;
+    var header = b.header || {};
+
+    // Timestamp: handle unix seconds (< 1e10) or ms or ISO strings
+    var tsRaw  = b.timestamp != null ? b.timestamp : (header.timestamp != null ? header.timestamp : null);
+    var tsMs   = (typeof tsRaw === 'number' && tsRaw > 0 && tsRaw < 1e10) ? tsRaw * 1000 : new Date(tsRaw).getTime();
+    var ts     = tsRaw != null && !isNaN(tsMs) ? new Date(tsMs).toLocaleString() : '—';
+
     var reward = b.total_reward != null ? fmtRwd(b.total_reward) : '—';
-    var diff   = b.difficulty   != null ? Number(b.difficulty).toFixed(4) : '—';
-    var nonce  = b.nonce        != null ? fmtN(b.nonce) : '—';
+
+    // Difficulty — try all known field names across flat and nested structures
+    var diffRaw = b.difficulty != null ? b.difficulty :
+                  header.difficulty != null ? header.difficulty :
+                  b.bits != null ? b.bits :
+                  header.bits != null ? header.bits :
+                  b.difficulty_target != null ? b.difficulty_target :
+                  header.difficulty_target != null ? header.difficulty_target : null;
+    var diff    = diffRaw != null ? String(diffRaw) : '—';
+
+    // Nonce — try all known field names
+    var nonceRaw = b.nonce != null ? b.nonce :
+                   header.nonce != null ? header.nonce :
+                   b.pow_nonce != null ? b.pow_nonce :
+                   header.pow_nonce != null ? header.pow_nonce :
+                   b.block_nonce != null ? b.block_nonce : null;
+    var nonce    = nonceRaw != null ? fmtN(nonceRaw) : '—';
+
+    // Miner address — try all known field names
+    var miner = b.miner_address || b.miner || header.miner_address || header.miner || '';
+
+    // Prev hash and merkle root — try all known field names
+    var prevH  = b.prev_hash || b.previous_hash || b.previous_block_hash || b.parent_hash ||
+                 header.prev_hash || header.previous_hash || header.previous_block_hash || '—';
+    var merkle = b.merkle_root || b.merkle_root_hash || b.transactions_merkle_root || b.txs_root ||
+                 header.merkle_root || header.merkle_root_hash || '—';
 
     var tbl = '<table style="width:100%;border-collapse:collapse;">' +
       mdRow('Height',     '<span style="color:#4ade80;font-weight:700;">' + fmtN(b.height) + '</span>') +
@@ -968,17 +1004,21 @@ GitHub</a>
       mdRow('Nonce',      nonce) +
     '</table>';
 
-    var minerHtml = b.miner_address
+    var minerHtml = miner
       ? mdSect('Miner address') +
-        '<div style="font-family:monospace;font-size:12px;color:rgba(91,177,255,0.8);word-break:break-all;padding:6px 0;cursor:pointer;" onclick="showAddr(\'' + b.miner_address + '\')">' + b.miner_address + '</div>'
+        '<div style="font-family:monospace;font-size:12px;color:rgba(91,177,255,0.8);word-break:break-all;padding:6px 0;cursor:pointer;" onclick="showAddr(\'' + miner + '\')">' + miner + '</div>'
       : '';
 
     var hashHtml =
       mdSect('Block hash')  + mdHash(b.hash || '—') +
-      mdSect('Prev hash')   + mdHash(b.prev_hash || b.previous_hash || '—') +
-      mdSect('Merkle root') + mdHash(b.merkle_root || '—');
+      mdSect('Prev hash')   + mdHash(prevH) +
+      mdSect('Merkle root') + mdHash(merkle);
 
-    var txids = b.txids || b.tx_ids || [];
+    // Transactions: API may return txids as strings or as objects with txid/hash fields
+    var rawTxids = b.txids || b.tx_ids || b.transactions || b.tx_hashes || [];
+    var txids = rawTxids.map(function (item) {
+      return typeof item === 'string' ? item : (item.txid || item.hash || item.id || '');
+    }).filter(Boolean);
     var txHtml = '';
     if (txids.length) {
       txHtml = mdSect('Transactions (' + txids.length + ')') +
@@ -1157,6 +1197,7 @@ GitHub</a>
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
 
   setInterval(function () {
+    console.log('[interval] auto-refresh at', new Date().toLocaleTimeString());
     st.offset = 0; // always refresh back to the latest page
     loadOverview();
   }, 15000);

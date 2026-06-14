@@ -15,10 +15,12 @@
 body {
   font-family: "Space Grotesk", system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
   color: var(--elite-text);
-  background:
-    radial-gradient(900px 500px at 10% -10%, rgba(43, 195, 255, 0.16), transparent 65%),
-    radial-gradient(760px 460px at 90% -15%, rgba(144, 92, 255, 0.18), transparent 67%),
-    linear-gradient(160deg, var(--elite-bg-1) 0%, var(--elite-bg-2) 46%, var(--elite-bg-3) 100%);
+  background-color: #0A1226 !important;
+  background-image:
+    radial-gradient(ellipse 65% 55% at 12% 18%, rgba(59,59,255,0.22) 0%, transparent 65%),
+    radial-gradient(ellipse 50% 65% at 88% 78%, rgba(167,139,250,0.18) 0%, transparent 65%),
+    radial-gradient(ellipse 40% 40% at 60% 40%, rgba(110,198,255,0.12) 0%, transparent 55%) !important;
+  background-attachment: fixed !important;
   overflow-x: hidden;
 }
 

@@ -573,14 +573,11 @@ body {
   </div>
 </section>
 
-<!-- Block Details Modal (original v4 design) -->
-<div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:9999; align-items:center; justify-content:center;">
-  <div id="block-modal-content" style="background:#10131a; color:#fff; width:90%; max-width:720px; border-radius:10px; border:1px solid rgba(255,255,255,0.1); box-shadow:0 10px 25px rgba(0,0,0,0.5); max-height:90vh; overflow-y:auto;">
-    <div style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid rgba(255,255,255,0.1); position:sticky; top:0; background:#10131a; z-index:1;">
-      <h3 style="margin:0; font-size:18px;">Lookup Details</h3>
-      <button id="block-modal-close" aria-label="Close" style="background:transparent; color:#fff; border:none; font-size:20px; cursor:pointer;">&times;</button>
-    </div>
-    <div id="block-modal-body" style="padding:20px; line-height:1.5; font-size:14px;"></div>
+<!-- Block Details Modal (irium-core design) -->
+<div id="block-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.75); backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px); z-index:9999; align-items:center; justify-content:center; padding:16px;">
+  <div id="block-modal-content" style="background:rgba(5,8,20,0.99); border:1px solid rgba(110,198,255,0.22); border-radius:10px; padding:24px; box-shadow:0 32px 80px rgba(0,0,0,0.9); width:100%; max-width:672px; max-height:86vh; overflow-y:auto; position:relative;">
+    <button id="block-modal-close" aria-label="Close" style="position:absolute;top:18px;right:18px;width:28px;height:28px;border-radius:8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.35);cursor:pointer;font-size:18px;display:flex;align-items:center;justify-content:center;padding:0;line-height:1;">&times;</button>
+    <div id="block-modal-body"></div>
   </div>
 </div>
 
@@ -634,7 +631,7 @@ GitHub</a>
   var PER_PAGE     = 20;
   var REWARD_DENOM = 1e8;
   var BLOCKS_DAY      = 288;
-  var HALVING_INTERVAL = 1050000;
+  var HALVING_INTERVAL = 210000;
 
   var st = { offset: 0, pool: null, chainHashrate: 0, rlDone: false, activeTab: 'ov', tipHeight: 0, lastOverviewTs: 0, lastBlocks: [], atGenesis: false };
 
@@ -999,7 +996,7 @@ GitHub</a>
     });
   }
 
-  /* --- modal (original v4 design) --- */
+  /* --- modal (irium-core design) --- */
   function closeModal() {
     var m = $id('block-modal');
     if (m) m.style.display = 'none';
@@ -1021,98 +1018,74 @@ GitHub</a>
     if (m)   m.style.display = 'flex';
   };
 
-  function mdRow(lbl, val) {
-    return '<tr>' +
-      '<td style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.07);color:rgba(255,255,255,0.55);width:170px;vertical-align:top;">' + lbl + '</td>' +
-      '<td style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.07);word-break:break-all;">' + val + '</td>' +
-    '</tr>';
+  function blockReward(height) {
+    var halvings = Math.floor(height / HALVING_INTERVAL);
+    var reward   = 50 * Math.pow(0.5, halvings);
+    return (reward < 1 ? reward.toFixed(4) : reward.toFixed(0)) + ' IRM';
   }
 
-  function mdSect(title) {
-    return '<div style="font-size:11px;letter-spacing:0.12em;text-transform:uppercase;color:rgba(255,255,255,0.45);margin:14px 0 8px;">' + title + '</div>';
-  }
-
-  function mdHash(val) {
-    return '<div style="font-family:monospace;font-size:12px;color:rgba(255,255,255,0.75);word-break:break-all;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.07);">' + val + '</div>';
-  }
-
-  function mdTxRow(txid, onclick) {
-    return '<div style="font-family:monospace;font-size:12px;color:rgba(91,177,255,0.75);padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);word-break:break-all;cursor:pointer;" onclick="' + onclick + '">' + txid + '</div>';
+  function iRow(lbl, val, opts) {
+    opts = opts || {};
+    var color = opts.color || 'rgba(255,255,255,0.80)';
+    var font  = opts.mono === false
+      ? '\'Space Grotesk\',system-ui,sans-serif'
+      : '\'JetBrains Mono\',monospace';
+    var wb    = opts.noWrap ? '' : 'word-break:break-all;';
+    var inner = opts.onclick
+      ? '<span style="flex:1;min-width:0;font-size:12px;color:' + color + ';font-family:' + font + ';' + wb + 'cursor:pointer;" onclick="' + opts.onclick + '">' + val + '</span>'
+      : '<span style="flex:1;min-width:0;font-size:12px;color:' + color + ';font-family:' + font + ';' + wb + '">' + val + '</span>';
+    return '<div style="display:flex;align-items:flex-start;gap:12px;margin-bottom:10px;">' +
+      '<span style="flex-shrink:0;width:112px;text-align:right;font-size:10px;color:rgba(255,255,255,0.28);text-transform:uppercase;letter-spacing:0.10em;padding-top:2px;font-family:\'Space Grotesk\',system-ui,sans-serif;">' + lbl + '</span>' +
+      inner +
+    '</div>';
   }
 
   function renderBlockModal(raw) {
-    console.log('[block detail] raw:', JSON.stringify(raw));
-    // Unwrap: API may return {block:{...}} or {block:{header:{...},...}} or flat {height:...}
-    var b      = (raw && raw.block) ? raw.block : raw;
-    var header = b.header || {};
+    var b = (raw && raw.block) ? raw.block : raw;
 
-    // Timestamp: handle unix seconds (< 1e10) or ms or ISO strings
-    var tsRaw  = b.timestamp != null ? b.timestamp : (header.timestamp != null ? header.timestamp : null);
-    var tsMs   = (typeof tsRaw === 'number' && tsRaw > 0 && tsRaw < 1e10) ? tsRaw * 1000 : new Date(tsRaw).getTime();
-    var ts     = tsRaw != null && !isNaN(tsMs) ? new Date(tsMs).toLocaleString() : '—';
+    var tsRaw = b.timestamp != null ? b.timestamp : null;
+    var tsMs  = (typeof tsRaw === 'number' && tsRaw > 0 && tsRaw < 1e10)
+      ? tsRaw * 1000
+      : new Date(tsRaw).getTime();
+    var ts = (tsRaw != null && !isNaN(tsMs))
+      ? new Date(tsMs).toLocaleString('en-US', {dateStyle:'medium', timeStyle:'medium'})
+      : '—';
 
-    var reward = b.total_reward != null ? fmtRwd(b.total_reward) : '—';
+    var height  = b.height != null ? b.height : '—';
+    var hash    = b.hash || '—';
+    var prevH   = b.prev_hash || b.previous_hash || '—';
+    var merkle  = b.merkle_root || '—';
+    var nonce   = b.nonce != null ? fmtN(b.nonce) : '—';
+    var bits    = b.bits != null ? String(b.bits) : '—';
+    var txCount = b.tx_count != null ? fmtN(b.tx_count) : '—';
+    var miner   = b.miner_address || b.miner || '';
+    var reward  = typeof height === 'number' ? blockReward(height) + ' (estimated)' : '—';
 
-    // Difficulty — try all known field names across flat and nested structures
-    var diffRaw = b.difficulty != null ? b.difficulty :
-                  header.difficulty != null ? header.difficulty :
-                  b.bits != null ? b.bits :
-                  header.bits != null ? header.bits :
-                  b.difficulty_target != null ? b.difficulty_target :
-                  header.difficulty_target != null ? header.difficulty_target : null;
-    var diff    = diffRaw != null ? String(diffRaw) : '—';
+    var ICON = '<svg width="14" height="14" fill="none" stroke="#6ec6ff" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>';
 
-    // Nonce — try all known field names
-    var nonceRaw = b.nonce != null ? b.nonce :
-                   header.nonce != null ? header.nonce :
-                   b.pow_nonce != null ? b.pow_nonce :
-                   header.pow_nonce != null ? header.pow_nonce :
-                   b.block_nonce != null ? b.block_nonce : null;
-    var nonce    = nonceRaw != null ? fmtN(nonceRaw) : '—';
+    var title =
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:20px;">' +
+        ICON +
+        '<span style="font-family:\'Space Grotesk\',system-ui,sans-serif;font-size:16px;font-weight:800;color:#6ec6ff;">' +
+          'Block #' + (typeof height === 'number' ? fmtN(height) : height) +
+        '</span>' +
+      '</div>';
 
-    // Miner address — try all known field names
-    var miner = b.miner_address || b.miner || header.miner_address || header.miner || '';
+    var rows =
+      iRow('Height',       '#' + (typeof height === 'number' ? fmtN(height) : height)) +
+      iRow('Hash',         hash) +
+      iRow('Prev Hash',    prevH) +
+      iRow('Merkle Root',  merkle) +
+      iRow('Time',         ts, {mono: false}) +
+      iRow('Reward',       reward, {color: '#34d399'}) +
+      iRow('Transactions', txCount, {noWrap: true}) +
+      iRow('Bits',         bits, {noWrap: true}) +
+      iRow('Nonce',        nonce, {noWrap: true}) +
+      (miner
+        ? iRow('Miner', miner, {color: 'rgba(110,198,255,0.75)', onclick: "event.stopPropagation();showAddr('" + miner + "')"})
+        : iRow('Miner', '—'));
 
-    // Prev hash and merkle root — try all known field names
-    var prevH  = b.prev_hash || b.previous_hash || b.previous_block_hash || b.parent_hash ||
-                 header.prev_hash || header.previous_hash || header.previous_block_hash || '—';
-    var merkle = b.merkle_root || b.merkle_root_hash || b.transactions_merkle_root || b.txs_root ||
-                 header.merkle_root || header.merkle_root_hash || '—';
-
-    var tbl = '<table style="width:100%;border-collapse:collapse;">' +
-      mdRow('Height',     '<span style="color:#4ade80;font-weight:700;">' + fmtN(b.height) + '</span>') +
-      mdRow('Timestamp',  ts) +
-      mdRow('Reward',     '<span style="color:#4ade80;">' + reward + '</span>') +
-      mdRow('Tx count',   fmtN(b.tx_count)) +
-      mdRow('Difficulty', diff) +
-      mdRow('Nonce',      nonce) +
-    '</table>';
-
-    var minerHtml = miner
-      ? mdSect('Miner address') +
-        '<div style="font-family:monospace;font-size:12px;color:rgba(91,177,255,0.8);word-break:break-all;padding:6px 0;cursor:pointer;" onclick="showAddr(\'' + miner + '\')">' + miner + '</div>'
-      : '';
-
-    var hashHtml =
-      mdSect('Block hash')  + mdHash(b.hash || '—') +
-      mdSect('Prev hash')   + mdHash(prevH) +
-      mdSect('Merkle root') + mdHash(merkle);
-
-    // Transactions: API may return txids as strings or as objects with txid/hash fields
-    var rawTxids = b.txids || b.tx_ids || b.transactions || b.tx_hashes || [];
-    var txids = rawTxids.map(function (item) {
-      return typeof item === 'string' ? item : (item.txid || item.hash || item.id || '');
-    }).filter(Boolean);
-    var txHtml = '';
-    if (txids.length) {
-      txHtml = mdSect('Transactions (' + txids.length + ')') +
-        txids.map(function (id) { return mdTxRow(id, 'showTx(\'' + id + '\')'); }).join('');
-    }
-
-    window.__showBlockModal(
-      '<h4 style="margin:0 0 14px;font-size:16px;">Block #' + fmtN(b.height) + '</h4>' +
-      tbl + minerHtml + hashHtml + txHtml
-    );
+    window.__showBlockModal(title + rows);
   }
 
   function showBlock(height) {
@@ -1147,7 +1120,15 @@ GitHub</a>
   }
 
   function showAddr(addr) {
-    window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading address...</div>');
+    var ICON = '<svg width="14" height="14" fill="none" stroke="#6ec6ff" stroke-width="2" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>';
+    var header =
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">' +
+        ICON +
+        '<span style="font-family:\'Space Grotesk\',system-ui,sans-serif;font-size:16px;font-weight:800;color:#6ec6ff;">Address</span>' +
+      '</div>' +
+      '<div style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:rgba(110,198,255,0.70);word-break:break-all;background:rgba(110,198,255,0.05);border:1px solid rgba(110,198,255,0.14);border-radius:6px;padding:8px 10px;margin-bottom:18px;">' + addr + '</div>';
+
+    window.__showBlockModal(header + '<div style="color:rgba(255,255,255,0.30);text-align:center;padding:20px;">Loading...</div>');
     var balUrl  = API + '/rpc/balance?address=' + encodeURIComponent(addr);
     var histUrl = API + '/rpc/history?address=' + encodeURIComponent(addr) + '&limit=20';
     console.log('[showAddr] GET', balUrl, histUrl);
@@ -1156,34 +1137,39 @@ GitHub</a>
       var hist = res[1];
       var txs  = (hist && hist.txs) ? hist.txs : [];
 
-      var tbl = '<table style="width:100%;border-collapse:collapse;">' +
-        mdRow('Balance',       '<span style="color:#4ade80;font-weight:700;">' + fmtRwd(bal.balance) + '</span>') +
-        mdRow('Mined balance', fmtRwd(bal.mined_balance)) +
-        mdRow('UTXOs',         fmtN(bal.utxo_count)) +
-        mdRow('Blocks mined',  fmtN(bal.mined_blocks)) +
-        mdRow('Transactions',  fmtN(txs.length) + (txs.length === 20 ? '+' : '')) +
-      '</table>';
+      var statsRows =
+        iRow('Balance',      fmtRwd(bal.balance || 0), {color: '#34d399'}) +
+        iRow('Mined',        fmtRwd(bal.mined_balance || 0)) +
+        iRow('UTXOs',        fmtN(bal.utxo_count || 0), {noWrap: true}) +
+        iRow('Blocks mined', fmtN(bal.mined_blocks || 0), {noWrap: true}) +
+        iRow('Transactions', fmtN(txs.length) + (txs.length === 20 ? '+' : ''), {noWrap: true});
 
       var txHtml = '';
       if (txs.length) {
-        txHtml = mdSect('Recent transactions') +
+        txHtml =
+          '<div style="display:flex;align-items:center;gap:10px;margin:20px 0 12px;">' +
+            '<span style="font-size:10px;font-weight:700;letter-spacing:0.14em;text-transform:uppercase;color:rgba(110,198,255,0.45);font-family:\'Space Grotesk\',system-ui,sans-serif;">Recent Transactions</span>' +
+            '<div style="flex:1;height:1px;background:rgba(110,198,255,0.10);"></div>' +
+          '</div>' +
           txs.map(function (tx) {
-            var net    = tx.net != null ? tx.net : 0;
-            var sign   = net >= 0 ? '+' : '';
-            var color  = net >= 0 ? '#4ade80' : '#f87171';
-            var netStr = ' <span style="color:' + color + ';flex-shrink:0;">' + sign + fmtRwd(Math.abs(net)) + '</span>';
-            var cbTag  = tx.is_coinbase ? ' <span style="font-size:10px;color:rgba(255,255,255,0.4);">[coinbase]</span>' : '';
-            return '<div style="display:flex;justify-content:space-between;align-items:baseline;font-family:monospace;font-size:12px;color:rgba(91,177,255,0.75);padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);word-break:break-all;cursor:pointer;gap:8px;" onclick="showTx(\'' + tx.txid + '\')">' +
-              '<span>' + tx.txid + cbTag + '</span>' + netStr +
+            var net     = tx.net != null ? tx.net : 0;
+            var sign    = net >= 0 ? '+' : '−';
+            var ncol    = net >= 0 ? '#34d399' : '#f87171';
+            var cbBadge = tx.is_coinbase
+              ? '<span style="display:inline-block;padding:1px 6px;border-radius:99px;font-size:9px;font-weight:700;letter-spacing:0.08em;background:rgba(52,211,153,0.12);border:1px solid rgba(52,211,153,0.28);color:#34d399;margin-left:8px;vertical-align:middle;font-family:\'Space Grotesk\',system-ui,sans-serif;">COINBASE</span>'
+              : '';
+            return '<div onclick="showTx(\'' + tx.txid + '\')" style="display:flex;justify-content:space-between;align-items:baseline;gap:12px;padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.05);cursor:pointer;">' +
+              '<span style="font-family:\'JetBrains Mono\',monospace;font-size:11px;color:rgba(110,198,255,0.65);min-width:0;word-break:break-all;">' +
+                (tx.txid || '').slice(0, 16) + '…' + cbBadge +
+              '</span>' +
+              '<span style="flex-shrink:0;font-family:\'JetBrains Mono\',monospace;font-size:12px;font-weight:700;color:' + ncol + ';">' +
+                sign + fmtRwd(Math.abs(net)) +
+              '</span>' +
             '</div>';
           }).join('');
       }
 
-      window.__showBlockModal(
-        '<h4 style="margin:0 0 4px;font-size:16px;">Address</h4>' +
-        '<p style="margin:0 0 14px;font-family:monospace;font-size:11px;color:rgba(255,255,255,0.5);word-break:break-all;">' + addr + '</p>' +
-        tbl + txHtml
-      );
+      window.__showBlockModal(header + statsRows + txHtml);
     }).catch(function (err) {
       console.error('[showAddr] failed:', err && err.message);
       window.__showBlockError('Could not load address' + (err && err.message ? ' — ' + err.message : ''));
@@ -1191,24 +1177,27 @@ GitHub</a>
   }
 
   function showTx(txid) {
-    window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading transaction...</div>');
+    var ICON = '<svg width="14" height="14" fill="none" stroke="#6ec6ff" stroke-width="2" viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 014-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 01-4 4H3"/></svg>';
+    var header =
+      '<div style="display:flex;align-items:center;gap:10px;margin-bottom:16px;">' +
+        ICON +
+        '<span style="font-family:\'Space Grotesk\',system-ui,sans-serif;font-size:16px;font-weight:800;color:#6ec6ff;">Transaction</span>' +
+      '</div>' +
+      '<div style="font-family:\'JetBrains Mono\',monospace;font-size:10px;color:rgba(255,255,255,0.30);word-break:break-all;margin-bottom:18px;">' + txid + '</div>';
+
+    window.__showBlockModal(header + '<div style="color:rgba(255,255,255,0.30);text-align:center;padding:20px;">Loading...</div>');
     var txUrl = API + '/rpc/tx?txid=' + txid;
     console.log('[showTx] GET', txUrl);
     get(txUrl).then(function (tx) {
-      var tbl = '<table style="width:100%;border-collapse:collapse;">' +
-        mdRow('Height',      fmtN(tx.height)) +
-        mdRow('Block hash',  '<span style="font-family:monospace;font-size:11px;word-break:break-all;">' + (tx.block_hash || '—') + '</span>') +
-        mdRow('Type',        tx.is_coinbase ? 'Coinbase (mining reward)' : 'Standard') +
-        mdRow('Inputs',      fmtN(tx.inputs)) +
-        mdRow('Outputs',     fmtN(tx.outputs)) +
-        mdRow('Total value', '<span style="color:#4ade80;">' + fmtRwd(tx.output_value) + '</span>') +
-      '</table>';
+      var rows =
+        iRow('Height',      tx.height != null ? '#' + fmtN(tx.height) : '—', {noWrap: true}) +
+        iRow('Block hash',  tx.block_hash || '—') +
+        iRow('Type',        tx.is_coinbase ? 'Coinbase (mining reward)' : 'Standard', {mono: false}) +
+        iRow('Inputs',      fmtN(tx.inputs || 0), {noWrap: true}) +
+        iRow('Outputs',     fmtN(tx.outputs || 0), {noWrap: true}) +
+        iRow('Total value', fmtRwd(tx.output_value || 0), {color: '#34d399', noWrap: true});
 
-      window.__showBlockModal(
-        '<h4 style="margin:0 0 4px;font-size:16px;">Transaction</h4>' +
-        '<p style="margin:0 0 14px;font-family:monospace;font-size:11px;color:rgba(255,255,255,0.5);word-break:break-all;">' + txid + '</p>' +
-        tbl
-      );
+      window.__showBlockModal(header + rows);
     }).catch(function (err) {
       console.error('[showTx] failed:', txUrl, err && err.message);
       window.__showBlockError('Could not load transaction' + (err && err.message ? ' — ' + err.message : ''));

@@ -257,6 +257,130 @@
 <p>Irium is not abandoning mining, nor is it reducing the importance of the base chain. The point of the settlement-first positioning is to explain what that base layer is for. Mining secures the live public network. The broader settlement roadmap gives that network a clearer commercial purpose: trust-minimized outcomes, not just payments.</p>
 </div>
 
+<div class="wp-section"><h2>8. Agreement Templates</h2>
+<p>Irium defines six agreement template types in the settlement protocol. Each template carries a snake_case <code>template_type</code> field that iriumd uses to validate and route the agreement. Four templates have CLI builders in <code>irium-wallet</code>; two are recognized by the protocol and accepted on-chain but require hand-constructed JSON today.</p>
+<table class="wp-table">
+<thead>
+<tr><th>template_type</th><th>Use Case</th><th>CLI Builder</th></tr>
+</thead>
+<tbody>
+<tr><td><code>simple_release_refund</code></td><td>Two parties, one amount, one secret hash. General purpose escrow with a single release path and timeout refund.</td><td>Yes</td></tr>
+<tr><td><code>otc_settlement</code></td><td>Buyer/seller OTC trade. Includes asset reference and payment reference. Seller locks IRM in escrow; buyer receives after delivering off-chain payment.</td><td>Yes</td></tr>
+<tr><td><code>refundable_deposit</code></td><td>Payer/payee deposit. Includes purpose reference and deposit rule. Funds return to payer on timeout if the payee does not authorize release.</td><td>Yes</td></tr>
+<tr><td><code>milestone_settlement</code></td><td>Multiple milestones, each with its own amount, timeout height, and per-milestone secret hash. Each leg is funded and released independently.</td><td>Yes</td></tr>
+<tr><td><code>merchant_delayed_settlement</code></td><td>Merchant-side settlement with a delayed payout deadline. Recognized by the protocol; no CLI builder yet.</td><td>No</td></tr>
+<tr><td><code>contractor_milestone</code></td><td>Contractor-style milestone agreement with per-leg release authorization. Recognized by the protocol; no CLI builder yet.</td><td>No</td></tr>
+</tbody>
+</table>
+<p>All amounts in agreement JSON are denominated in IRM. The protocol enforces this via the <code>network_marker == "IRIUM"</code> check at validation time.</p>
+</div>
+
+<div class="wp-section"><h2>9. Agreement Lifecycle</h2>
+<p>Every agreement moves through a defined set of lifecycle states. The state is derived deterministically from the on-chain record and is the same on every node.</p>
+<div class="wp-badges">
+<span class="badge">Draft</span>
+<span class="badge">Proposed</span>
+<span class="badge">Funded</span>
+<span class="badge">PartiallyReleased</span>
+<span class="badge">Released</span>
+<span class="badge">Refunded</span>
+<span class="badge">Expired</span>
+<span class="badge">Cancelled</span>
+</div>
+<ul style="margin-top:12px;">
+<li><strong>Draft</strong> — Agreement created locally; funding transaction not yet broadcast.</li>
+<li><strong>Proposed</strong> — Agreement registered on the node; awaiting on-chain funding confirmation.</li>
+<li><strong>Funded</strong> — HTLC funding transaction confirmed on-chain. Funds are locked.</li>
+<li><strong>PartiallyReleased</strong> — One or more milestones released; remaining legs still locked (milestone agreements only).</li>
+<li><strong>Released</strong> — Recipient unlocked funds by presenting the secret preimage. Settlement complete.</li>
+<li><strong>Refunded</strong> — Funder reclaimed funds after the refund timeout block height was reached.</li>
+<li><strong>Expired</strong> — Agreement passed its settlement deadline with no release or refund action.</li>
+<li><strong>Cancelled</strong> — Agreement cancelled before funding.</li>
+</ul>
+<p>Release eligibility requires both proof finality (proof buried at least 6 blocks deep by default) and a satisfied release policy. The <code>release_eligible</code> field on the agreement status response is the authoritative gate before releasing funds.</p>
+</div>
+
+<div class="wp-section"><h2>10. Proof Engine</h2>
+<p>The Irium settlement layer adds a structured proof and policy evaluation layer on top of the base HTLC escrow. Funds are locked in a Hash Time-Locked Contract controlled by a 2-of-2 condition: either the recipient presents the preimage of a known secret hash (release), or the funder reclaims after a block height timeout (refund).</p>
+<p>On top of the base HTLC, a proof submission and policy evaluation system allows release conditions to be verified programmatically before funds are moved. Attestors submit signed proof objects against an agreement hash. A configurable policy defines which proof types are required and which attestors are accepted. The evaluator counts only unique attestor identities, so duplicate proofs from the same attestor count as one.</p>
+<h3>Proof Schema Kinds</h3>
+<table class="wp-table">
+<thead>
+<tr><th>proof_type</th><th>When Used</th></tr>
+</thead>
+<tbody>
+<tr><td><code>delivery_confirmed</code></td><td>Attestor confirms that goods, services, or a deliverable was received.</td></tr>
+<tr><td><code>payment_confirmed</code></td><td>Attestor confirms off-chain payment (e.g. bank transfer, USDT) was received.</td></tr>
+<tr><td><code>milestone_accepted</code></td><td>Client confirms a milestone deliverable meets the agreed specification.</td></tr>
+<tr><td><code>custom_attestation</code></td><td>General-purpose attestation for use cases not covered by the standard types.</td></tr>
+<tr><td><code>timeout_expiry</code></td><td>Proof that the refund timeout height has been reached; used in automated refund paths.</td></tr>
+</tbody>
+</table>
+<p>A proof is considered final after the block containing it is at least 6 blocks deep (configurable via <code>IRIUM_PROOF_FINALITY_DEPTH</code>). Parties should wait for <code>release_eligible: true</code> on the agreement status before considering a settlement complete. If a chain reorganization removes the proof block, iriumd emits an <code>agreement.proof_reorged</code> event and the proof must be resubmitted.</p>
+<p>Policies can also declare a holdback: a fraction of the escrowed amount in basis points that stays locked after the base release condition is met, releasing on its own deadline or proof requirement. Attestors may register an on-chain bond to signal accountability; bonded attestors are preferred in policy evaluation, and contradicting proofs from the same attestor can be slashed on-chain.</p>
+</div>
+
+<div class="wp-section"><h2>11. Live Network</h2>
+<p>The settlement layer is live on mainnet. Agreements, proofs, and marketplace offers are active on-chain.</p>
+<table class="wp-table">
+<thead>
+<tr><th>Component</th><th>Status</th></tr>
+</thead>
+<tbody>
+<tr><td>Settlement layer</td><td>Live</td></tr>
+<tr><td>Marketplace</td><td>Live</td></tr>
+<tr><td>Reputation system</td><td>Live</td></tr>
+<tr><td>Proof ecosystem</td><td>Live</td></tr>
+</tbody>
+</table>
+<p style="margin-top:12px;">Total agreements on-chain: <strong id="settlement-agreement-count">loading...</strong></p>
+</div>
+
+<div class="wp-section"><h2>12. Using Settlement via CLI</h2>
+<p>The <code>irium-wallet</code> command-line tool handles the full agreement lifecycle from wallet setup through funding, proof submission, and release. All chain commands accept <code>--rpc &lt;url&gt;</code> to specify a node (default: <code>http://127.0.0.1:38300</code>).</p>
+<h3>Wallet Setup</h3>
+<pre>irium-wallet init
+irium-wallet new-address</pre>
+<h3>Create and List Offers</h3>
+<pre>irium-wallet offer-create \
+  --seller &lt;YOUR_ADDRESS&gt; \
+  --amount 1.0 \
+  --payment-method bank-transfer \
+  --timeout 25000 \
+  --price-note "1 IRM = 0.10 USD"
+
+irium-wallet offer-list --status open --sort score</pre>
+<h3>Take an Offer and Fund the Agreement</h3>
+<pre>irium-wallet offer-take --offer &lt;OFFER_ID&gt; --buyer &lt;BUYER_ADDRESS&gt;
+
+irium-wallet agreement-fund agreement.json --broadcast --rpc http://127.0.0.1:38300</pre>
+<h3>Submit a Proof</h3>
+<pre>irium-wallet agreement-proof-create \
+  --agreement-hash &lt;AGREEMENT_HASH&gt; \
+  --proof-type delivery_confirmed \
+  --attested-by attestor-id \
+  --address &lt;ATTESTOR_ADDRESS&gt; \
+  --evidence-summary "Payment confirmed." \
+  --out proof.json
+
+irium-wallet agreement-proof-submit --proof proof.json --rpc http://127.0.0.1:38300</pre>
+<h3>Check Eligibility and Release</h3>
+<pre>irium-wallet agreement-release-eligibility agreement.json --rpc http://127.0.0.1:38300
+
+irium-wallet agreement-release agreement.json \
+  --secret &lt;PREIMAGE_HEX&gt; \
+  --broadcast \
+  --rpc http://127.0.0.1:38300</pre>
+<h3>Auto-Release Watch Mode</h3>
+<pre>irium-wallet watch --auto-release</pre>
+</div>
+
+<div class="wp-section"><h2>13. Get Started</h2>
+<p>Irium Core is the desktop wallet and full node application. It includes the GUI wallet interface, agreement builder, marketplace browser, and direct access to the CLI tools documented above. Download the latest release for Windows, macOS, or Linux:</p>
+<p><a href="https://github.com/iriumlabs/irium-core/releases/latest" target="_blank" rel="noopener">Download Irium Core — github.com/iriumlabs/irium-core/releases/latest</a></p>
+<p>The <code>irium-wallet</code> CLI is bundled with Irium Core. After installing, run <code>irium-wallet init</code> to create a new wallet, or <code>irium-wallet import-seed &lt;64hex&gt;</code> to restore from an existing seed.</p>
+</div>
+
 </div>
 </div>
 </div>
@@ -303,5 +427,21 @@ GitHub</a>
 
 <script src="https://www.iriumlabs.org/script.js"></script>
 <script src="https://www.iriumlabs.org/nav.js"></script>
+<script>
+(function() {
+  fetch('https://api.iriumlabs.org/explorer/agreements?limit=1')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var el = document.getElementById('settlement-agreement-count');
+      if (el && d && typeof d.total === 'number') {
+        el.textContent = d.total.toLocaleString() + ' agreements';
+      }
+    })
+    .catch(function() {
+      var el = document.getElementById('settlement-agreement-count');
+      if (el) el.textContent = 'unavailable';
+    });
+})();
+</script>
 </body>
 </html>

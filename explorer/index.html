@@ -419,7 +419,7 @@ body {
         <div class="xp-sc"><div class="xp-sc-label">Network Hashrate</div><div class="xp-sc-val xp-gv" id="s-nethash">—</div></div>
         <div class="xp-sc"><div class="xp-sc-label">Difficulty</div><div class="xp-sc-val" id="s-diff">—</div></div>
         <div class="xp-sc"><div class="xp-sc-label">Active Peers</div><div class="xp-sc-val" id="s-peers">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Total TXs</div><div class="xp-sc-val" id="s-txcount">—</div></div>
+        <div class="xp-sc"><div class="xp-sc-label">Avg Block Time</div><div class="xp-sc-val" id="s-txcount">—</div></div>
       </div>
 
       <div class="xp-2col">
@@ -602,13 +602,13 @@ GitHub</a>
 (function () {
   'use strict';
 
-  var API          = 'https://explorer.iriumlabs.org/api';
-  var POOL         = 'https://explorer.iriumlabs.org/pool-stats/';
+  var API          = 'https://api.iriumlabs.org';
+  var POOL         = 'https://api.iriumlabs.org/pool-stats/';
   var PER_PAGE     = 20;
   var REWARD_DENOM = 1e8;
   var BLOCKS_DAY   = 288;
 
-  var st = { offset: 0, pool: null, chainHashrate: 0, rlDone: false, activeTab: 'ov', tipHeight: 0, lastOverviewTs: 0, lastBlocks: [] };
+  var st = { offset: 0, pool: null, chainHashrate: 0, rlDone: false, activeTab: 'ov', tipHeight: 0, lastOverviewTs: 0, lastBlocks: [], atGenesis: false };
 
   function $id(id) { return document.getElementById(id); }
   function set(id, v) { var e = $id(id); if (e) e.textContent = v; }
@@ -659,6 +659,32 @@ GitHub</a>
     return h.toFixed(0) + ' H/s';
   }
 
+  function normalizeBlock(b) {
+    var h = b.header || {};
+    return {
+      height:        b.height,
+      hash:          h.hash,
+      timestamp:     h.time,
+      tx_count:      b.tx_hex ? b.tx_hex.length : 0,
+      miner_address: b.miner_address,
+      total_reward:  5000000000,
+      nonce:         h.nonce,
+      bits:          h.bits,
+      prev_hash:     h.prev_hash,
+      merkle_root:   h.merkle_root
+    };
+  }
+
+  function fmtBlockTime(s) {
+    if (!s || s <= 0) return '—';
+    if (s >= 60) return Math.floor(s / 60) + 'm ' + Math.floor(s % 60) + 's';
+    return s.toFixed(0) + 's';
+  }
+
+  function safeGet(url) {
+    return get(url).catch(function () { return null; });
+  }
+
   function get(url) {
     return fetch(url, { cache: 'no-store' }).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
@@ -685,29 +711,21 @@ GitHub</a>
 
   /* --- overview --- */
   function loadOverview() {
-    var t = Date.now(); // cache-buster: forces unique URL past proxy/CDN cache
-    return Promise.all([
-      get(API + '/status?_=' + t),
-      get(API + '/blocks?limit=' + PER_PAGE + '&offset=' + st.offset + '&_=' + t),
-    ]).then(function (res) {
-      var status = res[0], blocks = res[1];
-
-      console.log('[status raw]', JSON.stringify(status));
-      st.tipHeight = status.synced_height;
+    var t = Date.now();
+    return get(API + '/status?_=' + t).then(function (status) {
+      st.tipHeight = status.height;
       st.lastOverviewTs = Date.now();
-      console.log('[loadOverview] tipHeight=' + st.tipHeight + (blocks && blocks.length ? ' latestBlock=' + blocks[0].height : ' blocks=none'));
-      set('xp-status', 'Block #' + fmtN(status.synced_height) + ' · Synced');
-      set('s-height', fmtN(status.synced_height));
-      set('s-tiphash', status.synced_block_hash
-        ? status.synced_block_hash.slice(0,22) + '…' : '—');
-
-      if (blocks && blocks.length) {
-        var b0 = blocks[0];
-        set('s-lastblock', fmtAge(b0.timestamp));
-        var supM = (status.synced_height * (b0.total_reward / REWARD_DENOM)) / 1e6;
-        set('s-supply', supM.toFixed(2) + 'M IRM');
-      }
-
+      set('xp-status', 'Block #' + fmtN(status.height) + ' · Synced');
+      set('s-height',  fmtN(status.height));
+      var tipHash = status.best_header_tip && status.best_header_tip.hash;
+      set('s-tiphash', tipHash ? tipHash.slice(0, 22) + '…' : '—');
+      var fromH = Math.max(0, status.height - st.offset - (PER_PAGE - 1));
+      return get(API + '/rpc/blocks?from=' + fromH + '&count=' + PER_PAGE + '&_=' + t);
+    }).then(function (data) {
+      var raw    = (data && data.blocks) ? data.blocks : [];
+      var blocks = raw.slice().reverse().map(normalizeBlock);
+      st.atGenesis = blocks.length > 0 && blocks[blocks.length - 1].height === 0;
+      if (blocks.length) set('s-lastblock', fmtAge(blocks[0].timestamp));
       renderBlocks(blocks);
     }).catch(function (e) {
       console.error('overview:', e);
@@ -726,23 +744,29 @@ GitHub</a>
     }).catch(function (e) { console.error('pool:', e); });
   }
 
-  /* --- chain stats (network hashrate, difficulty, peers, total txs) --- */
+  /* --- chain stats (mining metrics + status + richlist) --- */
   function loadChainStats() {
     var t = Date.now();
-    return get(API + '/stats?_=' + t).then(function (stats) {
-      if (!stats) return;
-      if (stats.network_hashrate != null) {
-        st.chainHashrate = stats.network_hashrate;
-        set('s-nethash',    fmtHps(stats.network_hashrate));
-        set('calc-nethash', fmtHps(stats.network_hashrate));
+    return Promise.all([
+      safeGet(API + '/rpc/mining_metrics?_=' + t),
+      safeGet(API + '/status?_=' + t),
+      safeGet(API + '/rpc/richlist?_=' + t)
+    ]).then(function (res) {
+      var metrics  = res[0];
+      var status   = res[1];
+      var richlist = res[2];
+      if (metrics) {
+        st.chainHashrate = metrics.hashrate || 0;
+        set('s-nethash',    fmtHps(metrics.hashrate));
+        set('calc-nethash', fmtHps(metrics.hashrate));
+        if (metrics.difficulty    != null) set('s-diff',    fmtN(metrics.difficulty));
+        if (metrics.avg_block_time != null) set('s-txcount', fmtBlockTime(metrics.avg_block_time));
         updateCalc();
       }
-      if (stats.difficulty        != null) set('s-diff',    fmtN(stats.difficulty));
-      if (stats.peer_count        != null) set('s-peers',   fmtN(stats.peer_count));
-      if (stats.total_txs         != null) set('s-txcount', fmtN(stats.total_txs));
-      if (stats.circulating_supply != null) {
-        var supM = (stats.circulating_supply / REWARD_DENOM) / 1e6;
-        set('s-supply', supM.toFixed(2) + 'M IRM');
+      if (status && status.peer_count != null) set('s-peers', fmtN(status.peer_count));
+      if (richlist && richlist.total_supply_sats != null) {
+        var supIrm = richlist.total_supply_sats / REWARD_DENOM;
+        set('s-supply', supIrm.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' IRM');
       }
     }).catch(function () {});
   }
@@ -812,7 +836,7 @@ GitHub</a>
     var newer = $id('xp-newer'), older = $id('xp-older');
     var lbl = $id('xp-plabel'), totalLbl = $id('xp-ptotal');
     if (newer) newer.disabled = st.offset === 0;
-    if (older) older.disabled = !blocks || blocks.length < PER_PAGE;
+    if (older) older.disabled = !blocks || blocks.length < PER_PAGE || st.atGenesis;
     if (lbl) {
       var curPage = Math.floor(st.offset / PER_PAGE) + 1;
       var totPages = st.tipHeight > 0 ? Math.ceil((st.tipHeight + 1) / PER_PAGE) : '?';
@@ -840,30 +864,32 @@ GitHub</a>
   var FOUNDER_ADDR     = 'PxG1FmGiSnvfXJUcryLna2L5MB4iGG1KD7';
   var FOUNDER_UNLOCK   = 158704;
 
-  function loadRichList() { rlFetch(100); }
+  function loadRichList() { rlFetch(); }
 
-  function rlFetch(limit) {
+  function rlFetch() {
     var btn = $id('rl-load-btn');
     if (btn) { btn.disabled = true; btn.textContent = 'Loading...'; }
 
-    get(API + '/miners?limit=' + limit).then(function (miners) {
+    get(API + '/rpc/richlist').then(function (data) {
       st.rlDone = true;
       var tbody = $id('xp-rl-body');
       if (!tbody) return;
 
-      var miningIrm = st.tipHeight > 0 ? st.tipHeight * 50 : 0;
-      var mintedIrm = miningIrm + FOUNDER_LOCK_IRM;
-      var mintedPct = mintedIrm > 0 ? (mintedIrm / MAX_SUPPLY_IRM * 100).toFixed(4) + '%' : '—';
+      var entries   = (data && data.entries) ? data.entries : [];
+      var totalSats = (data && data.total_supply_sats) ? data.total_supply_sats : 0;
+      var totalIrm  = totalSats / REWARD_DENOM;
+      var circIrm   = Math.max(0, totalIrm - FOUNDER_LOCK_IRM);
+      var mintedPct = totalIrm > 0 ? (totalIrm / MAX_SUPPLY_IRM * 100).toFixed(4) + '%' : '—';
       var lockedPct = (FOUNDER_LOCK_IRM / MAX_SUPPLY_IRM * 100).toFixed(4) + '%';
+      var genHeight = (data && data.generated_at_height != null) ? data.generated_at_height : st.tipHeight;
 
-      set('rl-circulating', fmtIRM2(miningIrm));
-      set('rl-minted',      fmtIRM(mintedIrm));
-      set('rl-minted-pct',  mintedPct);
-      set('rl-locked-pct',  lockedPct);
-
-      var ageS = st.lastOverviewTs ? Math.floor((Date.now() - st.lastOverviewTs) / 1000) : 0;
-      set('rl-supply-updated', '· Updated ' + (ageS < 5 ? 'just now' : ageS + 's ago'));
-      set('rl-minted-at', 'at height #' + fmtN(st.tipHeight));
+      set('rl-circulating',   fmtIRM2(circIrm));
+      set('rl-minted',        fmtIRM(totalIrm));
+      set('rl-minted-pct',    mintedPct);
+      set('rl-locked-pct',    lockedPct);
+      set('rl-minted-at',     'at height #' + fmtN(genHeight));
+      var blocksBehind = st.tipHeight > genHeight ? (st.tipHeight - genHeight) + ' blocks ago' : 'current';
+      set('rl-supply-updated', '· ' + blocksBehind);
 
       var founderPct = (FOUNDER_LOCK_IRM / MAX_SUPPLY_IRM * 100).toFixed(4) + '%';
 
@@ -887,44 +913,35 @@ GitHub</a>
           '<td class="xp-age">—</td>' +
         '</tr>';
 
-      if (!miners || !miners.length) {
-        tbody.innerHTML = lockedRow + '<tr><td colspan="5" class="xp-ldg">No miner data</td></tr>';
+      if (!entries.length) {
+        tbody.innerHTML = lockedRow + '<tr><td colspan="5" class="xp-ldg">No data</td></tr>';
       } else {
-        var MEDALS     = ['rl-gold', 'rl-silver', 'rl-bronze'];
-        var MEDAL_ICONS = ['🥇', '🥈', '🥉']; // 🥇🥈🥉
-        var rows = miners.map(function (m, i) {
-          var rank     = i + 1;
-          var rankCls  = rank <= 3 ? MEDALS[i] : 'xp-rk';
+        var MEDALS      = ['rl-gold', 'rl-silver', 'rl-bronze'];
+        var MEDAL_ICONS = ['🥇', '🥈', '🥉'];
+        var rows = entries.map(function (e) {
+          var rank     = e.rank || 1;
+          var rankCls  = rank <= 3 ? MEDALS[rank - 1] : 'xp-rk';
           var rankDisp = rank <= 3
-            ? '<span style="font-size:15px;vertical-align:middle;margin-right:4px;">' + MEDAL_ICONS[i] + '</span>' + rank
+            ? '<span style="font-size:15px;vertical-align:middle;margin-right:4px;">' + MEDAL_ICONS[rank - 1] + '</span>' + rank
             : rank;
-          var balIrm  = m.total_reward / REWARD_DENOM;
-          var pct     = (balIrm / MAX_SUPPLY_IRM * 100).toFixed(4) + '%';
-          var balStr  = balIrm.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' IRM';
+          var balStr = fmtIRM2(e.balance_irm);
+          var pct    = e.percentage != null ? e.percentage.toFixed(4) + '%' : '—';
           return '<tr>' +
             '<td class="' + rankCls + '">' + rankDisp + '</td>' +
-            '<td><span class="xp-al" style="cursor:pointer" onclick="showAddr(\'' + m.address + '\')">' + m.address + '</span></td>' +
+            '<td><span class="xp-al" style="cursor:pointer" onclick="showAddr(\'' + e.address + '\')">' + e.address + '</span></td>' +
             '<td style="color:#34d399;font-weight:600;font-variant-numeric:tabular-nums;">' + balStr + '</td>' +
             '<td class="xp-pct">' + pct + '</td>' +
-            '<td style="color:rgba(255,255,255,0.55);font-variant-numeric:tabular-nums;">' + fmtN(m.blocks_mined) + '</td>' +
+            '<td style="color:rgba(255,255,255,0.55);font-variant-numeric:tabular-nums;">' + fmtN(e.utxo_count) + '</td>' +
             '</tr>';
         }).join('');
         tbody.innerHTML = lockedRow + rows;
       }
 
-      if (btn) {
-        if (limit >= 500 || !miners || miners.length < limit) {
-          btn.disabled = true;
-          btn.textContent = limit >= 500 ? 'Showing top 500' : 'All entries loaded';
-        } else {
-          btn.disabled = false;
-          btn.textContent = 'Load top 500';
-        }
-      }
+      if (btn) { btn.disabled = true; btn.textContent = 'All entries loaded'; }
     }).catch(function (e) {
       console.error('richlist:', e);
       var b = $id('rl-load-btn');
-      if (b) { b.disabled = false; b.textContent = 'Load top 500'; }
+      if (b) { b.disabled = false; b.textContent = 'Retry'; }
     });
   }
 
@@ -1047,9 +1064,13 @@ GitHub</a>
   function showBlock(height) {
     window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading block #' + height + '...</div>');
     var cached = st.lastBlocks.filter(function (b) { return b.height === height; })[0];
-    var url = API + '/block/height/' + height;
+    var url = API + '/rpc/blocks?from=' + height + '&count=1';
     console.log('[showBlock] GET', url);
-    get(url).then(renderBlockModal).catch(function (err) {
+    get(url).then(function (data) {
+      var b = data && data.blocks && data.blocks[0];
+      if (!b) throw new Error('no block in response');
+      renderBlockModal(normalizeBlock(b));
+    }).catch(function (err) {
       console.error('[showBlock] failed:', url, err && err.message);
       if (cached) {
         renderBlockModal(cached);
@@ -1061,9 +1082,11 @@ GitHub</a>
 
   function showBlockByHash(hash) {
     window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading block...</div>');
-    var url = API + '/block/hash/' + hash;
+    var url = API + '/rpc/block_by_hash?hash=' + hash;
     console.log('[showBlockByHash] GET', url);
-    get(url).then(renderBlockModal).catch(function (err) {
+    get(url).then(function (data) {
+      renderBlockModal(normalizeBlock(data));
+    }).catch(function (err) {
       console.error('[showBlockByHash] failed:', url, err && err.message);
       window.__showBlockError('Could not load block' + (err && err.message ? ' — ' + err.message : ''));
     });
@@ -1071,28 +1094,34 @@ GitHub</a>
 
   function showAddr(addr) {
     window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading address...</div>');
-    var url = API + '/address/' + encodeURIComponent(addr);
-    console.log('[showAddr] GET', url);
-    get(url).then(function (d) {
-      var bal  = d.balance        != null ? fmtRwd(d.balance)        : '—';
-      var recv = d.total_received != null ? fmtRwd(d.total_received) : '—';
-      var sent = d.total_sent     != null ? fmtRwd(d.total_sent)     : '—';
+    var balUrl  = API + '/rpc/balance?address=' + encodeURIComponent(addr);
+    var histUrl = API + '/rpc/history?address=' + encodeURIComponent(addr) + '&limit=20';
+    console.log('[showAddr] GET', balUrl, histUrl);
+    Promise.all([get(balUrl), get(histUrl)]).then(function (res) {
+      var bal  = res[0];
+      var hist = res[1];
+      var txs  = (hist && hist.txs) ? hist.txs : [];
 
       var tbl = '<table style="width:100%;border-collapse:collapse;">' +
-        mdRow('Balance',        '<span style="color:#4ade80;font-weight:700;">' + bal + '</span>') +
-        mdRow('Total received', recv) +
-        mdRow('Total sent',     sent) +
-        mdRow('Transactions',   fmtN(d.tx_count)) +
-        mdRow('Blocks mined',   d.blocks_mined != null ? fmtN(d.blocks_mined) : '—') +
+        mdRow('Balance',       '<span style="color:#4ade80;font-weight:700;">' + fmtRwd(bal.balance) + '</span>') +
+        mdRow('Mined balance', fmtRwd(bal.mined_balance)) +
+        mdRow('UTXOs',         fmtN(bal.utxo_count)) +
+        mdRow('Blocks mined',  fmtN(bal.mined_blocks)) +
+        mdRow('Transactions',  fmtN(txs.length) + (txs.length === 20 ? '+' : '')) +
       '</table>';
 
-      var txs = d.transactions || [];
       var txHtml = '';
       if (txs.length) {
         txHtml = mdSect('Recent transactions') +
-          txs.slice(0, 25).map(function (tx) {
-            var txid = typeof tx === 'string' ? tx : (tx.txid || tx.hash || '');
-            return mdTxRow(txid, 'showTx(\'' + txid + '\')');
+          txs.map(function (tx) {
+            var net    = tx.net != null ? tx.net : 0;
+            var sign   = net >= 0 ? '+' : '';
+            var color  = net >= 0 ? '#4ade80' : '#f87171';
+            var netStr = ' <span style="color:' + color + ';flex-shrink:0;">' + sign + fmtRwd(Math.abs(net)) + '</span>';
+            var cbTag  = tx.is_coinbase ? ' <span style="font-size:10px;color:rgba(255,255,255,0.4);">[coinbase]</span>' : '';
+            return '<div style="display:flex;justify-content:space-between;align-items:baseline;font-family:monospace;font-size:12px;color:rgba(91,177,255,0.75);padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.06);word-break:break-all;cursor:pointer;gap:8px;" onclick="showTx(\'' + tx.txid + '\')">' +
+              '<span>' + tx.txid + cbTag + '</span>' + netStr +
+            '</div>';
           }).join('');
       }
 
@@ -1102,47 +1131,29 @@ GitHub</a>
         tbl + txHtml
       );
     }).catch(function (err) {
-      console.error('[showAddr] failed:', url, err && err.message);
+      console.error('[showAddr] failed:', err && err.message);
       window.__showBlockError('Could not load address' + (err && err.message ? ' — ' + err.message : ''));
     });
   }
 
   function showTx(txid) {
     window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Loading transaction...</div>');
-    var txUrl = API + '/tx/' + txid;
+    var txUrl = API + '/rpc/tx?txid=' + txid;
     console.log('[showTx] GET', txUrl);
     get(txUrl).then(function (tx) {
-      var inputs  = tx.inputs  || tx.vin  || [];
-      var outputs = tx.outputs || tx.vout || [];
-
-      var inHtml;
-      if (inputs.length === 0) {
-        inHtml = '<div style="font-size:13px;color:rgba(255,255,255,0.55);padding:6px 0;">Coinbase (mining reward)</div>';
-      } else {
-        inHtml = inputs.map(function (inp) {
-          var addr = inp.address || inp.prev_address || inp.prev_out || '—';
-          var val  = inp.value != null ? fmtRwd(inp.value) : '';
-          return '<div style="font-family:monospace;font-size:12px;color:rgba(255,255,255,0.75);padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.06);word-break:break-all;display:flex;justify-content:space-between;gap:8px;">' +
-            '<span>' + addr + '</span>' +
-            (val ? '<span style="color:#4ade80;flex-shrink:0;">' + val + '</span>' : '') +
-          '</div>';
-        }).join('');
-      }
-
-      var outHtml = outputs.map(function (out) {
-        var addr = out.address || out.scriptpubkey_address || '—';
-        var val  = out.value != null ? fmtRwd(out.value) : '—';
-        return '<div style="font-family:monospace;font-size:12px;color:rgba(91,177,255,0.75);padding:7px 0;border-bottom:1px solid rgba(255,255,255,0.06);word-break:break-all;cursor:pointer;display:flex;justify-content:space-between;gap:8px;" onclick="showAddr(\'' + addr + '\')">' +
-          '<span>' + addr + '</span>' +
-          '<span style="color:#4ade80;flex-shrink:0;">' + val + '</span>' +
-        '</div>';
-      }).join('');
+      var tbl = '<table style="width:100%;border-collapse:collapse;">' +
+        mdRow('Height',      fmtN(tx.height)) +
+        mdRow('Block hash',  '<span style="font-family:monospace;font-size:11px;word-break:break-all;">' + (tx.block_hash || '—') + '</span>') +
+        mdRow('Type',        tx.is_coinbase ? 'Coinbase (mining reward)' : 'Standard') +
+        mdRow('Inputs',      fmtN(tx.inputs)) +
+        mdRow('Outputs',     fmtN(tx.outputs)) +
+        mdRow('Total value', '<span style="color:#4ade80;">' + fmtRwd(tx.output_value) + '</span>') +
+      '</table>';
 
       window.__showBlockModal(
         '<h4 style="margin:0 0 4px;font-size:16px;">Transaction</h4>' +
         '<p style="margin:0 0 14px;font-family:monospace;font-size:11px;color:rgba(255,255,255,0.5);word-break:break-all;">' + txid + '</p>' +
-        mdSect('Inputs (' + inputs.length + ')') + inHtml +
-        mdSect('Outputs (' + outputs.length + ')') + outHtml
+        tbl
       );
     }).catch(function (err) {
       console.error('[showTx] failed:', txUrl, err && err.message);
@@ -1174,16 +1185,16 @@ GitHub</a>
     q = q.trim();
     if (!q) return;
     if (/^\d+$/.test(q)) { showBlock(parseInt(q, 10)); return; }
-    get(API + '/search?q=' + encodeURIComponent(q)).then(function (r) {
-      if (!r) return;
-      if      (r.result_type === 'block_height') showBlock(parseInt(r.value, 10));
-      else if (r.result_type === 'block_hash')   showBlockByHash(r.value);
-      else if (r.result_type === 'tx')           showTx(r.value);
-      else if (r.result_type === 'address')      showAddr(r.value);
-    }).catch(function () {
-      var inp = $id('xp-q');
-      if (inp) { inp.style.borderColor = 'rgba(248,113,113,0.7)'; setTimeout(function () { inp.style.borderColor = ''; }, 2000); }
-    });
+    if (/^[0-9a-fA-F]{64}$/.test(q)) {
+      window.__showBlockModal('<div style="color:rgba(255,255,255,0.55);">Searching...</div>');
+      get(API + '/rpc/block_by_hash?hash=' + q)
+        .then(function (data) { renderBlockModal(normalizeBlock(data)); })
+        .catch(function () { showTx(q); });
+      return;
+    }
+    if (/^[PQ][a-zA-Z0-9]{33}$/.test(q)) { showAddr(q); return; }
+    var inp = $id('xp-q');
+    if (inp) { inp.style.borderColor = 'rgba(248,113,113,0.7)'; setTimeout(function () { inp.style.borderColor = ''; }, 2000); }
   }
   window.xpSearch = xpSearch;
 
@@ -1196,7 +1207,7 @@ GitHub</a>
   if (qEl)  qEl.addEventListener('keydown', function (e) { if (e.key === 'Enter') xpSearch(); });
 
   var rlBtn = $id('rl-load-btn');
-  if (rlBtn) rlBtn.addEventListener('click', function () { rlFetch(500); });
+  if (rlBtn) rlBtn.addEventListener('click', function () { rlFetch(); });
 
   var bModal = $id('block-modal'), bClose = $id('block-modal-close');
   if (bModal && bClose) {

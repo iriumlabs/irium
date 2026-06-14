@@ -11,266 +11,353 @@
 <style>
 /* ── Settlement Page ── */
 .sp { font-family: 'Space Grotesk', system-ui, sans-serif; }
-.sp .s-wrap { max-width: 1120px; margin: 0 auto; padding: 0 28px; }
+.s-wrap { max-width: 1120px; margin: 0 auto; padding: 0 32px; }
 
-@keyframes cardGlow {
-  0%,100% { border-color: rgba(91,177,255,0.28); box-shadow: 0 8px 32px rgba(0,0,0,0.50), 0 0 20px rgba(42,171,238,0.10); }
-  50%      { border-color: rgba(91,177,255,0.52); box-shadow: 0 12px 40px rgba(0,0,0,0.55), 0 0 36px rgba(42,171,238,0.22); }
-}
-@keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:.28} }
+@keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:.20} }
 
-/* ── Hero extras ── */
+/* ── Hero stat cards ── */
 .sp-tagline {
-  font-size: 1.10rem; color: rgba(205,228,248,0.72);
-  max-width: 580px; margin: 0 auto 6px; text-align: center; line-height: 1.65;
+  font-size: 1.12rem; color: rgba(205,228,248,0.68);
+  max-width: 600px; margin: 0 auto 42px; text-align: center; line-height: 1.72;
 }
 .sp-stat-row {
-  display: flex; justify-content: center; gap: 18px;
-  flex-wrap: wrap; margin-top: 36px; padding: 0 24px;
+  display: flex; justify-content: center; gap: 20px; flex-wrap: wrap; padding: 0 24px;
 }
 .sp-stat {
-  background: rgba(0,0,0,0.48);
-  border: 1px solid rgba(91,177,255,0.36);
-  border-radius: 14px; padding: 18px 28px; min-width: 148px; text-align: center;
-  backdrop-filter: blur(8px);
-  box-shadow: 0 4px 24px rgba(0,0,0,0.50), 0 0 18px rgba(42,171,238,0.14);
-  animation: cardGlow 4.5s ease-in-out infinite;
+  background: linear-gradient(160deg, rgba(8,16,40,0.96), rgba(4,10,28,0.92));
+  border: 1px solid rgba(91,177,255,0.28);
+  border-radius: 16px; padding: 24px 36px; min-width: 164px; text-align: center;
+  position: relative; overflow: hidden;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.65), 0 0 28px rgba(42,171,238,0.10);
+}
+.sp-stat::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+  background: linear-gradient(90deg, transparent 10%, rgba(139,225,255,0.55) 50%, transparent 90%);
 }
 .sp-stat-val {
-  font-size: 1.85rem; font-weight: 700; color: #6ec6ff;
+  font-size: 2.4rem; font-weight: 700; color: #6ec6ff;
   font-family: 'JetBrains Mono', monospace; line-height: 1;
 }
 .sp-stat-val.green { color: #34d399; }
 .sp-stat-lbl {
-  font-size: .72rem; letter-spacing: .13em; text-transform: uppercase;
-  color: rgba(180,210,238,0.52); margin-top: 7px;
+  font-size: .67rem; letter-spacing: .18em; text-transform: uppercase;
+  color: rgba(180,210,238,0.42); margin-top: 9px;
 }
 
-/* ── Sections ── */
-.s-sec { padding: 56px 0; border-top: 1px solid rgba(91,177,255,0.14); }
+/* ── Section divider ── */
+.s-divider {
+  height: 1px;
+  background: linear-gradient(90deg, transparent 0%, rgba(91,177,255,0.28) 35%, rgba(139,225,255,0.40) 50%, rgba(91,177,255,0.28) 65%, transparent 100%);
+}
+
+/* ── Section spacing ── */
+.s-sec { padding: 70px 0; }
+
+/* ── Typography ── */
 .s-eyebrow {
-  font-size: 10px; letter-spacing: .20em; text-transform: uppercase;
-  color: #6ec6ff; margin-bottom: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .67rem; letter-spacing: .26em; text-transform: uppercase;
+  color: #6ec6ff; margin-bottom: 12px;
 }
 .s-title {
-  font-size: 1.75rem; font-weight: 700; color: rgba(255,255,255,0.96);
-  margin-bottom: 12px; line-height: 1.22;
+  font-size: 2.05rem; font-weight: 700; line-height: 1.18; margin-bottom: 16px;
+  background: linear-gradient(135deg, #ffffff 15%, #8be1ff 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 .s-sub {
-  font-size: 1.00rem; color: rgba(208,228,245,0.80);
-  line-height: 1.72; max-width: 740px;
+  font-size: 1.01rem; color: rgba(205,228,248,0.72); line-height: 1.75; max-width: 760px;
 }
 
-/* ── Concept cards ── */
-.s-concepts { display: grid; grid-template-columns: repeat(3,1fr); gap: 16px; margin-top: 30px; }
-.s-card {
-  background: rgba(4,10,28,0.82);
-  border: 1px solid rgba(91,177,255,0.30);
-  border-radius: 16px; padding: 24px;
-  backdrop-filter: blur(6px);
-  box-shadow: 0 8px 32px rgba(0,0,0,0.50), 0 0 18px rgba(42,171,238,0.10);
-  transition: border-color .25s, box-shadow .25s;
-  animation: cardGlow 5s ease-in-out infinite;
+/* ── How It Works: 3-step layout ── */
+.s-steps {
+  display: grid;
+  grid-template-columns: 1fr 48px 1fr 48px 1fr;
+  align-items: start; margin-top: 40px;
 }
-.s-card:hover {
-  border-color: rgba(91,177,255,0.55);
-  box-shadow: 0 10px 40px rgba(0,0,0,0.55), 0 0 30px rgba(42,171,238,0.22);
+.s-step {
+  background: linear-gradient(160deg, rgba(8,16,40,0.96), rgba(5,12,30,0.90));
+  border: 1px solid rgba(91,177,255,0.18);
+  border-top: 2px solid rgba(91,177,255,0.44);
+  border-radius: 18px; padding: 28px 26px;
+  transition: border-color .24s, box-shadow .24s, transform .24s;
 }
-.s-card-icon {
-  width: 42px; height: 42px; border-radius: 11px;
-  background: rgba(91,177,255,0.14); border: 1px solid rgba(91,177,255,0.34);
-  display: flex; align-items: center; justify-content: center; margin-bottom: 15px;
+.s-step:hover {
+  border-color: rgba(91,177,255,0.40);
+  border-top-color: rgba(139,225,255,0.80);
+  box-shadow: 0 14px 48px rgba(0,0,0,0.62), 0 0 34px rgba(42,171,238,0.18);
+  transform: translateY(-4px);
 }
-.s-card-icon svg { width: 20px; height: 20px; stroke: #6ec6ff; fill: none; stroke-width: 1.8; }
-.s-card-title { font-size: 1.02rem; font-weight: 600; color: rgba(255,255,255,0.95); margin-bottom: 8px; }
-.s-card-body { font-size: .92rem; color: rgba(208,228,245,0.76); line-height: 1.65; }
+.s-step-num {
+  font-family: 'JetBrains Mono', monospace; font-size: .64rem; letter-spacing: .22em;
+  text-transform: uppercase; color: rgba(110,198,255,0.38); margin-bottom: 16px;
+}
+.s-step-icon {
+  width: 50px; height: 50px; border-radius: 14px;
+  background: rgba(91,177,255,0.08); border: 1px solid rgba(91,177,255,0.26);
+  display: flex; align-items: center; justify-content: center; margin-bottom: 16px;
+}
+.s-step-icon svg { width: 22px; height: 22px; stroke: #8be1ff; fill: none; stroke-width: 1.8; }
+.s-step-title { font-size: 1.06rem; font-weight: 700; color: rgba(255,255,255,0.96); margin-bottom: 10px; }
+.s-step-body { font-size: .89rem; color: rgba(205,228,248,0.66); line-height: 1.67; }
+.s-step-arr {
+  display: flex; align-items: flex-start; justify-content: center;
+  padding-top: 90px; color: rgba(91,177,255,0.30); font-size: 1.5rem;
+  user-select: none;
+}
 
-/* ── Use cases ── */
-.s-usecases { display: grid; grid-template-columns: repeat(2,1fr); gap: 12px; margin-top: 26px; }
+/* ── Use cases: 3-col left-accent ── */
+.s-usecases { display: grid; grid-template-columns: repeat(3,1fr); gap: 11px; margin-top: 32px; }
 .s-usecase {
-  display: flex; align-items: flex-start; gap: 14px;
-  background: rgba(4,10,28,0.70); border: 1px solid rgba(91,177,255,0.24);
-  border-radius: 13px; padding: 16px 18px;
-  backdrop-filter: blur(4px);
-  box-shadow: 0 4px 18px rgba(0,0,0,0.40);
+  background: rgba(5,12,32,0.84);
+  border: 1px solid rgba(91,177,255,0.14);
+  border-left: 3px solid rgba(91,177,255,0.42);
+  border-radius: 0 12px 12px 0; padding: 18px 20px;
+  transition: border-left-color .2s, background .2s;
 }
-.s-uc-dot {
-  width: 8px; height: 8px; border-radius: 50%; background: #34d399;
-  flex-shrink: 0; margin-top: 5px; box-shadow: 0 0 8px rgba(52,211,153,0.65);
+.s-usecase:hover {
+  background: rgba(7,16,42,0.92);
+  border-left-color: rgba(139,225,255,0.78);
 }
-.s-uc-title { font-size: .95rem; font-weight: 600; color: rgba(255,255,255,0.92); }
-.s-uc-body { font-size: .88rem; color: rgba(208,228,245,0.70); line-height: 1.58; margin-top: 4px; }
+.s-uc-title { font-size: .96rem; font-weight: 600; color: rgba(255,255,255,0.95); margin-bottom: 7px; }
+.s-uc-body { font-size: .86rem; color: rgba(205,228,248,0.62); line-height: 1.58; }
+
+/* ── Live status banner ── */
+.s-live-banner {
+  display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 32px;
+  padding: 15px 20px;
+  background: rgba(52,211,153,0.05);
+  border: 1px solid rgba(52,211,153,0.18);
+  border-radius: 14px;
+}
+.s-live-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: .73rem; font-weight: 600; color: #34d399;
+  background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.20);
+  padding: 5px 12px; border-radius: 20px;
+}
+.s-live-pill::before {
+  content: ''; display: block; width: 6px; height: 6px; border-radius: 50%;
+  background: #34d399; flex-shrink: 0;
+  box-shadow: 0 0 7px rgba(52,211,153,0.85);
+  animation: livePulse 2.2s ease infinite;
+}
 
 /* ── Two-column layout ── */
-.s-two { display: grid; grid-template-columns: 1fr 1fr; gap: 36px; align-items: start; margin-top: 30px; }
+.s-two { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: start; }
 
 /* ── Status grid ── */
-.s-status-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 9px; }
+.s-status-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 7px; margin-top: 18px; }
 .s-srow {
   display: flex; align-items: center; justify-content: space-between;
-  background: rgba(4,10,28,0.70); border: 1px solid rgba(91,177,255,0.22);
-  border-radius: 10px; padding: 12px 16px;
+  background: rgba(4,10,28,0.78); border: 1px solid rgba(91,177,255,0.14);
+  border-radius: 10px; padding: 11px 15px;
 }
-.s-srow-name { font-size: .91rem; color: rgba(215,232,248,0.88); }
-.s-live { display: inline-flex; align-items: center; gap: 6px; font-size: .80rem; color: #34d399; font-weight: 600; }
-.s-live-dot {
-  width: 7px; height: 7px; border-radius: 50%; background: #34d399; flex-shrink: 0;
-  animation: livePulse 2s ease infinite; box-shadow: 0 0 6px rgba(52,211,153,0.70);
-}
+.s-srow-name { font-size: .87rem; color: rgba(215,232,248,0.84); }
+.s-live-tag { display: inline-flex; align-items: center; gap: 5px; font-size: .74rem; color: #34d399; font-weight: 600; }
+.s-live-dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; flex-shrink: 0; animation: livePulse 2.2s ease infinite; box-shadow: 0 0 5px rgba(52,211,153,0.65); }
 
 /* ── Info list ── */
-.s-infolist { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 10px; }
+.s-infolist { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 7px; }
 .s-infoitem {
-  font-size: .92rem; color: rgba(208,228,245,0.78); padding: 13px 16px;
-  background: rgba(4,10,28,0.70); border: 1px solid rgba(91,177,255,0.20);
-  border-radius: 11px; line-height: 1.55;
+  font-size: .90rem; color: rgba(205,228,248,0.72); padding: 12px 16px;
+  background: rgba(4,10,28,0.76);
+  border: 1px solid rgba(91,177,255,0.13);
+  border-left: 2px solid rgba(91,177,255,0.40);
+  border-radius: 0 10px 10px 0; line-height: 1.56;
 }
-.s-infoitem strong { color: rgba(255,255,255,0.95); display: block; margin-bottom: 3px; }
+.s-infoitem strong { color: rgba(255,255,255,0.96); display: block; margin-bottom: 2px; }
 
-/* ── Template cards ── */
-.s-templates { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-top: 28px; }
+/* ── Template cards: top-accent ── */
+.s-templates { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-top: 30px; }
 .s-tpl {
-  background: rgba(4,10,28,0.82); border: 1px solid rgba(91,177,255,0.28);
-  border-radius: 16px; padding: 20px; display: flex; flex-direction: column;
-  backdrop-filter: blur(6px);
-  box-shadow: 0 8px 28px rgba(0,0,0,0.48), 0 0 14px rgba(42,171,238,0.08);
-  animation: cardGlow 5.5s ease-in-out infinite;
+  background: linear-gradient(160deg, rgba(8,16,40,0.96), rgba(4,10,28,0.88));
+  border: 1px solid rgba(91,177,255,0.17);
+  border-top: 2px solid rgba(91,177,255,0.42);
+  border-radius: 16px; padding: 22px; display: flex; flex-direction: column;
+  transition: border-color .22s, box-shadow .22s, transform .22s;
+}
+.s-tpl:hover {
+  border-color: rgba(91,177,255,0.36);
+  border-top-color: rgba(139,225,255,0.78);
+  box-shadow: 0 12px 42px rgba(0,0,0,0.60), 0 0 28px rgba(42,171,238,0.16);
+  transform: translateY(-3px);
 }
 .s-tpl-tag {
-  font-family: 'JetBrains Mono', monospace; font-size: .76rem; color: #8be1ff;
-  background: rgba(91,177,255,0.12); border: 1px solid rgba(91,177,255,0.28);
-  padding: 4px 9px; border-radius: 6px; display: inline-block; margin-bottom: 12px;
+  font-family: 'JetBrains Mono', monospace; font-size: .70rem; color: #8be1ff;
+  background: rgba(91,177,255,0.08); border: 1px solid rgba(91,177,255,0.20);
+  padding: 4px 9px; border-radius: 6px; display: inline-block; margin-bottom: 14px;
   word-break: break-all;
 }
-.s-tpl-name { font-size: .98rem; font-weight: 600; color: rgba(255,255,255,0.95); margin-bottom: 8px; }
-.s-tpl-body { font-size: .88rem; color: rgba(208,228,245,0.72); line-height: 1.58; flex: 1; }
-.s-tpl-footer { margin-top: 14px; }
-.s-tpl-badge { font-size: .73rem; font-weight: 600; padding: 3px 9px; border-radius: 6px; }
-.s-tpl-badge.has { background: rgba(52,211,153,0.12); color: #34d399; border: 1px solid rgba(52,211,153,0.28); }
-.s-tpl-badge.nob { background: rgba(255,255,255,0.05); color: rgba(208,228,245,0.42); border: 1px solid rgba(255,255,255,0.10); }
+.s-tpl-name { font-size: 1.00rem; font-weight: 700; color: rgba(255,255,255,0.96); margin-bottom: 10px; }
+.s-tpl-body { font-size: .87rem; color: rgba(205,228,248,0.65); line-height: 1.60; flex: 1; }
+.s-tpl-footer { margin-top: 16px; }
+.s-tpl-badge { font-size: .70rem; font-weight: 600; padding: 3px 10px; border-radius: 20px; }
+.s-tpl-badge.has { background: rgba(52,211,153,0.09); color: #34d399; border: 1px solid rgba(52,211,153,0.26); }
+.s-tpl-badge.nob { background: rgba(255,255,255,0.04); color: rgba(208,228,245,0.34); border: 1px solid rgba(255,255,255,0.09); }
 
 /* ── Lifecycle pipeline ── */
-.s-pipeline { display: flex; flex-wrap: wrap; align-items: center; gap: 5px; margin-top: 28px; }
-.s-pstate {
-  background: rgba(4,10,28,0.82); border: 1px solid rgba(91,177,255,0.30);
-  border-radius: 10px; padding: 9px 13px; flex-shrink: 0;
-  font-size: .82rem; font-weight: 600; color: rgba(255,255,255,0.90); white-space: nowrap;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.40);
+.s-pipeline {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 6px;
+  margin-top: 34px; padding: 20px 22px;
+  background: rgba(4,10,28,0.80); border: 1px solid rgba(91,177,255,0.16);
+  border-radius: 14px;
 }
-.s-parr { color: rgba(91,177,255,0.50); font-size: 1.05rem; padding: 0 2px; }
-.s-pterms { display: flex; gap: 8px; flex-wrap: wrap; }
-.s-pterm { font-size: .80rem; font-weight: 600; padding: 8px 14px; border-radius: 10px; }
-.s-pterm.released { background: rgba(52,211,153,0.12); border: 1px solid rgba(52,211,153,0.30); color: #34d399; }
-.s-pterm.refunded { background: rgba(251,191,36,0.10); border: 1px solid rgba(251,191,36,0.26); color: #fbbf24; }
-.s-pterm.other { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.10); color: rgba(208,228,245,0.48); }
+.s-pstate {
+  font-family: 'JetBrains Mono', monospace;
+  background: rgba(91,177,255,0.08); border: 1px solid rgba(91,177,255,0.26);
+  border-radius: 8px; padding: 8px 14px; flex-shrink: 0;
+  font-size: .81rem; font-weight: 600; color: rgba(255,255,255,0.90); white-space: nowrap;
+}
+.s-parr { color: rgba(91,177,255,0.32); font-size: 1.1rem; padding: 0 2px; user-select: none; }
+.s-pterms { display: flex; gap: 7px; flex-wrap: wrap; }
+.s-pterm {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: .78rem; font-weight: 600; padding: 8px 14px; border-radius: 8px;
+}
+.s-pterm.released { background: rgba(52,211,153,0.09); border: 1px solid rgba(52,211,153,0.28); color: #34d399; }
+.s-pterm.refunded { background: rgba(251,191,36,0.08); border: 1px solid rgba(251,191,36,0.24); color: #fbbf24; }
+.s-pterm.other { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.09); color: rgba(208,228,245,0.36); }
 
 /* ── Lifecycle state list ── */
-.s-lc-list { list-style: none; padding: 0; margin: 22px 0 0; display: grid; grid-template-columns: repeat(2,1fr); gap: 9px; }
+.s-lc-list { list-style: none; padding: 0; margin: 18px 0 0; display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
 .s-lc-item {
-  background: rgba(4,10,28,0.70); border: 1px solid rgba(91,177,255,0.20);
-  border-radius: 11px; padding: 13px 15px;
+  background: rgba(4,10,28,0.78); border: 1px solid rgba(91,177,255,0.13);
+  border-left: 2px solid rgba(91,177,255,0.38);
+  border-radius: 0 10px 10px 0; padding: 13px 15px;
 }
-.s-lc-state { font-family: 'JetBrains Mono', monospace; font-size: .80rem; color: #8be1ff; margin-bottom: 5px; }
-.s-lc-desc { font-size: .87rem; color: rgba(208,228,245,0.70); line-height: 1.52; }
+.s-lc-state { font-family: 'JetBrains Mono', monospace; font-size: .77rem; color: #8be1ff; margin-bottom: 5px; }
+.s-lc-desc { font-size: .85rem; color: rgba(205,228,248,0.62); line-height: 1.52; }
 
-/* ── Info box ── */
+/* ── Info / note box ── */
 .s-infobox {
-  background: rgba(4,10,28,0.70); border: 1px solid rgba(91,177,255,0.22);
-  border-radius: 11px; padding: 14px 16px; margin-top: 14px;
-  font-size: .91rem; color: rgba(208,228,245,0.78); line-height: 1.62;
+  background: rgba(91,177,255,0.04); border: 1px solid rgba(91,177,255,0.16);
+  border-left: 3px solid rgba(91,177,255,0.44);
+  border-radius: 0 10px 10px 0; padding: 14px 17px; margin-top: 14px;
+  font-size: .89rem; color: rgba(205,228,248,0.70); line-height: 1.64;
 }
 .s-infobox strong { color: #8be1ff; }
 .s-mono {
-  font-family: 'JetBrains Mono', monospace; font-size: .86em;
+  font-family: 'JetBrains Mono', monospace; font-size: .84em;
   color: #8be1ff; background: rgba(91,177,255,0.10);
   padding: 2px 6px; border-radius: 4px;
 }
 
 /* ── Proof cards ── */
-.s-proof-grid { display: flex; flex-direction: column; gap: 9px; }
+.s-proof-grid { display: flex; flex-direction: column; gap: 7px; }
 .s-proof-card {
-  background: rgba(4,10,28,0.70); border: 1px solid rgba(91,177,255,0.22);
-  border-radius: 11px; padding: 13px 15px;
+  background: rgba(4,10,28,0.80);
+  border: 1px solid rgba(91,177,255,0.13);
+  border-left: 2px solid rgba(91,177,255,0.40);
+  border-radius: 0 10px 10px 0; padding: 12px 16px;
 }
-.s-proof-name { font-family: 'JetBrains Mono', monospace; font-size: .81rem; color: #8be1ff; margin-bottom: 5px; }
-.s-proof-desc { font-size: .88rem; color: rgba(208,228,245,0.70); line-height: 1.52; }
+.s-proof-name { font-family: 'JetBrains Mono', monospace; font-size: .79rem; color: #8be1ff; margin-bottom: 4px; }
+.s-proof-desc { font-size: .86rem; color: rgba(205,228,248,0.62); line-height: 1.50; }
 
-/* ── Principles ── */
-.s-principles { list-style: none; padding: 0; margin: 24px 0 0; display: grid; grid-template-columns: repeat(2,1fr); gap: 10px; }
+/* ── Trust principles: 3-col ── */
+.s-principles { list-style: none; padding: 0; margin: 30px 0 0; display: grid; grid-template-columns: repeat(3,1fr); gap: 12px; }
 .s-principle {
-  display: flex; align-items: flex-start; gap: 12px;
-  background: rgba(4,10,28,0.70); border: 1px solid rgba(91,177,255,0.22);
-  border-radius: 13px; padding: 15px 17px;
+  background: linear-gradient(160deg, rgba(8,16,40,0.92), rgba(4,10,28,0.86));
+  border: 1px solid rgba(91,177,255,0.15);
+  border-top: 2px solid rgba(52,211,153,0.30);
+  border-radius: 14px; padding: 20px 18px;
+  transition: border-top-color .22s, transform .22s;
 }
+.s-principle:hover { border-top-color: rgba(52,211,153,0.65); transform: translateY(-3px); }
 .s-picon {
-  width: 22px; height: 22px; border-radius: 50%;
-  background: rgba(52,211,153,0.14); border: 1px solid rgba(52,211,153,0.30);
-  display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+  width: 36px; height: 36px; border-radius: 10px;
+  background: rgba(52,211,153,0.08); border: 1px solid rgba(52,211,153,0.24);
+  display: flex; align-items: center; justify-content: center; margin-bottom: 14px;
 }
-.s-picon svg { width: 11px; height: 11px; stroke: #34d399; fill: none; stroke-width: 2.5; }
-.s-ptext { font-size: .92rem; color: rgba(210,230,245,0.82); line-height: 1.52; }
-.s-ptext strong { color: rgba(255,255,255,0.95); display: block; margin-bottom: 3px; }
+.s-picon svg { width: 14px; height: 14px; stroke: #34d399; fill: none; stroke-width: 2.4; }
+.s-ptext { font-size: .90rem; color: rgba(210,230,245,0.72); line-height: 1.54; }
+.s-ptext strong { color: rgba(255,255,255,0.96); display: block; margin-bottom: 4px; font-size: .96rem; }
 
-/* ── Roadmap ── */
-.s-roadmap { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-top: 28px; }
-.s-phase {
-  background: rgba(4,10,28,0.82); border: 1px solid rgba(91,177,255,0.28);
-  border-radius: 16px; padding: 20px; display: flex; flex-direction: column;
-  backdrop-filter: blur(6px);
-  box-shadow: 0 8px 28px rgba(0,0,0,0.48), 0 0 14px rgba(42,171,238,0.08);
-  animation: cardGlow 5.5s ease-in-out infinite;
+/* ── Roadmap: 4-col with timeline connector ── */
+.s-roadmap { display: grid; grid-template-columns: repeat(4,1fr); gap: 14px; margin-top: 34px; position: relative; }
+.s-roadmap::before {
+  content: ''; position: absolute; top: 36px; left: 12.5%; right: 12.5%; height: 1px;
+  background: linear-gradient(90deg, rgba(91,177,255,0.10), rgba(91,177,255,0.26), rgba(91,177,255,0.10));
+  pointer-events: none; z-index: 0;
 }
-.s-phase-num { font-size: .73rem; letter-spacing: .14em; text-transform: uppercase; color: rgba(110,198,255,0.65); margin-bottom: 9px; }
-.s-phase-name { font-size: .98rem; font-weight: 700; color: rgba(255,255,255,0.95); margin-bottom: 10px; }
-.s-phase-body { font-size: .88rem; color: rgba(208,228,245,0.68); line-height: 1.58; flex: 1; margin-bottom: 14px; }
-.s-phase-badge { font-size: .72rem; font-weight: 700; padding: 4px 10px; border-radius: 6px; display: inline-block; align-self: flex-start; }
-.s-phase-badge.live { background: rgba(52,211,153,0.12); color: #34d399; border: 1px solid rgba(52,211,153,0.28); }
-.s-phase-badge.plan { background: rgba(255,255,255,0.05); color: rgba(208,228,245,0.44); border: 1px solid rgba(255,255,255,0.10); }
+.s-phase {
+  background: linear-gradient(160deg, rgba(8,16,40,0.96), rgba(4,10,28,0.90));
+  border: 1px solid rgba(91,177,255,0.17);
+  border-top: 2px solid rgba(91,177,255,0.38);
+  border-radius: 18px; padding: 24px 20px; display: flex; flex-direction: column;
+  position: relative; z-index: 1;
+  transition: border-color .22s, box-shadow .22s, transform .22s;
+}
+.s-phase:hover {
+  border-color: rgba(91,177,255,0.36);
+  border-top-color: rgba(139,225,255,0.75);
+  box-shadow: 0 12px 42px rgba(0,0,0,0.60), 0 0 26px rgba(42,171,238,0.15);
+  transform: translateY(-4px);
+}
+.s-phase-num {
+  font-family: 'JetBrains Mono', monospace; font-size: .64rem; letter-spacing: .20em;
+  text-transform: uppercase; color: rgba(110,198,255,0.40); margin-bottom: 10px;
+}
+.s-phase-name { font-size: 1.00rem; font-weight: 700; color: rgba(255,255,255,0.96); margin-bottom: 12px; }
+.s-phase-body { font-size: .86rem; color: rgba(205,228,248,0.60); line-height: 1.60; flex: 1; margin-bottom: 16px; }
+.s-phase-badge { font-size: .69rem; font-weight: 700; padding: 4px 11px; border-radius: 20px; display: inline-block; align-self: flex-start; }
+.s-phase-badge.live { background: rgba(52,211,153,0.09); color: #34d399; border: 1px solid rgba(52,211,153,0.26); }
+.s-phase-badge.plan { background: rgba(255,255,255,0.04); color: rgba(208,228,245,0.34); border: 1px solid rgba(255,255,255,0.09); }
 
 /* ── CLI ── */
-.s-cli-group { margin-bottom: 26px; }
-.s-cli-label { font-size: .75rem; letter-spacing: .13em; text-transform: uppercase; color: rgba(180,210,238,0.46); margin-bottom: 7px; }
+.s-cli-group { margin-bottom: 28px; }
+.s-cli-label {
+  font-family: 'JetBrains Mono', monospace; font-size: .64rem; letter-spacing: .22em;
+  text-transform: uppercase; color: rgba(110,198,255,0.40); margin-bottom: 8px;
+}
 pre.s-pre {
-  background: rgba(1,4,14,0.97); border: 1px solid rgba(91,177,255,0.22);
-  border-radius: 12px; padding: 16px 18px; overflow-x: auto;
+  background: rgba(1,3,12,0.98);
+  border: 1px solid rgba(91,177,255,0.15);
+  border-left: 3px solid rgba(91,177,255,0.44);
+  border-radius: 0 12px 12px 0; padding: 18px 20px; overflow-x: auto;
   color: #cce4ff; font-family: 'JetBrains Mono', monospace;
-  font-size: .85rem; line-height: 1.70; margin: 0;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.50);
+  font-size: .84rem; line-height: 1.72; margin: 0;
+  box-shadow: 0 6px 28px rgba(0,0,0,0.60);
 }
 
 /* ── CTA ── */
-.s-cta {
-  text-align: center; padding: 64px 24px 80px;
-  border-top: 1px solid rgba(91,177,255,0.14);
+.s-cta { text-align: center; padding: 72px 24px 88px; }
+.s-cta-title {
+  font-size: 2.2rem; font-weight: 700; margin-bottom: 14px;
+  background: linear-gradient(135deg, #ffffff 15%, #8be1ff 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
-.s-cta-title { font-size: 1.85rem; font-weight: 700; color: rgba(255,255,255,0.96); margin-bottom: 12px; }
-.s-cta-sub { font-size: 1.00rem; color: rgba(208,228,245,0.68); margin-bottom: 30px; max-width: 480px; margin-left: auto; margin-right: auto; }
+.s-cta-sub { font-size: 1.00rem; color: rgba(205,228,248,0.62); margin-bottom: 32px; max-width: 480px; margin-left: auto; margin-right: auto; }
 .s-btn {
-  display: inline-flex; align-items: center; gap: 10px; padding: 14px 28px;
-  background: rgba(91,177,255,0.14); border: 1px solid rgba(91,177,255,0.44);
-  border-radius: 12px; color: #8be1ff; font-size: 1.00rem; font-weight: 600;
-  text-decoration: none; transition: background .2s, border-color .2s, box-shadow .2s;
-  box-shadow: 0 0 18px rgba(42,171,238,0.14);
+  display: inline-flex; align-items: center; gap: 10px; padding: 15px 30px;
+  background: rgba(91,177,255,0.10); border: 1px solid rgba(91,177,255,0.38);
+  border-radius: 12px; color: #8be1ff; font-size: 1.01rem; font-weight: 600;
+  text-decoration: none; transition: all .22s;
+  box-shadow: 0 0 22px rgba(42,171,238,0.12);
 }
 .s-btn:hover {
-  background: rgba(91,177,255,0.24); border-color: rgba(91,177,255,0.65);
-  color: #c2f0ff; box-shadow: 0 0 28px rgba(42,171,238,0.28);
+  background: rgba(91,177,255,0.20); border-color: rgba(91,177,255,0.65);
+  color: #c2f0ff; box-shadow: 0 0 38px rgba(42,171,238,0.28);
+  transform: translateY(-2px);
 }
 .s-btn svg { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
-.s-cta-note { margin-top: 14px; font-size: .82rem; color: rgba(175,210,238,0.40); }
+.s-cta-note { margin-top: 16px; font-size: .81rem; color: rgba(175,210,238,0.32); }
 
 /* ── Responsive ── */
-@media (max-width: 900px) {
-  .s-concepts { grid-template-columns: repeat(2,1fr); }
-  .s-templates { grid-template-columns: repeat(2,1fr); }
-  .s-roadmap { grid-template-columns: repeat(2,1fr); }
-  .s-two { grid-template-columns: 1fr; gap: 24px; }
-  .s-usecases, .s-status-grid, .s-lc-list, .s-principles { grid-template-columns: 1fr; }
+@media (max-width: 960px) {
+  .s-steps { grid-template-columns: 1fr; }
+  .s-step-arr { display: none; }
+  .s-templates, .s-roadmap { grid-template-columns: repeat(2,1fr); }
+  .s-principles { grid-template-columns: repeat(2,1fr); }
+  .s-two { grid-template-columns: 1fr; gap: 26px; }
+  .s-usecases, .s-status-grid, .s-lc-list { grid-template-columns: 1fr; }
 }
-@media (max-width: 540px) {
-  .s-concepts, .s-templates, .s-roadmap { grid-template-columns: 1fr; }
+@media (max-width: 600px) {
+  .s-templates, .s-roadmap, .s-principles, .s-usecases { grid-template-columns: 1fr; }
+  .s-title { font-size: 1.55rem; }
   .sp-stat-row { gap: 12px; }
-  .s-title { font-size: 1.45rem; }
+  .s-wrap { padding: 0 20px; }
 }
 </style>
 </head>
@@ -333,30 +420,37 @@ pre.s-pre {
   <div class="s-eyebrow">Overview</div>
   <h2 class="s-title">Settlement-first blockchain for escrow, agreements, and proof-based commerce</h2>
   <p class="s-sub">Irium is an independent SHA-256d Proof-of-Work chain built from scratch in Rust. Its commercial purpose is trust-minimized settlement — what happens before release, after timeout, at refund, or when a verifiable condition is met.</p>
-  <div class="s-concepts">
-    <div class="s-card">
-      <div class="s-card-icon">
+  <div class="s-steps">
+    <div class="s-step">
+      <div class="s-step-num">STEP 01</div>
+      <div class="s-step-icon">
         <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
       </div>
-      <div class="s-card-title">HTLC Escrow</div>
-      <div class="s-card-body">Funds are locked on-chain in a Hash Time-Locked Contract. Release requires the secret preimage; refund is available after the timeout block height. No privileged party controls the outcome.</div>
+      <div class="s-step-title">HTLC Escrow</div>
+      <div class="s-step-body">Funds are locked on-chain in a Hash Time-Locked Contract. Release requires the secret preimage; refund is available after the timeout block height. No privileged party controls the outcome.</div>
     </div>
-    <div class="s-card">
-      <div class="s-card-icon">
+    <div class="s-step-arr">&#8594;</div>
+    <div class="s-step">
+      <div class="s-step-num">STEP 02</div>
+      <div class="s-step-icon">
         <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
       </div>
-      <div class="s-card-title">Proof Engine</div>
-      <div class="s-card-body">Attestors submit cryptographic proofs against an agreement hash. A configurable policy defines which proof types and attestors are required before the release path is unlocked.</div>
+      <div class="s-step-title">Proof Engine</div>
+      <div class="s-step-body">Attestors submit cryptographic proofs against an agreement hash. A configurable policy defines which proof types and attestors are required before the release path is unlocked.</div>
     </div>
-    <div class="s-card">
-      <div class="s-card-icon">
+    <div class="s-step-arr">&#8594;</div>
+    <div class="s-step">
+      <div class="s-step-num">STEP 03</div>
+      <div class="s-step-icon">
         <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
       </div>
-      <div class="s-card-title">Timeout Refund</div>
-      <div class="s-card-body">If the counterparty does not perform, the funder reclaims automatically after the refund timeout block height. No admin action required — the chain enforces it.</div>
+      <div class="s-step-title">Timeout Refund</div>
+      <div class="s-step-body">If the counterparty does not perform, the funder reclaims automatically after the refund timeout block height. No admin action required — the chain enforces it.</div>
     </div>
   </div>
 </section>
+
+<div class="s-divider"></div>
 
 <!-- 2. Use Cases -->
 <section class="s-sec">
@@ -365,66 +459,60 @@ pre.s-pre {
   <p class="s-sub">Commercial coordination requires more than a transfer. Irium provides the infrastructure for conditional release, milestone payouts, and explicit refund paths.</p>
   <div class="s-usecases">
     <div class="s-usecase">
-      <div class="s-uc-dot"></div>
-      <div>
-        <div class="s-uc-title">OTC Escrow</div>
-        <div class="s-uc-body">Safer peer-to-peer trading. Seller locks IRM in escrow; buyer delivers off-chain payment; seller reveals the preimage to release funds to the buyer.</div>
-      </div>
+      <div class="s-uc-title">OTC Escrow</div>
+      <div class="s-uc-body">Safer peer-to-peer trading. Seller locks IRM in escrow; buyer delivers off-chain payment; seller reveals the preimage to release funds to the buyer.</div>
     </div>
     <div class="s-usecase">
-      <div class="s-uc-dot"></div>
-      <div>
-        <div class="s-uc-title">Contractor and Service Payments</div>
-        <div class="s-uc-body">Milestone-oriented release logic. Each deliverable leg funded and released independently with its own proof requirement and timeout.</div>
-      </div>
+      <div class="s-uc-title">Contractor and Service Payments</div>
+      <div class="s-uc-body">Milestone-oriented release logic. Each deliverable leg funded and released independently with its own proof requirement and timeout.</div>
     </div>
     <div class="s-usecase">
-      <div class="s-uc-dot"></div>
-      <div>
-        <div class="s-uc-title">Refundable Deposits</div>
-        <div class="s-uc-body">Security deposits and preorders with explicit refund paths. Funds return to payer on timeout if the payee does not authorize release.</div>
-      </div>
+      <div class="s-uc-title">Refundable Deposits</div>
+      <div class="s-uc-body">Security deposits and preorders with explicit refund paths. Funds return to payer on timeout if the payee does not authorize release.</div>
     </div>
     <div class="s-usecase">
-      <div class="s-uc-dot"></div>
-      <div>
-        <div class="s-uc-title">Milestone Settlement</div>
-        <div class="s-uc-body">Staged commercial payouts. Multiple milestones each carry their own amount, secret hash, and timeout — independently fundable and releasable.</div>
-      </div>
+      <div class="s-uc-title">Milestone Settlement</div>
+      <div class="s-uc-body">Staged commercial payouts. Multiple milestones each carry their own amount, secret hash, and timeout — independently fundable and releasable.</div>
     </div>
     <div class="s-usecase">
-      <div class="s-uc-dot"></div>
-      <div>
-        <div class="s-uc-title">Verifiable Commercial Agreements</div>
-        <div class="s-uc-body">Agreement hash anchored to chain state. Off-chain terms bound to on-chain outcomes via document hash and cryptographic proof submission.</div>
-      </div>
+      <div class="s-uc-title">Verifiable Commercial Agreements</div>
+      <div class="s-uc-body">Agreement hash anchored to chain state. Off-chain terms bound to on-chain outcomes via document hash and cryptographic proof submission.</div>
     </div>
     <div class="s-usecase">
-      <div class="s-uc-dot"></div>
-      <div>
-        <div class="s-uc-title">Merchant Delayed Settlement</div>
-        <div class="s-uc-body">Merchant-side settlement with a defined payout deadline. Funds are held in escrow until the merchant triggers release or the buyer reclaims after timeout.</div>
-      </div>
+      <div class="s-uc-title">Merchant Delayed Settlement</div>
+      <div class="s-uc-body">Merchant-side settlement with a defined payout deadline. Funds are held in escrow until the merchant triggers release or the buyer reclaims after timeout.</div>
     </div>
   </div>
 </section>
+
+<div class="s-divider"></div>
 
 <!-- 3. What's Live -->
 <section class="s-sec">
   <div class="s-eyebrow">Network Status</div>
   <h2 class="s-title">What is live today</h2>
+  <div class="s-live-banner">
+    <span class="s-live-pill">SHA-256d PoW Chain</span>
+    <span class="s-live-pill">Settlement Layer</span>
+    <span class="s-live-pill">OTC Marketplace</span>
+    <span class="s-live-pill">Proof Ecosystem</span>
+    <span class="s-live-pill">Reputation System</span>
+    <span class="s-live-pill">Public Explorer</span>
+    <span class="s-live-pill">Public Mining Pool</span>
+    <span class="s-live-pill">Fair Launch</span>
+  </div>
   <div class="s-two">
     <div>
-      <p class="s-sub" style="margin-bottom:18px;">The settlement layer, OTC marketplace, reputation system, and proof ecosystem are all live on mainnet. The base chain is an independent SHA-256d Proof-of-Work blockchain built from scratch in Rust — not a fork.</p>
+      <p class="s-sub">The settlement layer, OTC marketplace, reputation system, and proof ecosystem are all live on mainnet. The base chain is an independent SHA-256d Proof-of-Work blockchain built from scratch in Rust — not a fork.</p>
       <div class="s-status-grid">
-        <div class="s-srow"><span class="s-srow-name">SHA-256d PoW Chain</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
-        <div class="s-srow"><span class="s-srow-name">Settlement Layer</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
-        <div class="s-srow"><span class="s-srow-name">OTC Marketplace</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
-        <div class="s-srow"><span class="s-srow-name">Proof Ecosystem</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
-        <div class="s-srow"><span class="s-srow-name">Reputation System</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
-        <div class="s-srow"><span class="s-srow-name">Public Explorer</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
-        <div class="s-srow"><span class="s-srow-name">Public Mining Pool</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
-        <div class="s-srow"><span class="s-srow-name">No Premine / No ICO</span><span class="s-live"><span class="s-live-dot"></span>Fair Launch</span></div>
+        <div class="s-srow"><span class="s-srow-name">SHA-256d PoW Chain</span><span class="s-live-tag"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">Settlement Layer</span><span class="s-live-tag"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">OTC Marketplace</span><span class="s-live-tag"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">Proof Ecosystem</span><span class="s-live-tag"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">Reputation System</span><span class="s-live-tag"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">Public Explorer</span><span class="s-live-tag"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">Public Mining Pool</span><span class="s-live-tag"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">No Premine / No ICO</span><span class="s-live-tag"><span class="s-live-dot"></span>Fair Launch</span></div>
       </div>
     </div>
     <div>
@@ -438,6 +526,8 @@ pre.s-pre {
     </div>
   </div>
 </section>
+
+<div class="s-divider"></div>
 
 <!-- 4. Agreement Templates -->
 <section class="s-sec">
@@ -484,6 +574,8 @@ pre.s-pre {
   </div>
 </section>
 
+<div class="s-divider"></div>
+
 <!-- 5. Lifecycle -->
 <section class="s-sec">
   <div class="s-eyebrow">Lifecycle</div>
@@ -518,6 +610,8 @@ pre.s-pre {
   <div class="s-infobox"><strong>release_eligible</strong> is the authoritative gate. Release eligibility requires both proof finality (proof buried at least 6 blocks deep by default) and a satisfied release policy. Wait for <span class="s-mono">release_eligible: true</span> on the agreement status response before releasing funds.</div>
 </section>
 
+<div class="s-divider"></div>
+
 <!-- 6. Proof Engine -->
 <section class="s-sec">
   <div class="s-eyebrow">Proof Engine</div>
@@ -525,14 +619,14 @@ pre.s-pre {
   <div class="s-two">
     <div>
       <p class="s-sub">On top of the base HTLC, a proof submission and policy evaluation layer allows release conditions to be verified programmatically before funds move.</p>
-      <p class="s-sub" style="margin-top:13px;">Attestors submit signed proof objects against an agreement hash. A configurable policy defines which proof types are required and which attestors are accepted. The evaluator counts only unique attestor identities — duplicate proofs from the same attestor count as one.</p>
-      <div class="s-infobox" style="margin-top:16px;"><strong>Proof finality depth</strong> — default 6 blocks. A proof is final after its block is buried at least 6 blocks deep (configurable via <span class="s-mono">IRIUM_PROOF_FINALITY_DEPTH</span>). If a chain reorganization removes the proof block, iriumd emits <span class="s-mono">agreement.proof_reorged</span> and the proof must be resubmitted.</div>
+      <p class="s-sub" style="margin-top:14px;">Attestors submit signed proof objects against an agreement hash. A configurable policy defines which proof types are required and which attestors are accepted. The evaluator counts only unique attestor identities — duplicate proofs from the same attestor count as one.</p>
+      <div class="s-infobox" style="margin-top:18px;"><strong>Proof finality depth</strong> — default 6 blocks. A proof is final after its block is buried at least 6 blocks deep (configurable via <span class="s-mono">IRIUM_PROOF_FINALITY_DEPTH</span>). If a chain reorganization removes the proof block, iriumd emits <span class="s-mono">agreement.proof_reorged</span> and the proof must be resubmitted.</div>
       <div class="s-infobox"><strong>Holdback</strong> — policies can declare a fraction of the escrowed amount in basis points that stays locked after the base release condition is met, releasing on its own deadline or proof requirement.</div>
       <div class="s-infobox"><strong>Attestor bonds</strong> — attestors may register an on-chain bond to signal accountability. Contradicting proofs from the same attestor can be slashed on-chain via an OP_RETURN anchor transaction.</div>
       <div class="s-infobox"><strong>N-of-M thresholds</strong> — a policy can require N-of-M attestor signatures. The evaluator counts only unique attestor identities across the active proof set.</div>
     </div>
     <div>
-      <p class="s-sub" style="margin-bottom:13px;">Five standard proof schema kinds:</p>
+      <p class="s-sub" style="margin-bottom:14px;">Five standard proof schema kinds:</p>
       <div class="s-proof-grid">
         <div class="s-proof-card"><div class="s-proof-name">delivery_confirmed</div><div class="s-proof-desc">Attestor confirms goods, services, or a deliverable was received.</div></div>
         <div class="s-proof-card"><div class="s-proof-name">payment_confirmed</div><div class="s-proof-desc">Attestor confirms off-chain payment (e.g. bank transfer, USDT) was received.</div></div>
@@ -543,6 +637,8 @@ pre.s-pre {
     </div>
   </div>
 </section>
+
+<div class="s-divider"></div>
 
 <!-- 7. Principles -->
 <section class="s-sec">
@@ -577,6 +673,8 @@ pre.s-pre {
   </ul>
 </section>
 
+<div class="s-divider"></div>
+
 <!-- 8. Roadmap -->
 <section class="s-sec">
   <div class="s-eyebrow">Roadmap</div>
@@ -610,11 +708,13 @@ pre.s-pre {
   </div>
 </section>
 
+<div class="s-divider"></div>
+
 <!-- 9. CLI -->
 <section class="s-sec">
   <div class="s-eyebrow">CLI Reference</div>
-  <h2 class="s-title">Using settlement via <span class="s-mono" style="font-size:.85em;">irium-wallet</span></h2>
-  <p class="s-sub" style="margin-bottom:26px;">The <span class="s-mono">irium-wallet</span> CLI handles the full agreement lifecycle from wallet setup through funding, proof submission, and release. All chain commands accept <span class="s-mono">--rpc &lt;url&gt;</span> to specify a node (default: <span class="s-mono">http://127.0.0.1:38300</span>).</p>
+  <h2 class="s-title">Using settlement via <span class="s-mono" style="font-size:.82em;">irium-wallet</span></h2>
+  <p class="s-sub" style="margin-bottom:28px;">The <span class="s-mono">irium-wallet</span> CLI handles the full agreement lifecycle from wallet setup through funding, proof submission, and release. All chain commands accept <span class="s-mono">--rpc &lt;url&gt;</span> to specify a node (default: <span class="s-mono">http://127.0.0.1:38300</span>).</p>
   <div class="s-cli-group">
     <div class="s-cli-label">Wallet Setup</div>
     <pre class="s-pre">irium-wallet init
@@ -663,6 +763,8 @@ irium-wallet agreement-release agreement.json \
     <pre class="s-pre">irium-wallet watch --auto-release</pre>
   </div>
 </section>
+
+<div class="s-divider"></div>
 
 <!-- 10. CTA -->
 <section class="s-cta">

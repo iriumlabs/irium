@@ -3,118 +3,238 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<meta name="description" content="Understand Irium’s settlement-first direction and how the live PoW chain connects to escrow, agreements, and proof-based commerce.">
+<meta name="description" content="Irium settlement system — HTLC-based escrow, agreement templates, proof engine, and CLI tools for trust-minimized commerce on a live SHA-256d PoW blockchain.">
 <title>Settlement | Irium</title>
 <link rel="stylesheet" href="https://www.iriumlabs.org/style.css?v=9">
 <link rel="icon" type="image/png" href="https://www.iriumlabs.org/assets/irium-logo-alt-transparent.png?v=1">
 <link rel="stylesheet" href="https://www.iriumlabs.org/assets/css/elite-theme.css?v=2">
 <style>
-  .settlement-page .hero-whitepaper .container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 0 20px;
-  }
-  .settlement-page .wp-shell {
-    display: grid;
-    gap: 18px;
-    margin-top: 18px;
-  }
-  .settlement-page .wp-body {
-    background: rgba(0,0,0,0.32);
-    border: 1px solid rgba(91,177,255,0.34);
-    border-radius: 14px;
-    padding: 18px;
-    box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 30px rgba(42,171,238,0.20);
-    backdrop-filter: blur(6px);
-    -webkit-backdrop-filter: blur(6px);
-    position: relative;
-    overflow: hidden;
-  }
-  .settlement-page .wp-body:before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: 14px;
-    pointer-events: none;
-    box-shadow: 0 0 26px rgba(42,171,238,0.20), inset 0 0 18px rgba(42,171,238,0.10);
-    animation: xGridAura 4.2s ease-in-out infinite;
-  }
-  .settlement-page .wp-body > * { position: relative; z-index: 1; }
-  .settlement-page .wp-header {
-    background: rgba(0,0,0,0.18);
-    border: 1px solid rgba(91,177,255,0.30);
-    border-radius: 16px;
-    padding: 16px;
-    margin-bottom: 12px;
-    animation: xGridGlow 4.8s ease-in-out infinite;
-  }
-  .settlement-page .wp-section {
-    background: rgba(0,0,0,0.18);
-    border: 1px solid rgba(91,177,255,0.30);
-    border-radius: 16px;
-    padding: 16px;
-    margin-top: 12px;
-    animation: xGridGlow 4.8s ease-in-out infinite;
-  }
-  .settlement-page .wp-section h2,
-  .settlement-page .wp-section h3,
-  .settlement-page .wp-header h1 { color: rgba(255,255,255,0.95); }
-  .settlement-page .wp-body p,
-  .settlement-page .wp-body li,
-  .settlement-page .wp-body td,
-  .settlement-page .wp-body th { color: rgba(230,237,243,0.9); }
-  .settlement-page .wp-body a { color: #8be1ff; text-decoration: underline; text-underline-offset: 2px; }
-  .settlement-page .wp-body a:hover { color: #c2f0ff; }
-  .settlement-page pre,
-  .settlement-page .code-block {
-    background: rgba(2,7,14,0.95);
-    border: 1px solid rgba(148,186,240,.26);
-    border-radius: 10px;
-    padding: 11px;
-    overflow-x: auto;
-    color: #e9f2ff;
-  }
-  .settlement-page .wp-table {
-    width: 100%;
-    border-collapse: collapse;
-    overflow: hidden;
-    border-radius: 10px;
-    border: 1px solid rgba(91,177,255,0.24);
-  }
-  .settlement-page .wp-table th,
-  .settlement-page .wp-table td {
-    padding: 10px;
-    border-bottom: 1px solid rgba(91,177,255,0.16);
-    vertical-align: top;
-  }
-  .settlement-page .wp-subtitle {
-    color: rgba(205, 224, 244, 0.86);
-    margin-top: .35rem;
-  }
-  .settlement-page .wp-badges {
-    display: flex;
-    flex-wrap: wrap;
-    gap: .65rem;
-    margin-top: .85rem;
-  }
-  .settlement-page .badge {
-    display: inline-flex;
-    align-items: center;
-    padding: .42rem .7rem;
-    border-radius: 999px;
-    background: rgba(35, 166, 213, 0.20);
-    border: 1px solid rgba(91,177,255,0.28);
-    color: #e8f7ff;
-    font-size: .86rem;
-  }
-  @keyframes xGridGlow {
-    0%,100% { border-color: rgba(91,177,255,0.32); box-shadow: 0 12px 34px rgba(0,0,0,0.38), 0 0 26px rgba(42,171,238,0.16); }
-    50% { border-color: rgba(91,177,255,0.60); box-shadow: 0 16px 42px rgba(0,0,0,0.44), 0 0 40px rgba(42,171,238,0.34); }
-  }
-  @keyframes xGridAura {
-    0%,100% { opacity: .62; box-shadow: 0 0 20px rgba(42,171,238,0.18), inset 0 0 14px rgba(42,171,238,0.08); }
-    50% { opacity: .95; box-shadow: 0 0 36px rgba(42,171,238,0.34), inset 0 0 24px rgba(42,171,238,0.16); }
-  }
+/* ── Settlement Page Redesign ── */
+.sp { font-family: 'Space Grotesk', system-ui, sans-serif; }
+.sp .s-wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
+
+/* Hero additions */
+.sp-tagline {
+  font-size: 1.08rem; color: rgba(195,220,242,0.65);
+  max-width: 600px; margin: 0 auto 8px; text-align: center; line-height: 1.65;
+}
+.sp-stat-row {
+  display: flex; justify-content: center; gap: 16px;
+  flex-wrap: wrap; margin-top: 32px; padding: 0 24px;
+}
+.sp-stat {
+  background: rgba(4,7,20,0.80); border: 1px solid rgba(91,177,255,0.22);
+  border-radius: 13px; padding: 16px 24px; min-width: 140px; text-align: center;
+  backdrop-filter: blur(4px);
+}
+.sp-stat-val {
+  font-size: 1.65rem; font-weight: 700; color: #5bb1ff;
+  font-family: 'JetBrains Mono', monospace; line-height: 1;
+}
+.sp-stat-val.green { color: #34d399; }
+.sp-stat-lbl {
+  font-size: .70rem; letter-spacing: .12em; text-transform: uppercase;
+  color: rgba(175,205,230,0.44); margin-top: 6px;
+}
+
+/* Sections */
+.s-sec { padding: 52px 0; border-top: 1px solid rgba(91,177,255,0.09); }
+.s-eyebrow {
+  font-size: 10px; letter-spacing: .18em; text-transform: uppercase;
+  color: #5bb1ff; margin-bottom: 7px;
+}
+.s-title {
+  font-size: 1.60rem; font-weight: 700; color: rgba(255,255,255,0.94);
+  margin-bottom: 10px; line-height: 1.25;
+}
+.s-sub {
+  font-size: .95rem; color: rgba(198,220,240,0.68);
+  line-height: 1.70; max-width: 720px;
+}
+
+/* Concept cards — 3 col */
+.s-concepts { display: grid; grid-template-columns: repeat(3,1fr); gap: 14px; margin-top: 28px; }
+.s-card {
+  background: rgba(4,7,20,0.72); border: 1px solid rgba(91,177,255,0.17);
+  border-radius: 14px; padding: 22px; transition: border-color .2s;
+}
+.s-card:hover { border-color: rgba(91,177,255,0.38); }
+.s-card-icon {
+  width: 38px; height: 38px; border-radius: 10px;
+  background: rgba(91,177,255,0.09); border: 1px solid rgba(91,177,255,0.20);
+  display: flex; align-items: center; justify-content: center; margin-bottom: 13px;
+}
+.s-card-icon svg { width: 19px; height: 19px; stroke: #5bb1ff; fill: none; stroke-width: 1.8; }
+.s-card-title { font-size: .96rem; font-weight: 600; color: rgba(255,255,255,0.90); margin-bottom: 7px; }
+.s-card-body { font-size: .85rem; color: rgba(192,216,238,0.60); line-height: 1.60; }
+
+/* Use cases — 2 col */
+.s-usecases { display: grid; grid-template-columns: repeat(2,1fr); gap: 11px; margin-top: 24px; }
+.s-usecase {
+  display: flex; align-items: flex-start; gap: 13px;
+  background: rgba(4,7,20,0.55); border: 1px solid rgba(91,177,255,0.13);
+  border-radius: 12px; padding: 15px 17px;
+}
+.s-uc-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: #34d399;
+  flex-shrink: 0; margin-top: 5px; box-shadow: 0 0 6px rgba(52,211,153,0.55);
+}
+.s-uc-title { font-size: .91rem; font-weight: 600; color: rgba(255,255,255,0.87); }
+.s-uc-body { font-size: .83rem; color: rgba(192,216,238,0.56); line-height: 1.55; margin-top: 3px; }
+
+/* Two-column layout */
+.s-two { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start; margin-top: 28px; }
+
+/* Status grid */
+.s-status-grid { display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
+.s-srow {
+  display: flex; align-items: center; justify-content: space-between;
+  background: rgba(4,7,20,0.55); border: 1px solid rgba(91,177,255,0.12);
+  border-radius: 9px; padding: 11px 14px;
+}
+.s-srow-name { font-size: .86rem; color: rgba(202,222,240,0.76); }
+.s-live {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: .76rem; color: #34d399; font-weight: 600;
+}
+.s-live-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: #34d399;
+  flex-shrink: 0; animation: livePulse 2s ease infinite;
+  box-shadow: 0 0 5px rgba(52,211,153,0.65);
+}
+@keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:.30} }
+
+/* Info list items */
+.s-infolist { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 9px; }
+.s-infoitem {
+  font-size: .87rem; color: rgba(198,220,240,0.68); padding: 11px 14px;
+  background: rgba(4,7,20,0.55); border: 1px solid rgba(91,177,255,0.12);
+  border-radius: 10px; line-height: 1.50;
+}
+.s-infoitem strong { color: rgba(255,255,255,0.87); display: block; margin-bottom: 2px; }
+
+/* Template cards — 3 col */
+.s-templates { display: grid; grid-template-columns: repeat(3,1fr); gap: 13px; margin-top: 26px; }
+.s-tpl {
+  background: rgba(4,7,20,0.72); border: 1px solid rgba(91,177,255,0.17);
+  border-radius: 14px; padding: 19px; display: flex; flex-direction: column;
+}
+.s-tpl-tag {
+  font-family: 'JetBrains Mono', monospace; font-size: .74rem; color: #8be1ff;
+  background: rgba(91,177,255,0.08); border: 1px solid rgba(91,177,255,0.18);
+  padding: 4px 8px; border-radius: 6px; display: inline-block; margin-bottom: 11px;
+  word-break: break-all;
+}
+.s-tpl-name { font-size: .93rem; font-weight: 600; color: rgba(255,255,255,0.89); margin-bottom: 7px; }
+.s-tpl-body { font-size: .83rem; color: rgba(192,216,238,0.58); line-height: 1.55; flex: 1; }
+.s-tpl-footer { margin-top: 13px; }
+.s-tpl-badge { font-size: .71rem; font-weight: 600; padding: 3px 8px; border-radius: 5px; }
+.s-tpl-badge.has { background: rgba(52,211,153,0.10); color: #34d399; border: 1px solid rgba(52,211,153,0.22); }
+.s-tpl-badge.nob { background: rgba(255,255,255,0.04); color: rgba(195,218,238,0.38); border: 1px solid rgba(255,255,255,0.08); }
+
+/* Lifecycle pipeline */
+.s-pipeline { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 26px; }
+.s-pstate {
+  background: rgba(4,7,20,0.72); border: 1px solid rgba(91,177,255,0.20);
+  border-radius: 9px; padding: 8px 11px; flex-shrink: 0;
+  font-size: .77rem; font-weight: 600; color: rgba(255,255,255,0.84); white-space: nowrap;
+}
+.s-parr { color: rgba(91,177,255,0.38); font-size: .95rem; padding: 0 1px; }
+.s-pterms { display: flex; gap: 7px; flex-wrap: wrap; }
+.s-pterm { font-size: .76rem; font-weight: 600; padding: 7px 12px; border-radius: 9px; }
+.s-pterm.released { background: rgba(52,211,153,0.10); border: 1px solid rgba(52,211,153,0.24); color: #34d399; }
+.s-pterm.refunded { background: rgba(251,191,36,0.09); border: 1px solid rgba(251,191,36,0.21); color: #fbbf24; }
+.s-pterm.other { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); color: rgba(195,218,238,0.42); }
+
+/* Lifecycle state list */
+.s-lc-list { list-style: none; padding: 0; margin: 20px 0 0; display: grid; grid-template-columns: repeat(2,1fr); gap: 8px; }
+.s-lc-item { background: rgba(4,7,20,0.55); border: 1px solid rgba(91,177,255,0.12); border-radius: 10px; padding: 12px 14px; }
+.s-lc-state { font-family: 'JetBrains Mono', monospace; font-size: .76rem; color: #8be1ff; margin-bottom: 4px; }
+.s-lc-desc { font-size: .82rem; color: rgba(192,216,238,0.58); line-height: 1.50; }
+
+/* Info box */
+.s-infobox {
+  background: rgba(4,7,20,0.55); border: 1px solid rgba(91,177,255,0.15);
+  border-radius: 10px; padding: 13px 15px; margin-top: 16px;
+  font-size: .86rem; color: rgba(195,218,238,0.70); line-height: 1.60;
+}
+.s-infobox strong { color: #8be1ff; }
+.s-mono { font-family: 'JetBrains Mono', monospace; font-size: .86em; color: #8be1ff; background: rgba(91,177,255,0.08); padding: 2px 5px; border-radius: 4px; }
+
+/* Proof cards */
+.s-proof-grid { display: flex; flex-direction: column; gap: 8px; }
+.s-proof-card { background: rgba(4,7,20,0.55); border: 1px solid rgba(91,177,255,0.13); border-radius: 10px; padding: 12px 14px; }
+.s-proof-name { font-family: 'JetBrains Mono', monospace; font-size: .77rem; color: #8be1ff; margin-bottom: 4px; }
+.s-proof-desc { font-size: .82rem; color: rgba(192,216,238,0.57); line-height: 1.50; }
+
+/* Principles */
+.s-principles { list-style: none; padding: 0; margin: 22px 0 0; display: grid; grid-template-columns: repeat(2,1fr); gap: 9px; }
+.s-principle {
+  display: flex; align-items: flex-start; gap: 11px;
+  background: rgba(4,7,20,0.55); border: 1px solid rgba(91,177,255,0.12);
+  border-radius: 11px; padding: 13px 15px;
+}
+.s-picon {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: rgba(52,211,153,0.11); border: 1px solid rgba(52,211,153,0.22);
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0; margin-top: 1px;
+}
+.s-picon svg { width: 10px; height: 10px; stroke: #34d399; fill: none; stroke-width: 2.5; }
+.s-ptext { font-size: .87rem; color: rgba(200,222,240,0.72); line-height: 1.50; }
+.s-ptext strong { color: rgba(255,255,255,0.87); display: block; margin-bottom: 2px; }
+
+/* Roadmap */
+.s-roadmap { display: grid; grid-template-columns: repeat(4,1fr); gap: 13px; margin-top: 26px; }
+.s-phase {
+  background: rgba(4,7,20,0.72); border: 1px solid rgba(91,177,255,0.17);
+  border-radius: 14px; padding: 19px; display: flex; flex-direction: column;
+}
+.s-phase-num { font-size: .71rem; letter-spacing: .14em; text-transform: uppercase; color: rgba(91,177,255,0.60); margin-bottom: 8px; }
+.s-phase-name { font-size: .93rem; font-weight: 700; color: rgba(255,255,255,0.88); margin-bottom: 9px; }
+.s-phase-body { font-size: .82rem; color: rgba(192,216,238,0.54); line-height: 1.55; flex: 1; margin-bottom: 13px; }
+.s-phase-badge { font-size: .70rem; font-weight: 700; padding: 3px 9px; border-radius: 5px; display: inline-block; align-self: flex-start; }
+.s-phase-badge.live { background: rgba(52,211,153,0.10); color: #34d399; border: 1px solid rgba(52,211,153,0.22); }
+.s-phase-badge.plan { background: rgba(255,255,255,0.04); color: rgba(195,218,238,0.40); border: 1px solid rgba(255,255,255,0.08); }
+
+/* CLI */
+.s-cli-group { margin-bottom: 24px; }
+.s-cli-label { font-size: .73rem; letter-spacing: .12em; text-transform: uppercase; color: rgba(175,205,230,0.40); margin-bottom: 6px; }
+pre.s-pre {
+  background: rgba(2,6,14,0.96); border: 1px solid rgba(91,177,255,0.15);
+  border-radius: 11px; padding: 14px 17px; overflow-x: auto;
+  color: #c4e0ff; font-family: 'JetBrains Mono', monospace;
+  font-size: .81rem; line-height: 1.68; margin: 0;
+}
+
+/* CTA */
+.s-cta {
+  text-align: center; padding: 60px 24px 76px;
+  border-top: 1px solid rgba(91,177,255,0.09);
+}
+.s-cta-title { font-size: 1.75rem; font-weight: 700; color: rgba(255,255,255,0.94); margin-bottom: 11px; }
+.s-cta-sub { font-size: .95rem; color: rgba(195,218,238,0.60); margin-bottom: 28px; max-width: 480px; margin-left: auto; margin-right: auto; }
+.s-btn {
+  display: inline-flex; align-items: center; gap: 9px; padding: 13px 26px;
+  background: rgba(91,177,255,0.11); border: 1px solid rgba(91,177,255,0.36);
+  border-radius: 11px; color: #8be1ff; font-size: .96rem; font-weight: 600;
+  text-decoration: none; transition: background .2s, border-color .2s;
+}
+.s-btn:hover { background: rgba(91,177,255,0.20); border-color: rgba(91,177,255,0.58); color: #c2f0ff; }
+.s-btn svg { width: 18px; height: 18px; fill: currentColor; flex-shrink: 0; }
+.s-cta-note { margin-top: 13px; font-size: .80rem; color: rgba(175,205,230,0.38); }
+
+/* Responsive */
+@media (max-width: 860px) {
+  .s-concepts { grid-template-columns: repeat(2,1fr); }
+  .s-templates { grid-template-columns: repeat(2,1fr); }
+  .s-roadmap { grid-template-columns: repeat(2,1fr); }
+  .s-two { grid-template-columns: 1fr; gap: 22px; }
+  .s-usecases, .s-status-grid, .s-lc-list, .s-principles { grid-template-columns: 1fr; }
+}
+@media (max-width: 520px) {
+  .s-concepts, .s-templates, .s-roadmap { grid-template-columns: 1fr; }
+  .sp-stat-row { gap: 10px; }
+}
 </style>
 </head>
 <body class="settlement-page x-explorer">
@@ -145,204 +265,327 @@
   </div>
 </nav>
 
+<!-- ── Hero ── -->
 <section class="hero hero-whitepaper">
-<div class="container">
+<div class="container" style="text-align:center;">
 <h1 class="glitch wp-title" data-text="SETTLEMENT">SETTLEMENT</h1>
-<div class="wp-content wp-shell">
+<p class="sp-tagline">HTLC-based escrow, proof-linked release conditions, and trust-minimized commercial agreements on a live SHA-256d Proof-of-Work blockchain.</p>
+<div class="sp-stat-row">
+  <div class="sp-stat">
+    <div class="sp-stat-val" id="settlement-agreement-count">—</div>
+    <div class="sp-stat-lbl">Agreements On-Chain</div>
+  </div>
+  <div class="sp-stat">
+    <div class="sp-stat-val green">6</div>
+    <div class="sp-stat-lbl">Template Types</div>
+  </div>
+  <div class="sp-stat">
+    <div class="sp-stat-val green">4</div>
+    <div class="sp-stat-lbl">Live Components</div>
+  </div>
+</div>
+</div>
+</section>
 
-<div class="wp-body">
-<div class="wp-header">
-<h1>Irium: Settlement-First Blockchain for Agreements and Commerce</h1>
-<p class="wp-subtitle">Positioning Overview - Current Network, Settlement Direction, and Roadmap</p>
-<div class="wp-badges">
-  <span class="badge">Live: Independent SHA-256d PoW Mainnet</span>
-  <span class="badge">In Development: Settlement Foundation</span>
-  <span class="badge">Planned: Proof-Based Commerce Tooling</span>
-</div>
-</div>
+<!-- ── Main Content ── -->
+<main class="sp">
+<div class="s-wrap">
 
-<div class="wp-section"><h2>Abstract</h2>
-<p>Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce. The live network already operates as an independent SHA-256d Proof-of-Work chain built from scratch in Rust with public mining, public explorer access, public pool infrastructure, and a fair-launch profile. Its broader direction is to extend that base layer toward trust-minimized commercial settlement built around objective rules, agreement anchoring, escrow-oriented outputs, timeout refunds, and proof-linked outcomes.</p>
-<p><strong>Implementation status:</strong> the base chain and infrastructure are live today; settlement primitives are in active development; objective proof automation and broader commercial tooling remain planned roadmap work.</p>
-</div>
+<!-- 1. Overview -->
+<section class="s-sec">
+  <div class="s-eyebrow">Overview</div>
+  <h2 class="s-title">Settlement-first blockchain for escrow, agreements, and proof-based commerce</h2>
+  <p class="s-sub">Irium is an independent SHA-256d Proof-of-Work chain built from scratch in Rust. Its commercial purpose is trust-minimized settlement — what happens before release, after timeout, at refund, or when a verifiable condition is met.</p>
+  <div class="s-concepts">
+    <div class="s-card">
+      <div class="s-card-icon">
+        <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+      </div>
+      <div class="s-card-title">HTLC Escrow</div>
+      <div class="s-card-body">Funds are locked on-chain in a Hash Time-Locked Contract. Release requires the secret preimage; refund is available after the timeout block height. No privileged party controls the outcome.</div>
+    </div>
+    <div class="s-card">
+      <div class="s-card-icon">
+        <svg viewBox="0 0 24 24"><path d="M9 12l2 2 4-4"/><circle cx="12" cy="12" r="9"/></svg>
+      </div>
+      <div class="s-card-title">Proof Engine</div>
+      <div class="s-card-body">Attestors submit cryptographic proofs against an agreement hash. A configurable policy defines which proof types and attestors are required before the release path is unlocked.</div>
+    </div>
+    <div class="s-card">
+      <div class="s-card-icon">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15 14"/></svg>
+      </div>
+      <div class="s-card-title">Timeout Refund</div>
+      <div class="s-card-body">If the counterparty does not perform, the funder reclaims automatically after the refund timeout block height. No admin action required — the chain enforces it.</div>
+    </div>
+  </div>
+</section>
 
-<div class="wp-section"><h2>1. Positioning</h2>
-<p>Most blockchains are framed primarily as payment systems. They move value from one address to another and treat the transfer itself as the finished job. Irium is being positioned around a narrower and more practical problem: how a public blockchain can support agreements, escrow, release conditions, refund logic, and objective settlement outcomes without turning consensus into subjective arbitration.</p>
-<p><strong>Core positioning:</strong></p>
-<ul>
-<li><strong>Settlement-first blockchain</strong> rather than a generic transfer chain</li>
-<li><strong>Mineable</strong> and secured by public Proof-of-Work</li>
-<li><strong>Designed for escrow, agreements, and proof-based commerce</strong></li>
-<li><strong>Rules-based and objective-only</strong>, not dependent on admin overrides</li>
-</ul>
-<p><strong>Preferred description:</strong> Irium (IRM) is a mineable, settlement-first blockchain for escrow, agreements, and proof-based commerce.</p>
-</div>
+<!-- 2. Use Cases -->
+<section class="s-sec">
+  <div class="s-eyebrow">Use Cases</div>
+  <h2 class="s-title">Why payments alone are not enough</h2>
+  <p class="s-sub">Commercial coordination requires more than a transfer. Irium provides the infrastructure for conditional release, milestone payouts, and explicit refund paths.</p>
+  <div class="s-usecases">
+    <div class="s-usecase">
+      <div class="s-uc-dot"></div>
+      <div>
+        <div class="s-uc-title">OTC Escrow</div>
+        <div class="s-uc-body">Safer peer-to-peer trading. Seller locks IRM in escrow; buyer delivers off-chain payment; seller reveals the preimage to release funds to the buyer.</div>
+      </div>
+    </div>
+    <div class="s-usecase">
+      <div class="s-uc-dot"></div>
+      <div>
+        <div class="s-uc-title">Contractor and Service Payments</div>
+        <div class="s-uc-body">Milestone-oriented release logic. Each deliverable leg funded and released independently with its own proof requirement and timeout.</div>
+      </div>
+    </div>
+    <div class="s-usecase">
+      <div class="s-uc-dot"></div>
+      <div>
+        <div class="s-uc-title">Refundable Deposits</div>
+        <div class="s-uc-body">Security deposits and preorders with explicit refund paths. Funds return to payer on timeout if the payee does not authorize release.</div>
+      </div>
+    </div>
+    <div class="s-usecase">
+      <div class="s-uc-dot"></div>
+      <div>
+        <div class="s-uc-title">Milestone Settlement</div>
+        <div class="s-uc-body">Staged commercial payouts. Multiple milestones each carry their own amount, secret hash, and timeout — independently fundable and releasable.</div>
+      </div>
+    </div>
+    <div class="s-usecase">
+      <div class="s-uc-dot"></div>
+      <div>
+        <div class="s-uc-title">Verifiable Commercial Agreements</div>
+        <div class="s-uc-body">Agreement hash anchored to chain state. Off-chain terms bound to on-chain outcomes via document hash and cryptographic proof submission.</div>
+      </div>
+    </div>
+    <div class="s-usecase">
+      <div class="s-uc-dot"></div>
+      <div>
+        <div class="s-uc-title">Merchant Delayed Settlement</div>
+        <div class="s-uc-body">Merchant-side settlement with a defined payout deadline. Funds are held in escrow until the merchant triggers release or the buyer reclaims after timeout.</div>
+      </div>
+    </div>
+  </div>
+</section>
 
-<div class="wp-section"><h2>2. Why Payments Are Not Enough</h2>
-<p>Commercial coordination usually requires more than a transfer. OTC trades may need escrow release rules. Contractor payments may need milestone logic and holdbacks. Deposits and preorders may require refund handling and response windows. Business agreements may need defined proof paths and objective fallback outcomes if one side fails to perform or fails to respond.</p>
-<p>A settlement-first blockchain is concerned with what happens before release, after timeout, at refund, or when a verifiable condition is met. That makes it different from a chain whose primary concern is only transferring units between addresses.</p>
-<h3>2.1 Example Use Cases</h3>
-<ul>
-<li><strong>OTC escrow</strong> for safer peer-to-peer trading</li>
-<li><strong>Contractor and service payments</strong> with milestone-oriented release logic</li>
-<li><strong>Deposits and preorders</strong> with explicit refund paths</li>
-<li><strong>Milestone settlement</strong> for staged commercial payouts</li>
-<li><strong>Verifiable commercial agreements</strong> anchored to chain state</li>
-</ul>
-</div>
+<!-- 3. What's Live -->
+<section class="s-sec">
+  <div class="s-eyebrow">Network Status</div>
+  <h2 class="s-title">What is live today</h2>
+  <div class="s-two">
+    <div>
+      <p class="s-sub" style="margin-bottom:18px;">The settlement layer, OTC marketplace, reputation system, and proof ecosystem are all live on mainnet. The base chain is an independent SHA-256d Proof-of-Work blockchain built from scratch in Rust — not a fork.</p>
+      <div class="s-status-grid">
+        <div class="s-srow"><span class="s-srow-name">SHA-256d PoW Chain</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">Settlement Layer</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">OTC Marketplace</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">Proof Ecosystem</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">Reputation System</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">Public Explorer</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">Public Mining Pool</span><span class="s-live"><span class="s-live-dot"></span>Live</span></div>
+        <div class="s-srow"><span class="s-srow-name">No Premine / No ICO</span><span class="s-live"><span class="s-live-dot"></span>Fair Launch</span></div>
+      </div>
+    </div>
+    <div>
+      <ul class="s-infolist">
+        <li class="s-infoitem"><strong>Rust implementation</strong>Built from scratch. Not a fork of any existing chain.</li>
+        <li class="s-infoitem"><strong>Objective-only consensus</strong>No admin keys, no override powers, no freeze or seizure mechanism.</li>
+        <li class="s-infoitem"><strong>DNS-free bootstrap</strong>Resilient peer discovery and Sybil-resistant networking from launch.</li>
+        <li class="s-infoitem"><strong>Mining secures settlement</strong>Proof-of-Work miners secure the public base layer that commercial settlement depends on.</li>
+        <li class="s-infoitem"><strong>On-chain metadata support</strong>Agreement hashes, proof anchors, and bond records written directly to the chain.</li>
+      </ul>
+    </div>
+  </div>
+</section>
 
-<div class="wp-section"><h2>3. What Is Live Today</h2>
-<p>The current Irium network is already live as an independent SHA-256d Proof-of-Work blockchain. It is not a fork. It was built from scratch in Rust and launched with public mining rather than a private distribution model.</p>
-<table class="wp-table">
-<thead>
-<tr><th>Live Base Layer</th><th>Status</th></tr>
-</thead>
-<tbody>
-<tr><td>Independent SHA-256d Proof-of-Work chain</td><td>Live</td></tr>
-<tr><td>Rust implementation</td><td>Live</td></tr>
-<tr><td>Public mining path and public pool</td><td>Live</td></tr>
-<tr><td>Explorer and mining calculator</td><td>Live</td></tr>
-<tr><td>No premine, no ICO, no presale, no VC control</td><td>Live positioning / launch model</td></tr>
-<tr><td>DNS-free bootstrap approach</td><td>Live foundation</td></tr>
-<tr><td>Resilient peer discovery and Sybil-resistant networking</td><td>Live foundation</td></tr>
-<tr><td>Anchor checkpoints and light-client-oriented architecture</td><td>Live foundation</td></tr>
-<tr><td>On-chain metadata support</td><td>Live foundation</td></tr>
-</tbody>
-</table>
-<p>Mining remains important because miners secure the public base layer that the broader settlement narrative depends on.</p>
-</div>
+<!-- 4. Agreement Templates -->
+<section class="s-sec">
+  <div class="s-eyebrow">Agreement Templates</div>
+  <h2 class="s-title">Six template types</h2>
+  <p class="s-sub">Each agreement carries a <span class="s-mono">template_type</span> field that iriumd uses to validate and route it. Four types have <span class="s-mono">irium-wallet</span> CLI builders; two are recognized by the protocol but require hand-constructed JSON today.</p>
+  <div class="s-templates">
+    <div class="s-tpl">
+      <span class="s-tpl-tag">simple_release_refund</span>
+      <div class="s-tpl-name">Simple Escrow</div>
+      <div class="s-tpl-body">Two parties, one amount, one secret hash. General purpose escrow with a single release path and timeout refund. The payer locks funds; release is authorized by revealing the preimage.</div>
+      <div class="s-tpl-footer"><span class="s-tpl-badge has">CLI builder available</span></div>
+    </div>
+    <div class="s-tpl">
+      <span class="s-tpl-tag">otc_settlement</span>
+      <div class="s-tpl-name">OTC Trade</div>
+      <div class="s-tpl-body">Buyer/seller OTC trade. Includes asset reference and payment reference. Seller locks IRM in escrow; buyer receives after delivering off-chain payment and seller reveals the preimage.</div>
+      <div class="s-tpl-footer"><span class="s-tpl-badge has">CLI builder available</span></div>
+    </div>
+    <div class="s-tpl">
+      <span class="s-tpl-tag">refundable_deposit</span>
+      <div class="s-tpl-name">Refundable Deposit</div>
+      <div class="s-tpl-body">Payer/payee deposit with purpose reference and deposit rule. Funds return to payer on timeout if the payee does not authorize release. Suitable for security deposits and preorders.</div>
+      <div class="s-tpl-footer"><span class="s-tpl-badge has">CLI builder available</span></div>
+    </div>
+    <div class="s-tpl">
+      <span class="s-tpl-tag">milestone_settlement</span>
+      <div class="s-tpl-name">Milestone Settlement</div>
+      <div class="s-tpl-body">Multiple milestones, each with its own amount, timeout height, and per-milestone secret hash. Each leg is funded and released independently. Total amount is the sum of all milestone amounts.</div>
+      <div class="s-tpl-footer"><span class="s-tpl-badge has">CLI builder available</span></div>
+    </div>
+    <div class="s-tpl">
+      <span class="s-tpl-tag">merchant_delayed_settlement</span>
+      <div class="s-tpl-name">Merchant Delayed</div>
+      <div class="s-tpl-body">Merchant-side settlement with a delayed payout deadline. Recognized by the protocol and accepted on-chain; requires hand-constructed <span class="s-mono">AgreementObject</span> JSON today.</div>
+      <div class="s-tpl-footer"><span class="s-tpl-badge nob">No CLI builder yet</span></div>
+    </div>
+    <div class="s-tpl">
+      <span class="s-tpl-tag">contractor_milestone</span>
+      <div class="s-tpl-name">Contractor Milestone</div>
+      <div class="s-tpl-body">Contractor-style milestone agreement with per-leg release authorization. Recognized by the protocol; requires hand-constructed <span class="s-mono">AgreementObject</span> JSON today.</div>
+      <div class="s-tpl-footer"><span class="s-tpl-badge nob">No CLI builder yet</span></div>
+    </div>
+  </div>
+</section>
 
-<div class="wp-section"><h2>4. Settlement Foundation In Development</h2>
-<p>The next layer of Irium’s direction is settlement infrastructure built on top of the live chain. This does not mean every settlement feature is already in production. It means the protocol and product direction are moving toward practical settlement primitives that remain compatible with objective-only consensus.</p>
-<h3>4.1 Active Direction</h3>
-<ul>
-<li><strong>Agreement-hash anchoring</strong></li>
-<li><strong>Native escrow / settlement output direction</strong></li>
-<li><strong>Timeout refund logic</strong></li>
-<li><strong>Basic commercial settlement primitives</strong></li>
-<li><strong>Safer OTC escrow and simpler contractor/deposit flows</strong></li>
-</ul>
-<p>These items should be understood as in development unless explicitly described elsewhere as already live.</p>
-</div>
+<!-- 5. Lifecycle -->
+<section class="s-sec">
+  <div class="s-eyebrow">Lifecycle</div>
+  <h2 class="s-title">Agreement lifecycle states</h2>
+  <p class="s-sub">Every agreement moves through a defined set of states derived deterministically from the on-chain record. Every node reaches the same conclusion.</p>
+  <div class="s-pipeline">
+    <div class="s-pstate">Draft</div>
+    <div class="s-parr">&#8594;</div>
+    <div class="s-pstate">Proposed</div>
+    <div class="s-parr">&#8594;</div>
+    <div class="s-pstate">Funded</div>
+    <div class="s-parr">&#8594;</div>
+    <div class="s-pstate">PartiallyReleased</div>
+    <div class="s-parr">&#8594;</div>
+    <div class="s-pterms">
+      <div class="s-pterm released">Released</div>
+      <div class="s-pterm refunded">Refunded</div>
+      <div class="s-pterm other">Expired</div>
+      <div class="s-pterm other">Cancelled</div>
+    </div>
+  </div>
+  <ul class="s-lc-list">
+    <li class="s-lc-item"><div class="s-lc-state">Draft</div><div class="s-lc-desc">Created locally. Funding transaction not yet broadcast.</div></li>
+    <li class="s-lc-item"><div class="s-lc-state">Proposed</div><div class="s-lc-desc">Registered on the node. Awaiting on-chain funding confirmation.</div></li>
+    <li class="s-lc-item"><div class="s-lc-state">Funded</div><div class="s-lc-desc">HTLC funding transaction confirmed on-chain. Funds are locked.</div></li>
+    <li class="s-lc-item"><div class="s-lc-state">PartiallyReleased</div><div class="s-lc-desc">One or more milestones released; remaining legs still locked. Milestone agreements only.</div></li>
+    <li class="s-lc-item"><div class="s-lc-state">Released</div><div class="s-lc-desc">Recipient unlocked funds by presenting the secret preimage. Settlement complete.</div></li>
+    <li class="s-lc-item"><div class="s-lc-state">Refunded</div><div class="s-lc-desc">Funder reclaimed funds after the refund timeout block height was reached.</div></li>
+    <li class="s-lc-item"><div class="s-lc-state">Expired</div><div class="s-lc-desc">Agreement passed its settlement deadline with no release or refund action.</div></li>
+    <li class="s-lc-item"><div class="s-lc-state">Cancelled</div><div class="s-lc-desc">Agreement cancelled before funding.</div></li>
+  </ul>
+  <div class="s-infobox"><strong>release_eligible</strong> is the authoritative gate. Release eligibility requires both proof finality (proof buried at least 6 blocks deep by default) and a satisfied release policy. Wait for <span class="s-mono">release_eligible: true</span> on the agreement status response before releasing funds.</div>
+</section>
 
-<div class="wp-section"><h2>5. Objective-Only Consensus</h2>
-<p>Irium’s settlement direction depends on keeping consensus narrow, deterministic, and objective-only. The protocol should not become a general-purpose human dispute system. Subjective judgment, discretionary governance, and privileged override powers would conflict with the trust-minimized positioning the project is aiming for.</p>
-<h3>5.1 Public Principles</h3>
-<ul>
-<li><strong>No admin keys</strong></li>
-<li><strong>No override powers</strong></li>
-<li><strong>No freeze or seizure mechanism</strong></li>
-<li><strong>No centralized dispute authority in consensus</strong></li>
-<li><strong>Rules-based, verifiable settlement paths only</strong></li>
-</ul>
-<p>Where signatures, attestors, proofs, or timeout behavior are used, they should remain explicit and technically verifiable rather than dependent on a privileged operator.</p>
-</div>
+<!-- 6. Proof Engine -->
+<section class="s-sec">
+  <div class="s-eyebrow">Proof Engine</div>
+  <h2 class="s-title">Proof submission and policy evaluation</h2>
+  <div class="s-two">
+    <div>
+      <p class="s-sub">On top of the base HTLC, a proof submission and policy evaluation layer allows release conditions to be verified programmatically before funds move.</p>
+      <p class="s-sub" style="margin-top:13px;">Attestors submit signed proof objects against an agreement hash. A configurable policy defines which proof types are required and which attestors are accepted. The evaluator counts only unique attestor identities — duplicate proofs from the same attestor count as one.</p>
+      <div class="s-infobox" style="margin-top:16px;"><strong>Proof finality depth</strong> — default 6 blocks. A proof is final after its block is buried at least 6 blocks deep (configurable via <span class="s-mono">IRIUM_PROOF_FINALITY_DEPTH</span>). If a chain reorganization removes the proof block, iriumd emits <span class="s-mono">agreement.proof_reorged</span> and the proof must be resubmitted.</div>
+      <div class="s-infobox"><strong>Holdback</strong> — policies can declare a fraction of the escrowed amount in basis points that stays locked after the base release condition is met, releasing on its own deadline or proof requirement.</div>
+      <div class="s-infobox"><strong>Attestor bonds</strong> — attestors may register an on-chain bond to signal accountability. Contradicting proofs from the same attestor can be slashed on-chain via an OP_RETURN anchor transaction.</div>
+      <div class="s-infobox"><strong>N-of-M thresholds</strong> — a policy can require N-of-M attestor signatures. The evaluator counts only unique attestor identities across the active proof set.</div>
+    </div>
+    <div>
+      <p class="s-sub" style="margin-bottom:13px;">Five standard proof schema kinds:</p>
+      <div class="s-proof-grid">
+        <div class="s-proof-card"><div class="s-proof-name">delivery_confirmed</div><div class="s-proof-desc">Attestor confirms goods, services, or a deliverable was received.</div></div>
+        <div class="s-proof-card"><div class="s-proof-name">payment_confirmed</div><div class="s-proof-desc">Attestor confirms off-chain payment (e.g. bank transfer, USDT) was received.</div></div>
+        <div class="s-proof-card"><div class="s-proof-name">milestone_accepted</div><div class="s-proof-desc">Client confirms a milestone deliverable meets the agreed specification.</div></div>
+        <div class="s-proof-card"><div class="s-proof-name">custom_attestation</div><div class="s-proof-desc">General-purpose attestation for use cases not covered by the standard types.</div></div>
+        <div class="s-proof-card"><div class="s-proof-name">timeout_expiry</div><div class="s-proof-desc">Proof that the refund timeout height has been reached; used in automated refund paths.</div></div>
+      </div>
+    </div>
+  </div>
+</section>
 
-<div class="wp-section"><h2>6. Roadmap Phases</h2>
-<p>Irium’s public messaging needs to distinguish clearly between what already exists, what is under active development, and what is still planned. The roadmap below follows that principle.</p>
-<table class="wp-table">
-<thead>
-<tr><th>Phase</th><th>Scope</th><th>Status</th></tr>
-</thead>
-<tbody>
-<tr><td><strong>Phase 1</strong></td><td>Core independent PoW foundation, Rust node, public explorer, public pool, calculator, fair-launch profile, resilient networking</td><td>Live</td></tr>
-<tr><td><strong>Phase 2</strong></td><td>Agreement anchoring, native escrow / settlement direction, timeout refunds, basic settlement primitives</td><td>In Development</td></tr>
-<tr><td><strong>Phase 3</strong></td><td>Objective proof validation, approved attestors, no-response auto-settlement, milestone proofs and holdbacks</td><td>Planned</td></tr>
-<tr><td><strong>Phase 4</strong></td><td>Commercial templates, contractor and merchant flows, recurring invoice direction, reputation tooling, broader integration APIs</td><td>Planned</td></tr>
-</tbody>
-</table>
-</div>
+<!-- 7. Principles -->
+<section class="s-sec">
+  <div class="s-eyebrow">Trust Model</div>
+  <h2 class="s-title">Objective-only consensus</h2>
+  <p class="s-sub">Irium's settlement direction depends on keeping consensus narrow, deterministic, and objective-only. Subjective judgment, discretionary governance, and privileged override powers conflict with trust-minimized positioning.</p>
+  <ul class="s-principles">
+    <li class="s-principle">
+      <div class="s-picon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="s-ptext"><strong>No admin keys</strong>No privileged key holds authority over agreement outcomes or chain state.</div>
+    </li>
+    <li class="s-principle">
+      <div class="s-picon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="s-ptext"><strong>No override powers</strong>No party can reverse or block a valid on-chain spend once conditions are met.</div>
+    </li>
+    <li class="s-principle">
+      <div class="s-picon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="s-ptext"><strong>No freeze or seizure mechanism</strong>Funds locked in an HTLC can only be spent by the holder of the preimage or after timeout.</div>
+    </li>
+    <li class="s-principle">
+      <div class="s-picon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="s-ptext"><strong>No centralized dispute authority in consensus</strong>Resolution options are defined by the agreement itself, not by a privileged operator.</div>
+    </li>
+    <li class="s-principle">
+      <div class="s-picon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="s-ptext"><strong>Rules-based settlement paths only</strong>Signatures, attestors, proofs, and timeouts must remain explicit and technically verifiable.</div>
+    </li>
+    <li class="s-principle">
+      <div class="s-picon"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div class="s-ptext"><strong>Mineable and publicly secured</strong>Proof-of-Work mining secures the base layer that commercial settlement depends on.</div>
+    </li>
+  </ul>
+</section>
 
-<div class="wp-section"><h2>7. Closing Note</h2>
-<p>Irium is not abandoning mining, nor is it reducing the importance of the base chain. The point of the settlement-first positioning is to explain what that base layer is for. Mining secures the live public network. The broader settlement roadmap gives that network a clearer commercial purpose: trust-minimized outcomes, not just payments.</p>
-</div>
+<!-- 8. Roadmap -->
+<section class="s-sec">
+  <div class="s-eyebrow">Roadmap</div>
+  <h2 class="s-title">Development phases</h2>
+  <p class="s-sub">What exists, what is in development, and what is planned.</p>
+  <div class="s-roadmap">
+    <div class="s-phase">
+      <div class="s-phase-num">Phase 1</div>
+      <div class="s-phase-name">PoW Foundation</div>
+      <div class="s-phase-body">Core independent PoW chain, Rust node, public explorer, public pool, mining calculator, fair-launch profile, resilient peer discovery, Sybil-resistant networking, DNS-free bootstrap.</div>
+      <span class="s-phase-badge live">Live</span>
+    </div>
+    <div class="s-phase">
+      <div class="s-phase-num">Phase 2</div>
+      <div class="s-phase-name">Settlement Primitives</div>
+      <div class="s-phase-body">Agreement anchoring, native HTLC escrow, timeout refunds, settlement layer, OTC marketplace, reputation system, proof ecosystem, milestone and deposit flows.</div>
+      <span class="s-phase-badge live">Live</span>
+    </div>
+    <div class="s-phase">
+      <div class="s-phase-num">Phase 3</div>
+      <div class="s-phase-name">Proof Automation</div>
+      <div class="s-phase-body">Objective proof validation, approved attestors, no-response auto-settlement, milestone proofs and holdbacks, N-of-M attestor thresholds, on-chain reputation anchoring.</div>
+      <span class="s-phase-badge plan">Planned</span>
+    </div>
+    <div class="s-phase">
+      <div class="s-phase-num">Phase 4</div>
+      <div class="s-phase-name">Commercial Tooling</div>
+      <div class="s-phase-body">Merchant and contractor template builders, recurring invoice direction, dispute resolution, broader integration APIs, reputation tooling for marketplace participants.</div>
+      <span class="s-phase-badge plan">Planned</span>
+    </div>
+  </div>
+</section>
 
-<div class="wp-section"><h2>8. Agreement Templates</h2>
-<p>Irium defines six agreement template types in the settlement protocol. Each template carries a snake_case <code>template_type</code> field that iriumd uses to validate and route the agreement. Four templates have CLI builders in <code>irium-wallet</code>; two are recognized by the protocol and accepted on-chain but require hand-constructed JSON today.</p>
-<table class="wp-table">
-<thead>
-<tr><th>template_type</th><th>Use Case</th><th>CLI Builder</th></tr>
-</thead>
-<tbody>
-<tr><td><code>simple_release_refund</code></td><td>Two parties, one amount, one secret hash. General purpose escrow with a single release path and timeout refund.</td><td>Yes</td></tr>
-<tr><td><code>otc_settlement</code></td><td>Buyer/seller OTC trade. Includes asset reference and payment reference. Seller locks IRM in escrow; buyer receives after delivering off-chain payment.</td><td>Yes</td></tr>
-<tr><td><code>refundable_deposit</code></td><td>Payer/payee deposit. Includes purpose reference and deposit rule. Funds return to payer on timeout if the payee does not authorize release.</td><td>Yes</td></tr>
-<tr><td><code>milestone_settlement</code></td><td>Multiple milestones, each with its own amount, timeout height, and per-milestone secret hash. Each leg is funded and released independently.</td><td>Yes</td></tr>
-<tr><td><code>merchant_delayed_settlement</code></td><td>Merchant-side settlement with a delayed payout deadline. Recognized by the protocol; no CLI builder yet.</td><td>No</td></tr>
-<tr><td><code>contractor_milestone</code></td><td>Contractor-style milestone agreement with per-leg release authorization. Recognized by the protocol; no CLI builder yet.</td><td>No</td></tr>
-</tbody>
-</table>
-<p>All amounts in agreement JSON are denominated in IRM. The protocol enforces this via the <code>network_marker == "IRIUM"</code> check at validation time.</p>
-</div>
-
-<div class="wp-section"><h2>9. Agreement Lifecycle</h2>
-<p>Every agreement moves through a defined set of lifecycle states. The state is derived deterministically from the on-chain record and is the same on every node.</p>
-<div class="wp-badges">
-<span class="badge">Draft</span>
-<span class="badge">Proposed</span>
-<span class="badge">Funded</span>
-<span class="badge">PartiallyReleased</span>
-<span class="badge">Released</span>
-<span class="badge">Refunded</span>
-<span class="badge">Expired</span>
-<span class="badge">Cancelled</span>
-</div>
-<ul style="margin-top:12px;">
-<li><strong>Draft</strong> — Agreement created locally; funding transaction not yet broadcast.</li>
-<li><strong>Proposed</strong> — Agreement registered on the node; awaiting on-chain funding confirmation.</li>
-<li><strong>Funded</strong> — HTLC funding transaction confirmed on-chain. Funds are locked.</li>
-<li><strong>PartiallyReleased</strong> — One or more milestones released; remaining legs still locked (milestone agreements only).</li>
-<li><strong>Released</strong> — Recipient unlocked funds by presenting the secret preimage. Settlement complete.</li>
-<li><strong>Refunded</strong> — Funder reclaimed funds after the refund timeout block height was reached.</li>
-<li><strong>Expired</strong> — Agreement passed its settlement deadline with no release or refund action.</li>
-<li><strong>Cancelled</strong> — Agreement cancelled before funding.</li>
-</ul>
-<p>Release eligibility requires both proof finality (proof buried at least 6 blocks deep by default) and a satisfied release policy. The <code>release_eligible</code> field on the agreement status response is the authoritative gate before releasing funds.</p>
-</div>
-
-<div class="wp-section"><h2>10. Proof Engine</h2>
-<p>The Irium settlement layer adds a structured proof and policy evaluation layer on top of the base HTLC escrow. Funds are locked in a Hash Time-Locked Contract controlled by a 2-of-2 condition: either the recipient presents the preimage of a known secret hash (release), or the funder reclaims after a block height timeout (refund).</p>
-<p>On top of the base HTLC, a proof submission and policy evaluation system allows release conditions to be verified programmatically before funds are moved. Attestors submit signed proof objects against an agreement hash. A configurable policy defines which proof types are required and which attestors are accepted. The evaluator counts only unique attestor identities, so duplicate proofs from the same attestor count as one.</p>
-<h3>Proof Schema Kinds</h3>
-<table class="wp-table">
-<thead>
-<tr><th>proof_type</th><th>When Used</th></tr>
-</thead>
-<tbody>
-<tr><td><code>delivery_confirmed</code></td><td>Attestor confirms that goods, services, or a deliverable was received.</td></tr>
-<tr><td><code>payment_confirmed</code></td><td>Attestor confirms off-chain payment (e.g. bank transfer, USDT) was received.</td></tr>
-<tr><td><code>milestone_accepted</code></td><td>Client confirms a milestone deliverable meets the agreed specification.</td></tr>
-<tr><td><code>custom_attestation</code></td><td>General-purpose attestation for use cases not covered by the standard types.</td></tr>
-<tr><td><code>timeout_expiry</code></td><td>Proof that the refund timeout height has been reached; used in automated refund paths.</td></tr>
-</tbody>
-</table>
-<p>A proof is considered final after the block containing it is at least 6 blocks deep (configurable via <code>IRIUM_PROOF_FINALITY_DEPTH</code>). Parties should wait for <code>release_eligible: true</code> on the agreement status before considering a settlement complete. If a chain reorganization removes the proof block, iriumd emits an <code>agreement.proof_reorged</code> event and the proof must be resubmitted.</p>
-<p>Policies can also declare a holdback: a fraction of the escrowed amount in basis points that stays locked after the base release condition is met, releasing on its own deadline or proof requirement. Attestors may register an on-chain bond to signal accountability; bonded attestors are preferred in policy evaluation, and contradicting proofs from the same attestor can be slashed on-chain.</p>
-</div>
-
-<div class="wp-section"><h2>11. Live Network</h2>
-<p>The settlement layer is live on mainnet. Agreements, proofs, and marketplace offers are active on-chain.</p>
-<table class="wp-table">
-<thead>
-<tr><th>Component</th><th>Status</th></tr>
-</thead>
-<tbody>
-<tr><td>Settlement layer</td><td>Live</td></tr>
-<tr><td>Marketplace</td><td>Live</td></tr>
-<tr><td>Reputation system</td><td>Live</td></tr>
-<tr><td>Proof ecosystem</td><td>Live</td></tr>
-</tbody>
-</table>
-<p style="margin-top:12px;">Total agreements on-chain: <strong id="settlement-agreement-count">loading...</strong></p>
-</div>
-
-<div class="wp-section"><h2>12. Using Settlement via CLI</h2>
-<p>The <code>irium-wallet</code> command-line tool handles the full agreement lifecycle from wallet setup through funding, proof submission, and release. All chain commands accept <code>--rpc &lt;url&gt;</code> to specify a node (default: <code>http://127.0.0.1:38300</code>).</p>
-<h3>Wallet Setup</h3>
-<pre>irium-wallet init
+<!-- 9. CLI -->
+<section class="s-sec">
+  <div class="s-eyebrow">CLI Reference</div>
+  <h2 class="s-title">Using settlement via <span class="s-mono" style="font-size:.85em;">irium-wallet</span></h2>
+  <p class="s-sub" style="margin-bottom:26px;">The <span class="s-mono">irium-wallet</span> CLI handles the full agreement lifecycle from wallet setup through funding, proof submission, and release. All chain commands accept <span class="s-mono">--rpc &lt;url&gt;</span> to specify a node (default: <span class="s-mono">http://127.0.0.1:38300</span>).</p>
+  <div class="s-cli-group">
+    <div class="s-cli-label">Wallet Setup</div>
+    <pre class="s-pre">irium-wallet init
 irium-wallet new-address</pre>
-<h3>Create and List Offers</h3>
-<pre>irium-wallet offer-create \
+  </div>
+  <div class="s-cli-group">
+    <div class="s-cli-label">Create and List Offers</div>
+    <pre class="s-pre">irium-wallet offer-create \
   --seller &lt;YOUR_ADDRESS&gt; \
   --amount 1.0 \
   --payment-method bank-transfer \
@@ -350,12 +593,16 @@ irium-wallet new-address</pre>
   --price-note "1 IRM = 0.10 USD"
 
 irium-wallet offer-list --status open --sort score</pre>
-<h3>Take an Offer and Fund the Agreement</h3>
-<pre>irium-wallet offer-take --offer &lt;OFFER_ID&gt; --buyer &lt;BUYER_ADDRESS&gt;
+  </div>
+  <div class="s-cli-group">
+    <div class="s-cli-label">Take an Offer and Fund the Agreement</div>
+    <pre class="s-pre">irium-wallet offer-take --offer &lt;OFFER_ID&gt; --buyer &lt;BUYER_ADDRESS&gt;
 
 irium-wallet agreement-fund agreement.json --broadcast --rpc http://127.0.0.1:38300</pre>
-<h3>Submit a Proof</h3>
-<pre>irium-wallet agreement-proof-create \
+  </div>
+  <div class="s-cli-group">
+    <div class="s-cli-label">Submit a Proof</div>
+    <pre class="s-pre">irium-wallet agreement-proof-create \
   --agreement-hash &lt;AGREEMENT_HASH&gt; \
   --proof-type delivery_confirmed \
   --attested-by attestor-id \
@@ -364,27 +611,35 @@ irium-wallet agreement-fund agreement.json --broadcast --rpc http://127.0.0.1:38
   --out proof.json
 
 irium-wallet agreement-proof-submit --proof proof.json --rpc http://127.0.0.1:38300</pre>
-<h3>Check Eligibility and Release</h3>
-<pre>irium-wallet agreement-release-eligibility agreement.json --rpc http://127.0.0.1:38300
+  </div>
+  <div class="s-cli-group">
+    <div class="s-cli-label">Check Eligibility and Release</div>
+    <pre class="s-pre">irium-wallet agreement-release-eligibility agreement.json --rpc http://127.0.0.1:38300
 
 irium-wallet agreement-release agreement.json \
   --secret &lt;PREIMAGE_HEX&gt; \
   --broadcast \
   --rpc http://127.0.0.1:38300</pre>
-<h3>Auto-Release Watch Mode</h3>
-<pre>irium-wallet watch --auto-release</pre>
-</div>
-
-<div class="wp-section"><h2>13. Get Started</h2>
-<p>Irium Core is the desktop wallet and full node application. It includes the GUI wallet interface, agreement builder, marketplace browser, and direct access to the CLI tools documented above. Download the latest release for Windows, macOS, or Linux:</p>
-<p><a href="https://github.com/iriumlabs/irium-core/releases/latest" target="_blank" rel="noopener">Download Irium Core — github.com/iriumlabs/irium-core/releases/latest</a></p>
-<p>The <code>irium-wallet</code> CLI is bundled with Irium Core. After installing, run <code>irium-wallet init</code> to create a new wallet, or <code>irium-wallet import-seed &lt;64hex&gt;</code> to restore from an existing seed.</p>
-</div>
-
-</div>
-</div>
-</div>
+  </div>
+  <div class="s-cli-group">
+    <div class="s-cli-label">Auto-Release Watch Mode</div>
+    <pre class="s-pre">irium-wallet watch --auto-release</pre>
+  </div>
 </section>
+
+<!-- 10. CTA -->
+<section class="s-cta">
+  <div class="s-cta-title">Get Started with Irium Core</div>
+  <p class="s-cta-sub">Desktop wallet and full node — GUI interface, agreement builder, marketplace browser, and irium-wallet CLI included.</p>
+  <a href="https://github.com/iriumlabs/irium-core/releases/latest" target="_blank" rel="noopener" class="s-btn">
+    <svg viewBox="0 0 24 24"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
+    Download Irium Core
+  </a>
+  <p class="s-cta-note">Windows / macOS / Linux &nbsp;&middot;&nbsp; github.com/iriumlabs/irium-core/releases/latest</p>
+</section>
+
+</div>
+</main>
 
 <footer class="footer">
 <div class="container">
@@ -434,12 +689,12 @@ GitHub</a>
     .then(function(d) {
       var el = document.getElementById('settlement-agreement-count');
       if (el && d && typeof d.total === 'number') {
-        el.textContent = d.total.toLocaleString() + ' agreements';
+        el.textContent = d.total.toLocaleString();
       }
     })
     .catch(function() {
       var el = document.getElementById('settlement-agreement-count');
-      if (el) el.textContent = 'unavailable';
+      if (el) el.textContent = '—';
     });
 })();
 </script>

@@ -707,7 +707,8 @@ GitHub</a>
       nonce:         h.nonce,
       bits:          h.bits,
       prev_hash:     h.prev_hash,
-      merkle_root:   h.merkle_root
+      merkle_root:   h.merkle_root,
+      coinbase_tag:  b.coinbase_tag
     };
   }
 
@@ -1061,6 +1062,7 @@ GitHub</a>
     var bits    = b.bits != null ? String(b.bits) : '—';
     var txCount = b.tx_count != null ? fmtN(b.tx_count) : '—';
     var miner   = b.miner_address || b.miner || '';
+    var cbTag   = b.coinbase_tag != null ? b.coinbase_tag : null;
     var reward  = typeof height === 'number' ? blockReward(height) + ' (estimated)' : '—';
 
     var ICON = '<svg width="14" height="14" fill="none" stroke="#6ec6ff" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>';
@@ -1085,7 +1087,8 @@ GitHub</a>
       iRow('Nonce',        nonce, {noWrap: true}) +
       (miner
         ? iRow('Miner', miner, {color: 'rgba(110,198,255,0.75)', onclick: "event.stopPropagation();showAddr('" + miner + "')"})
-        : iRow('Miner', '—'));
+        : iRow('Miner', '—')) +
+      (cbTag ? iRow('Coinbase Tag', cbTag, {mono: false}) : '');
 
     window.__showBlockModal(title + rows);
   }

@@ -174,8 +174,11 @@ body {
   isolation: isolate;
 }
 .xp-sc:hover { border-color: var(--xp-bhi); transform: translateY(-2px); }
-.xp-sc-label { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--xp-t2); margin-bottom: 8px; font-family: 'Space Grotesk', system-ui, sans-serif; }
-.xp-sc-val   { font-size: 16px; font-weight: 800; color: var(--xp-t1); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; line-height: 1.3; }
+.xp-sc-label { font-size: 10px; font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; color: var(--xp-t2); font-family: 'Space Grotesk', system-ui, sans-serif; }
+.xp-sc-val   { font-size: 18px; font-weight: 800; color: var(--xp-t1); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; line-height: 1.2; }
+.xp-sc-hdr   { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:8px; }
+.xp-sc-icon  { color:var(--xp-t3); opacity:0.7; flex-shrink:0; }
+.xp-sc-sub   { font-size:11px; color:var(--xp-t3); margin-top:5px; font-family:'Space Grotesk',system-ui,sans-serif; }
 
 /* --- two-col ------------------------------------------------ */
 .xp-2col { display: grid; grid-template-columns: 1.45fr 0.55fr; gap: 14px; margin: 20px 0; }
@@ -414,12 +417,36 @@ body {
 
       <div class="xp-sl">NETWORK STATS</div>
       <div class="xp-g6">
-        <div class="xp-sc"><div class="xp-sc-label">Best Block</div><div class="xp-sc-val" id="s-height">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Circulating Supply</div><div class="xp-sc-val xp-gv" id="s-supply">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Network Hashrate</div><div class="xp-sc-val xp-gv" id="s-nethash">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Difficulty</div><div class="xp-sc-val" id="s-diff">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Active Peers</div><div class="xp-sc-val" id="s-peers">—</div></div>
-        <div class="xp-sc"><div class="xp-sc-label">Avg Block Time</div><div class="xp-sc-val" id="s-txcount">—</div></div>
+        <div class="xp-sc">
+          <div class="xp-sc-hdr"><span class="xp-sc-label">Block Height</span><span class="xp-sc-icon"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg></span></div>
+          <div class="xp-sc-val" id="s-height">—</div>
+          <div class="xp-sc-sub">chain tip</div>
+        </div>
+        <div class="xp-sc">
+          <div class="xp-sc-hdr"><span class="xp-sc-label">Circulating Supply</span><span class="xp-sc-icon"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg></span></div>
+          <div class="xp-sc-val xp-gv" id="s-supply">—</div>
+          <div class="xp-sc-sub" id="s-supply-sub">next halving: —</div>
+        </div>
+        <div class="xp-sc">
+          <div class="xp-sc-hdr"><span class="xp-sc-label">Network Hashrate</span><span class="xp-sc-icon"><svg width="15" height="15" fill="currentColor" viewBox="0 0 24 24"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></svg></span></div>
+          <div class="xp-sc-val xp-gv" id="s-nethash">—</div>
+          <div class="xp-sc-sub">proof-of-work</div>
+        </div>
+        <div class="xp-sc">
+          <div class="xp-sc-hdr"><span class="xp-sc-label">Difficulty (LWMA)</span><span class="xp-sc-icon"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></svg></span></div>
+          <div class="xp-sc-val" id="s-diff">—</div>
+          <div class="xp-sc-sub">LWMA-144 target</div>
+        </div>
+        <div class="xp-sc">
+          <div class="xp-sc-hdr"><span class="xp-sc-label">Peers</span><span class="xp-sc-icon"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg></span></div>
+          <div class="xp-sc-val" id="s-peers">—</div>
+          <div class="xp-sc-sub">connected</div>
+        </div>
+        <div class="xp-sc">
+          <div class="xp-sc-hdr"><span class="xp-sc-label">Active Miners</span><span class="xp-sc-icon"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg></span></div>
+          <div class="xp-sc-val" id="s-txcount">—</div>
+          <div class="xp-sc-sub">recent blocks</div>
+        </div>
       </div>
 
       <div class="xp-2col">
@@ -606,7 +633,8 @@ GitHub</a>
   var POOL         = 'https://api.iriumlabs.org/pool-stats/';
   var PER_PAGE     = 20;
   var REWARD_DENOM = 1e8;
-  var BLOCKS_DAY   = 288;
+  var BLOCKS_DAY      = 288;
+  var HALVING_INTERVAL = 1050000;
 
   var st = { offset: 0, pool: null, chainHashrate: 0, rlDone: false, activeTab: 'ov', tipHeight: 0, lastOverviewTs: 0, lastBlocks: [], atGenesis: false };
 
@@ -616,26 +644,16 @@ GitHub</a>
   function fmtN(n)  { return n != null ? Number(n).toLocaleString() : '—'; }
   function fmtAge(ts) {
     var t;
-    // Detect unix timestamps in seconds: current year ~1.78e9 seconds, safely below 1e10
     if (typeof ts === 'number' && ts > 0 && ts < 1e10) {
       t = ts * 1000;
     } else {
       t = new Date(ts).getTime();
       if (isNaN(t)) return '—';
     }
-    var diff = Date.now() - t; // positive = past, negative = future
-    // Chain drift: block timestamp slightly ahead of real clock
-    // Treat up to 1 hour in the future as "just now"; beyond that is a data error
-    if (diff < 0) {
-      return (-diff < 3600000) ? 'just now'
-        : new Date(t).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
-    }
-    var s = Math.floor(diff / 1000);
-    if (s < 5)     return 'just now';
-    if (s < 60)    return s + 's ago';
+    var s = Math.abs(Date.now() - t) / 1000;
+    if (s < 60)    return 'just now';
     if (s < 3600)  return Math.floor(s / 60) + 'm ago';
     if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-    // More than 24 hours old: show absolute date
     return new Date(t).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
   }
   function fmtAddr(a) { return a ? a.slice(0,10) + '…' + a.slice(-6) : '—'; }
@@ -657,6 +675,18 @@ GitHub</a>
     if (h >= 1e6)  return (h/1e6).toFixed(2)  + ' MH/s';
     if (h >= 1e3)  return (h/1e3).toFixed(1)  + ' KH/s';
     return h.toFixed(0) + ' H/s';
+  }
+
+  function fmtSupplyM(irm) {
+    if (irm >= 1e6) return (irm / 1e6).toFixed(2) + 'M IRM';
+    return irm.toLocaleString('en-US', {maximumFractionDigits: 0}) + ' IRM';
+  }
+  function fmtDiffAbbr(n) {
+    if (n == null) return '—';
+    if (n >= 1e9) return (n / 1e9).toFixed(3) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(3) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return fmtN(n);
   }
 
   function normalizeBlock(b) {
@@ -716,7 +746,7 @@ GitHub</a>
       st.tipHeight = status.height;
       st.lastOverviewTs = Date.now();
       set('xp-status', 'Block #' + fmtN(status.height) + ' · Synced');
-      set('s-height',  fmtN(status.height));
+      set('s-height',  '#' + fmtN(status.height));
       var tipHash = status.best_header_tip && status.best_header_tip.hash;
       set('s-tiphash', tipHash ? tipHash.slice(0, 22) + '…' : '—');
       var fromH = Math.max(0, status.height - st.offset - (PER_PAGE - 1));
@@ -737,9 +767,8 @@ GitHub</a>
   function loadPoolStats() {
     return get(POOL).then(function (p) {
       st.pool = p;
-      set('s-poolurl',  p.url          || '—');
-      set('s-asicport', p.asic_port    || '—');
-      set('s-cpuport',  p.cpu_gpu_port || '—');
+      var activeMiners = (p.asic ? (p.asic.active_miners || 0) : 0) + (p.cpu_gpu ? (p.cpu_gpu.active_miners || 0) : 0);
+      set('s-txcount', fmtN(activeMiners));
       if (st.activeTab === 'ps') renderPoolStats(p);
     }).catch(function (e) { console.error('pool:', e); });
   }
@@ -759,14 +788,17 @@ GitHub</a>
         st.chainHashrate = metrics.hashrate || 0;
         set('s-nethash',    fmtHps(metrics.hashrate));
         set('calc-nethash', fmtHps(metrics.hashrate));
-        if (metrics.difficulty    != null) set('s-diff',    fmtN(metrics.difficulty));
-        if (metrics.avg_block_time != null) set('s-txcount', fmtBlockTime(metrics.avg_block_time));
+        if (metrics.difficulty != null) set('s-diff', fmtDiffAbbr(metrics.difficulty));
         updateCalc();
       }
       if (status && status.peer_count != null) set('s-peers', fmtN(status.peer_count));
+      if (status && status.height != null) {
+        var nextHalving = Math.ceil((status.height + 1) / HALVING_INTERVAL) * HALVING_INTERVAL;
+        set('s-supply-sub', 'Next halving: #' + fmtN(nextHalving));
+      }
       if (richlist && richlist.total_supply_sats != null) {
         var supIrm = richlist.total_supply_sats / REWARD_DENOM;
-        set('s-supply', supIrm.toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' IRM');
+        set('s-supply', fmtSupplyM(supIrm));
       }
     }).catch(function () {});
   }
@@ -1199,6 +1231,10 @@ GitHub</a>
   window.xpSearch = xpSearch;
 
   /* --- init --- */
+  set('s-poolurl', 'pool.iriumlabs.org');
+  set('s-asicport', '3333');
+  set('s-cpuport', '3335');
+
   Promise.all([loadOverview(), loadPoolStats(), loadChainStats()]).then(updateCalc);
 
   var hrEl = $id('xp-hr'), huEl = $id('xp-hu'), qEl = $id('xp-q');

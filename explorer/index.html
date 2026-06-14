@@ -631,7 +631,7 @@ GitHub</a>
   var PER_PAGE     = 20;
   var REWARD_DENOM = 1e8;
   var BLOCKS_DAY      = 288;
-  var HALVING_INTERVAL = 210000;
+  var HALVING_INTERVAL = 1050000;
 
   var st = { offset: 0, pool: null, chainHashrate: 0, rlDone: false, activeTab: 'ov', tipHeight: 0, lastOverviewTs: 0, lastBlocks: [], atGenesis: false };
 
@@ -799,10 +799,11 @@ GitHub</a>
       if (status && status.peer_count != null) set('s-peers', fmtN(status.peer_count));
       if (status && status.height != null) {
         var nextHalving = Math.ceil((status.height + 1) / HALVING_INTERVAL) * HALVING_INTERVAL;
-        set('s-supply-sub', 'Next halving: #' + fmtN(nextHalving));
+        set('s-supply-sub', 'excl. founder vesting · Next halving: #' + fmtN(nextHalving));
       }
       if (richlist && richlist.total_supply_sats != null) {
-        var supIrm = richlist.total_supply_sats / REWARD_DENOM;
+        var circulatingSats = richlist.total_supply_sats - 350000000000000;
+        var supIrm = Math.max(0, circulatingSats) / REWARD_DENOM;
         set('s-supply', fmtSupplyM(supIrm));
       }
     }).catch(function () {});

@@ -642,19 +642,27 @@ GitHub</a>
   function set(id, v) { var e = $id(id); if (e) e.textContent = v; }
 
   function fmtN(n)  { return n != null ? Number(n).toLocaleString() : '—'; }
-  function fmtAge(ts) {
+  function timeAgo(secs) {
+    var diff = Math.floor(Date.now() / 1000) - secs;
+    if (diff <= 0)    return 'just now';
+    if (diff < 60)    return diff + 's ago';
+    if (diff < 3600)  return Math.floor(diff / 60) + 'm ago';
+    if (diff < 86400) return Math.floor(diff / 3600) + 'h ago';
+    return Math.floor(diff / 86400) + 'd ago';
+  }
+  function fmtAge(ts, blockHeight) {
     var t;
     if (typeof ts === 'number' && ts > 0 && ts < 1e10) {
-      t = ts * 1000;
+      t = ts;
     } else {
-      t = new Date(ts).getTime();
-      if (isNaN(t)) return '—';
+      t = Math.floor(new Date(ts).getTime() / 1000);
+      if (!t || isNaN(t)) return '—';
     }
-    var s = Math.abs(Date.now() - t) / 1000;
-    if (s < 60)    return 'just now';
-    if (s < 3600)  return Math.floor(s / 60) + 'm ago';
-    if (s < 86400) return Math.floor(s / 3600) + 'h ago';
-    return new Date(t).toLocaleString('en-US', {month:'short', day:'numeric', hour:'2-digit', minute:'2-digit'});
+    var nowSecs = Math.floor(Date.now() / 1000);
+    if (t > nowSecs && st.tipHeight > 0 && blockHeight && blockHeight <= st.tipHeight) {
+      return timeAgo(nowSecs - (st.tipHeight - blockHeight) * 60);
+    }
+    return timeAgo(t);
   }
   function fmtAddr(a) { return a ? a.slice(0,10) + '…' + a.slice(-6) : '—'; }
   function fmtHash(h) { return h ? h.slice(0,16) + '…' : '—'; }
@@ -735,7 +743,7 @@ GitHub</a>
       }
     });
     if (tab === 'rl' && !st.rlDone) loadRichList();
-    if (tab === 'ps') renderPoolStats(st.pool);
+    if (tab === 'ps') { if (st.pool) renderPoolStats(st.pool); else loadPoolStats(); }
   }
   window.xpTab = xpTab;
 
@@ -755,7 +763,7 @@ GitHub</a>
       var raw    = (data && data.blocks) ? data.blocks : [];
       var blocks = raw.slice().reverse().map(normalizeBlock);
       st.atGenesis = blocks.length > 0 && blocks[blocks.length - 1].height === 0;
-      if (blocks.length) set('s-lastblock', fmtAge(blocks[0].timestamp));
+      if (blocks.length) set('s-lastblock', fmtAge(blocks[0].timestamp, blocks[0].height));
       renderBlocks(blocks);
     }).catch(function (e) {
       console.error('overview:', e);
@@ -855,10 +863,10 @@ GitHub</a>
         var minerCell = b.miner_address
           ? '<span class="xp-adr" style="cursor:pointer" onclick="event.stopPropagation();showAddr(\'' + b.miner_address + '\')">' + b.miner_address + '</span>'
           : '—';
-        return '<tr class="xp-click" onclick="showBlock(' + b.height + ')">' +
+        return '<tr class="xp-click" data-ts="' + b.timestamp + '" data-bh="' + b.height + '" onclick="showBlock(' + b.height + ')">' +
           '<td><span class="xp-hl">' + fmtN(b.height) + '</span></td>' +
           '<td><span style="font-family:var(--xp-mono);font-size:11px;color:rgba(255,255,255,0.45);word-break:break-all;">' + (b.hash || '—') + '</span></td>' +
-          '<td class="xp-age">' + fmtAge(b.timestamp) + '</td>' +
+          '<td class="xp-age">' + fmtAge(b.timestamp, b.height) + '</td>' +
           '<td>' + (b.tx_count || 0) + '</td>' +
           '<td>' + minerCell + '</td>' +
           '<td class="xp-rwd" style="color:#34d399">' + fmtRwd(b.total_reward) + '</td>' +
@@ -889,6 +897,20 @@ GitHub</a>
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   window.xpPage = xpPage;
+
+  function refreshAges() {
+    var tbody = $id('xp-tbody');
+    if (!tbody) return;
+    var rows = tbody.querySelectorAll('tr[data-ts]');
+    for (var i = 0; i < rows.length; i++) {
+      var row = rows[i];
+      var ts = parseFloat(row.getAttribute('data-ts'));
+      var bh = parseInt(row.getAttribute('data-bh') || '0', 10);
+      var cells = row.querySelectorAll('td');
+      if (cells.length >= 3) cells[2].textContent = fmtAge(ts, bh);
+    }
+    if (st.lastBlocks.length) set('s-lastblock', fmtAge(st.lastBlocks[0].timestamp, st.lastBlocks[0].height));
+  }
 
   /* --- rich list --- */
   var MAX_SUPPLY_IRM   = 100000000;
@@ -1259,7 +1281,7 @@ GitHub</a>
   }, 15000);
   setInterval(loadPoolStats, 30000);
   setInterval(loadChainStats, 60000);
-  setInterval(function () { if (st.lastBlocks.length) renderBlocks(st.lastBlocks); }, 30000);
+  setInterval(refreshAges, 30000);
 
 })();
 </script>

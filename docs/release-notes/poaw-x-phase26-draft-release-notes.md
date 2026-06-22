@@ -6,6 +6,12 @@
 > - **No mainnet activation.** PoAW-X is hard-off for `network_id == 0`.
 > - **NOT production-ready. NOT mainnet-ready. NOT audited.**
 > - No public testnet has launched. Nothing here authorizes a launch.
+>
+> **Phase 27 note (development only — not a release):** subsequent Phase 27 work on branch
+> `testnet/poawx-phase27-full-blueprint-implementation` added an off-chain **simulation suite**
+> (`poawx-sim`) and a full **gap audit**; it changed no consensus gate. Several blueprint refinements
+> remain deferred (see `docs/poaw-x-phase27-known-limitations.md`). Phase 27 is **development only**,
+> is **not** part of any release, and is **not** a completion of the full blueprint.
 
 ## Audience
 

@@ -357,6 +357,14 @@ fn mode_index(m: PuzzleMode) -> usize {
     m.id() as usize
 }
 
+/// Phase 28 model: does the node reject a reorg whose common-ancestor (fork) height
+/// is `fork_point` given a finalized checkpoint at `finalized_height`? Mirrors the
+/// consensus rule `ChainState::reorg_violates_finalized` (a reorg removes blocks
+/// above the fork point; a finalized block at F is removed iff fork_point < F).
+fn reorg_below_finalized_rejected(finalized_height: u64, fork_point: u64) -> bool {
+    finalized_height > 0 && fork_point < finalized_height
+}
+
 fn top1_raw_share_permille(miners: &[Miner]) -> u32 {
     let total: u128 = miners.iter().map(|m| m.base_work as u128).sum();
     if total == 0 {
@@ -597,9 +605,24 @@ fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
                     out.top1_reward_share_permille
                 ),
             ));
+            // Phase 28: a reorg whose fork point is below a finalized checkpoint is
+            // now rejected by the node (deterministic). Model that here.
+            let finalized_height = blocks.saturating_sub(2); // tip-1 finalized (parent of tip)
+            let attacker_fork_point = finalized_height.saturating_sub(1); // dives below it
+            let rejected = reorg_below_finalized_rejected(finalized_height, attacker_fork_point);
+            checks.push((
+                "deep_reorg_below_finalized_rejected".into(),
+                rejected,
+                format!(
+                    "finalized H{} fork@{} -> rejected={}",
+                    finalized_height, attacker_fork_point, rejected
+                ),
+            ));
             metrics = mining_metrics(&out, &miners);
             metrics["attacker_recent_blocks"] = json!(attacker_blocks);
-            metrics["note"] = json!("deep reorg below a finalized checkpoint is a DEFERRED consensus gap (see known-limitations)");
+            metrics["finalized_height"] = json!(finalized_height);
+            metrics["deep_reorg_below_finalized_rejected"] = json!(rejected);
+            metrics["note"] = json!("Phase 28: reorg below a finalized checkpoint is now rejected by the node (testnet/devnet; mainnet hard-off).");
         }
         "randomness_manipulation" => {
             // Compare puzzle-mode distribution under no bias vs an attacker seed bias.
@@ -682,13 +705,25 @@ fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
                 attacker > 333 || true,
                 format!("attacker {} permille", attacker),
             ));
+            // Phase 28: once a block is finalized, a reorg replacing it is rejected
+            // by the node regardless of the attacker's work — model that invariant.
+            let finalized_height = 8u64;
+            let finalized_reorg_rejected =
+                reorg_below_finalized_rejected(finalized_height, finalized_height - 1)
+                    && !reorg_below_finalized_rejected(finalized_height, finalized_height);
+            checks.push((
+                "finalized_reorg_rejected".into(),
+                finalized_reorg_rejected,
+                "reorg below finalized rejected; fork after finalized allowed".into(),
+            ));
             metrics = json!({
                 "attacker_committee_permille": attacker,
                 "threshold_numerator": 2,
                 "threshold_denominator": 3,
                 "can_block_finality": can_finalize_conflict,
                 "can_forge_finality": attacker > 666,
-                "note": "finality is enforced (phase21h); finalized-checkpoint reorg rejection is a DEFERRED gap"
+                "finalized_reorg_rejected": finalized_reorg_rejected,
+                "note": "Phase 28: finality enforced (phase21h) AND reorg below a finalized checkpoint is now rejected by the node (testnet/devnet; mainnet hard-off)."
             });
         }
         "fresh_wipe" => {
@@ -1008,6 +1043,24 @@ mod tests {
     fn reorg_scenario_measures_attacker() {
         let r = run_scenario("reorg", &base_cfg());
         assert!(r["metrics"]["blocks_produced"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn finalized_reorg_rejection_modeled() {
+        // Phase 28: reorg below a finalized checkpoint is rejected; fork at/after
+        // it is allowed (matches consensus `reorg_violates_finalized`).
+        assert!(reorg_below_finalized_rejected(8, 7));
+        assert!(reorg_below_finalized_rejected(8, 0));
+        assert!(!reorg_below_finalized_rejected(8, 8));
+        assert!(!reorg_below_finalized_rejected(8, 9));
+        assert!(!reorg_below_finalized_rejected(0, 0)); // no checkpoint
+        let r = run_scenario("finality_attack", &base_cfg());
+        assert_eq!(r["metrics"]["finalized_reorg_rejected"], json!(true));
+        let rr = run_scenario("reorg", &base_cfg());
+        assert_eq!(
+            rr["metrics"]["deep_reorg_below_finalized_rejected"],
+            json!(true)
+        );
     }
 
     #[test]

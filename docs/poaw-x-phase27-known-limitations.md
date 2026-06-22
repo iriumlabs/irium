@@ -15,16 +15,13 @@ the project's change rules forbid on consensus-critical code.
 
 ## Deferred items (recommended order)
 
-### A. Finality: finalized-checkpoint state + reorg-below-finalized rejection (System 5) — **highest priority, highest risk**
-- **Gap:** finality proofs are enforced (`phase21h`), but there is no persistent finalized-checkpoint
-  state, and `reorg_to_tip`/`find_reorg_path` (`src/chain.rs`) do not reject a reorg that would rewrite
-  finalized history.
-- **Why it matters:** without it, finality is "soft" — a deep reorg can still rewrite a finalized
-  block. The simulator's `finality_attack` scenario flags this.
-- **Decisions needed:** finalization rule (when does a checkpoint become irreversible?); recovery
-  semantics (the documented testnet exception); interaction with the existing finality proof; reorg-
-  safe persistence.
-- **Risk:** High (touches reorg path + new persistent consensus state).
+### A. Finality: finalized-checkpoint state + reorg-below-finalized rejection (System 5) — **DONE in Phase 28**
+- **Status:** ✅ Implemented in Phase 28 (branch `testnet/poawx-phase28-finalized-reorg-rejection`).
+  `connect_block` now derives a monotonic finalized checkpoint after `validate_block_finality`, and
+  `reorg_to_tip` rejects any reorg whose fork point is below it (even a higher-work fork). Reconstructed
+  on cold replay/rebuild; no new wire format. See
+  `docs/poaw-x-phase28-finalized-reorg-rejection.md` and its design doc. 8 `phase28_*` tests; full lib
+  suite 756/0. Testnet/devnet only; mainnet hard-off.
 
 ### B. Finality: double-sign → penalty wiring (System 5)
 - **Gap:** conflicting finality votes are detected at the gossip layer but are **not** recorded into

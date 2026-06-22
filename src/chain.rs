@@ -291,6 +291,14 @@ pub struct ChainState {
     /// (both gated + mainnet hard-off); deterministically rebuilt by chain
     /// replay on restart / rebuild-style reorg.
     pub dominance: crate::poawx_dominance::PersistentDominance,
+    /// Phase 28: PoAW-X finalized checkpoint (testnet/devnet only; stays
+    /// `0`/zeros on mainnet, which is hard-off). Highest block height finalized
+    /// by a validated finality proof, plus that block's hash. Derived inside
+    /// `connect_block` (so cold replay / `rebuild_to_tip` reconstruct it) and
+    /// advanced monotonically (never backward). `reorg_to_tip` consults it to
+    /// reject any reorg that would disconnect finalized history.
+    pub poawx_finalized_height: u64,
+    pub poawx_finalized_hash: [u8; 32],
 }
 
 #[derive(Debug, Clone)]
@@ -367,6 +375,8 @@ impl ChainState {
             claimed_ltc_outpoints: HashSet::new(),
             reorg_orphaned_blocks: Vec::new(),
             dominance: crate::poawx_dominance::PersistentDominance::from_env(),
+            poawx_finalized_height: 0,
+            poawx_finalized_hash: [0u8; 32],
         };
         let genesis = state.params.genesis_block.clone();
         state
@@ -864,8 +874,18 @@ impl ChainState {
         if crate::poawx_puzzle::puzzle_work_enforced(expected_height) {
             self.validate_block_puzzle_proofs(&block, expected_height)?;
         }
+        // Phase 28: capture the finalized-parent decision here (after the proof
+        // is validated, so an invalid proof can never set a checkpoint), but
+        // apply it AFTER the block is committed below — `previous` borrows
+        // `self.chain` immutably through the committed-admission check.
+        let mut finalize_parent: Option<(u64, [u8; 32])> = None;
         if crate::poawx_finality::finality_committee_enforced(expected_height) {
             self.validate_block_finality(&block, expected_height)?;
+            // The validated proof finalizes the PARENT block (block_hash =
+            // prev_hash at expected_height - 1).
+            if expected_height >= 1 {
+                finalize_parent = Some((expected_height - 1, block.header.prev_hash));
+            }
         }
         if crate::poawx_committed_admission::committed_admission_enforced(expected_height) {
             self.validate_block_committed_admission(&block, previous, expected_height)?;
@@ -902,6 +922,12 @@ impl ChainState {
         self.undo_logs.insert(hash, undo);
         self.best_tip = hash;
         self.apply_block_dominance(expected_height);
+        // Phase 28: now that the block is committed, advance the finalized
+        // checkpoint monotonically (derived here so cold replay/rebuild
+        // reconstruct it). Mainnet stays off (the finality gate is hard-off).
+        if let Some((h, fhash)) = finalize_parent {
+            self.advance_finalized(h, fhash);
+        }
         self.prune_caches();
 
         Ok(())
@@ -1522,6 +1548,28 @@ impl ChainState {
         }
     }
 
+    /// Phase 28: monotonically advance the PoAW-X finalized checkpoint. Only
+    /// moves forward (never backward, rule 4); called from `connect_block` after
+    /// a finality proof has been validated, so an invalid proof can never set a
+    /// checkpoint. No-op on mainnet (finality is hard-off there, so this is never
+    /// reached with a real height).
+    fn advance_finalized(&mut self, height: u64, hash: [u8; 32]) {
+        if height > self.poawx_finalized_height {
+            self.poawx_finalized_height = height;
+            self.poawx_finalized_hash = hash;
+        }
+    }
+
+    /// Phase 28: pure decision — does a reorg whose common-ancestor (fork) height
+    /// is `ancestor_height` disconnect the finalized checkpoint at
+    /// `finalized_height`? A reorg removes every block above the fork point, so a
+    /// finalized block at height F is removed iff the fork point is below F. No
+    /// checkpoint (`finalized_height == 0`) ⇒ never a violation (existing reorg
+    /// behavior, including all of mainnet, is unchanged).
+    fn reorg_violates_finalized(finalized_height: u64, ancestor_height: u64) -> bool {
+        finalized_height > 0 && ancestor_height < finalized_height
+    }
+
     fn find_reorg_path(&self, new_tip: [u8; 32]) -> Result<(u64, Vec<Block>), String> {
         let mut cur = new_tip;
         let mut new_branch_rev: Vec<Block> = Vec::new();
@@ -1549,6 +1597,24 @@ impl ChainState {
             return Ok(());
         }
 
+        // Phase 28: reject a reorg that would disconnect a finalized checkpoint.
+        // A reorg removes every block above `ancestor_height`; a finalized block
+        // at height F is removed iff `ancestor_height < F`. Deterministic and
+        // consensus-level (returns Err, blocking the reorg before any disconnect).
+        // No-op when no checkpoint exists (`poawx_finalized_height == 0`, which
+        // includes all of mainnet, where finality is hard-off). Even a
+        // higher-work / longer fork is rejected here.
+        if Self::reorg_violates_finalized(self.poawx_finalized_height, ancestor_height) {
+            return Err(format!(
+                "phase28: reorg would disconnect finalized checkpoint at height {}",
+                self.poawx_finalized_height
+            ));
+        }
+        // Snapshot finalized state so a mid-reorg failure (which reconnects the
+        // old branch) can restore it; new-branch `connect_block` calls below may
+        // advance it, and the monotonic setter would otherwise leave it stuck.
+        let finalized_snapshot = (self.poawx_finalized_height, self.poawx_finalized_hash);
+
         // Observability: capture old-tip hash and counts before mutating
         // chain state. Emitted as a single [reorg] log line on success
         // below so operators can finally see how often the chain reorgs
@@ -1571,6 +1637,11 @@ impl ChainState {
                 for old in disconnected.iter().rev() {
                     let _ = self.connect_block(old.clone());
                 }
+                // Phase 28: restore the pre-reorg finalized checkpoint (partial
+                // new-branch connects above may have advanced it past the now-
+                // restored old chain).
+                self.poawx_finalized_height = finalized_snapshot.0;
+                self.poawx_finalized_hash = finalized_snapshot.1;
                 return Err(format!("reorg connect failed: {}", e));
             }
             connected_new.push(block.clone());
@@ -2231,6 +2302,8 @@ impl ChainState {
             claimed_ltc_outpoints: self.claimed_ltc_outpoints.clone(),
             reorg_orphaned_blocks: Vec::new(),
             dominance: crate::poawx_dominance::PersistentDominance::from_env(),
+            poawx_finalized_height: 0,
+            poawx_finalized_hash: [0u8; 32],
         };
 
         let branch = self.gather_branch_to_genesis(tip_hash)?;
@@ -9574,7 +9647,13 @@ mod tests {
             let bits = st.target_for_height(h).bits;
             let time = genesis.header.time + h as u32;
             let proof = crate::poawx_mining_harness::build_devnet_all_gates_block(
-                net, h, prev, parent_prev, bits, time, 4,
+                net,
+                h,
+                prev,
+                parent_prev,
+                bits,
+                time,
+                4,
             )
             .unwrap_or_else(|e| panic!("build H{h}: {e}"));
 
@@ -9630,6 +9709,343 @@ mod tests {
             st.height
         );
 
+        cache.clear();
+        phase26b_clear_gate_env();
+    }
+
+    // ── Phase 28: finalized-checkpoint reorg rejection ──────────────────────────
+
+    /// Build + connect `n` all-gates blocks (genesis -> n) using the EXACT
+    /// live-proof builder, every gate enforced (incl. finality). Returns the block
+    /// hash by height (index 0 = genesis). Mirrors `phase26b_multiblock` but is a
+    /// reusable helper for the Phase 28 tests. Caller holds the env lock + gate env.
+    #[allow(clippy::type_complexity)]
+    fn phase28_build_connect_chain(
+        st: &mut ChainState,
+        n: u64,
+    ) -> (Vec<[u8; 32]>, Vec<(Block, Vec<Vec<u8>>)>) {
+        use crate::poawx_admission::global_admission_cache;
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let net = crate::activation::network_id_byte();
+        let cache = global_admission_cache();
+        let mut hashes = vec![genesis_hash];
+        let mut captured: Vec<(Block, Vec<Vec<u8>>)> = Vec::new();
+        let mut prev = genesis_hash;
+        let mut parent_prev: Option<[u8; 32]> = None;
+        for h in 1..=n {
+            let bits = st.target_for_height(h).bits;
+            let time = genesis.header.time + h as u32;
+            let proof = crate::poawx_mining_harness::build_devnet_all_gates_block(
+                net,
+                h,
+                prev,
+                parent_prev,
+                bits,
+                time,
+                4,
+            )
+            .unwrap_or_else(|e| panic!("phase28 build H{h}: {e}"));
+            cache.clear();
+            cache.set_tip(h);
+            for adm in &proof.admissions {
+                assert_eq!(
+                    cache.ingest_bytes(adm),
+                    crate::poawx_gossip::GossipOutcome::AcceptedNew,
+                    "phase28 H{h}: admission ingested"
+                );
+            }
+            let blk_hash = proof.block_hash;
+            let blk_prev = prev;
+            // Capture (block, admissions) for faithful replay tests.
+            captured.push((proof.block.clone(), proof.admissions.clone()));
+            st.connect_block(proof.block)
+                .unwrap_or_else(|e| panic!("phase28 connect H{h}: {e}"));
+            hashes.push(blk_hash);
+            parent_prev = Some(blk_prev);
+            prev = blk_hash;
+        }
+        (hashes, captured)
+    }
+
+    /// Insert a synthetic fork-point block at `height` whose parent is the main
+    /// chain's block at `height-1` (`prev_at_height_minus_1`) but with a distinct
+    /// hash (nonce tweaked). It is registered in `block_store`/`heights` only, so
+    /// `find_reorg_path` resolves its fork point to `height-1` WITHOUT it being on
+    /// the main chain. Returns the fork block hash. The block is intentionally not
+    /// valid for `connect_block` — it is used only to drive the reorg fork point.
+    fn phase28_insert_fork_point(
+        st: &mut ChainState,
+        height: u64,
+        prev_at_height_minus_1: [u8; 32],
+    ) -> [u8; 32] {
+        let mut fork = st.chain[height as usize].clone();
+        fork.header.prev_hash = prev_at_height_minus_1;
+        fork.header.nonce = fork.header.nonce.wrapping_add(0x5151_5151);
+        let fork_hash = fork.header.hash_for_height(height);
+        st.block_store.insert(fork_hash, fork);
+        st.heights.insert(fork_hash, height);
+        fork_hash
+    }
+
+    #[test]
+    fn phase28_finalized_checkpoint_set_by_valid_finality() {
+        // A valid all-gates chain advances the finalized checkpoint to the parent
+        // of the tip (block H finalizes H-1). After 5 blocks, finalized == 4 with
+        // the height-4 block hash; only a VALIDATED finality proof advances it.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        let mut st = base_chain(None);
+        let (hashes, _) = phase28_build_connect_chain(&mut st, 5);
+        assert_eq!(
+            st.poawx_finalized_height, 4,
+            "block 5 finalizes its parent at height 4"
+        );
+        assert_eq!(
+            st.poawx_finalized_hash, hashes[4],
+            "finalized hash is the height-4 block hash"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase28_rejects_reorg_replacing_finalized_checkpoint() {
+        // Finalize height 4; a reorg whose fork point is below 4 (here height 2)
+        // is rejected deterministically BEFORE any disconnect — even though the
+        // reorg path is reached directly (bypassing the more-work gate).
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        let mut st = base_chain(None);
+        let (hashes, _) = phase28_build_connect_chain(&mut st, 5);
+        assert_eq!(st.poawx_finalized_height, 4);
+        let pre = (st.poawx_finalized_height, st.poawx_finalized_hash);
+
+        // Fork point at height 2 (< finalized 4): diverges below the checkpoint.
+        let fork_hash = phase28_insert_fork_point(&mut st, 2, hashes[1]);
+        let err = st
+            .reorg_to_tip(fork_hash)
+            .expect_err("reorg below finalized checkpoint must be rejected");
+        assert!(
+            err.contains("phase28") && err.contains("finalized"),
+            "expected phase28 finalized rejection, got: {err}"
+        );
+        // Chain + checkpoint unchanged (rejected before any disconnect).
+        assert_eq!(st.tip_height(), 5, "tip unchanged after rejected reorg");
+        assert_eq!(
+            (st.poawx_finalized_height, st.poawx_finalized_hash),
+            pre,
+            "finalized checkpoint unchanged"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase28_allows_fork_after_finalized_checkpoint() {
+        // Finalize height 4; a fork that shares block 4 and diverges at height 5
+        // (fork point == finalized height) is NOT blocked by the finality guard —
+        // it proceeds to normal chain rules (and here fails to connect for an
+        // unrelated reason, proving the guard let it through).
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        let mut st = base_chain(None);
+        let (hashes, _) = phase28_build_connect_chain(&mut st, 5);
+        assert_eq!(st.poawx_finalized_height, 4);
+
+        // Fork point at height 5 (> finalized 4): shares the finalized block 4.
+        let fork_hash = phase28_insert_fork_point(&mut st, 5, hashes[4]);
+        let res = st.reorg_to_tip(fork_hash);
+        // The guard must NOT reject it; any error must be a normal connect failure.
+        if let Err(e) = res {
+            assert!(
+                !(e.contains("phase28") && e.contains("finalized")),
+                "fork after finalized must not be blocked by the finality guard, got: {e}"
+            );
+        }
+        // Finalized checkpoint never moved backward.
+        assert_eq!(
+            st.poawx_finalized_height, 4,
+            "finalized height unchanged / not backward"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase28_no_finalized_checkpoint_preserves_existing_reorg() {
+        // With no checkpoint (poawx_finalized_height == 0), the guard is inactive
+        // and pre-existing reorg behavior is unchanged. A fresh chain has no
+        // checkpoint; the pure decision is false for all fork points.
+        let st = base_chain(None);
+        assert_eq!(
+            st.poawx_finalized_height, 0,
+            "no checkpoint on a fresh chain"
+        );
+        for ancestor in [0u64, 1, 5, 100] {
+            assert!(
+                !ChainState::reorg_violates_finalized(0, ancestor),
+                "no checkpoint must never block a reorg (ancestor {ancestor})"
+            );
+        }
+    }
+
+    #[test]
+    fn phase28_reorg_violates_finalized_pure_boundary() {
+        // Exhaustive boundary of the pure decision.
+        // F=0: never blocks.
+        assert!(!ChainState::reorg_violates_finalized(0, 0));
+        assert!(!ChainState::reorg_violates_finalized(0, 10));
+        // F=4: fork points 0..=3 block; 4 and above allowed.
+        for a in 0..=3 {
+            assert!(
+                ChainState::reorg_violates_finalized(4, a),
+                "fork below finalized must block (a={a})"
+            );
+        }
+        for a in 4..=8 {
+            assert!(
+                !ChainState::reorg_violates_finalized(4, a),
+                "fork at/after finalized must be allowed (a={a})"
+            );
+        }
+    }
+
+    #[test]
+    fn phase28_finalized_checkpoint_monotonic_no_backward() {
+        // The checkpoint advances as blocks connect and never decreases.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 5);
+        assert_eq!(st.poawx_finalized_height, 4);
+        // A lower advance is a no-op (rule 4: never backward).
+        st.advance_finalized(2, [0x22u8; 32]);
+        assert_eq!(
+            st.poawx_finalized_height, 4,
+            "checkpoint must not move backward"
+        );
+        // A higher advance moves it forward.
+        st.advance_finalized(5, [0x55u8; 32]);
+        assert_eq!(st.poawx_finalized_height, 5);
+        assert_eq!(st.poawx_finalized_hash, [0x55u8; 32]);
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase28_invalid_finality_does_not_lock_chain() {
+        // A block whose finality proof is tampered must be REJECTED by
+        // connect_block and must NOT advance the finalized checkpoint.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let finalized_before = st.poawx_finalized_height; // == 2
+        assert_eq!(finalized_before, 2);
+
+        // Build a valid height-4 block, then tamper its finality proof.
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let net = crate::activation::network_id_byte();
+        let prev = st.chain[3].header.hash_for_height(3);
+        let parent_prev = Some(st.chain[2].header.hash_for_height(2));
+        let bits = st.target_for_height(4).bits;
+        let time = genesis.header.time + 4;
+        let mut proof = crate::poawx_mining_harness::build_devnet_all_gates_block(
+            net,
+            4,
+            prev,
+            parent_prev,
+            bits,
+            time,
+            4,
+        )
+        .expect("build H4");
+        // Ingest admissions so only finality is the failing gate of interest.
+        let cache = crate::poawx_admission::global_admission_cache();
+        cache.clear();
+        cache.set_tip(4);
+        for adm in &proof.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        // Tamper the finality proof: corrupt the first vote's signature.
+        if let Some(receipts) = proof.block.poawx_receipts.as_mut() {
+            for r in receipts.iter_mut() {
+                if let Some(ext) = r.phase20_ext.as_mut() {
+                    if let Some(fp) = ext.finality_proof.as_mut() {
+                        if let Some(v) = fp.votes.first_mut() {
+                            v.signature[0] ^= 0xFF;
+                        }
+                    }
+                }
+            }
+        }
+        let res = st.connect_block(proof.block);
+        assert!(res.is_err(), "tampered finality must be rejected");
+        assert_eq!(
+            st.poawx_finalized_height, finalized_before,
+            "rejected block must not advance the finalized checkpoint"
+        );
+        cache.clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase28_finalized_checkpoint_survives_replay() {
+        // The checkpoint is DERIVED inside connect_block, so replaying the same
+        // blocks (re-ingesting their admissions, as the real cold-replay path does
+        // after reloading persisted admissions) into a FRESH state reconstructs the
+        // same checkpoint — and the replayed state still rejects a conflicting reorg.
+        use crate::poawx_admission::global_admission_cache;
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        let mut st = base_chain(None);
+        let (hashes, captured) = phase28_build_connect_chain(&mut st, 5);
+        assert_eq!(st.poawx_finalized_height, 4);
+
+        // Replay the captured blocks into a brand-new ChainState.
+        let cache = global_admission_cache();
+        let mut replayed = base_chain(None);
+        for (h, (block, admissions)) in captured.iter().enumerate() {
+            let height = (h + 1) as u64;
+            cache.clear();
+            cache.set_tip(height);
+            for adm in admissions {
+                let _ = cache.ingest_bytes(adm);
+            }
+            replayed
+                .connect_block(block.clone())
+                .unwrap_or_else(|e| panic!("replay H{height}: {e}"));
+        }
+        assert_eq!(
+            replayed.poawx_finalized_height, 4,
+            "replay reconstructs the finalized checkpoint"
+        );
+        assert_eq!(replayed.poawx_finalized_hash, hashes[4]);
+
+        // The replayed state rejects a reorg below the reconstructed checkpoint.
+        let fork_hash = phase28_insert_fork_point(&mut replayed, 2, hashes[1]);
+        let err = replayed
+            .reorg_to_tip(fork_hash)
+            .expect_err("replayed state must still reject reorg below finalized");
+        assert!(
+            err.contains("phase28") && err.contains("finalized"),
+            "expected phase28 rejection after replay, got: {err}"
+        );
         cache.clear();
         phase26b_clear_gate_env();
     }
@@ -9755,7 +10171,8 @@ mod tests {
 
         // Replay / stale: a commitment frozen for a DIFFERENT seed (epoch) must not
         // match this set.
-        let stale = AdmissionCommitmentV1::from_candidate_set(&mk_set(target, [0xAAu8; 32]), target - 1);
+        let stale =
+            AdmissionCommitmentV1::from_candidate_set(&mk_set(target, [0xAAu8; 32]), target - 1);
         assert!(
             !stale.matches_candidate_set(&cs),
             "commitment frozen for a different seed/epoch must not match (replay-safe)"

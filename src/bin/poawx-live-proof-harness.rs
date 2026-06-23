@@ -17,7 +17,8 @@
 use irium_node_rs::activation::network_id_byte;
 use irium_node_rs::poawx::Phase20ReceiptExt;
 use irium_node_rs::poawx_mining_harness::{
-    build_devnet_all_gates_block, guard_isolated_storage, guard_network, AllGatesProof,
+    build_devnet_all_gates_block_with, guard_isolated_storage, guard_network, AllGatesProof,
+    AllGatesSections,
 };
 use std::path::Path;
 use std::time::Duration;
@@ -29,6 +30,8 @@ struct Args {
     rpc_url: String,
     work_dir: String,
     rpc_token: Option<String>,
+    /// Phase 42: opt-in Phase 31–34 trailing block sections (DMC1/ADM1/TKT1).
+    sections: AllGatesSections,
 }
 
 fn parse_args(argv: &[String]) -> Result<Args, String> {
@@ -38,12 +41,22 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
         rpc_url: String::new(),
         work_dir: String::new(),
         rpc_token: None,
+        sections: AllGatesSections::default(),
     };
     let mut i = 0;
     while i < argv.len() {
         match argv[i].as_str() {
             "--devnet" => a.devnet = true,
             "--testnet" => a.testnet = true,
+            // Phase 42: opt-in newer trailing sections (devnet/testnet only).
+            "--emit-dmc1" => a.sections.dominance_commitment = true,
+            "--emit-adm1" => a.sections.adaptive_commitment = true,
+            "--emit-tkt1" => a.sections.ticket_registrations = true,
+            "--phase31-34" => {
+                a.sections.dominance_commitment = true;
+                a.sections.adaptive_commitment = true;
+                a.sections.ticket_registrations = true;
+            }
             "--rpc-url" => {
                 i += 1;
                 a.rpc_url = argv.get(i).cloned().ok_or("--rpc-url requires a value")?;
@@ -281,9 +294,19 @@ fn run(a: &Args) -> Result<String, String> {
             })
     };
 
-    // 4) build the all-gates block with Irium-native PoW (mainnet hard-off).
-    let proof =
-        build_devnet_all_gates_block(net, height, prev_hash, parent_prev_hash, bits, time, receipt_diff)?;
+    // 4) build the all-gates block with Irium-native PoW (mainnet hard-off). With no
+    // `--emit-*`/`--phase31-34` flag, `a.sections` is default and this is identical to
+    // the legacy all-gates block; the flags add the Phase 31–34 trailing sections.
+    let proof = build_devnet_all_gates_block_with(
+        a.sections,
+        net,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_diff,
+    )?;
 
     // 5) ingest the candidate admissions (raw canonical wire bytes).
     for (i, adm) in proof.admissions.iter().enumerate() {
@@ -371,7 +394,10 @@ fn run(a: &Args) -> Result<String, String> {
 fn usage() -> &'static str {
     "poawx-live-proof-harness (devnet/testnet ONLY)\n\
      usage: poawx-live-proof-harness --devnet --rpc-url http://127.0.0.1:41011 \
-     --work-dir <isolated-dir> [--rpc-token <token>]\n\
+     --work-dir <isolated-dir> [--rpc-token <token>] \
+     [--emit-dmc1] [--emit-adm1] [--emit-tkt1] [--phase31-34]\n\
+     (Phase 42: --emit-* / --phase31-34 add the Phase 33/34/32 trailing sections; \
+     node gates must be set to match. Default = legacy all-gates block.)\n\
      refuses mainnet, non-loopback RPC, and default %USERPROFILE%\\.irium / $HOME/.irium."
 }
 
@@ -478,8 +504,8 @@ mod tests {
         ] {
             std::env::set_var(k, v);
         }
-        let proof =
-            build_devnet_all_gates_block(2, 1, [0x44u8; 32], None, 0x207fffff, 1, 4).expect("build");
+        let proof = build_devnet_all_gates_block(2, 1, [0x44u8; 32], None, 0x207fffff, 1, 4)
+            .expect("build");
         let req = build_submit_request(&proof).expect("req");
         // The request keys are mechanical block fields; assert none of the JSON
         // *keys* leak secret material and the header/hash fields are present.

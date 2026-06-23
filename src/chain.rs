@@ -11938,6 +11938,309 @@ mod tests {
         phase26b_clear_gate_env();
     }
 
+    // ── Phase 42: live-harness Phase 31–34 section support ───────────────────────
+
+    /// Phase 31 caps active + Phase 33 DMC required + Phase 34 adaptive required.
+    /// Ticket store is explicitly INACTIVE (so the adaptive Caution-mode effect does
+    /// not demand ticket eligibility). Use for DMC/ADM-only (no-TKT1) tests, where
+    /// the adaptive mode is Caution (0 recent tickets) and only DMC is demanded.
+    fn phase42_set_gate_env_dmc_adm() {
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_REWARD_MANIFEST_CAPS_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_REQUIRED", "1");
+        std::env::set_var("IRIUM_POAWX_ADAPTIVE_MODE_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_ADAPTIVE_COMMITMENT_REQUIRED", "1");
+        // Neutralize any leaked ticket-store env from other tests.
+        std::env::remove_var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT");
+        std::env::set_var("IRIUM_POAWX_TICKET_STORE_REQUIRED", "0");
+    }
+
+    /// As above PLUS Phase 32 ticket store ACTIVE (registrations collected/applied,
+    /// not required — eligibility needs role_ticket_proofs which the harness omits;
+    /// H->H+1 timing is verified separately). With TKT1 emitted, the adaptive mode is
+    /// Normal (recent tickets ≥ threshold), so no Caution effect fires.
+    fn phase42_set_gate_env_with_tickets() {
+        phase42_set_gate_env_dmc_adm();
+        std::env::set_var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_TICKET_STORE_REQUIRED", "0");
+        std::env::set_var("IRIUM_POAWX_TICKET_SYBIL_BITS", "0");
+    }
+
+    fn phase42_clear_full_gate_env() {
+        for k in [
+            "IRIUM_POAWX_REWARD_MANIFEST_CAPS_ACTIVATION_HEIGHT",
+            "IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT",
+            "IRIUM_POAWX_DOMINANCE_COMMITMENT_REQUIRED",
+            "IRIUM_POAWX_ADAPTIVE_MODE_ACTIVATION_HEIGHT",
+            "IRIUM_POAWX_ADAPTIVE_COMMITMENT_REQUIRED",
+            "IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT",
+            "IRIUM_POAWX_TICKET_STORE_REQUIRED",
+            "IRIUM_POAWX_TICKET_SYBIL_BITS",
+        ] {
+            std::env::remove_var(k);
+        }
+        phase26b_clear_gate_env();
+    }
+
+    /// Build + connect `n` blocks via the EXTENDED Phase 42 builder with `opts`.
+    fn phase42_build_connect_chain(
+        st: &mut ChainState,
+        n: u64,
+        opts: crate::poawx_mining_harness::AllGatesSections,
+    ) -> Vec<[u8; 32]> {
+        use crate::poawx_admission::global_admission_cache;
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let net = crate::activation::network_id_byte();
+        let cache = global_admission_cache();
+        let mut hashes = vec![genesis_hash];
+        let mut prev = genesis_hash;
+        let mut parent_prev: Option<[u8; 32]> = None;
+        for h in 1..=n {
+            let bits = st.target_for_height(h).bits;
+            let time = genesis.header.time + h as u32;
+            let proof = crate::poawx_mining_harness::build_devnet_all_gates_block_with(
+                opts,
+                net,
+                h,
+                prev,
+                parent_prev,
+                bits,
+                time,
+                4,
+            )
+            .unwrap_or_else(|e| panic!("phase42 build H{h}: {e}"));
+            cache.clear();
+            cache.set_tip(h);
+            for adm in &proof.admissions {
+                let _ = cache.ingest_bytes(adm);
+            }
+            let blk_hash = proof.block_hash;
+            let blk_prev = prev;
+            st.connect_block(proof.block)
+                .unwrap_or_else(|e| panic!("phase42 connect H{h}: {e}"));
+            hashes.push(blk_hash);
+            parent_prev = Some(blk_prev);
+            prev = blk_hash;
+        }
+        hashes
+    }
+
+    fn phase42_last_ext(st: &ChainState, h: u64) -> crate::poawx::Phase20ReceiptExt {
+        st.chain[h as usize].poawx_receipts.as_ref().unwrap()[0]
+            .phase20_ext
+            .clone()
+            .unwrap()
+    }
+
+    #[test]
+    fn phase42_harness_preserves_legacy_all_gates_path() {
+        // Default options emit NO Phase 31-34 sections and the legacy all-gates chain
+        // connects exactly as before.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        let mut st = base_chain(None);
+        let _ = phase42_build_connect_chain(
+            &mut st,
+            3,
+            crate::poawx_mining_harness::AllGatesSections::default(),
+        );
+        assert_eq!(st.height, 4); // genesis + 3
+        let ext = phase42_last_ext(&st, 3);
+        assert!(ext.dominance_commitment.is_none());
+        assert!(ext.adaptive_mode_commitment.is_none());
+        assert!(ext.ticket_registrations.is_none());
+        assert_eq!(
+            crate::poawx::Phase20ReceiptExt::deserialize(&ext.serialize()).unwrap(),
+            ext
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase42_harness_emits_tkt1_dmc1_adm1_sections() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase42_set_gate_env_with_tickets();
+        let opts = crate::poawx_mining_harness::AllGatesSections {
+            dominance_commitment: true,
+            adaptive_commitment: true,
+            ticket_registrations: true,
+        };
+        let mut st = base_chain(None);
+        let _ = phase42_build_connect_chain(&mut st, 3, opts);
+        let ext = phase42_last_ext(&st, 3);
+        assert!(ext.dominance_commitment.is_some(), "DMC1 present");
+        assert!(ext.adaptive_mode_commitment.is_some(), "ADM1 present");
+        let regs = ext.ticket_registrations.as_ref().expect("TKT1 present");
+        assert_eq!(
+            regs.len(),
+            crate::poawx_mining_harness::TICKET_REGISTRATIONS_PER_BLOCK as usize
+        );
+        // Wire round-trip with all three sections present.
+        assert_eq!(
+            crate::poawx::Phase20ReceiptExt::deserialize(&ext.serialize()).unwrap(),
+            ext
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase42_clear_full_gate_env();
+    }
+
+    #[test]
+    fn phase42_harness_ticket_h_plus_one_timing() {
+        // A registration emitted in block H (epoch H+1) is ACTIVE from H+1.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase42_set_gate_env_with_tickets();
+        let opts = crate::poawx_mining_harness::AllGatesSections {
+            dominance_commitment: true,
+            adaptive_commitment: true,
+            ticket_registrations: true,
+        };
+        let mut st = base_chain(None);
+        let _ = phase42_build_connect_chain(&mut st, 2, opts);
+        // Block 2 registered tickets for epoch 3 (the compute solver + apk the harness uses);
+        // active from H+1 = 3 (registered_height 2 < 3).
+        let compute_solver = [0xC1u8; 20];
+        let apk = [0xD1u8; 33];
+        assert!(
+            st.ticket_store.has_active(&compute_solver, 3, &apk, 3),
+            "ticket registered at H=2 is active at H+1=3"
+        );
+        // Block 1 registered epoch 2 (active at height 2), proving the H->H+1 timing.
+        assert!(
+            st.ticket_store.has_active(&compute_solver, 2, &apk, 2),
+            "ticket registered at H=1 is active at H+1=2"
+        );
+        // An epoch never registered is not active.
+        assert!(
+            !st.ticket_store.has_active(&compute_solver, 99, &apk, 3),
+            "unregistered epoch is not active"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase42_clear_full_gate_env();
+    }
+
+    #[test]
+    fn phase42_harness_dominance_commitment_valid() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase42_set_gate_env_dmc_adm();
+        let opts = crate::poawx_mining_harness::AllGatesSections::phase33_34();
+        let mut st = base_chain(None);
+        let hashes = phase42_build_connect_chain(&mut st, 2, opts);
+        // Build (not connect) block 3 with the harness DMC1 and validate it node-side.
+        let net = crate::activation::network_id_byte();
+        let bits = st.target_for_height(3).bits;
+        let time = st.chain[0].header.time + 3;
+        let proof = crate::poawx_mining_harness::build_devnet_all_gates_block_with(
+            opts,
+            net,
+            3,
+            hashes[2],
+            Some(hashes[1]),
+            bits,
+            time,
+            4,
+        )
+        .expect("build H3");
+        assert!(
+            st.validate_block_dominance_commitment(&proof.block, 3)
+                .is_ok(),
+            "harness DMC1 validates against node recompute"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase42_clear_full_gate_env();
+    }
+
+    #[test]
+    fn phase42_harness_adaptive_commitment_valid() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase42_set_gate_env_dmc_adm();
+        let opts = crate::poawx_mining_harness::AllGatesSections::phase33_34();
+        let mut st = base_chain(None);
+        let hashes = phase42_build_connect_chain(&mut st, 2, opts);
+        let net = crate::activation::network_id_byte();
+        let bits = st.target_for_height(3).bits;
+        let time = st.chain[0].header.time + 3;
+        let proof = crate::poawx_mining_harness::build_devnet_all_gates_block_with(
+            opts,
+            net,
+            3,
+            hashes[2],
+            Some(hashes[1]),
+            bits,
+            time,
+            4,
+        )
+        .expect("build H3");
+        assert!(
+            st.validate_block_adaptive_commitment(&proof.block, 3)
+                .is_ok(),
+            "harness ADM1 validates against node recompute"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase42_clear_full_gate_env();
+    }
+
+    #[test]
+    fn phase42_harness_full_phase31_34_stack_connects() {
+        // A 6-block chain with Phase 31 caps active + Phase 33 DMC required + Phase 34
+        // adaptive required + Phase 32 ticket store active connects end to end, with
+        // every block carrying TKT1 + DMC1 + ADM1.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase42_set_gate_env_with_tickets();
+        let opts = crate::poawx_mining_harness::AllGatesSections {
+            dominance_commitment: true,
+            adaptive_commitment: true,
+            ticket_registrations: true,
+        };
+        let mut st = base_chain(None);
+        let _ = phase42_build_connect_chain(&mut st, 6, opts);
+        assert_eq!(st.height, 7, "genesis + 6 all-section blocks connected");
+        for h in 1..=6u64 {
+            let ext = phase42_last_ext(&st, h);
+            assert!(ext.dominance_commitment.is_some(), "H{h} DMC1");
+            assert!(ext.adaptive_mode_commitment.is_some(), "H{h} ADM1");
+            assert!(ext.ticket_registrations.is_some(), "H{h} TKT1");
+        }
+        crate::poawx_admission::global_admission_cache().clear();
+        phase42_clear_full_gate_env();
+    }
+
+    #[test]
+    fn phase42_harness_no_mainnet_activation() {
+        // The builder refuses mainnet (network_id == 0) regardless of options.
+        let opts = crate::poawx_mining_harness::AllGatesSections {
+            dominance_commitment: true,
+            adaptive_commitment: true,
+            ticket_registrations: true,
+        };
+        let r = crate::poawx_mining_harness::build_devnet_all_gates_block_with(
+            opts,
+            0,
+            1,
+            [0u8; 32],
+            None,
+            0x207f_ffff,
+            0,
+            4,
+        );
+        assert!(r.is_err(), "mainnet (network_id 0) refused by the builder");
+    }
+
     #[test]
     fn phase26b_stale_immediate_parent_seed_rejected() {
         // Negative: a height-2 block whose candidate set is seeded by the IMMEDIATE

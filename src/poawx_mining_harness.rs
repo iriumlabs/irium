@@ -34,10 +34,16 @@ use crate::poawx::{
     Phase20ReceiptExt, PoawxBlockReceipt, PoawxRoleClaim, RoleReward, ROLE_COMPUTE_CONTRIBUTOR,
     ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
 };
+use crate::poawx_adaptive::{
+    adaptive_mode_active, PoawxAdaptiveChainSignals, PoawxAdaptiveCommitmentV1, PoawxAdaptiveState,
+    ADAPTIVE_RECENT_WINDOW,
+};
 use crate::poawx_admission::CandidateAdmissionV1;
 use crate::poawx_candidate::{AssignmentProofV2, CandidateSet, RoleCandidate};
 use crate::poawx_committed_admission::{admission_epoch_seed, AdmissionCommitmentV1};
-use crate::poawx_dominance::{PersistentDominance, RoleRewardKind, DOMINANCE_BASE_WORK_SCORE};
+use crate::poawx_dominance::{
+    PersistentDominance, PoawxDominanceCommitmentV1, RoleRewardKind, DOMINANCE_BASE_WORK_SCORE,
+};
 use crate::poawx_finality::{
     finality_threshold, FinalityProofV1, FinalityVoteType, FinalityVoteV1,
 };
@@ -175,7 +181,69 @@ pub struct AllGatesProof {
 /// `prev_hash` (the genesis hash) and behavior is unchanged. This makes blocks at
 /// `height >= 2` satisfy BOTH the phase21d candidate-set gate and the phase22a
 /// committed-admission gate.
+/// Phase 42: opt-in selectors for the newer (Phase 31–34) trailing block sections.
+/// `Default` = none emitted, so `build_devnet_all_gates_block` stays byte-identical
+/// to the legacy all-gates path (Phases ≤ 30). Devnet/testnet only.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AllGatesSections {
+    /// Phase 33: emit a `DMC1` dominance-state commitment (pre/post digests).
+    pub dominance_commitment: bool,
+    /// Phase 34: emit an `ADM1` adaptive-mode commitment (pre/post mode+state+metrics).
+    pub adaptive_commitment: bool,
+    /// Phase 32: emit `TKT1` ticket registrations (count per block = `ticket_registrations_per_block`).
+    pub ticket_registrations: bool,
+}
+
+impl AllGatesSections {
+    /// Enable the Phase 33 + Phase 34 commitments (the cleanly harness-derivable
+    /// sections). Ticket registrations stay off unless explicitly enabled.
+    pub fn phase33_34() -> Self {
+        Self {
+            dominance_commitment: true,
+            adaptive_commitment: true,
+            ticket_registrations: false,
+        }
+    }
+}
+
+/// Phase 42: TKT1 registrations the harness emits per block when enabled — one per
+/// non-primary role (compute, verify, support), each for the NEXT block's epoch
+/// (`height + 1`) so a registration in block H is ACTIVE from H+1 (the consensus
+/// H→H+1 ticket timing). The adaptive `registered_ticket_count` signal counts these.
+pub const TICKET_REGISTRATIONS_PER_BLOCK: u32 = 3;
+
+/// Legacy entry point — identical to the pre-Phase-42 all-gates builder (no Phase
+/// 31–34 trailing sections). Preserved so existing callers/tests are unchanged.
 pub fn build_devnet_all_gates_block(
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+) -> Result<AllGatesProof, String> {
+    build_devnet_all_gates_block_with(
+        AllGatesSections::default(),
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+    )
+}
+
+/// Phase 42: all-gates builder with opt-in Phase 31–34 trailing sections. With
+/// `AllGatesSections::default()` the output is identical to the legacy builder.
+/// The optional `DMC1`/`ADM1` commitments are computed from the SAME deterministic
+/// chain-derived state the node validates (dominance replay via `dom_at`; adaptive
+/// replay via the public `PoawxAdaptiveState::next`), so a node with Phase 33/34
+/// gates active+required accepts the result. Phase 31 reward caps need no section:
+/// the canonical 55/22/13/10 split already satisfies the cap/fallback validator.
+pub fn build_devnet_all_gates_block_with(
+    opts: AllGatesSections,
     network_id: u8,
     height: u64,
     prev_hash: [u8; 32],
@@ -360,6 +428,115 @@ pub fn build_devnet_all_gates_block(
         }
     };
 
+    // ── Phase 42: optional Phase 33 (DMC1) + Phase 34 (ADM1) commitments ──────
+    // Both are derived from the SAME deterministic chain-derived state the node
+    // validates, so a node with the Phase 33/34 gates active+required accepts them.
+    //
+    // DMC1: pre = dominance state after blocks < H (`dom_at(H)`); post = after this
+    // block's role rewards (`dom_at(H+1)`) — mirrors the node's
+    // `validate_block_dominance_commitment` (pre = current digest, post = after H).
+    let dominance_commitment = if opts.dominance_commitment
+        && crate::poawx_dominance::dominance_commitment_active(height)
+    {
+        let pre = dom_at(height).digest();
+        let post = dom_at(height + 1).digest();
+        Some(PoawxDominanceCommitmentV1::new(net, height, pre, post))
+    } else {
+        None
+    };
+
+    // ADM1: replay the adaptive state over blocks < H (transition only when the
+    // adaptive gate is active at that height), then commit (pre, post, signals).
+    // The signals mirror the node's `adaptive_chain_signals`: concentration +
+    // participation from the dominance state after each height; recent ticket
+    // registrations = (per-block count) × (blocks in the recent window); recent
+    // double-sign evidence = 0 (this builder carries none); finality available =
+    // true (every harness block carries a finality proof). NO local-only signal.
+    let tickets_per_block: u32 = if opts.ticket_registrations {
+        TICKET_REGISTRATIONS_PER_BLOCK
+    } else {
+        0
+    };
+    let adaptive_signals_at = |h: u64| -> PoawxAdaptiveChainSignals {
+        let dom_after = dom_at(h + 1);
+        let window_blocks = ADAPTIVE_RECENT_WINDOW.min(h) as u32; // |[max(1,h-W+1)..=h]|
+        PoawxAdaptiveChainSignals {
+            dominance_concentration_permille: dom_after.max_recent_reward_share_permille(h),
+            active_role_participation: dom_after.distinct_recent_miners(h),
+            registered_ticket_count: tickets_per_block.saturating_mul(window_blocks),
+            double_sign_evidence_count: 0,
+            finality_available: h >= 1,
+        }
+    };
+    let adaptive_mode_commitment = if opts.adaptive_commitment && adaptive_mode_active(height) {
+        let mut state = PoawxAdaptiveState::genesis();
+        for h in 1..height {
+            if adaptive_mode_active(h) {
+                state = state.next(&adaptive_signals_at(h));
+            }
+        }
+        let pre = state;
+        let signals_h = adaptive_signals_at(height);
+        let post = pre.next(&signals_h);
+        Some(PoawxAdaptiveCommitmentV1::new(
+            net, height, &pre, &post, &signals_h,
+        ))
+    } else {
+        None
+    };
+
+    // ── Phase 42: optional Phase 32 (TKT1) ticket registrations ───────────────
+    // Deterministic devnet registrations (no real wallet/key) for the three
+    // non-primary role solvers, each for the NEXT block's epoch (`height + 1`), so
+    // they are ACTIVE from H+1 (consensus H→H+1 timing). Canonical strictly-
+    // increasing ticket_id order; sybil work satisfies the configured bits.
+    let ticket_registrations = if opts.ticket_registrations
+        && crate::poawx_ticket::ticket_store_active(height)
+    {
+        let require_bits = crate::poawx_ticket::sybil_threshold_bits();
+        let reg_epoch = height + 1;
+        let mut regs: Vec<crate::poawx_ticket::PoawxTicketRegistrationV1> = Vec::with_capacity(3);
+        for (solver, apk_seed) in [
+            (compute_solver, 0xD1u8),
+            (verify_solver, 0xD2u8),
+            (support_solver, 0xD3u8),
+        ] {
+            let apk = [apk_seed; 33];
+            let (nonce, digest) = crate::poawx_ticket::grind_sybil_nonce(
+                net,
+                &solver,
+                reg_epoch,
+                &apk,
+                require_bits,
+                2_000_000,
+            )
+            .ok_or_else(|| "harness: sybil nonce grind failed".to_string())?;
+            regs.push(crate::poawx_ticket::PoawxTicketRegistrationV1::new(
+                crate::poawx_ticket::MinerWorkTicket {
+                    version: crate::poawx_ticket::TICKET_VERSION,
+                    network_id: net,
+                    miner_pkh: solver,
+                    epoch: reg_epoch,
+                    assignment_public_key: apk,
+                    sybil_work_nonce: nonce,
+                    sybil_work_digest: digest,
+                    recent_reward_score: 0,
+                    valid_work_count: 0,
+                    invalid_work_count: 0,
+                    penalty_status: PenaltyStatus::Clean.id(),
+                    bond_reference: None,
+                    issued_height: height,
+                    expiry_height: height + 1000,
+                },
+            ));
+        }
+        // Canonical: strictly-increasing ticket_id (distinct solver+apk ⇒ distinct ids).
+        regs.sort_by(|a, b| a.ticket_id().cmp(&b.ticket_id()));
+        Some(regs)
+    } else {
+        None
+    };
+
     let ext = Phase20ReceiptExt {
         role_reward: RoleReward {
             compute_contributor_pkh: compute_solver,
@@ -385,9 +562,9 @@ pub fn build_devnet_all_gates_block(
         committed_admission: Some(commitment),
         role_assignment_v2: Some(in_proofs),
         double_sign_evidence: None,
-        ticket_registrations: None,
-        dominance_commitment: None,
-        adaptive_mode_commitment: None,
+        ticket_registrations,
+        dominance_commitment,
+        adaptive_mode_commitment,
     };
 
     // Worker receipt: real receipt PoW solution + signed challenge (mode-0).

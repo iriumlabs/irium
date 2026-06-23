@@ -35,5 +35,8 @@ the mitigation **not yet done** unless stated.
   emit the Phase 31–34 sections** (TKT1/DMC1/ADM1) and a local smoke mined blocks accepted under DMC +
   adaptive **required** (`docs/devnet/phase42-live-harness-phase31-34-sections/README.md`). R6/R11 remain
   **open**: genuine multi-node convergence/fresh-wipe needs an owner-approved Stage B (cross-host), and
-  full ticket-store *eligibility* enforcement live is still future work (H→H+1 timing).
+  full ticket-store *eligibility* enforcement live is still future work (H→H+1 timing). **Phase 43**
+  reran the enhanced single-host Stage A soak (6 blocks with DMC+adaptive **required** + TKT1 + caps +
+  cold replay — `docs/devnet/phase43-enhanced-stage-a-soak/PHASE43_FINAL_REPORT.md`); R6/R11 stay
+  **open** pending the cross-host Stage B.
 - Nothing in this register authorizes a public testnet or mainnet launch.

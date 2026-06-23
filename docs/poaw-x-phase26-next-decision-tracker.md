@@ -35,7 +35,9 @@ _Last updated: `[YYYY-MM-DD]` by `[name]`_
 > harness to emit the Phase 31–34 sections (TKT1/DMC1/ADM1), validated by in-process tests + a local smoke
 > under DMC/adaptive **required** (`docs/devnet/phase42-live-harness-phase31-34-sections/README.md`).
 > Decision 4 (public testnet) stays blocked (still needs the independent audit + an owner-approved Stage B
-> cross-host soak).
+> cross-host soak). **Phase 43** reran the enhanced single-host Stage A soak (6 blocks, `--phase31-34`,
+> DMC+adaptive **required** + TKT1 + caps + cold replay) —
+> `docs/devnet/phase43-enhanced-stage-a-soak/PHASE43_FINAL_REPORT.md`; Decision 4 remains blocked.
 
 ## Decision 1 — Choose an independent auditor
 

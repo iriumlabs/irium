@@ -42,3 +42,7 @@ with DMC + adaptive **required** (proving the sections were present and valid), 
 
 production-ready: no · mainnet-ready: no · audited: no · public-testnet-ready: planning-ready only.
 This harness extension enables a stronger future soak; it does not itself authorize any launch.
+
+> **Used in Phase 43:** the enhanced harness drove a 6-block single-host Stage A soak with `--phase31-34`
+> under DMC + adaptive **required** + TKT1 + caps, plus cold replay —
+> `docs/devnet/phase43-enhanced-stage-a-soak/PHASE43_FINAL_REPORT.md`.

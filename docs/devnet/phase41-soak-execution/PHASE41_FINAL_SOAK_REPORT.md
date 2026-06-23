@@ -82,6 +82,9 @@ wallets/keys.
 > sections — closing recommendation (a). A local-only smoke mined blocks accepted by a node with DMC +
 > adaptive **required**. See `docs/devnet/phase42-live-harness-phase31-34-sections/README.md`. Full
 > ticket-eligibility enforcement and Stage B cross-host remain future work.
+> **Update (Phase 43):** the enhanced Stage A soak was rerun for **6 blocks** with `--phase31-34` under
+> DMC + adaptive **required** + ticket store + caps, plus cold replay — closing the harness gap for
+> single-host live coverage. See `docs/devnet/phase43-enhanced-stage-a-soak/PHASE43_FINAL_REPORT.md`.
 - Do **not** treat this soak as a public-testnet or mainnet authorization.
 
 ## Status

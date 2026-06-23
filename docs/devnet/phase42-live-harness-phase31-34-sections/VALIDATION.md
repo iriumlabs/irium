@@ -43,3 +43,6 @@ Phase 32 (TKT1) registrations with correct H→H+1 timing, and satisfy Phase 31 
 closing the Phase 41 gap. Full ticket-store *eligibility* enforcement and cross-host (Stage B) live
 soak remain future work (see `README.md` limitations). Not audited / not production-ready /
 not mainnet-ready.
+
+Phase 43 used this harness to rerun a 6-block single-host Stage A soak (`--phase31-34`, DMC + adaptive
+**required** + TKT1 + caps + cold replay): `docs/devnet/phase43-enhanced-stage-a-soak/PHASE43_FINAL_REPORT.md`.

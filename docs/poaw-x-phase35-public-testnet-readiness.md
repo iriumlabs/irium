@@ -32,8 +32,11 @@ These are gates (each must pass before the next), none of which is done:
    soak was executed (Phase 41)**: combined build boots + 6-block all-gates live chain + cold replay
    (loopback single-node); multi-node convergence deferred to an owner-approved Stage B; Phases 31–34
    live enforcement is blocked by the current harness. See
-   `docs/devnet/phase41-soak-execution/PHASE41_FINAL_SOAK_REPORT.md`. Public testnet remains
-   planning-ready only.
+   `docs/devnet/phase41-soak-execution/PHASE41_FINAL_SOAK_REPORT.md`. **Phase 42** then extended the
+   harness to emit the Phase 31–34 sections, and **Phase 43** reran the enhanced single-host Stage A soak
+   (6 blocks with DMC+adaptive **required** + TKT1 + caps + cold replay) —
+   `docs/devnet/phase43-enhanced-stage-a-soak/PHASE43_FINAL_REPORT.md`. Cross-host Stage B + the
+   independent audit are still pending. Public testnet remains planning-ready only.
 3. **Economic-incentive review** of the combined system (R9).
 4. **Operator runbook + single coordinated config profile** (consensus parameters pinned; R4/R12).
 5. **Monitoring/metrics + rollback plan** validated on the internal devnet (sections 4–5 below).

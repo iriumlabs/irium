@@ -29,6 +29,9 @@ the mitigation **not yet done** unless stated.
   public-testnet planning-ready only**.
 - The highest-leverage next actions are **R1 (audit)** and **R6/R11 (combined internal multi-node
   devnet soak)** — both gate everything downstream. A documentation-only plan for the combined-stack
-  soak (R6/R11) is prepared at `docs/devnet/phase39-preaudit-multinode-soak/README.md`; the soak itself
-  is **not yet executed**, so R6/R11 remain open.
+  soak (R6/R11) is prepared at `docs/devnet/phase39-preaudit-multinode-soak/README.md`; **Stage A was
+  executed in Phase 41** (loopback single-node: 6-block all-gates chain + cold replay PASS —
+  `docs/devnet/phase41-soak-execution/PHASE41_FINAL_SOAK_REPORT.md`). R6/R11 remain **open**: genuine
+  multi-node convergence/fresh-wipe needs an owner-approved Stage B (cross-host), and live enforcement of
+  Phases 31–34 needs a harness extension.
 - Nothing in this register authorizes a public testnet or mainnet launch.

@@ -14,7 +14,10 @@ env activation gates. Nothing here authorizes a public testnet or mainnet launch
 > isolated branches, tested, retested, and closed) is at
 > `docs/audit/phase38-remediation-workflow/README.md`. No findings received; remediation not started.
 > A docs-only **pre-audit internal multi-node devnet soak plan** (Phase 39) for the combined Phase 28–34
-> stack is at `docs/devnet/phase39-preaudit-multinode-soak/README.md` — soak not yet executed.
+> stack is at `docs/devnet/phase39-preaudit-multinode-soak/README.md`. **Stage A of the soak was executed
+> (Phase 41)** — the combined build boots and produces/accepts a 6-block all-gates live chain and
+> cold-replays; multi-node + Phases 31–34 live enforcement are deferred (Stage B / harness extension).
+> Evidence: `docs/devnet/phase41-soak-execution/PHASE41_FINAL_SOAK_REPORT.md`.
 
 ## What PoAW-X is
 

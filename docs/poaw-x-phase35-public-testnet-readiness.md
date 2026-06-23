@@ -28,7 +28,12 @@ These are gates (each must pass before the next), none of which is done:
    at `docs/devnet/phase39-preaudit-multinode-soak/README.md` — **soak not yet executed**; execution is a
    separate owner-approved phase. The execution-readiness **sign-off gate** (topology/ports/storage/
    scenarios/duration decisions + go/no-go + owner approval form) is at
-   `docs/devnet/phase40-soak-readiness-signoff/README.md` — execution not yet approved.
+   `docs/devnet/phase40-soak-readiness-signoff/README.md` — execution not yet approved. **Stage A of the
+   soak was executed (Phase 41)**: combined build boots + 6-block all-gates live chain + cold replay
+   (loopback single-node); multi-node convergence deferred to an owner-approved Stage B; Phases 31–34
+   live enforcement is blocked by the current harness. See
+   `docs/devnet/phase41-soak-execution/PHASE41_FINAL_SOAK_REPORT.md`. Public testnet remains
+   planning-ready only.
 3. **Economic-incentive review** of the combined system (R9).
 4. **Operator runbook + single coordinated config profile** (consensus parameters pinned; R4/R12).
 5. **Monitoring/metrics + rollback plan** validated on the internal devnet (sections 4–5 below).

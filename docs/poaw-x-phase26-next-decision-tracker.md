@@ -28,7 +28,11 @@ _Last updated: `[YYYY-MM-DD]` by `[name]`_
 > `docs/devnet/phase39-preaudit-multinode-soak/README.md`; it strengthens the evidence base for
 > **Decision 4 (public testnet after audit)** but the **soak is not yet executed** and Decision 4 stays
 > blocked. The Phase 40 execution-readiness **sign-off** package (owner approval form + go/no-go gate) is
-> at `docs/devnet/phase40-soak-readiness-signoff/README.md` — execution not yet approved.
+> at `docs/devnet/phase40-soak-readiness-signoff/README.md` — execution not yet approved. **Phase 41 ran
+> Stage A** (loopback single-node: 6-block all-gates chain + cold replay PASS; multi-node deferred to an
+> owner-approved Stage B; Phases 31–34 live enforcement blocked by the harness) —
+> `docs/devnet/phase41-soak-execution/PHASE41_FINAL_SOAK_REPORT.md`. Decision 4 (public testnet) stays
+> blocked.
 
 ## Decision 1 — Choose an independent auditor
 

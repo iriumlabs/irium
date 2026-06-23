@@ -13,6 +13,11 @@ nodes are started, no firewall rules changed, no miners run, no code changed.
 - Audited: **no**
 - Public-testnet-ready: **planning-ready only**
 
+> **Executed (Phase 41, Stage A only):** an internal loopback devnet soak was run — the combined build
+> booted, produced/accepted a 6-block all-gates chain, and cold-replayed. Multi-node convergence was
+> deferred to Stage B (loopback can't dial self-peers) and Stage B was not approved this session. See
+> `docs/devnet/phase41-soak-execution/PHASE41_FINAL_SOAK_REPORT.md`.
+
 ## Purpose
 
 Provide a single, owner-facing path from "plan exists" (Phase 39) to "execution is approved" — without

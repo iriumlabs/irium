@@ -14,8 +14,9 @@ evidence capture.
 - Public-testnet-ready: **planning-ready only**
 
 > **Execution gate (Phase 40):** the owner-facing execution-readiness sign-off package is at
-> `docs/devnet/phase40-soak-readiness-signoff/README.md`. Execution not yet approved; soak not yet
-> executed.
+> `docs/devnet/phase40-soak-readiness-signoff/README.md`. **Stage A executed in Phase 41** (loopback
+> single-node: 6-block all-gates chain + cold replay PASS; multi-node deferred to Stage B). See
+> `docs/devnet/phase41-soak-execution/PHASE41_FINAL_SOAK_REPORT.md`.
 
 ## Purpose
 

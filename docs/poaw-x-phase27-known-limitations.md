@@ -23,17 +23,17 @@ the project's change rules forbid on consensus-critical code.
   `docs/poaw-x-phase28-finalized-reorg-rejection.md` and its design doc. 8 `phase28_*` tests; full lib
   suite 756/0. Testnet/devnet only; mainnet hard-off.
 
-### B. Finality: double-sign → penalty wiring (System 5) — **PARTIAL in Phase 29**
-- **Done (Phase 29):** validated finality double-sign evidence (`PoawxDoubleSignEvidenceV1`) now drives
-  a deterministic, **replayable** penalty (`PoawxDoubleSignPenaltyState`) that suspends the offender and
-  removes finality eligibility/weight — plus a bounded **local** evidence cache + detector. See
-  `docs/poaw-x-phase29-double-sign-penalties.md`. 12 `phase29_*` tests; full lib suite 768/0.
-- **Still deferred (consensus enforcement):** blocks do **not** yet **carry** double-sign evidence, so
-  the penalty is a local/replayable **primitive**, NOT wired into `connect_block` block acceptance, the
-  reward manifest, or committee selection (doing so on local-only evidence would let nodes diverge —
-  forbidden by the consensus-safety rule). The remaining work is a **block-carried evidence** design +
-  reward/committee exclusion in consensus.
-- **Risk:** Medium-High (the remaining consensus path adds persistent state feeding eligibility).
+### B. Finality: double-sign → penalty wiring (System 5) — **DONE (Phase 29 primitive + Phase 30 consensus)**
+- **Phase 29:** validated double-sign evidence (`PoawxDoubleSignEvidenceV1`) + deterministic replayable
+  penalty state + bounded local cache (local-only primitive).
+- **Phase 30 (consensus enforcement):** evidence is now **block-carried** (trailing `DSE1` ext section,
+  committed into the irx1 root, cap 16, canonical/deduped), **validated + applied in `connect_block`**
+  (effective from H+1, non-retroactive), reconstructed by replay and rebuilt from the active chain on
+  reorg, and **enforced** by excluding penalized signers from future finality
+  (`phase30: penalized signer in finality committee`). Local gossip evidence stays non-consensus. See
+  `docs/poaw-x-phase30-block-carried-doublesign-evidence.md`. 7 `phase30_*` tests; full lib suite 775/0.
+- **Optional future work:** proposer/builder auto-inclusion of locally-cached evidence into candidate
+  blocks (out of scope; tests inject evidence + pre-populate penalty state to exercise consensus).
 
 ### C. Anti-domination: state-digest commitment + validation (System 3)
 - **Gap:** `PersistentDominance::digest()` is computed but not committed in the receipt/manifest nor

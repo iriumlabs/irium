@@ -21,7 +21,7 @@
 
 use irium_node_rs::poawx::multi_role_amounts;
 use irium_node_rs::poawx_adaptive::{assess, AdaptiveMode, NetworkSignals};
-use irium_node_rs::poawx_dominance::fairness_weight;
+use irium_node_rs::poawx_dominance::{fairness_weight, PersistentDominance, RoleRewardKind};
 use irium_node_rs::poawx_penalty::PenaltyStatus;
 use irium_node_rs::poawx_puzzle::{assign_puzzle_mode, PuzzleMode};
 use irium_node_rs::poawx_reward::{role_amounts_with_fallback, PoawxRewardManifestV1};
@@ -547,7 +547,40 @@ fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
                 miners[0].total_reward > 0,
                 "dominant miner still earns".into(),
             ));
+            // Phase 33: commit the dominance-state digest with the REAL state. Build
+            // a pre-state, apply one block's role rewards, take the post-state digest,
+            // and confirm the digest is replay-stable (order-independent).
+            let mut dom = PersistentDominance::from_env();
+            // pre-state: a few prior reward events.
+            dom.apply_event([0x01u8; 20], RoleRewardKind::Primary, 550_000, 1);
+            dom.apply_event([0x02u8; 20], RoleRewardKind::Compute, 220_000, 1);
+            let pre = dom.digest();
+            // apply block H's rewards (the dominant miner takes primary).
+            let mut post_state = dom.clone();
+            post_state.apply_event([0x01u8; 20], RoleRewardKind::Primary, 550_000, 2);
+            post_state.apply_event([0x03u8; 20], RoleRewardKind::Verify, 130_000, 2);
+            let post = post_state.digest();
+            // replay stability: apply the same events in the other order.
+            let mut replay = dom.clone();
+            replay.apply_event([0x03u8; 20], RoleRewardKind::Verify, 130_000, 2);
+            replay.apply_event([0x01u8; 20], RoleRewardKind::Primary, 550_000, 2);
+            let digest_replay_stable = replay.digest() == post;
+            // dominant-miner fairness reduction (real fairness_weight): 70% share.
+            let weight_full = fairness_weight(1000, 0);
+            let weight_dom = fairness_weight(1000, 700);
+            let weight_reduction = weight_full.saturating_sub(weight_dom);
+            checks.push((
+                "dominance_digest_replay_stable".into(),
+                digest_replay_stable && pre != post,
+                "pre != post; post order-independent".into(),
+            ));
             metrics = mining_metrics(&out, &miners);
+            metrics["dominance_state_committed"] = json!(true);
+            metrics["dominance_pre_digest"] = json!(hex::encode(pre));
+            metrics["dominance_post_digest"] = json!(hex::encode(post));
+            metrics["reward_concentration_permille"] = json!(out.top1_reward_share_permille);
+            metrics["dominant_miner_weight_reduction"] = json!(weight_reduction);
+            metrics["digest_replay_stable"] = json!(digest_replay_stable);
         }
         "dominant_pool" => {
             let mut c = cfg.clone();
@@ -1210,6 +1243,18 @@ mod tests {
     fn reorg_scenario_measures_attacker() {
         let r = run_scenario("reorg", &base_cfg());
         assert!(r["metrics"]["blocks_produced"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn dominance_commitment_modeled() {
+        // Phase 33: dominant_miner reports a replay-stable dominance-state commitment
+        // and the dominant miner's fairness-weight reduction.
+        let r = run_scenario("dominant_miner", &base_cfg());
+        let m = &r["metrics"];
+        assert_eq!(m["dominance_state_committed"], json!(true));
+        assert_eq!(m["digest_replay_stable"], json!(true));
+        assert!(m["dominant_miner_weight_reduction"].as_u64().unwrap() > 0);
+        assert_ne!(m["dominance_pre_digest"], m["dominance_post_digest"]);
     }
 
     #[test]

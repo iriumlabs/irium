@@ -24,6 +24,7 @@ use irium_node_rs::poawx_adaptive::{assess, AdaptiveMode, NetworkSignals};
 use irium_node_rs::poawx_dominance::fairness_weight;
 use irium_node_rs::poawx_penalty::PenaltyStatus;
 use irium_node_rs::poawx_puzzle::{assign_puzzle_mode, PuzzleMode};
+use irium_node_rs::poawx_reward::{role_amounts_with_fallback, PoawxRewardManifestV1};
 use irium_node_rs::poawx_ticket::leading_zero_bits;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -685,8 +686,57 @@ fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
                     })
                 })
                 .collect();
+            // Phase 31: explicit reward-manifest caps + deterministic fallback,
+            // computed with the REAL split + manifest primitives. Per-block subsidy
+            // is split 55/22/13/10; absent roles are not minted (non-inflationary).
+            let subsidy = cfg.subsidy;
+            let full = multi_role_amounts(subsidy);
+            let permille = |amt: u64| -> u64 {
+                if subsidy == 0 {
+                    0
+                } else {
+                    (amt as u128 * 1000 / subsidy as u128) as u64
+                }
+            };
+            // Low-participation example: no SUPPORT/finality recipient.
+            let fb = role_amounts_with_fallback(subsidy, [true, true, true, false]);
+            let minted_fb: u64 = fb.iter().sum();
+            let unpaid_fb = subsidy.saturating_sub(minted_fb);
+            let manifest = PoawxRewardManifestV1::new_full(
+                cfg.network_id,
+                1,
+                subsidy,
+                [0x01u8; 20],
+                [0x02u8; 20],
+                [0x03u8; 20],
+                [0x04u8; 20],
+                0,
+                [0u8; 20],
+            );
+            let cap_ok = manifest.validate_caps(cfg.network_id, subsidy, 0).is_ok();
+            let total_reward_cap_respected =
+                full.iter().sum::<u64>() == subsidy && minted_fb <= subsidy && cap_ok;
+            checks.push((
+                "reward_caps_respected".into(),
+                total_reward_cap_respected,
+                format!(
+                    "split sum == subsidy; fallback minted {} <= {}",
+                    minted_fb, subsidy
+                ),
+            ));
+            checks.push((
+                "fallback_non_inflationary".into(),
+                minted_fb <= subsidy && unpaid_fb == full[3],
+                format!("unpaid (absent support) share = {}", unpaid_fb),
+            ));
             metrics = mining_metrics(&out, &miners);
             metrics["per_miner"] = json!(per_miner);
+            metrics["proposer_reward_permille"] = json!(permille(full[0]));
+            metrics["best_worker_reward_permille"] = json!(permille(full[1]));
+            metrics["other_worker_reward_permille"] = json!(permille(full[2]));
+            metrics["finality_reward_permille"] = json!(permille(full[3]));
+            metrics["unpaid_or_fallback_share_permille"] = json!(permille(unpaid_fb));
+            metrics["total_reward_cap_respected"] = json!(total_reward_cap_respected);
         }
         "finality_attack" => {
             // Attacker controls `attacker_share_permille` of committee weight; a
@@ -1095,6 +1145,21 @@ mod tests {
     fn reorg_scenario_measures_attacker() {
         let r = run_scenario("reorg", &base_cfg());
         assert!(r["metrics"]["blocks_produced"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn reward_caps_and_fallback_modeled() {
+        // Phase 31: reward_distribution reports the capped 55/22/13/10 split and a
+        // non-inflationary fallback share.
+        let r = run_scenario("reward_distribution", &base_cfg());
+        let m = &r["metrics"];
+        assert_eq!(m["proposer_reward_permille"], json!(550));
+        assert_eq!(m["best_worker_reward_permille"], json!(220));
+        assert_eq!(m["other_worker_reward_permille"], json!(130));
+        assert_eq!(m["finality_reward_permille"], json!(100));
+        assert_eq!(m["total_reward_cap_respected"], json!(true));
+        // fallback (absent support) leaves the 100‰ finality share unminted.
+        assert_eq!(m["unpaid_or_fallback_share_permille"], json!(100));
     }
 
     #[test]

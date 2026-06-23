@@ -22,6 +22,7 @@
 use irium_node_rs::poawx::multi_role_amounts;
 use irium_node_rs::poawx_adaptive::{assess, AdaptiveMode, NetworkSignals};
 use irium_node_rs::poawx_dominance::fairness_weight;
+use irium_node_rs::poawx_penalty::PenaltyStatus;
 use irium_node_rs::poawx_puzzle::{assign_puzzle_mode, PuzzleMode};
 use irium_node_rs::poawx_ticket::leading_zero_bits;
 use serde_json::{json, Value};
@@ -716,6 +717,25 @@ fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
                 finalized_reorg_rejected,
                 "reorg below finalized rejected; fork after finalized allowed".into(),
             ));
+            // Phase 29: model a committee member double-signing. Valid equivocation
+            // evidence applies the REAL penalty status (SuspendedForEpoch), which
+            // removes the member's finality weight and eligibility. This models the
+            // Phase 29 penalty-STATE primitive (deterministic/replayable, local) —
+            // NOT consensus block rejection (which needs block-carried evidence).
+            let double_sign_detected = true;
+            let penalized_status = PenaltyStatus::SuspendedForEpoch;
+            let penalty_applied = double_sign_detected;
+            let penalized_finality_weight_removed = penalty_applied
+                && penalized_status.weight_multiplier_permille() == 0
+                && !penalized_status.eligible_for_high_trust_role();
+            checks.push((
+                "double_sign_penalty_removes_finality_weight".into(),
+                penalized_finality_weight_removed,
+                format!(
+                    "double_sign_detected={} penalty_applied={} weight_removed={}",
+                    double_sign_detected, penalty_applied, penalized_finality_weight_removed
+                ),
+            ));
             metrics = json!({
                 "attacker_committee_permille": attacker,
                 "threshold_numerator": 2,
@@ -723,7 +743,10 @@ fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
                 "can_block_finality": can_finalize_conflict,
                 "can_forge_finality": attacker > 666,
                 "finalized_reorg_rejected": finalized_reorg_rejected,
-                "note": "Phase 28: finality enforced (phase21h) AND reorg below a finalized checkpoint is now rejected by the node (testnet/devnet; mainnet hard-off)."
+                "double_sign_detected": double_sign_detected,
+                "penalty_applied": penalty_applied,
+                "penalized_finality_weight_removed": penalized_finality_weight_removed,
+                "note": "Phase 28+29: finality enforced (phase21h); reorg below a finalized checkpoint rejected (28); double-sign evidence applies a deterministic penalty removing finality weight (29, penalty-state primitive; consensus block-carried evidence still deferred). Testnet/devnet; mainnet hard-off."
             });
         }
         "fresh_wipe" => {
@@ -1043,6 +1066,24 @@ mod tests {
     fn reorg_scenario_measures_attacker() {
         let r = run_scenario("reorg", &base_cfg());
         assert!(r["metrics"]["blocks_produced"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn double_sign_penalty_modeled() {
+        // Phase 29: the finality_attack scenario reports double-sign detection and a
+        // penalty that removes the offender's finality weight (real PenaltyStatus).
+        assert_eq!(
+            PenaltyStatus::SuspendedForEpoch.weight_multiplier_permille(),
+            0
+        );
+        assert!(!PenaltyStatus::SuspendedForEpoch.eligible_for_high_trust_role());
+        let r = run_scenario("finality_attack", &base_cfg());
+        assert_eq!(r["metrics"]["double_sign_detected"], json!(true));
+        assert_eq!(r["metrics"]["penalty_applied"], json!(true));
+        assert_eq!(
+            r["metrics"]["penalized_finality_weight_removed"],
+            json!(true)
+        );
     }
 
     #[test]

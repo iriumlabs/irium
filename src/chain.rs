@@ -299,6 +299,11 @@ pub struct ChainState {
     /// reject any reorg that would disconnect finalized history.
     pub poawx_finalized_height: u64,
     pub poawx_finalized_hash: [u8; 32],
+    /// Phase 30: deterministic, replayable double-sign penalty state, derived from
+    /// the active chain's block-carried evidence (testnet/devnet only; empty on
+    /// mainnet, hard-off). Applied in `connect_block` (effective from the NEXT
+    /// block), reconstructed by replay, and rebuilt from the active chain on reorg.
+    pub doublesign_penalty: crate::poawx_doublesign::PoawxDoubleSignPenaltyState,
 }
 
 #[derive(Debug, Clone)]
@@ -377,6 +382,7 @@ impl ChainState {
             dominance: crate::poawx_dominance::PersistentDominance::from_env(),
             poawx_finalized_height: 0,
             poawx_finalized_hash: [0u8; 32],
+            doublesign_penalty: crate::poawx_doublesign::PoawxDoubleSignPenaltyState::new(),
         };
         let genesis = state.params.genesis_block.clone();
         state
@@ -893,6 +899,17 @@ impl ChainState {
         if crate::poawx_candidate::true_vrf_enforced(expected_height) {
             self.validate_block_true_vrf(&block, expected_height)?;
         }
+        // Phase 30: validate any block-carried double-sign evidence (testnet-gated;
+        // mainnet hard-off). Invalid/over-cap/duplicate/non-canonical evidence
+        // rejects the block. Capture the validated set to APPLY AFTER commit, so
+        // evidence in block H is effective from H+1 (non-retroactive; H's own
+        // finality, validated above, is unaffected by H's evidence).
+        let pending_double_sign: Vec<crate::poawx_doublesign::PoawxDoubleSignEvidenceV1> =
+            if crate::poawx_doublesign::double_sign_penalty_active(expected_height) {
+                self.validate_block_double_sign_evidence(&block, expected_height)?
+            } else {
+                Vec::new()
+            };
 
         let reward = block_reward(expected_height);
         let (_fees, _coinbase_total, subsidy_created, undo) = self
@@ -927,6 +944,23 @@ impl ChainState {
         // reconstruct it). Mainnet stays off (the finality gate is hard-off).
         if let Some((h, fhash)) = finalize_parent {
             self.advance_finalized(h, fhash);
+        }
+        // Phase 30: apply the validated block-carried double-sign evidence to the
+        // deterministic penalty state (effective from the NEXT block). Derived here
+        // so cold replay reconstructs it; rebuilt from the active chain on reorg.
+        if !pending_double_sign.is_empty() {
+            let net = crate::activation::network_id_byte();
+            for ev in &pending_double_sign {
+                if let Some(committee) = self.committee_pkhs_at(ev.target_height()) {
+                    let _ = self.doublesign_penalty.apply_evidence(
+                        ev,
+                        &committee,
+                        net,
+                        expected_height,
+                        crate::poawx_doublesign::DEFAULT_SUSPEND_EPOCHS,
+                    );
+                }
+            }
         }
         self.prune_caches();
 
@@ -1100,8 +1134,153 @@ impl ChainState {
                 return Err("phase21h: finality threshold mismatch".to_string());
             }
             fp.validate(net, height, &block.header.prev_hash, &committee)?;
+            // Phase 30: exclude penalized signers. A finality vote by an identity
+            // that is currently suspended (per the deterministic penalty state from
+            // EARLIER blocks — this block's own evidence is applied only after
+            // commit) makes the block invalid. Testnet-gated; mainnet hard-off.
+            if crate::poawx_doublesign::double_sign_penalty_active(height) {
+                for v in &fp.votes {
+                    if !self
+                        .doublesign_penalty
+                        .is_eligible_for_finality(&v.member_pkh, fp.committee_epoch)
+                    {
+                        return Err("phase30: penalized signer in finality committee".to_string());
+                    }
+                }
+            }
         }
         Ok(())
+    }
+
+    /// Phase 30: SUPPORT-committee member pkhs at `height` (from the on-chain
+    /// block's candidate set). Deterministic + replayable (every node has the same
+    /// chain). Returns None if the height/candidate-set is unavailable.
+    fn committee_pkhs_at(&self, height: u64) -> Option<Vec<[u8; 20]>> {
+        use crate::poawx::ROLE_SUPPORT_CONTRIBUTOR;
+        let block = self.chain.get(height as usize)?;
+        let receipts = block.poawx_receipts.as_ref()?;
+        let mut pkhs: Vec<[u8; 20]> = Vec::new();
+        for r in receipts {
+            if let Some(ext) = &r.phase20_ext {
+                if let Some(cs) = &ext.candidate_set {
+                    for c in &cs.candidates {
+                        if c.role_id == ROLE_SUPPORT_CONTRIBUTOR {
+                            pkhs.push(c.solver_pkh);
+                        }
+                    }
+                }
+            }
+        }
+        if pkhs.is_empty() {
+            None
+        } else {
+            Some(pkhs)
+        }
+    }
+
+    /// Phase 30: collect + validate the block-carried double-sign evidence. Returns
+    /// the validated, canonically-ordered, deduped evidence (to apply after commit).
+    /// Rejects: over-cap, in-block duplicate id, non-canonical order, future/unknown
+    /// offense height, or any evidence failing `validate` (bad sig / wrong network /
+    /// non-committee / not equivocation). Committee is derived from the on-chain
+    /// offense block (deterministic + replayable).
+    fn validate_block_double_sign_evidence(
+        &self,
+        block: &Block,
+        height: u64,
+    ) -> Result<Vec<crate::poawx_doublesign::PoawxDoubleSignEvidenceV1>, String> {
+        let net = crate::activation::network_id_byte();
+        let mut collected: Vec<crate::poawx_doublesign::PoawxDoubleSignEvidenceV1> = Vec::new();
+        if let Some(receipts) = &block.poawx_receipts {
+            for r in receipts {
+                if let Some(ext) = &r.phase20_ext {
+                    if let Some(evs) = &ext.double_sign_evidence {
+                        collected.extend(evs.iter().cloned());
+                    }
+                }
+            }
+        }
+        if collected.is_empty() {
+            return Ok(collected);
+        }
+        if collected.len() > crate::poawx_doublesign::MAX_DOUBLE_SIGN_EVIDENCE_PER_BLOCK {
+            return Err("phase30: too many double-sign evidence entries".to_string());
+        }
+        // Canonical order (strictly increasing evidence id) + no in-block duplicates.
+        let mut prev_id: Option<[u8; 32]> = None;
+        for ev in &collected {
+            let id = ev.evidence_id();
+            match prev_id {
+                Some(p) if id <= p => {
+                    return Err(
+                        "phase30: double-sign evidence not canonically ordered/deduped".to_string(),
+                    )
+                }
+                _ => {}
+            }
+            prev_id = Some(id);
+        }
+        // Validate each against the committee derived from the on-chain offense block.
+        for ev in &collected {
+            let th = ev.target_height();
+            if th >= height {
+                return Err("phase30: evidence offense height not in the past".to_string());
+            }
+            let committee = self.committee_pkhs_at(th).ok_or_else(|| {
+                "phase30: cannot derive committee for evidence height".to_string()
+            })?;
+            ev.validate(net, &committee)
+                .map_err(|e| format!("phase30: invalid block-carried evidence: {e}"))?;
+        }
+        Ok(collected)
+    }
+
+    /// Phase 30: rebuild the double-sign penalty state from the ACTIVE chain's
+    /// block-carried evidence (used after a successful reorg so abandoned-fork
+    /// evidence never pollutes the active chain). Deterministic.
+    fn rebuild_doublesign_penalty_from_chain(&mut self) {
+        let net = crate::activation::network_id_byte();
+        // Phase 1 (immutable): collect (evidence, committee, apply_height).
+        let mut to_apply: Vec<(
+            crate::poawx_doublesign::PoawxDoubleSignEvidenceV1,
+            Vec<[u8; 20]>,
+            u64,
+        )> = Vec::new();
+        for h in 1..self.chain.len() as u64 {
+            if !crate::poawx_doublesign::double_sign_penalty_active(h) {
+                continue;
+            }
+            let evs: Vec<crate::poawx_doublesign::PoawxDoubleSignEvidenceV1> = {
+                let mut v = Vec::new();
+                if let Some(receipts) = &self.chain[h as usize].poawx_receipts {
+                    for r in receipts {
+                        if let Some(ext) = &r.phase20_ext {
+                            if let Some(e) = &ext.double_sign_evidence {
+                                v.extend(e.iter().cloned());
+                            }
+                        }
+                    }
+                }
+                v
+            };
+            for ev in evs {
+                if let Some(committee) = self.committee_pkhs_at(ev.target_height()) {
+                    to_apply.push((ev, committee, h));
+                }
+            }
+        }
+        // Phase 2 (mutable): rebuild fresh state.
+        let mut st = crate::poawx_doublesign::PoawxDoubleSignPenaltyState::new();
+        for (ev, committee, h) in to_apply {
+            let _ = st.apply_evidence(
+                &ev,
+                &committee,
+                net,
+                h,
+                crate::poawx_doublesign::DEFAULT_SUSPEND_EPOCHS,
+            );
+        }
+        self.doublesign_penalty = st;
     }
 
     /// Phase 21F: when puzzle-work enforcement is on, every production receipt
@@ -1614,6 +1793,10 @@ impl ChainState {
         // old branch) can restore it; new-branch `connect_block` calls below may
         // advance it, and the monotonic setter would otherwise leave it stuck.
         let finalized_snapshot = (self.poawx_finalized_height, self.poawx_finalized_hash);
+        // Phase 30: snapshot the double-sign penalty state so a failed reorg can
+        // restore it exactly. On success it is REBUILT from the new active chain
+        // (below) so abandoned-fork evidence never pollutes the active chain.
+        let doublesign_snapshot = self.doublesign_penalty.clone();
 
         // Observability: capture old-tip hash and counts before mutating
         // chain state. Emitted as a single [reorg] log line on success
@@ -1642,6 +1825,8 @@ impl ChainState {
                 // restored old chain).
                 self.poawx_finalized_height = finalized_snapshot.0;
                 self.poawx_finalized_hash = finalized_snapshot.1;
+                // Phase 30: restore the pre-reorg double-sign penalty state.
+                self.doublesign_penalty = doublesign_snapshot;
                 return Err(format!("reorg connect failed: {}", e));
             }
             connected_new.push(block.clone());
@@ -1655,6 +1840,12 @@ impl ChainState {
             disconnected_count,
         );
         let _ = connected_count;
+        // Phase 30: rebuild the double-sign penalty state from the NEW active chain
+        // so evidence carried only on the abandoned fork no longer applies, and the
+        // new chain's evidence is fully reflected. (`doublesign_snapshot` is dropped
+        // on this success path.)
+        let _ = &doublesign_snapshot;
+        self.rebuild_doublesign_penalty_from_chain();
         // Phase 13-C: stash blocks with PoAW-X receipts for iriumd.rs to restore
         self.reorg_orphaned_blocks
             .extend(disconnected.into_iter().filter(|b| {
@@ -2304,6 +2495,7 @@ impl ChainState {
             dominance: crate::poawx_dominance::PersistentDominance::from_env(),
             poawx_finalized_height: 0,
             poawx_finalized_hash: [0u8; 32],
+            doublesign_penalty: crate::poawx_doublesign::PoawxDoubleSignPenaltyState::new(),
         };
 
         let branch = self.gather_branch_to_genesis(tip_hash)?;
@@ -8072,6 +8264,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         }
     }
 
@@ -10050,6 +10243,442 @@ mod tests {
         phase26b_clear_gate_env();
     }
 
+    // ── Phase 30: block-carried double-sign evidence ────────────────────────────
+
+    /// The all-gates builder signs the SUPPORT-committee finality vote with this
+    /// exact key, so `committee_pkhs_at(h)` for a built block == `[member_pkh]`.
+    fn phase30_member_sk() -> k256::ecdsa::SigningKey {
+        k256::ecdsa::SigningKey::from_slice(&[0xC3u8; 32]).expect("sk")
+    }
+
+    fn phase30_member_pkh() -> [u8; 20] {
+        use crate::poawx_finality::{FinalityVoteType, FinalityVoteV1};
+        FinalityVoteV1::signed(
+            &phase30_member_sk(),
+            1,
+            1,
+            [0u8; 32],
+            [0u8; 32],
+            0,
+            [0x11u8; 32],
+            FinalityVoteType::Commit,
+        )
+        .member_pkh
+    }
+
+    /// Build double-sign evidence: the committee member signs two conflicting
+    /// Commit votes (same net/height/epoch, different block hashes).
+    fn phase30_evidence(
+        net: u8,
+        height: u64,
+        epoch: u64,
+        bh_a: [u8; 32],
+        bh_b: [u8; 32],
+    ) -> crate::poawx_doublesign::PoawxDoubleSignEvidenceV1 {
+        use crate::poawx_finality::{FinalityVoteType, FinalityVoteV1};
+        let sk = phase30_member_sk();
+        let va = FinalityVoteV1::signed(
+            &sk,
+            net,
+            height,
+            bh_a,
+            [0u8; 32],
+            epoch,
+            [0x11u8; 32],
+            FinalityVoteType::Commit,
+        );
+        let vb = FinalityVoteV1::signed(
+            &sk,
+            net,
+            height,
+            bh_b,
+            [0u8; 32],
+            epoch,
+            [0x11u8; 32],
+            FinalityVoteType::Commit,
+        );
+        crate::poawx_doublesign::PoawxDoubleSignEvidenceV1::new(net, va, vb)
+    }
+
+    /// Clone a built block and inject `evs` into its first receipt's ext.
+    fn phase30_block_with_evidence(
+        src: &Block,
+        evs: Vec<crate::poawx_doublesign::PoawxDoubleSignEvidenceV1>,
+    ) -> Block {
+        let mut blk = src.clone();
+        if let Some(rs) = blk.poawx_receipts.as_mut() {
+            if let Some(ext) = rs[0].phase20_ext.as_mut() {
+                ext.double_sign_evidence = Some(evs);
+            }
+        }
+        blk
+    }
+
+    /// Build (but do not connect) the next all-gates block on a chain at tip `n`.
+    fn phase30_build_next(st: &ChainState, n: u64) -> crate::poawx_mining_harness::AllGatesProof {
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let net = crate::activation::network_id_byte();
+        let h = n + 1;
+        let prev = st.chain[n as usize].header.hash_for_height(n);
+        let parent_prev = Some(st.chain[(n - 1) as usize].header.hash_for_height(n - 1));
+        let bits = st.target_for_height(h).bits;
+        let time = genesis.header.time + h as u32;
+        crate::poawx_mining_harness::build_devnet_all_gates_block(
+            net,
+            h,
+            prev,
+            parent_prev,
+            bits,
+            time,
+            4,
+        )
+        .unwrap_or_else(|e| panic!("phase30 build H{h}: {e}"))
+    }
+
+    fn phase30_ingest_admissions(proof: &crate::poawx_mining_harness::AllGatesProof, h: u64) {
+        let cache = crate::poawx_admission::global_admission_cache();
+        cache.clear();
+        cache.set_tip(h);
+        for adm in &proof.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+    }
+
+    #[test]
+    fn phase30_block_carried_evidence_validates_and_applies() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+
+        // The SUPPORT committee at height 1 is exactly the builder's member.
+        let committee = st.committee_pkhs_at(1).expect("committee at h1");
+        assert_eq!(
+            committee,
+            vec![phase30_member_pkh()],
+            "committee == builder member"
+        );
+
+        // Valid evidence: member double-signs at height 1.
+        let ev = phase30_evidence(net, 1, 0, [0xA1u8; 32], [0xB2u8; 32]);
+        let blk = phase30_block_with_evidence(&st.chain[3], vec![ev.clone()]);
+        let validated = st
+            .validate_block_double_sign_evidence(&blk, 4)
+            .expect("valid block-carried evidence");
+        assert_eq!(validated.len(), 1);
+
+        // Evidence is committed: it changes the ext digest (-> irx1 root).
+        let ext_with = blk.poawx_receipts.as_ref().unwrap()[0]
+            .phase20_ext
+            .clone()
+            .unwrap();
+        let mut ext_none = ext_with.clone();
+        ext_none.double_sign_evidence = None;
+        assert_ne!(
+            ext_with.digest(),
+            ext_none.digest(),
+            "evidence changes the ext digest (committed into irx1 root)"
+        );
+        // And it round-trips on the wire.
+        assert_eq!(
+            crate::poawx::Phase20ReceiptExt::deserialize(&ext_with.serialize()).unwrap(),
+            ext_with
+        );
+
+        // Applying updates the deterministic penalty state.
+        st.doublesign_penalty
+            .apply_evidence(
+                &ev,
+                &committee,
+                net,
+                4,
+                crate::poawx_doublesign::DEFAULT_SUSPEND_EPOCHS,
+            )
+            .unwrap();
+        assert!(
+            !st.doublesign_penalty
+                .is_eligible_for_finality(&phase30_member_pkh(), 0),
+            "member penalized after evidence applied"
+        );
+
+        std::env::remove_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase30_invalid_block_carried_evidence_rejected() {
+        use crate::poawx_finality::{FinalityVoteType, FinalityVoteV1};
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+
+        // Baseline valid evidence accepted.
+        let good = phase30_evidence(net, 1, 0, [0xA1u8; 32], [0xB2u8; 32]);
+        assert!(st
+            .validate_block_double_sign_evidence(
+                &phase30_block_with_evidence(&st.chain[3], vec![good.clone()]),
+                4
+            )
+            .is_ok());
+
+        // Bad signature => rejected.
+        let mut bad = good.clone();
+        bad.vote_a.signature[0] ^= 0xFF;
+        let bad =
+            crate::poawx_doublesign::PoawxDoubleSignEvidenceV1::new(net, bad.vote_a, bad.vote_b);
+        assert!(st
+            .validate_block_double_sign_evidence(
+                &phase30_block_with_evidence(&st.chain[3], vec![bad]),
+                4
+            )
+            .is_err());
+
+        // Non-committee signer => rejected.
+        let other = k256::ecdsa::SigningKey::from_slice(&[0x09u8; 32]).unwrap();
+        let oa = FinalityVoteV1::signed(
+            &other,
+            net,
+            1,
+            [0xA1u8; 32],
+            [0u8; 32],
+            0,
+            [0x11u8; 32],
+            FinalityVoteType::Commit,
+        );
+        let ob = FinalityVoteV1::signed(
+            &other,
+            net,
+            1,
+            [0xB2u8; 32],
+            [0u8; 32],
+            0,
+            [0x11u8; 32],
+            FinalityVoteType::Commit,
+        );
+        let nonmember = crate::poawx_doublesign::PoawxDoubleSignEvidenceV1::new(net, oa, ob);
+        assert!(st
+            .validate_block_double_sign_evidence(
+                &phase30_block_with_evidence(&st.chain[3], vec![nonmember]),
+                4
+            )
+            .is_err());
+
+        // Offense height not in the past (>= connecting height) => rejected.
+        let future = phase30_evidence(net, 4, 0, [0xA1u8; 32], [0xB2u8; 32]);
+        assert!(st
+            .validate_block_double_sign_evidence(
+                &phase30_block_with_evidence(&st.chain[3], vec![future]),
+                4
+            )
+            .is_err());
+
+        // In-block duplicate id => rejected (non-canonical/dedup).
+        assert!(st
+            .validate_block_double_sign_evidence(
+                &phase30_block_with_evidence(&st.chain[3], vec![good.clone(), good.clone()]),
+                4
+            )
+            .is_err());
+
+        // Non-canonical order of two distinct evidence => rejected.
+        let e1 = phase30_evidence(net, 1, 0, [0x01u8; 32], [0x02u8; 32]);
+        let e2 = phase30_evidence(net, 1, 0, [0x03u8; 32], [0x04u8; 32]);
+        let (lo, hi) = if e1.evidence_id() <= e2.evidence_id() {
+            (e1, e2)
+        } else {
+            (e2, e1)
+        };
+        assert!(
+            st.validate_block_double_sign_evidence(
+                &phase30_block_with_evidence(&st.chain[3], vec![hi, lo]),
+                4
+            )
+            .is_err(),
+            "descending order rejected"
+        );
+
+        std::env::remove_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase30_evidence_cap_enforced() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+        let cap = crate::poawx_doublesign::MAX_DOUBLE_SIGN_EVIDENCE_PER_BLOCK;
+        // cap+1 distinct evidence.
+        let mut evs = Vec::new();
+        for i in 0..(cap + 1) as u8 {
+            evs.push(phase30_evidence(net, 1, 0, [0x10 + i; 32], [0x90 + i; 32]));
+        }
+        evs.sort_by_key(|e| e.evidence_id());
+        assert!(
+            st.validate_block_double_sign_evidence(
+                &phase30_block_with_evidence(&st.chain[3], evs),
+                4
+            )
+            .is_err(),
+            "over-cap evidence rejected"
+        );
+        std::env::remove_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase30_penalized_signer_excluded_from_future_finality() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT", "1");
+        let net = crate::activation::network_id_byte();
+
+        // CONTROL: with the gate ON but NO penalty, the next block connects (its
+        // finality vote by the member is allowed; the gate is not retroactive).
+        {
+            let mut st = base_chain(None);
+            let _ = phase28_build_connect_chain(&mut st, 3);
+            let proof = phase30_build_next(&st, 3);
+            phase30_ingest_admissions(&proof, 4);
+            assert!(
+                st.connect_block(proof.block).is_ok(),
+                "no penalty => block 4 connects (non-retroactive gate)"
+            );
+        }
+
+        // PENALIZED: penalize the member (as an earlier block's evidence would),
+        // then the next all-gates block — whose finality vote is by that member —
+        // is REJECTED by the Phase 30 exclusion hook.
+        {
+            let mut st = base_chain(None);
+            let _ = phase28_build_connect_chain(&mut st, 3);
+            let committee = st.committee_pkhs_at(1).expect("committee");
+            let ev = phase30_evidence(net, 1, 0, [0xA1u8; 32], [0xB2u8; 32]);
+            st.doublesign_penalty
+                .apply_evidence(&ev, &committee, net, 3, 1)
+                .unwrap();
+            let proof = phase30_build_next(&st, 3);
+            phase30_ingest_admissions(&proof, 4);
+            let err = st
+                .connect_block(proof.block)
+                .expect_err("penalized signer must be excluded from finality");
+            assert!(
+                err.contains("phase30") && err.contains("penalized"),
+                "expected phase30 penalized-signer rejection, got: {err}"
+            );
+        }
+
+        std::env::remove_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase30_local_evidence_not_consensus_until_included() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+
+        // Put valid evidence into a LOCAL cache only.
+        let committee = st.committee_pkhs_at(1).expect("committee");
+        let ev = phase30_evidence(net, 1, 0, [0xA1u8; 32], [0xB2u8; 32]);
+        let cache = crate::poawx_doublesign::NodeDoubleSignEvidenceCache::new();
+        let outcome = cache.ingest(ev, &committee);
+        assert_eq!(outcome, crate::poawx_gossip::GossipOutcome::AcceptedNew);
+
+        // Consensus penalty state is UNAFFECTED by the local cache.
+        assert_eq!(
+            st.doublesign_penalty.penalized_count(),
+            0,
+            "local cache evidence must not touch consensus penalty state"
+        );
+        // And the next block (carrying no evidence) connects normally and leaves
+        // the consensus penalty state empty.
+        let proof = phase30_build_next(&st, 3);
+        phase30_ingest_admissions(&proof, 4);
+        st.connect_block(proof.block).expect("block 4 connects");
+        assert_eq!(st.doublesign_penalty.penalized_count(), 0);
+
+        std::env::remove_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase30_rebuild_penalty_clears_stale_evidence() {
+        // Rebuilding penalty state from the active chain (used after a successful
+        // reorg) drops penalties not justified by block-carried evidence on the
+        // active chain — abandoned-fork evidence cannot pollute the active chain.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+        let committee = st.committee_pkhs_at(1).expect("committee");
+        let ev = phase30_evidence(net, 1, 0, [0xA1u8; 32], [0xB2u8; 32]);
+        st.doublesign_penalty
+            .apply_evidence(&ev, &committee, net, 3, 1)
+            .unwrap();
+        assert_eq!(st.doublesign_penalty.penalized_count(), 1);
+
+        // The active chain's blocks carry NO evidence => rebuild yields empty state.
+        st.rebuild_doublesign_penalty_from_chain();
+        assert_eq!(
+            st.doublesign_penalty.penalized_count(),
+            0,
+            "stale (non-chain) penalty cleared on rebuild"
+        );
+
+        std::env::remove_var("IRIUM_POAWX_DOUBLE_SIGN_PENALTY_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase30_mainnet_no_consensus_penalty() {
+        // Mainnet hard-off: the consensus penalty gate is false for network 0.
+        assert!(!crate::poawx_doublesign::double_sign_penalty_gate(
+            0,
+            Some(1),
+            100
+        ));
+        assert!(crate::poawx_doublesign::double_sign_penalty_gate(
+            1,
+            Some(1),
+            100
+        ));
+        assert!(!crate::poawx_doublesign::double_sign_penalty_gate(
+            1, None, 100
+        ));
+    }
+
     #[test]
     fn phase26b_stale_immediate_parent_seed_rejected() {
         // Negative: a height-2 block whose candidate set is seeded by the IMMEDIATE
@@ -11808,6 +12437,7 @@ mod tests {
                 finality_proof: None,
                 committed_admission: None,
                 role_assignment_v2: None,
+                double_sign_evidence: None,
             }
         };
         let build = |h: u64, prev: &[u8; 32], ext: &crate::poawx::Phase20ReceiptExt| -> Block {

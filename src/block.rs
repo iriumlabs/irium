@@ -988,6 +988,7 @@ mod fix2a_boundary_tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         let mut r = make_receipt(7);
         r.phase20_ext = Some(ext);

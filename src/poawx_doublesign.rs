@@ -34,6 +34,10 @@ pub const DOUBLE_SIGN_EVIDENCE_MAX_BYTES: usize = EVIDENCE_WIRE + 8;
 /// Default suspension window (committee epochs) for a confirmed double-sign.
 pub const DEFAULT_SUSPEND_EPOCHS: u64 = 1;
 const EVIDENCE_CACHE_CAP: usize = 4096;
+/// Phase 30: trailing `Phase20ReceiptExt` section magic for block-carried evidence.
+pub const DOUBLE_SIGN_SECTION_MAGIC: &[u8; 4] = b"DSE1";
+/// Phase 30: max double-sign evidence entries carried in a single block (anti-spam).
+pub const MAX_DOUBLE_SIGN_EVIDENCE_PER_BLOCK: usize = 16;
 
 // ── Gate (testnet/devnet only; mainnet hard-off) ─────────────────────────────
 

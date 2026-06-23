@@ -11,6 +11,10 @@ use crate::poawx_committed_admission::{
     AdmissionCommitmentV1, ADMISSION_COMMITMENT_WIRE, COMMITTED_ADMISSION_SECTION_MAGIC,
 };
 use crate::poawx_dominance::{DOMINANCE_SECTION_MAGIC, DOMINANCE_WEIGHTS_WIRE};
+use crate::poawx_doublesign::{
+    PoawxDoubleSignEvidenceV1, DOUBLE_SIGN_SECTION_MAGIC, EVIDENCE_WIRE,
+    MAX_DOUBLE_SIGN_EVIDENCE_PER_BLOCK,
+};
 use crate::poawx_finality::{FinalityProofV1, FINALITY_SECTION_MAGIC};
 use crate::poawx_puzzle::{PuzzleSolutionV1, PUZZLE_SECTION_MAGIC, PUZZLE_SOLUTION_WIRE};
 use crate::poawx_ticket::{TicketProof, TICKET_PROOF_WIRE, TICKET_SECTION_MAGIC};
@@ -652,6 +656,13 @@ pub struct Phase20ReceiptExt {
     /// support] (trailing AVR2 section; None => byte-identical to pre-22D).
     /// Required + validated in connect_block when the true-VRF gate is enforced.
     pub role_assignment_v2: Option<[AssignmentProofV2; 3]>,
+    /// Phase 30: optional block-carried double-sign evidence (trailing DSE1
+    /// section; None => byte-identical to pre-30 exts). Each entry is a validated
+    /// `PoawxDoubleSignEvidenceV1`; stored in canonical order (by evidence id),
+    /// deduped, bounded by `MAX_DOUBLE_SIGN_EVIDENCE_PER_BLOCK`. Validated in
+    /// connect_block (testnet/devnet only; mainnet hard-off) and applied to the
+    /// node's deterministic, replayable double-sign penalty state.
+    pub double_sign_evidence: Option<Vec<PoawxDoubleSignEvidenceV1>>,
 }
 
 impl Phase20ReceiptExt {
@@ -688,6 +699,7 @@ impl Phase20ReceiptExt {
                     || self.finality_proof.is_some()
                     || self.committed_admission.is_some()
                     || self.role_assignment_v2.is_some()
+                    || self.double_sign_evidence.is_some()
                 {
                     out.push(0);
                 }
@@ -743,6 +755,16 @@ impl Phase20ReceiptExt {
             out.extend_from_slice(ASSIGNMENT_V2_SECTION_MAGIC);
             for pr in proofs.iter() {
                 out.extend_from_slice(&pr.serialize());
+            }
+        }
+        // Phase 30 trailing DSE1 double-sign evidence section (present-only): magic
+        // + u16 count + count × fixed-size evidence. Absent => byte-identical to
+        // pre-30 exts. (Producers canonicalize + dedup before serialization.)
+        if let Some(evidence) = &self.double_sign_evidence {
+            out.extend_from_slice(DOUBLE_SIGN_SECTION_MAGIC);
+            out.extend_from_slice(&(evidence.len() as u16).to_le_bytes());
+            for ev in evidence.iter() {
+                out.extend_from_slice(&ev.serialize());
             }
         }
         out
@@ -813,6 +835,7 @@ impl Phase20ReceiptExt {
         let mut finality_proof: Option<FinalityProofV1> = None;
         let mut committed_admission: Option<AdmissionCommitmentV1> = None;
         let mut role_assignment_v2: Option<[AssignmentProofV2; 3]> = None;
+        let mut double_sign_evidence: Option<Vec<PoawxDoubleSignEvidenceV1>> = None;
         while off < raw.len() {
             need(off, 4, "trailing section magic")?;
             let magic = &raw[off..off + 4];
@@ -905,6 +928,27 @@ impl Phase20ReceiptExt {
                     off += ASSIGNMENT_PROOF_V2_WIRE;
                 }
                 role_assignment_v2 = Some([ps[0].clone(), ps[1].clone(), ps[2].clone()]);
+            } else if magic == DOUBLE_SIGN_SECTION_MAGIC {
+                if double_sign_evidence.is_some() {
+                    return Err("phase20 ext: duplicate double-sign section".to_string());
+                }
+                off += 4;
+                need(off, 2, "double-sign count")?;
+                let count =
+                    u16::from_le_bytes(raw[off..off + 2].try_into().expect("len 2")) as usize;
+                off += 2;
+                if count > MAX_DOUBLE_SIGN_EVIDENCE_PER_BLOCK {
+                    return Err("phase20 ext: double-sign evidence count over cap".to_string());
+                }
+                let mut evs: Vec<PoawxDoubleSignEvidenceV1> = Vec::with_capacity(count);
+                for _ in 0..count {
+                    need(off, EVIDENCE_WIRE, "double-sign evidence")?;
+                    evs.push(PoawxDoubleSignEvidenceV1::deserialize(
+                        &raw[off..off + EVIDENCE_WIRE],
+                    )?);
+                    off += EVIDENCE_WIRE;
+                }
+                double_sign_evidence = Some(evs);
             } else {
                 return Err("phase20 ext: unknown trailing section magic".to_string());
             }
@@ -924,6 +968,7 @@ impl Phase20ReceiptExt {
             finality_proof,
             committed_admission,
             role_assignment_v2,
+            double_sign_evidence,
         })
     }
 
@@ -1893,6 +1938,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         let bytes = ext.serialize();
         let ext2 = Phase20ReceiptExt::deserialize(&bytes).expect("deserialize");
@@ -2009,6 +2055,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         let none = base();
         let mut some = base();
@@ -2052,6 +2099,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         let proofs = [
             TicketProof::new(
@@ -2171,6 +2219,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: Some(proofs),
+            double_sign_evidence: None,
         };
         let good = ext.serialize();
         assert_eq!(Phase20ReceiptExt::deserialize(&good).unwrap(), ext);
@@ -2216,6 +2265,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         let seed = [0x55u8; 32];
         let mk = |secret: u8, role: u8, solver: [u8; 20]| {
@@ -2304,6 +2354,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         let seed = [0x55u8; 32];
         let mut cs = CandidateSet::new(1, 61, seed);
@@ -2384,6 +2435,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         let sk = k256::ecdsa::SigningKey::from_slice(&[0x21u8; 32]).unwrap();
         let mut fp = FinalityProofV1::new(1, 60, prev, [0u8; 32], 0, 1, 1);
@@ -2460,6 +2512,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         let sol = |m: u8, n: u64, t: u8| PuzzleSolutionV1 {
             mode: m,
@@ -2527,6 +2580,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         let mut cs = CandidateSet::new(1, 60, prev);
         cs.push(RoleCandidate::build(
@@ -2600,6 +2654,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         let weights = [1000u64, 800, 900, 950];
         // (1) absent => no DOM1 magic, byte-identical, round-trips.
@@ -2700,6 +2755,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
         // no-ext v3 element == v2 element + a single 0 flag byte (present-only).
         let r = make_test_receipt(9);
@@ -2742,6 +2798,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            double_sign_evidence: None,
         };
 
         // Base mode-0 receipt with a production extension attached.

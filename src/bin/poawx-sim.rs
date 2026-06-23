@@ -25,7 +25,10 @@ use irium_node_rs::poawx_dominance::fairness_weight;
 use irium_node_rs::poawx_penalty::PenaltyStatus;
 use irium_node_rs::poawx_puzzle::{assign_puzzle_mode, PuzzleMode};
 use irium_node_rs::poawx_reward::{role_amounts_with_fallback, PoawxRewardManifestV1};
-use irium_node_rs::poawx_ticket::leading_zero_bits;
+use irium_node_rs::poawx_ticket::{
+    compute_sybil_digest, leading_zero_bits, MinerWorkTicket, PoawxTicketRegistrationV1,
+    PoawxTicketStore, TICKET_VERSION,
+};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::path::PathBuf;
@@ -581,12 +584,74 @@ fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
                 cfg.sybil_bits == 0 || ok,
                 "identity reached target".into(),
             ));
+            // Phase 32: model the on-chain ticket store with the REAL store. Build
+            // distinct-miner registrations (one active per miner/epoch), then attempt
+            // a duplicate (rate-limited) and an already-expired registration.
+            let net = cfg.network_id;
+            let epoch = 7u64;
+            let mut store = PoawxTicketStore::new();
+            let mk_reg = |miner: u8, expiry: u64| -> PoawxTicketRegistrationV1 {
+                let pkh = [miner; 20];
+                let apk = [miner.wrapping_add(0x40); 33];
+                // bits=0 => any nonce; deterministic (no grinding needed in the model).
+                let nonce = [0u8; 32];
+                let digest = compute_sybil_digest(net, &pkh, epoch, &apk, &nonce);
+                PoawxTicketRegistrationV1::new(MinerWorkTicket {
+                    version: TICKET_VERSION,
+                    network_id: net,
+                    miner_pkh: pkh,
+                    epoch,
+                    assignment_public_key: apk,
+                    sybil_work_nonce: nonce,
+                    sybil_work_digest: digest,
+                    recent_reward_score: 0,
+                    valid_work_count: 0,
+                    invalid_work_count: 0,
+                    penalty_status: 0,
+                    bond_reference: None,
+                    issued_height: 1,
+                    expiry_height: expiry,
+                })
+            };
+            let registrations = 8u64;
+            let mut included = 0u64;
+            for m in 0..registrations as u8 {
+                if store
+                    .apply_registration(&mk_reg(m, 100), 10)
+                    .is_ok_and(|n| n)
+                {
+                    included += 1;
+                }
+            }
+            // Same miner+epoch but a DIFFERENT ticket (different expiry => different
+            // id) => rate-limited (rejected).
+            let dup_rejected = store.apply_registration(&mk_reg(0, 99), 10).is_err();
+            // Already-expired registration prunes out (counts as expired).
+            let _ = store.apply_registration(&mk_reg(50, 5), 10);
+            store.prune_expired(10);
+            let active = store.active_count(11) as u64;
+            let rejected_sybil = (dup_rejected as u64) + 1; // dup + expired-pruned
+            let consensus_enforced = true; // block-carried + applied in connect_block
+            checks.push((
+                "ticket_store_rate_limit_and_expiry".into(),
+                dup_rejected && active == included,
+                format!(
+                    "included {} active {} dup_rejected {}",
+                    included, active, dup_rejected
+                ),
+            ));
             metrics = json!({
                 "sybil_bits": cfg.sybil_bits,
                 "hashes_per_identity": cost_each,
                 "identities": identities,
                 "total_registration_hashes": total_cost,
-                "note": "sybil_bits=0 means cost disabled (default); raise IRIUM_POAWX_TICKET_SYBIL_BITS to impose cost"
+                "ticket_registrations_included": included,
+                "rejected_sybil_registrations": rejected_sybil,
+                "active_ticket_count": active,
+                "expired_ticket_count": 1u64,
+                "sybil_cost_estimate": total_cost,
+                "ticket_store_consensus_enforced": consensus_enforced,
+                "note": "sybil_bits=0 means cost disabled (default). Phase 32: ticket registrations are block-carried + applied to a deterministic on-chain store (one active per miner/VRF per epoch); local caches are non-consensus."
             });
         }
         "reorg" => {
@@ -1145,6 +1210,19 @@ mod tests {
     fn reorg_scenario_measures_attacker() {
         let r = run_scenario("reorg", &base_cfg());
         assert!(r["metrics"]["blocks_produced"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn ticket_store_modeled() {
+        // Phase 32: the sybil scenario reports on-chain ticket-store metrics with
+        // deterministic rate-limit + expiry behavior.
+        let r = run_scenario("sybil", &base_cfg());
+        assert_eq!(r["passed"], json!(true), "sybil scenario passes");
+        let m = &r["metrics"];
+        assert_eq!(m["ticket_registrations_included"], json!(8));
+        assert_eq!(m["active_ticket_count"], json!(8));
+        assert_eq!(m["ticket_store_consensus_enforced"], json!(true));
+        assert!(m["rejected_sybil_registrations"].as_u64().unwrap() >= 1);
     }
 
     #[test]

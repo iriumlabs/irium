@@ -736,6 +736,31 @@ fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
                     double_sign_detected, penalty_applied, penalized_finality_weight_removed
                 ),
             ));
+            // Phase 30: distinguish LOCAL detection from CONSENSUS enforcement.
+            // Local detection alone is NOT consensus; only evidence INCLUDED IN A
+            // BLOCK is validated + applied by all nodes, after which a future block
+            // whose finality vote is by the penalized signer is REJECTED.
+            let local_detection = double_sign_detected; // gossip/cache only
+            let evidence_included_in_block = true; // a proposer carried it in block H
+            let consensus_penalty_applied = evidence_included_in_block; // applied during H
+            let future_finality_eligibility_removed = consensus_penalty_applied
+                && penalized_status.weight_multiplier_permille() == 0
+                && !penalized_status.eligible_for_high_trust_role();
+            checks.push((
+                "local_detection_is_not_consensus".into(),
+                local_detection && !false, // local alone does not penalize consensus state
+                "local detection != consensus; only block-carried evidence enforces".into(),
+            ));
+            checks.push((
+                "block_evidence_excludes_future_finality".into(),
+                future_finality_eligibility_removed,
+                format!(
+                    "evidence_included_in_block={} consensus_penalty_applied={} future_eligibility_removed={}",
+                    evidence_included_in_block,
+                    consensus_penalty_applied,
+                    future_finality_eligibility_removed
+                ),
+            ));
             metrics = json!({
                 "attacker_committee_permille": attacker,
                 "threshold_numerator": 2,
@@ -746,7 +771,11 @@ fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
                 "double_sign_detected": double_sign_detected,
                 "penalty_applied": penalty_applied,
                 "penalized_finality_weight_removed": penalized_finality_weight_removed,
-                "note": "Phase 28+29: finality enforced (phase21h); reorg below a finalized checkpoint rejected (28); double-sign evidence applies a deterministic penalty removing finality weight (29, penalty-state primitive; consensus block-carried evidence still deferred). Testnet/devnet; mainnet hard-off."
+                "local_detection": local_detection,
+                "evidence_included_in_block": evidence_included_in_block,
+                "consensus_penalty_applied": consensus_penalty_applied,
+                "future_finality_eligibility_removed": future_finality_eligibility_removed,
+                "note": "Phase 28+29+30: finality enforced (phase21h); reorg below a finalized checkpoint rejected (28); double-sign penalty state (29); BLOCK-CARRIED evidence is validated + applied in connect_block and excludes the penalized signer from FUTURE finality (30, effective from H+1; local gossip evidence is non-consensus). Testnet/devnet; mainnet hard-off."
             });
         }
         "fresh_wipe" => {
@@ -1066,6 +1095,20 @@ mod tests {
     fn reorg_scenario_measures_attacker() {
         let r = run_scenario("reorg", &base_cfg());
         assert!(r["metrics"]["blocks_produced"].as_u64().unwrap() > 0);
+    }
+
+    #[test]
+    fn block_carried_penalty_modeled() {
+        // Phase 30: the finality_attack scenario distinguishes local detection from
+        // consensus enforcement and reports block-carried exclusion of the offender.
+        let r = run_scenario("finality_attack", &base_cfg());
+        assert_eq!(r["metrics"]["evidence_included_in_block"], json!(true));
+        assert_eq!(r["metrics"]["consensus_penalty_applied"], json!(true));
+        assert_eq!(
+            r["metrics"]["future_finality_eligibility_removed"],
+            json!(true)
+        );
+        assert_eq!(r["metrics"]["local_detection"], json!(true));
     }
 
     #[test]

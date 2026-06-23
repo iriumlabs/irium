@@ -304,6 +304,12 @@ pub struct ChainState {
     /// mainnet, hard-off). Applied in `connect_block` (effective from the NEXT
     /// block), reconstructed by replay, and rebuilt from the active chain on reorg.
     pub doublesign_penalty: crate::poawx_doublesign::PoawxDoubleSignPenaltyState,
+    /// Phase 32: deterministic, replayable on-chain ticket store, derived from the
+    /// active chain's block-carried ticket registrations (testnet/devnet only;
+    /// empty on mainnet, hard-off). Applied in `connect_block` (effective from the
+    /// NEXT block), reconstructed by replay, and rebuilt from the active chain on
+    /// reorg.
+    pub ticket_store: crate::poawx_ticket::PoawxTicketStore,
 }
 
 #[derive(Debug, Clone)]
@@ -383,6 +389,7 @@ impl ChainState {
             poawx_finalized_height: 0,
             poawx_finalized_hash: [0u8; 32],
             doublesign_penalty: crate::poawx_doublesign::PoawxDoubleSignPenaltyState::new(),
+            ticket_store: crate::poawx_ticket::PoawxTicketStore::new(),
         };
         let genesis = state.params.genesis_block.clone();
         state
@@ -910,6 +917,23 @@ impl ChainState {
             } else {
                 Vec::new()
             };
+        // Phase 32: validate any block-carried ticket registrations (testnet-gated;
+        // mainnet hard-off). Invalid/over-cap/duplicate/non-canonical/rate-limited
+        // registrations reject the block. Captured to APPLY AFTER commit, so a
+        // registration in block H is usable from H+1 (non-retroactive).
+        let pending_ticket_regs: Vec<crate::poawx_ticket::PoawxTicketRegistrationV1> =
+            if crate::poawx_ticket::ticket_store_active(expected_height) {
+                self.validate_block_ticket_registrations(&block, expected_height)?
+            } else {
+                Vec::new()
+            };
+        // Phase 32 eligibility (ADDITIVE, gated): when enforced, every rewarded
+        // role's ticket proof must match an ACTIVE on-chain registered ticket from
+        // EARLIER blocks (this block's own registrations are applied only after
+        // commit). Strict superset of the existing ticket-proof validation.
+        if crate::poawx_ticket::ticket_store_enforced(expected_height) {
+            self.validate_block_ticket_store_eligibility(&block, expected_height)?;
+        }
 
         let reward = block_reward(expected_height);
         let (_fees, _coinbase_total, subsidy_created, undo) = self
@@ -961,6 +985,18 @@ impl ChainState {
                     );
                 }
             }
+        }
+        // Phase 32: apply the validated ticket registrations to the on-chain store
+        // (effective from the NEXT block), then deterministically prune expired
+        // entries. Derived here so cold replay reconstructs it; rebuilt from the
+        // active chain on reorg.
+        if !pending_ticket_regs.is_empty() {
+            for reg in &pending_ticket_regs {
+                let _ = self.ticket_store.apply_registration(reg, expected_height);
+            }
+        }
+        if crate::poawx_ticket::ticket_store_active(expected_height) {
+            self.ticket_store.prune_expired(expected_height);
         }
         self.prune_caches();
 
@@ -1281,6 +1317,127 @@ impl ChainState {
             );
         }
         self.doublesign_penalty = st;
+    }
+
+    /// Phase 32: collect + validate block-carried ticket registrations. Returns the
+    /// validated, canonically-ordered, deduped registrations (to apply after commit).
+    /// Rejects: over-cap, in-block duplicate id, non-canonical order, or any
+    /// registration failing `validate` (bad sybil / wrong network / expired /
+    /// future / malformed). Reuses the existing `MinerWorkTicket` validator.
+    fn validate_block_ticket_registrations(
+        &self,
+        block: &Block,
+        height: u64,
+    ) -> Result<Vec<crate::poawx_ticket::PoawxTicketRegistrationV1>, String> {
+        let net = crate::activation::network_id_byte();
+        let require_bits = crate::poawx_ticket::sybil_threshold_bits();
+        let mut collected: Vec<crate::poawx_ticket::PoawxTicketRegistrationV1> = Vec::new();
+        if let Some(receipts) = &block.poawx_receipts {
+            for r in receipts {
+                if let Some(ext) = &r.phase20_ext {
+                    if let Some(regs) = &ext.ticket_registrations {
+                        collected.extend(regs.iter().cloned());
+                    }
+                }
+            }
+        }
+        if collected.is_empty() {
+            return Ok(collected);
+        }
+        if collected.len() > crate::poawx_ticket::MAX_TICKET_REGISTRATIONS_PER_BLOCK {
+            return Err("phase32: too many ticket registrations".to_string());
+        }
+        // Canonical order (strictly increasing ticket id) + no in-block duplicates.
+        let mut prev_id: Option<[u8; 32]> = None;
+        for reg in &collected {
+            let id = reg.ticket_id();
+            match prev_id {
+                Some(p) if id <= p => {
+                    return Err(
+                        "phase32: ticket registrations not canonically ordered/deduped".to_string(),
+                    )
+                }
+                _ => {}
+            }
+            prev_id = Some(id);
+        }
+        // Each registration must be individually valid (reuses ticket validation).
+        for reg in &collected {
+            reg.validate(net, height, require_bits)?;
+        }
+        Ok(collected)
+    }
+
+    /// Phase 32 (additive): when ticket-store enforcement is ON, every rewarded
+    /// role's ticket proof must correspond to an ACTIVE on-chain registered ticket
+    /// (matching miner/epoch/assignment-key, not expired). Strict superset of the
+    /// existing `validate_phase20_ticket_proofs`.
+    fn validate_block_ticket_store_eligibility(
+        &self,
+        block: &Block,
+        height: u64,
+    ) -> Result<(), String> {
+        let receipts = match &block.poawx_receipts {
+            Some(r) => r,
+            None => return Ok(()),
+        };
+        for r in receipts {
+            let ext = match &r.phase20_ext {
+                Some(e) => e,
+                None => continue,
+            };
+            let proofs = match &ext.role_ticket_proofs {
+                Some(p) => p,
+                None => {
+                    return Err(
+                        "phase32: ticket-store enforced but role ticket proofs missing".to_string(),
+                    )
+                }
+            };
+            for p in proofs.iter() {
+                if !self.ticket_store.has_active(
+                    &p.miner_pkh,
+                    p.epoch,
+                    &p.assignment_public_key,
+                    height,
+                ) {
+                    return Err("phase32: role ticket not registered on-chain".to_string());
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Phase 32: rebuild the on-chain ticket store from the ACTIVE chain's
+    /// block-carried registrations (used after a successful reorg so abandoned-fork
+    /// registrations never pollute the active chain). Deterministic.
+    fn rebuild_ticket_store_from_chain(&mut self) {
+        // Phase 1 (immutable): collect (registration, applied_height) in order.
+        let mut to_apply: Vec<(crate::poawx_ticket::PoawxTicketRegistrationV1, u64)> = Vec::new();
+        for h in 1..self.chain.len() as u64 {
+            if !crate::poawx_ticket::ticket_store_active(h) {
+                continue;
+            }
+            if let Some(receipts) = &self.chain[h as usize].poawx_receipts {
+                for r in receipts {
+                    if let Some(ext) = &r.phase20_ext {
+                        if let Some(regs) = &ext.ticket_registrations {
+                            for reg in regs {
+                                to_apply.push((reg.clone(), h));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // Phase 2 (mutable): rebuild fresh store in chain order, then prune at tip.
+        let mut store = crate::poawx_ticket::PoawxTicketStore::new();
+        for (reg, h) in to_apply {
+            let _ = store.apply_registration(&reg, h);
+        }
+        let tip = self.tip_height();
+        store.prune_expired(tip);
+        self.ticket_store = store;
     }
 
     /// Phase 21F: when puzzle-work enforcement is on, every production receipt
@@ -1797,6 +1954,9 @@ impl ChainState {
         // restore it exactly. On success it is REBUILT from the new active chain
         // (below) so abandoned-fork evidence never pollutes the active chain.
         let doublesign_snapshot = self.doublesign_penalty.clone();
+        // Phase 32: snapshot the on-chain ticket store so a failed reorg can restore
+        // it exactly; on success it is REBUILT from the new active chain (below).
+        let ticket_store_snapshot = self.ticket_store.clone();
 
         // Observability: capture old-tip hash and counts before mutating
         // chain state. Emitted as a single [reorg] log line on success
@@ -1827,6 +1987,8 @@ impl ChainState {
                 self.poawx_finalized_hash = finalized_snapshot.1;
                 // Phase 30: restore the pre-reorg double-sign penalty state.
                 self.doublesign_penalty = doublesign_snapshot;
+                // Phase 32: restore the pre-reorg ticket store.
+                self.ticket_store = ticket_store_snapshot;
                 return Err(format!("reorg connect failed: {}", e));
             }
             connected_new.push(block.clone());
@@ -1846,6 +2008,11 @@ impl ChainState {
         // on this success path.)
         let _ = &doublesign_snapshot;
         self.rebuild_doublesign_penalty_from_chain();
+        // Phase 32: rebuild the on-chain ticket store from the new active chain so
+        // abandoned-fork registrations never apply. (`ticket_store_snapshot` is
+        // dropped on this success path.)
+        let _ = &ticket_store_snapshot;
+        self.rebuild_ticket_store_from_chain();
         // Phase 13-C: stash blocks with PoAW-X receipts for iriumd.rs to restore
         self.reorg_orphaned_blocks
             .extend(disconnected.into_iter().filter(|b| {
@@ -2496,6 +2663,7 @@ impl ChainState {
             poawx_finalized_height: 0,
             poawx_finalized_hash: [0u8; 32],
             doublesign_penalty: crate::poawx_doublesign::PoawxDoubleSignPenaltyState::new(),
+            ticket_store: crate::poawx_ticket::PoawxTicketStore::new(),
         };
 
         let branch = self.gather_branch_to_genesis(tip_hash)?;
@@ -8289,6 +8457,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         }
     }
 
@@ -10728,6 +10897,257 @@ mod tests {
         phase26b_clear_gate_env();
     }
 
+    // ── Phase 32: on-chain ticket store (consensus helpers) ─────────────────────
+
+    fn phase32_reg(
+        net: u8,
+        miner_byte: u8,
+        epoch: u64,
+        h_exp: u64,
+    ) -> crate::poawx_ticket::PoawxTicketRegistrationV1 {
+        let pkh = [miner_byte; 20];
+        let apk = [miner_byte.wrapping_add(0x40); 33];
+        let (nonce, digest) =
+            crate::poawx_ticket::grind_sybil_nonce(net, &pkh, epoch, &apk, 0, 1).unwrap();
+        crate::poawx_ticket::PoawxTicketRegistrationV1::new(crate::poawx_ticket::MinerWorkTicket {
+            version: crate::poawx_ticket::TICKET_VERSION,
+            network_id: net,
+            miner_pkh: pkh,
+            epoch,
+            assignment_public_key: apk,
+            sybil_work_nonce: nonce,
+            sybil_work_digest: digest,
+            recent_reward_score: 0,
+            valid_work_count: 0,
+            invalid_work_count: 0,
+            penalty_status: crate::poawx_penalty::PenaltyStatus::Clean.id(),
+            bond_reference: None,
+            issued_height: 1,
+            expiry_height: h_exp,
+        })
+    }
+
+    fn phase32_block_with_regs(
+        src: &Block,
+        regs: Vec<crate::poawx_ticket::PoawxTicketRegistrationV1>,
+    ) -> Block {
+        let mut blk = src.clone();
+        if let Some(rs) = blk.poawx_receipts.as_mut() {
+            if let Some(ext) = rs[0].phase20_ext.as_mut() {
+                ext.ticket_registrations = Some(regs);
+            }
+        }
+        blk
+    }
+
+    #[test]
+    fn phase32_block_carried_ticket_registration_accepted() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+        let reg = phase32_reg(net, 0xA1, 7, 100);
+        let blk = phase32_block_with_regs(&st.chain[3], vec![reg.clone()]);
+        let validated = st
+            .validate_block_ticket_registrations(&blk, 4)
+            .expect("valid registration");
+        assert_eq!(validated.len(), 1);
+        // ext digest changes (committed) + wire round-trips.
+        let ext = blk.poawx_receipts.as_ref().unwrap()[0]
+            .phase20_ext
+            .clone()
+            .unwrap();
+        let mut none = ext.clone();
+        none.ticket_registrations = None;
+        assert_ne!(ext.digest(), none.digest());
+        assert_eq!(
+            crate::poawx::Phase20ReceiptExt::deserialize(&ext.serialize()).unwrap(),
+            ext
+        );
+        // apply -> active from H+1.
+        st.ticket_store.apply_registration(&reg, 4).unwrap();
+        assert!(st
+            .ticket_store
+            .has_active(&[0xA1u8; 20], 7, &reg.assignment_public_key(), 5));
+        std::env::remove_var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase32_invalid_ticket_registrations_rejected() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+        // expired (expiry <= connecting height 4).
+        let expired = phase32_reg(net, 0xA1, 7, 4);
+        assert!(st
+            .validate_block_ticket_registrations(
+                &phase32_block_with_regs(&st.chain[3], vec![expired]),
+                4
+            )
+            .is_err());
+        // wrong network.
+        let wrong_net = phase32_reg(2u8.wrapping_add(net), 0xA2, 7, 100);
+        assert!(st
+            .validate_block_ticket_registrations(
+                &phase32_block_with_regs(&st.chain[3], vec![wrong_net]),
+                4
+            )
+            .is_err());
+        // over cap.
+        let mut many = Vec::new();
+        for i in 0..(crate::poawx_ticket::MAX_TICKET_REGISTRATIONS_PER_BLOCK as u8 + 1) {
+            many.push(phase32_reg(net, 0x10 + i, 7, 100));
+        }
+        many.sort_by_key(|r| r.ticket_id());
+        assert!(st
+            .validate_block_ticket_registrations(&phase32_block_with_regs(&st.chain[3], many), 4)
+            .is_err());
+        // in-block duplicate id.
+        let dup = phase32_reg(net, 0xA3, 7, 100);
+        assert!(st
+            .validate_block_ticket_registrations(
+                &phase32_block_with_regs(&st.chain[3], vec![dup.clone(), dup]),
+                4
+            )
+            .is_err());
+        std::env::remove_var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase32_missing_onchain_ticket_rejected_for_role() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+        // Build a block whose receipt carries 3 role ticket proofs for (miner,epoch,apk).
+        let (miner, epoch, apk) = ([0xA1u8; 20], 7u64, [0xE1u8; 33]);
+        let proof = |role: u8| {
+            crate::poawx_ticket::TicketProof::new(
+                net,
+                4,
+                role,
+                miner,
+                epoch,
+                100,
+                apk,
+                [0u8; 32],
+                crate::poawx_penalty::PenaltyStatus::Clean.id(),
+            )
+        };
+        let mut blk = st.chain[3].clone();
+        if let Some(rs) = blk.poawx_receipts.as_mut() {
+            if let Some(ext) = rs[0].phase20_ext.as_mut() {
+                ext.role_ticket_proofs = Some([
+                    proof(crate::poawx::ROLE_COMPUTE_CONTRIBUTOR),
+                    proof(crate::poawx::ROLE_VERIFY_CONTRIBUTOR),
+                    proof(crate::poawx::ROLE_SUPPORT_CONTRIBUTOR),
+                ]);
+            }
+        }
+        // Empty store => eligibility rejects.
+        let err = st
+            .validate_block_ticket_store_eligibility(&blk, 4)
+            .expect_err("missing on-chain ticket rejected");
+        assert!(
+            err.contains("phase32") && err.contains("not registered"),
+            "got: {err}"
+        );
+        // Register a matching ticket (active before height 4) => eligibility passes.
+        let reg = crate::poawx_ticket::PoawxTicketRegistrationV1::new(
+            crate::poawx_ticket::MinerWorkTicket {
+                version: crate::poawx_ticket::TICKET_VERSION,
+                network_id: net,
+                miner_pkh: miner,
+                epoch,
+                assignment_public_key: apk,
+                sybil_work_nonce: [0u8; 32],
+                sybil_work_digest: crate::poawx_ticket::compute_sybil_digest(
+                    net, &miner, epoch, &apk, &[0u8; 32],
+                ),
+                recent_reward_score: 0,
+                valid_work_count: 0,
+                invalid_work_count: 0,
+                penalty_status: crate::poawx_penalty::PenaltyStatus::Clean.id(),
+                bond_reference: None,
+                issued_height: 1,
+                expiry_height: 100,
+            },
+        );
+        st.ticket_store.apply_registration(&reg, 2).unwrap();
+        assert!(
+            st.validate_block_ticket_store_eligibility(&blk, 4).is_ok(),
+            "registered + active ticket satisfies eligibility"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase32_rebuild_ticket_store_clears_stale() {
+        // Rebuild from a chain with no registrations clears stale store state
+        // (abandoned-fork safety).
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+        let reg = phase32_reg(net, 0xA1, 7, 100);
+        st.ticket_store.apply_registration(&reg, 2).unwrap();
+        assert_eq!(st.ticket_store.len(), 1);
+        st.rebuild_ticket_store_from_chain();
+        assert_eq!(
+            st.ticket_store.len(),
+            0,
+            "stale (non-chain) registration cleared on rebuild"
+        );
+        std::env::remove_var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase32_local_ticket_not_consensus_until_included() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+        let reg = phase32_reg(net, 0xA1, 7, 100);
+        let cache = crate::poawx_ticket::NodeTicketRegistrationCache::new();
+        assert!(cache.ingest(reg, 3));
+        // Consensus store is UNAFFECTED by the local cache.
+        assert_eq!(
+            st.ticket_store.len(),
+            0,
+            "local cache registration must not touch the consensus store"
+        );
+        std::env::remove_var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
     #[test]
     fn phase26b_stale_immediate_parent_seed_rejected() {
         // Negative: a height-2 block whose candidate set is seeded by the IMMEDIATE
@@ -12487,6 +12907,7 @@ mod tests {
                 committed_admission: None,
                 role_assignment_v2: None,
                 double_sign_evidence: None,
+                ticket_registrations: None,
             }
         };
         let build = |h: u64, prev: &[u8; 32], ext: &crate::poawx::Phase20ReceiptExt| -> Block {

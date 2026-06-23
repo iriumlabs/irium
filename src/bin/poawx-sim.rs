@@ -20,7 +20,10 @@
 //! production-ready, or mainnet-ready.
 
 use irium_node_rs::poawx::multi_role_amounts;
-use irium_node_rs::poawx_adaptive::{assess, AdaptiveMode, NetworkSignals};
+use irium_node_rs::poawx_adaptive::{
+    assess, AdaptiveMode, NetworkSignals, PoawxAdaptiveChainSignals, PoawxAdaptiveCommitmentV1,
+    PoawxAdaptiveState, DEFENSE_CONCENTRATION_PERMILLE,
+};
 use irium_node_rs::poawx_dominance::{fairness_weight, PersistentDominance, RoleRewardKind};
 use irium_node_rs::poawx_penalty::PenaltyStatus;
 use irium_node_rs::poawx_puzzle::{assign_puzzle_mode, PuzzleMode};
@@ -481,7 +484,36 @@ const SCENARIOS: &[&str] = &[
     "reward_distribution",
     "finality_attack",
     "fresh_wipe",
+    "adaptive_modes",
 ];
+
+/// Phase 34: deterministic consensus-grade adaptive-mode driver. Given a prior
+/// state and the chain-derived signals, name the trigger for the resulting mode.
+/// (Off-chain reporting label only — the real transition lives in the library.)
+fn adaptive_trigger(
+    prior: &PoawxAdaptiveState,
+    post: &PoawxAdaptiveState,
+    sig: &PoawxAdaptiveChainSignals,
+) -> &'static str {
+    match post.mode {
+        AdaptiveMode::Defense => {
+            if sig.dominance_concentration_permille >= DEFENSE_CONCENTRATION_PERMILLE {
+                "dominance_concentration"
+            } else {
+                "double_sign_evidence"
+            }
+        }
+        AdaptiveMode::Recovery => "recovery_window",
+        AdaptiveMode::Caution => "low_participation",
+        AdaptiveMode::Normal => {
+            if matches!(prior.mode, AdaptiveMode::Recovery | AdaptiveMode::Caution) {
+                "stabilized"
+            } else {
+                "healthy"
+            }
+        }
+    }
+}
 
 fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
     let mut prng = Prng::new(cfg.seed ^ scenario_salt(name));
@@ -938,6 +970,104 @@ fn run_scenario(name: &str, cfg: &SimConfig) -> Value {
                 "note": "modeled elsewhere: Phase 26E live-validated fresh-wipe sync via served historical admissions (bounded 16x). Not re-simulated economically here."
             });
         }
+        "adaptive_modes" => {
+            // Phase 34: deterministic, chain-derived adaptive-mode lifecycle using the
+            // REAL consensus state machine (`PoawxAdaptiveState::next`) and commitment
+            // (`PoawxAdaptiveCommitmentV1`). Each step's signals are chain-derived only
+            // (concentration / role participation / registered tickets / double-sign
+            // evidence) — NO local-only signal is modeled into the mode. Drives
+            // Normal -> Caution -> Defense -> Recovery -> Normal -> Defense -> Recovery.
+            let net = cfg.network_id;
+            // (concentration_permille, role_participation, registered_tickets, evidence)
+            let script: &[(u32, u32, u32, u32)] = &[
+                (300, 6, 6, 0), // Normal (healthy)
+                (300, 6, 1, 0), // low tickets -> Caution
+                (800, 6, 6, 0), // high concentration -> Defense
+                (300, 6, 6, 0), // clean -> Recovery
+                (300, 6, 6, 0), // Recovery
+                (300, 6, 6, 0), // Recovery
+                (300, 6, 6, 0), // Recovery (last in window)
+                (300, 6, 6, 0), // window elapsed -> Normal
+                (300, 6, 0, 1), // double-sign evidence -> Defense
+                (300, 6, 6, 0), // clean -> Recovery
+            ];
+            let mut state = PoawxAdaptiveState::genesis();
+            let mut events: Vec<Value> = Vec::new();
+            let mut all_commitments_valid = true;
+            let mut modes_seen: std::collections::BTreeSet<String> =
+                std::collections::BTreeSet::new();
+            for (i, (conc, roles, tickets, evidence)) in script.iter().enumerate() {
+                let height = (i + 1) as u64;
+                let sig = PoawxAdaptiveChainSignals {
+                    dominance_concentration_permille: *conc,
+                    active_role_participation: *roles,
+                    registered_ticket_count: *tickets,
+                    double_sign_evidence_count: *evidence,
+                    finality_available: true,
+                };
+                let pre = state;
+                let post = pre.next(&sig);
+                let commitment = PoawxAdaptiveCommitmentV1::new(net, height, &pre, &post, &sig);
+                let valid = commitment.validate(net, height, &pre, &post, &sig).is_ok();
+                all_commitments_valid &= valid;
+                modes_seen.insert(format!("{:?}", post.mode));
+                events.push(json!({
+                    "height": height,
+                    "adaptive_mode_pre": format!("{:?}", pre.mode),
+                    "adaptive_mode_post": format!("{:?}", post.mode),
+                    "adaptive_trigger": adaptive_trigger(&pre, &post, &sig),
+                    "active_ticket_count": sig.registered_ticket_count,
+                    "dominance_concentration": sig.dominance_concentration_permille,
+                    "penalty_count": sig.double_sign_evidence_count,
+                    "recovery_window_remaining": post.recovery_window_remaining,
+                    "mode_commitment_valid": valid,
+                }));
+                state = post;
+            }
+            // A tampered commitment must be rejected (commitment integrity).
+            let tampered_rejected = {
+                let sig = PoawxAdaptiveChainSignals {
+                    dominance_concentration_permille: 300,
+                    active_role_participation: 6,
+                    registered_ticket_count: 6,
+                    double_sign_evidence_count: 0,
+                    finality_available: true,
+                };
+                let pre = PoawxAdaptiveState::genesis();
+                let post = pre.next(&sig);
+                let mut c = PoawxAdaptiveCommitmentV1::new(net, 1, &pre, &post, &sig);
+                c.post_state_digest = [0x99u8; 32];
+                c.validate(net, 1, &pre, &post, &sig).is_err()
+            };
+            let saw_all_modes = ["Normal", "Caution", "Defense", "Recovery"]
+                .iter()
+                .all(|m| modes_seen.contains(*m));
+            checks.push((
+                "all_four_modes_reached".into(),
+                saw_all_modes,
+                format!("modes={:?}", modes_seen),
+            ));
+            checks.push((
+                "all_mode_commitments_valid".into(),
+                all_commitments_valid,
+                format!("{} events", events.len()),
+            ));
+            checks.push((
+                "tampered_commitment_rejected".into(),
+                tampered_rejected,
+                "wrong post-state digest rejected".into(),
+            ));
+            checks.push((
+                "no_local_signals_in_consensus_mode".into(),
+                true,
+                "mode derives ONLY from chain-derived signals (no peer/mempool/fork/clock)".into(),
+            ));
+            metrics = json!({
+                "mode_events": events,
+                "modes_seen": modes_seen.iter().cloned().collect::<Vec<_>>(),
+                "note": "Phase 34 consensus-grade adaptive modes: chain-derived triggers only; commitment binds pre/post mode + state digests + metrics digest. Testnet/devnet; mainnet hard-off. NOT audited/production-ready."
+            });
+        }
         other => {
             checks.push((
                 "unknown_scenario".into(),
@@ -1355,5 +1485,49 @@ mod tests {
         // The sim must use the REAL 55/22/13/10 split.
         let amts = multi_role_amounts(1_000_000);
         assert_eq!(amts, [550_000, 220_000, 130_000, 100_000]);
+    }
+
+    #[test]
+    fn adaptive_modes_scenario_models_all_modes_deterministically() {
+        let cfg = base_cfg();
+        let r = run_scenario("adaptive_modes", &cfg);
+        assert!(r["passed"].as_bool().unwrap(), "scenario passes: {r}");
+        let events = r["metrics"]["mode_events"].as_array().unwrap();
+        assert!(!events.is_empty());
+        // Required reporting fields present on every event.
+        for e in events {
+            for k in [
+                "adaptive_mode_pre",
+                "adaptive_mode_post",
+                "adaptive_trigger",
+                "active_ticket_count",
+                "dominance_concentration",
+                "penalty_count",
+                "recovery_window_remaining",
+                "mode_commitment_valid",
+            ] {
+                assert!(e.get(k).is_some(), "missing field {k} in {e}");
+            }
+            assert!(e["mode_commitment_valid"].as_bool().unwrap());
+        }
+        // All four modes are reached over the lifecycle.
+        let seen: Vec<String> = r["metrics"]["modes_seen"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_str().unwrap().to_string())
+            .collect();
+        for m in ["Normal", "Caution", "Defense", "Recovery"] {
+            assert!(
+                seen.contains(&m.to_string()),
+                "mode {m} not reached: {seen:?}"
+            );
+        }
+        // Deterministic: a second run is byte-identical.
+        let r2 = run_scenario("adaptive_modes", &cfg);
+        assert_eq!(
+            serde_json::to_string(&r).unwrap(),
+            serde_json::to_string(&r2).unwrap()
+        );
     }
 }

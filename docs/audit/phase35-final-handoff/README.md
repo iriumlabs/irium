@@ -9,7 +9,8 @@ Phases 28–34 (closing the six deferred items from the Phase 27 blueprint gap a
 > **Phase 36 kickoff package:** the operational kickoff package (review guide, invariants checklist,
 > repro commands, findings template, auditor questions, deliverables, outreach draft, status) is at
 > `docs/audit/phase36-independent-audit-kickoff/README.md`. Auditor not yet selected; audit not yet
-> started.
+> started. The owner-facing auditor selection & engagement-prep package (Phase 37) is at
+> `docs/audit/phase37-auditor-selection-engagement/README.md`.
 
 ## Where to start
 

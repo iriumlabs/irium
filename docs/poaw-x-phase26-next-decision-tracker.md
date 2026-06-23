@@ -16,7 +16,11 @@ _Last updated: `[YYYY-MM-DD]` by `[name]`_
 > step. The Phase 36 independent-audit **kickoff package** (review guide, invariants checklist, repro
 > commands, findings template, outreach draft, status) is now prepared at
 > `docs/audit/phase36-independent-audit-kickoff/README.md` — auditor still not selected, audit not
-> started.
+> started. The Phase 37 **auditor selection & engagement-prep** package (selection criteria, scorecard,
+> conflict checks, scope options, NDA guide, budget/timeline templates, outreach drafts, decision log) is
+> at `docs/audit/phase37-auditor-selection-engagement/README.md`. This directly supports **Decision 1
+> (choose auditor)** and **Decision 2 (send package)** below; both remain owner-gated (outreach not sent,
+> NDA pending, budget pending).
 
 ## Decision 1 — Choose an independent auditor
 

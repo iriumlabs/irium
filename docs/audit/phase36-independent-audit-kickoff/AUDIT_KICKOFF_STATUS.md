@@ -5,7 +5,11 @@ Single-glance state of the independent-audit process. Testnet/devnet only; mainn
 | Item | Status |
 |---|---|
 | Audit kickoff package prepared | **Yes** (Phase 36) |
+| Auditor selection package prepared | **Yes** (Phase 37 — `docs/audit/phase37-auditor-selection-engagement/`) |
 | Auditor selected | **No** |
+| Outreach sent | **No** |
+| NDA decision | **Pending** |
+| Budget / timeline | **Pending** |
 | NDA signed | **No** |
 | Audit started | **No** |
 | Findings received | **No** (0) |

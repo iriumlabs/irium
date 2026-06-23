@@ -7,6 +7,11 @@ changed in Phase 36.
 PoAW-X is hard-off on mainnet (`network_id == 0`) and every feature is off by default behind explicit
 env activation gates. Nothing here authorizes a public testnet or mainnet launch.
 
+> **Auditor selection (Phase 37):** the owner-facing selection & engagement-prep package (criteria,
+> scorecard, conflict checks, scope options, NDA guide, outreach drafts, decision log) is at
+> `docs/audit/phase37-auditor-selection-engagement/README.md`. Auditor not yet selected; audit not yet
+> started; outreach not sent.
+
 ## What PoAW-X is
 
 PoAW-X ("proof-of-aligned-work, extended") is a **multi-role consensus overlay** layered on Irium's

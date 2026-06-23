@@ -9,7 +9,8 @@ does not assert correctness — it points reviewers at the exact code, invariant
 > **Kickoff package (Phase 36):** the operational auditor-kickoff package built on top of this readiness
 > doc is at `docs/audit/phase36-independent-audit-kickoff/` (review guide, invariants checklist, repro
 > commands, findings template, questions, deliverables, status). Auditor not yet selected; audit not yet
-> started.
+> started. The owner-facing auditor **selection & engagement-prep** package (Phase 37) is at
+> `docs/audit/phase37-auditor-selection-engagement/README.md`.
 
 ## 1. Audit scope
 

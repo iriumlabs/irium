@@ -310,6 +310,12 @@ pub struct ChainState {
     /// NEXT block), reconstructed by replay, and rebuilt from the active chain on
     /// reorg.
     pub ticket_store: crate::poawx_ticket::PoawxTicketStore,
+    /// Phase 34: deterministic, reorg-safe adaptive-mode state derived ONLY from
+    /// chain-derived signals (testnet/devnet only; stays `genesis()`/Normal on
+    /// mainnet, hard-off). Advanced in `connect_block` (the post-H mode it stores
+    /// governs validation of H+1), reconstructed by cold replay, and rebuilt from
+    /// the active chain on reorg. No local-only signal can affect it.
+    pub adaptive_state: crate::poawx_adaptive::PoawxAdaptiveState,
 }
 
 #[derive(Debug, Clone)]
@@ -390,6 +396,7 @@ impl ChainState {
             poawx_finalized_hash: [0u8; 32],
             doublesign_penalty: crate::poawx_doublesign::PoawxDoubleSignPenaltyState::new(),
             ticket_store: crate::poawx_ticket::PoawxTicketStore::new(),
+            adaptive_state: crate::poawx_adaptive::PoawxAdaptiveState::genesis(),
         };
         let genesis = state.params.genesis_block.clone();
         state
@@ -942,6 +949,20 @@ impl ChainState {
         if crate::poawx_ticket::ticket_store_enforced(expected_height) {
             self.validate_block_ticket_store_eligibility(&block, expected_height)?;
         }
+        // Phase 34: adaptive-mode consensus integration (testnet-gated; mainnet
+        // hard-off). Block H's stricter mode EFFECTS key off the PRE-mode (the mode
+        // active for H, = current `self.adaptive_state.mode`, derived from blocks <
+        // H) — non-retroactive. The block's ADM1 commitment is validated against the
+        // deterministically recomputed pre/post adaptive state; the captured
+        // post-state is applied after commit so it governs H+1. Additive: derives
+        // ONLY from chain-derived signals, never weakens an existing check.
+        let adaptive_post: Option<crate::poawx_adaptive::PoawxAdaptiveState> =
+            if crate::poawx_adaptive::adaptive_mode_active(expected_height) {
+                self.enforce_adaptive_mode_effects(&block, expected_height)?;
+                Some(self.validate_block_adaptive_commitment(&block, expected_height)?)
+            } else {
+                None
+            };
 
         let reward = block_reward(expected_height);
         let (_fees, _coinbase_total, subsidy_created, undo) = self
@@ -1005,6 +1026,12 @@ impl ChainState {
         }
         if crate::poawx_ticket::ticket_store_active(expected_height) {
             self.ticket_store.prune_expired(expected_height);
+        }
+        // Phase 34: commit the validated post-H adaptive state (derived here so cold
+        // replay reconstructs it; rebuilt from the active chain on reorg). It becomes
+        // the PRE-mode for H+1.
+        if let Some(post) = adaptive_post {
+            self.adaptive_state = post;
         }
         self.prune_caches();
 
@@ -1446,6 +1473,218 @@ impl ChainState {
         let tip = self.tip_height();
         store.prune_expired(tip);
         self.ticket_store = store;
+    }
+
+    // ── Phase 34: adaptive-mode consensus integration ──────────────────────────
+
+    /// Dominance state AFTER applying block H's role rewards, WITHOUT mutating
+    /// self (mirrors `compute_post_dominance_digest`). Used so the adaptive
+    /// concentration/participation signals reflect the state "after H".
+    fn dominance_after_block(
+        &self,
+        block: &Block,
+        height: u64,
+    ) -> crate::poawx_dominance::PersistentDominance {
+        let mut clone = self.dominance.clone();
+        for (pkh, kind, amount) in Self::dominance_events_from_block(block, height) {
+            clone.apply_event(pkh, kind, amount, height);
+        }
+        clone
+    }
+
+    /// Derive the STRICTLY chain-derived adaptive signals for the transition at
+    /// `height`, from `dominance_after` (dominance state after applying block H's
+    /// role rewards) and a bounded scan of the recent committed blocks. `block_h`
+    /// is block H when it is not yet in `self.chain` (connect-time); pass `None`
+    /// during a from-chain rebuild (block H already in `self.chain`). NO local-only
+    /// signal is read here — local observations cannot affect the consensus mode.
+    fn adaptive_chain_signals(
+        &self,
+        dominance_after: &crate::poawx_dominance::PersistentDominance,
+        height: u64,
+        block_h: Option<&Block>,
+    ) -> crate::poawx_adaptive::PoawxAdaptiveChainSignals {
+        use crate::poawx_adaptive::ADAPTIVE_RECENT_WINDOW;
+        let concentration = dominance_after.max_recent_reward_share_permille(height);
+        let participation = dominance_after.distinct_recent_miners(height);
+        let start = height
+            .saturating_sub(ADAPTIVE_RECENT_WINDOW.saturating_sub(1))
+            .max(1);
+        let mut registered_ticket_count: u32 = 0;
+        let mut double_sign_evidence_count: u32 = 0;
+        let mut finality_available = false;
+        for h in start..=height {
+            let blk: Option<&Block> = if h == height {
+                block_h.or_else(|| self.chain.get(h as usize))
+            } else {
+                self.chain.get(h as usize)
+            };
+            let blk = match blk {
+                Some(b) => b,
+                None => continue,
+            };
+            if let Some(receipts) = &blk.poawx_receipts {
+                for r in receipts {
+                    if let Some(ext) = &r.phase20_ext {
+                        if let Some(regs) = &ext.ticket_registrations {
+                            registered_ticket_count =
+                                registered_ticket_count.saturating_add(regs.len() as u32);
+                        }
+                        if let Some(evs) = &ext.double_sign_evidence {
+                            double_sign_evidence_count =
+                                double_sign_evidence_count.saturating_add(evs.len() as u32);
+                        }
+                        if ext.finality_proof.is_some() {
+                            finality_available = true;
+                        }
+                    }
+                }
+            }
+        }
+        crate::poawx_adaptive::PoawxAdaptiveChainSignals {
+            dominance_concentration_permille: concentration,
+            active_role_participation: participation,
+            registered_ticket_count,
+            double_sign_evidence_count,
+            finality_available,
+        }
+    }
+
+    /// Compute (pre_state, post_state, signals) for the adaptive transition at H
+    /// during connect (block H not yet in self.chain). pre = `self.adaptive_state`
+    /// (derived from blocks < H); post = pre.next(signals incl. H).
+    fn adaptive_transition_for_block(
+        &self,
+        block: &Block,
+        height: u64,
+    ) -> (
+        crate::poawx_adaptive::PoawxAdaptiveState,
+        crate::poawx_adaptive::PoawxAdaptiveState,
+        crate::poawx_adaptive::PoawxAdaptiveChainSignals,
+    ) {
+        let pre = self.adaptive_state;
+        let dom_after = self.dominance_after_block(block, height);
+        let signals = self.adaptive_chain_signals(&dom_after, height, Some(block));
+        let post = pre.next(&signals);
+        (pre, post, signals)
+    }
+
+    /// Phase 34: validate the block-carried ADM1 adaptive-mode commitment. The
+    /// modes/digests must match the deterministically recomputed pre (blocks < H)
+    /// and post (including H) adaptive state. When enforcement is required and NO
+    /// commitment is present, the block is rejected. Returns the post-state to
+    /// apply after commit.
+    fn validate_block_adaptive_commitment(
+        &self,
+        block: &Block,
+        height: u64,
+    ) -> Result<crate::poawx_adaptive::PoawxAdaptiveState, String> {
+        let net = crate::activation::network_id_byte();
+        let (pre, post, signals) = self.adaptive_transition_for_block(block, height);
+        let mut seen = false;
+        if let Some(receipts) = &block.poawx_receipts {
+            for r in receipts {
+                if let Some(ext) = &r.phase20_ext {
+                    if let Some(amc) = &ext.adaptive_mode_commitment {
+                        seen = true;
+                        amc.validate(net, height, &pre, &post, &signals)
+                            .map_err(|e| format!("phase34: {:?}", e))?;
+                    }
+                }
+            }
+        }
+        if !seen && crate::poawx_adaptive::adaptive_commitment_enforced(height) {
+            return Err("phase34: adaptive mode commitment required but missing".to_string());
+        }
+        Ok(post)
+    }
+
+    fn block_has_dominance_commitment(block: &Block) -> bool {
+        block.poawx_receipts.as_ref().is_some_and(|rs| {
+            rs.iter().any(|r| {
+                r.phase20_ext
+                    .as_ref()
+                    .is_some_and(|e| e.dominance_commitment.is_some())
+            })
+        })
+    }
+    fn block_has_committed_admission(block: &Block) -> bool {
+        block.poawx_receipts.as_ref().is_some_and(|rs| {
+            rs.iter().any(|r| {
+                r.phase20_ext
+                    .as_ref()
+                    .is_some_and(|e| e.committed_admission.is_some())
+            })
+        })
+    }
+
+    /// Phase 34: additive, mode-driven validation effects for block H under
+    /// `pre_mode` (the mode active FOR H, = `self.adaptive_state.mode`, derived from
+    /// blocks < H). Effects only ADD strictness and only when the relevant
+    /// underlying gate is ACTIVE (so they never fabricate enforcement). They never
+    /// touch PoW/LWMA/reward/mainnet, and never relax an existing check.
+    fn enforce_adaptive_mode_effects(&self, block: &Block, height: u64) -> Result<(), String> {
+        use crate::poawx_adaptive::AdaptiveMode;
+        let mode = self.adaptive_state.mode; // pre-mode for H
+        if mode == AdaptiveMode::Normal {
+            return Ok(());
+        }
+        let caution_plus = matches!(
+            mode,
+            AdaptiveMode::Caution | AdaptiveMode::Defense | AdaptiveMode::Recovery
+        );
+        let defense_plus = matches!(mode, AdaptiveMode::Defense | AdaptiveMode::Recovery);
+        if caution_plus {
+            if crate::poawx_dominance::dominance_commitment_active(height)
+                && !Self::block_has_dominance_commitment(block)
+            {
+                return Err(format!(
+                    "phase34: {:?} mode requires dominance commitment",
+                    mode
+                ));
+            }
+            if crate::poawx_ticket::ticket_store_active(height) {
+                self.validate_block_ticket_store_eligibility(block, height)?;
+            }
+        }
+        if defense_plus {
+            if crate::poawx_committed_admission::committed_admission_active(height)
+                && !Self::block_has_committed_admission(block)
+            {
+                return Err(format!(
+                    "phase34: {:?} mode requires committed admission",
+                    mode
+                ));
+            }
+            // The existing finality validator already requires a valid proof AND
+            // rejects suspended/penalized signers (Phase 30) — exactly the Defense
+            // "reject finality proofs containing suspended signers" requirement.
+            if crate::poawx_finality::finality_committee_active(height) {
+                self.validate_block_finality(block, height)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Phase 34: rebuild adaptive state from the ACTIVE chain by a fresh
+    /// deterministic replay (reconstructing dominance with `from_env()` so the
+    /// concentration signal matches connect-time exactly). Used after a reorg so
+    /// abandoned-fork modes never pollute the active chain. Shares the signal
+    /// helper with connect so the two paths cannot diverge.
+    fn rebuild_adaptive_state_from_chain(&mut self) {
+        let mut state = crate::poawx_adaptive::PoawxAdaptiveState::genesis();
+        let mut dom = crate::poawx_dominance::PersistentDominance::from_env();
+        for h in 1..self.chain.len() as u64 {
+            for (pkh, kind, amount) in Self::dominance_events_from_block(&self.chain[h as usize], h)
+            {
+                dom.apply_event(pkh, kind, amount, h);
+            }
+            if crate::poawx_adaptive::adaptive_mode_active(h) {
+                let signals = self.adaptive_chain_signals(&dom, h, None);
+                state = state.next(&signals);
+            }
+        }
+        self.adaptive_state = state;
     }
 
     /// Phase 21F: when puzzle-work enforcement is on, every production receipt
@@ -2010,6 +2249,9 @@ impl ChainState {
         // Phase 32: snapshot the on-chain ticket store so a failed reorg can restore
         // it exactly; on success it is REBUILT from the new active chain (below).
         let ticket_store_snapshot = self.ticket_store.clone();
+        // Phase 34: snapshot the adaptive state so a failed reorg can restore it
+        // exactly; on success it is REBUILT from the new active chain (below).
+        let adaptive_snapshot = self.adaptive_state;
 
         // Observability: capture old-tip hash and counts before mutating
         // chain state. Emitted as a single [reorg] log line on success
@@ -2023,6 +2265,11 @@ impl ChainState {
         while self.tip_height() > ancestor_height {
             disconnected.push(self.disconnect_tip_block()?);
         }
+        // Phase 34: now that the chain is back at the common ancestor (dominance was
+        // reverted per disconnected block), rebuild the adaptive state to the
+        // ancestor so the new-branch connect loop below validates each block's ADM1
+        // commitment against the correct pre-state. Deterministic + chain-only.
+        self.rebuild_adaptive_state_from_chain();
 
         let mut connected_new: Vec<Block> = Vec::new();
         for block in &new_branch {
@@ -2042,6 +2289,8 @@ impl ChainState {
                 self.doublesign_penalty = doublesign_snapshot;
                 // Phase 32: restore the pre-reorg ticket store.
                 self.ticket_store = ticket_store_snapshot;
+                // Phase 34: restore the pre-reorg adaptive state.
+                self.adaptive_state = adaptive_snapshot;
                 return Err(format!("reorg connect failed: {}", e));
             }
             connected_new.push(block.clone());
@@ -2066,6 +2315,11 @@ impl ChainState {
         // dropped on this success path.)
         let _ = &ticket_store_snapshot;
         self.rebuild_ticket_store_from_chain();
+        // Phase 34: rebuild the adaptive state from the new active chain so
+        // abandoned-fork modes never apply. (`adaptive_snapshot` is dropped on this
+        // success path.)
+        let _ = &adaptive_snapshot;
+        self.rebuild_adaptive_state_from_chain();
         // Phase 13-C: stash blocks with PoAW-X receipts for iriumd.rs to restore
         self.reorg_orphaned_blocks
             .extend(disconnected.into_iter().filter(|b| {
@@ -2717,6 +2971,7 @@ impl ChainState {
             poawx_finalized_hash: [0u8; 32],
             doublesign_penalty: crate::poawx_doublesign::PoawxDoubleSignPenaltyState::new(),
             ticket_store: crate::poawx_ticket::PoawxTicketStore::new(),
+            adaptive_state: crate::poawx_adaptive::PoawxAdaptiveState::genesis(),
         };
 
         let branch = self.gather_branch_to_genesis(tip_hash)?;
@@ -8512,6 +8767,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         }
     }
 
@@ -11420,6 +11676,268 @@ mod tests {
         ));
     }
 
+    // ── Phase 34: adaptive-mode consensus integration (chain) ───────────────────
+
+    fn phase34_clear_adaptive_env() {
+        std::env::remove_var("IRIUM_POAWX_ADAPTIVE_MODE_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_ADAPTIVE_COMMITMENT_REQUIRED");
+    }
+
+    /// Build (do NOT connect) the next all-gates block at `height`, ingesting its
+    /// admissions into the global cache. Mirrors phase28_build_connect_chain's loop.
+    fn phase34_build_next_block(
+        st: &ChainState,
+        height: u64,
+        prev: [u8; 32],
+        parent_prev: Option<[u8; 32]>,
+    ) -> Block {
+        use crate::poawx_admission::global_admission_cache;
+        let net = crate::activation::network_id_byte();
+        let genesis_time = st.chain[0].header.time;
+        let bits = st.target_for_height(height).bits;
+        let proof = crate::poawx_mining_harness::build_devnet_all_gates_block(
+            net,
+            height,
+            prev,
+            parent_prev,
+            bits,
+            genesis_time + height as u32,
+            4,
+        )
+        .unwrap_or_else(|e| panic!("phase34 build H{height}: {e}"));
+        let cache = global_admission_cache();
+        cache.clear();
+        cache.set_tip(height);
+        for adm in &proof.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        proof.block
+    }
+
+    fn phase34_attach_commitment(
+        src: &Block,
+        c: crate::poawx_adaptive::PoawxAdaptiveCommitmentV1,
+    ) -> Block {
+        let mut blk = src.clone();
+        if let Some(rs) = blk.poawx_receipts.as_mut() {
+            if let Some(ext) = rs[0].phase20_ext.as_mut() {
+                ext.adaptive_mode_commitment = Some(c);
+            }
+        }
+        blk
+    }
+
+    #[test]
+    fn phase34_valid_adaptive_commitment_accepted() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_ADAPTIVE_MODE_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let (hashes, _) = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+        let blk = phase34_build_next_block(&st, 4, hashes[3], Some(hashes[2]));
+        let (pre, post, signals) = st.adaptive_transition_for_block(&blk, 4);
+        let good =
+            crate::poawx_adaptive::PoawxAdaptiveCommitmentV1::new(net, 4, &pre, &post, &signals);
+        let with_c = phase34_attach_commitment(&blk, good);
+        assert!(
+            st.validate_block_adaptive_commitment(&with_c, 4).is_ok(),
+            "matching adaptive commitment accepted"
+        );
+        // Tampered post-state digest rejected.
+        let mut bad = good;
+        bad.post_state_digest = [0x99u8; 32];
+        assert!(st
+            .validate_block_adaptive_commitment(&phase34_attach_commitment(&blk, bad), 4)
+            .is_err());
+        // The commitment changes the ext digest (affects irx1 root) + wire round-trips.
+        let ext = with_c.poawx_receipts.as_ref().unwrap()[0]
+            .phase20_ext
+            .clone()
+            .unwrap();
+        let mut none = ext.clone();
+        none.adaptive_mode_commitment = None;
+        assert_ne!(ext.digest(), none.digest());
+        assert_eq!(
+            crate::poawx::Phase20ReceiptExt::deserialize(&ext.serialize()).unwrap(),
+            ext
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase34_clear_adaptive_env();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase34_missing_commitment_rejected_only_when_enforced() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_ADAPTIVE_MODE_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let (hashes, _) = phase28_build_connect_chain(&mut st, 3);
+        let blk = phase34_build_next_block(&st, 4, hashes[3], Some(hashes[2]));
+        // Not required: a block WITHOUT an ADM1 commitment is accepted (validated-if-present).
+        assert!(
+            st.validate_block_adaptive_commitment(&blk, 4).is_ok(),
+            "missing commitment OK when not required"
+        );
+        // Required: the same block is rejected.
+        std::env::set_var("IRIUM_POAWX_ADAPTIVE_COMMITMENT_REQUIRED", "1");
+        let err = st
+            .validate_block_adaptive_commitment(&blk, 4)
+            .expect_err("missing commitment rejected when enforced");
+        assert!(
+            err.contains("phase34") && err.contains("required"),
+            "got: {err}"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase34_clear_adaptive_env();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase34_adaptive_state_replays_from_blocks() {
+        // The adaptive state is a pure function of the active chain: rebuilding from
+        // the active chain matches the forward connect, and an independent identical
+        // build reaches the same state (cold-replay equivalence). No local input.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_ADAPTIVE_MODE_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 4);
+        let forward = st.adaptive_state;
+        // Rebuild from the active chain reproduces the forward-connected state.
+        st.rebuild_adaptive_state_from_chain();
+        assert_eq!(
+            st.adaptive_state, forward,
+            "rebuild-from-chain matches forward connect"
+        );
+        // Independent identical build reaches the same adaptive state.
+        let mut st_b = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st_b, 4);
+        assert_eq!(
+            st_b.adaptive_state, forward,
+            "deterministic replay reaches the same adaptive state"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase34_clear_adaptive_env();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase34_reorg_restores_adaptive_state() {
+        // (1) A rejected reorg (below the finalized checkpoint) leaves the adaptive
+        // state intact. (2) The reorg-rebuild mechanism (rebuild_adaptive_state_from_chain)
+        // clears any stale/abandoned-fork mode and restores the active-chain state.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_ADAPTIVE_MODE_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let (hashes, _) = phase28_build_connect_chain(&mut st, 5);
+        let before = st.adaptive_state;
+        // (1) Reorg below finalized (height 4) is rejected; adaptive state unchanged.
+        let fork_hash = phase28_insert_fork_point(&mut st, 2, hashes[1]);
+        let err = st
+            .reorg_to_tip(fork_hash)
+            .expect_err("reorg below finalized rejected");
+        assert!(err.contains("phase28"), "got: {err}");
+        assert_eq!(
+            st.adaptive_state, before,
+            "rejected reorg leaves adaptive state intact"
+        );
+        // (2) A stale/abandoned-fork mode is cleared by the active-chain rebuild.
+        st.adaptive_state = crate::poawx_adaptive::PoawxAdaptiveState {
+            mode: crate::poawx_adaptive::AdaptiveMode::Caution,
+            recovery_window_remaining: 99,
+        };
+        st.rebuild_adaptive_state_from_chain();
+        assert_eq!(
+            st.adaptive_state, before,
+            "rebuild from active chain restores the adaptive state"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase34_clear_adaptive_env();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase34_mode_effects_enforced() {
+        // Under Caution+, an active-but-not-required dominance commitment becomes
+        // REQUIRED; Normal imposes no extra requirement. Additive, never weakening.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_ADAPTIVE_MODE_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        // Build with dominance-commitment INACTIVE so harness blocks (no DMC) connect
+        // even though the chain enters Caution (recent registered tickets == 0).
+        let (hashes, _) = phase28_build_connect_chain(&mut st, 2);
+        let blk = phase34_build_next_block(&st, 3, hashes[2], Some(hashes[1]));
+        // Now activate the dominance-commitment gate so the Caution effect bites.
+        std::env::set_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT", "1");
+        // Normal: no extra requirement (the all-gates block has no DMC1 but passes).
+        st.adaptive_state = crate::poawx_adaptive::PoawxAdaptiveState {
+            mode: crate::poawx_adaptive::AdaptiveMode::Normal,
+            recovery_window_remaining: 0,
+        };
+        let normal_ok = st.enforce_adaptive_mode_effects(&blk, 3).is_ok();
+        // Caution: dominance commitment now required; the block lacks it -> rejected.
+        st.adaptive_state = crate::poawx_adaptive::PoawxAdaptiveState {
+            mode: crate::poawx_adaptive::AdaptiveMode::Caution,
+            recovery_window_remaining: 0,
+        };
+        let caution_res = st.enforce_adaptive_mode_effects(&blk, 3);
+        // Clean up env BEFORE asserting so a failure can never leak gate state.
+        std::env::remove_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase34_clear_adaptive_env();
+        phase26b_clear_gate_env();
+        assert!(normal_ok, "Normal: no extra requirement");
+        let err = caution_res.expect_err("Caution requires dominance commitment");
+        assert!(
+            err.contains("phase34") && err.contains("dominance commitment"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn phase34_inactive_is_noop_and_byte_identical() {
+        // With adaptive mode INACTIVE, connect_block does not validate/evolve adaptive
+        // state, and a receipt ext with no ADM1 serializes byte-identically to before.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        phase34_clear_adaptive_env();
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        assert_eq!(
+            st.adaptive_state,
+            crate::poawx_adaptive::PoawxAdaptiveState::genesis(),
+            "inactive: adaptive state stays genesis (Normal)"
+        );
+        // Byte-identity: an ext without an ADM1 section round-trips unchanged.
+        let ext = st.chain[1].poawx_receipts.as_ref().unwrap()[0]
+            .phase20_ext
+            .clone()
+            .unwrap();
+        assert!(ext.adaptive_mode_commitment.is_none());
+        assert_eq!(
+            crate::poawx::Phase20ReceiptExt::deserialize(&ext.serialize()).unwrap(),
+            ext
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
     #[test]
     fn phase26b_stale_immediate_parent_seed_rejected() {
         // Negative: a height-2 block whose candidate set is seeded by the IMMEDIATE
@@ -13181,6 +13699,7 @@ mod tests {
                 double_sign_evidence: None,
                 ticket_registrations: None,
                 dominance_commitment: None,
+                adaptive_mode_commitment: None,
             }
         };
         let build = |h: u64, prev: &[u8; 32], ext: &crate::poawx::Phase20ReceiptExt| -> Block {

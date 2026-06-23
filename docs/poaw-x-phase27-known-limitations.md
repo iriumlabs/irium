@@ -68,13 +68,26 @@ the project's change rules forbid on consensus-critical code.
   `docs/poaw-x-phase32-onchain-ticket-store.md`. 12 `phase32_*` tests; full lib suite 796/0. (Ticket
   signatures remain a deliberate non-goal — the Sybil PoW is the deterministic identity cost.)
 
-### F. Adaptive modes: consensus/node integration (System 6)
-- **Gap:** `assess()` + policies exist and are tested, but nothing consumes them — confirmation
-  multipliers, `require_finality`, and stricter verification are not applied in block acceptance.
-  `PoawxModeValidationError` is absent.
-- **Decisions needed:** which effects are consensus-binding vs node-local advisory; deterministic
-  signal sourcing; transition validation.
-- **Risk:** Medium-High (changes block-acceptance behavior).
+### F. Adaptive modes: consensus/node integration (System 6) — **DONE in Phase 34**
+- **Status:** ✅ Implemented in Phase 34 (`src/poawx_adaptive.rs` + `src/poawx.rs` + `src/chain.rs`):
+  a deterministic, reorg-safe `PoawxAdaptiveState` (Normal/Caution/Defense/Recovery) is derived ONLY
+  from chain-derived signals (dominance concentration, role participation, recent block-carried ticket
+  registrations, recent block-carried double-sign evidence), committed per block in a trailing `ADM1`
+  ext section (`PoawxAdaptiveCommitmentV1`, binding pre/post mode + pre/post state digests + metrics
+  digest), validated in `connect_block`, reconstructed by cold replay, and rebuilt from the active chain
+  on reorg. Mode EFFECTS are additive and gated: Caution/Defense/Recovery turn on already-existing
+  Phase 32/33/28/30 checks where their gates are active (require dominance commitment + ticket
+  eligibility in Caution+; require committed-admission + finality-with-suspended-signer-exclusion in
+  Defense/Recovery). `PoawxAdaptiveValidationError` is present.
+- **Consensus-safety:** local-only signals (peer count, locally-rejected forks, mempool, node clock,
+  uncommitted gossip) are structurally excluded — the consensus signal type has no field for them. The
+  legacy `assess()`/`NetworkSignals` primitive (which had local fields) stays for the off-chain
+  simulator/operator reporting only.
+- **Scope:** testnet/devnet only; mainnet (`network_id == 0`) hard-off; off by default (env-gated
+  activation height + required flag). Does not touch LWMA/PoW/target/base reward/mainnet; does not weaken
+  phase21d/21e/22a or Phase 30/31/32/33. See `docs/poaw-x-phase34-adaptive-consensus-integration.md` and
+  its design doc. 17 `phase34_*` tests (lib) + 1 sim scenario/test. NOT audited / production-ready /
+  mainnet-ready.
 
 ## Cross-cutting limitations (carried from prior phases)
 
@@ -95,4 +108,8 @@ the project's change rules forbid on consensus-critical code.
 4. Keep mainnet hard-off and the public-testnet gate closed throughout; obtain the independent audit
    (Phase 26H–26N program) before any launch.
 
-**None of the deferred items are implemented. Phase 27 is not a completion of the full blueprint.**
+**Update:** the deferred consensus items A–F were each implemented as their own scoped phase
+(A=Phase 28, B=Phase 29/30, C=Phase 33, D=Phase 31, E=Phase 32, F=Phase 34), each gated testnet/devnet
+with mainnet hard-off. This does **not** make the system audited, production-ready, or mainnet-ready;
+the cross-cutting limitations above (independent audit, live multi-machine validation, deep-scale sync)
+still stand.

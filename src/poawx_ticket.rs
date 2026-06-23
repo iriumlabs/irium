@@ -542,6 +542,300 @@ impl TicketProof {
     }
 }
 
+// ── Phase 32: block-carried ticket registrations + on-chain ticket store ──────
+//
+// A registration is a `MinerWorkTicket` (self-authenticating via its Sybil PoW;
+// unsigned by the existing deterministic design). Registrations are block-carried
+// in a trailing-optional `TKT1` ext section (committed into the irx1 root) and
+// applied to a deterministic, replayable on-chain ticket store. Testnet/devnet
+// only; mainnet hard-off. Only block-carried, replayed registrations affect
+// consensus — a local cache is provided for builders (observability only).
+
+use std::collections::BTreeMap;
+use std::sync::Mutex;
+
+/// Trailing `Phase20ReceiptExt` section magic for block-carried registrations.
+pub const TICKET_SECTION_MAGIC_TKT1: &[u8; 4] = b"TKT1";
+/// Max ticket registrations carried in a single block (anti-spam bound).
+pub const MAX_TICKET_REGISTRATIONS_PER_BLOCK: usize = 16;
+const TICKET_STORE_DOMAIN: &[u8] = b"IRIUM_POAWX_TICKET_STORE_V1";
+const TICKET_REG_CACHE_CAP: usize = 4096;
+
+/// A block-carried ticket registration (the full Miner Work Ticket).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoawxTicketRegistrationV1 {
+    pub ticket: MinerWorkTicket,
+}
+
+impl PoawxTicketRegistrationV1 {
+    pub fn new(ticket: MinerWorkTicket) -> Self {
+        Self { ticket }
+    }
+    /// Stable, order-independent id == the ticket digest.
+    pub fn ticket_id(&self) -> [u8; 32] {
+        self.ticket.digest()
+    }
+    pub fn miner_pkh(&self) -> [u8; 20] {
+        self.ticket.miner_pkh
+    }
+    pub fn epoch(&self) -> u64 {
+        self.ticket.epoch
+    }
+    pub fn assignment_public_key(&self) -> [u8; 33] {
+        self.ticket.assignment_public_key
+    }
+    pub fn expiry_height(&self) -> u64 {
+        self.ticket.expiry_height
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        self.ticket.serialize()
+    }
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        Ok(Self {
+            ticket: MinerWorkTicket::deserialize(raw)?,
+        })
+    }
+
+    /// Validate the registration (reuses the existing ticket validator). Mainnet
+    /// hard-off. Fails closed.
+    pub fn validate(
+        &self,
+        expected_network: u8,
+        current_height: u64,
+        require_bits: u32,
+    ) -> Result<(), String> {
+        if expected_network == 0 {
+            return Err("phase32: ticket registration mainnet hard-off".to_string());
+        }
+        self.ticket
+            .validate(expected_network, current_height, require_bits)
+            .map_err(|e| format!("phase32: invalid ticket registration: {e}"))
+    }
+}
+
+/// One entry in the on-chain ticket store.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoawxTicketStoreEntry {
+    pub ticket_id: [u8; 32],
+    pub miner_pkh: [u8; 20],
+    pub epoch: u64,
+    pub assignment_public_key: [u8; 33],
+    pub expiry_height: u64,
+    pub registered_height: u64,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoawxTicketStoreValidationError {
+    MainnetHardOff,
+    Invalid,
+    DuplicateTicketId,
+    MinerEpochRateLimited,
+    VrfEpochRateLimited,
+}
+
+/// Deterministic, replayable on-chain ticket store (derived from the active
+/// chain's block-carried registrations). Testnet/devnet only; empty on mainnet.
+#[derive(Debug, Clone, Default)]
+pub struct PoawxTicketStore {
+    by_id: BTreeMap<[u8; 32], PoawxTicketStoreEntry>,
+}
+
+impl PoawxTicketStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Deterministically prune entries that have expired at `tip_height`.
+    pub fn prune_expired(&mut self, tip_height: u64) {
+        self.by_id.retain(|_, e| e.expiry_height > tip_height);
+    }
+
+    fn miner_epoch_live(&self, miner_pkh: &[u8; 20], epoch: u64, height: u64) -> bool {
+        self.by_id
+            .values()
+            .any(|e| &e.miner_pkh == miner_pkh && e.epoch == epoch && e.expiry_height > height)
+    }
+    fn vrf_epoch_live(&self, key: &[u8; 33], epoch: u64, height: u64) -> bool {
+        self.by_id.values().any(|e| {
+            &e.assignment_public_key == key && e.epoch == epoch && e.expiry_height > height
+        })
+    }
+
+    /// Apply a VALIDATED registration. Idempotent by ticket id; enforces the
+    /// one-active-per-(miner,epoch) and one-active-per-(vrf,epoch) rate limits.
+    /// `applied_height` = the block that carried it (effective from the next block).
+    pub fn apply_registration(
+        &mut self,
+        reg: &PoawxTicketRegistrationV1,
+        applied_height: u64,
+    ) -> Result<bool, PoawxTicketStoreValidationError> {
+        let id = reg.ticket_id();
+        if self.by_id.contains_key(&id) {
+            return Ok(false); // idempotent
+        }
+        let (miner, epoch, key, expiry) = (
+            reg.miner_pkh(),
+            reg.epoch(),
+            reg.assignment_public_key(),
+            reg.expiry_height(),
+        );
+        if self.miner_epoch_live(&miner, epoch, applied_height) {
+            return Err(PoawxTicketStoreValidationError::MinerEpochRateLimited);
+        }
+        if self.vrf_epoch_live(&key, epoch, applied_height) {
+            return Err(PoawxTicketStoreValidationError::VrfEpochRateLimited);
+        }
+        self.by_id.insert(
+            id,
+            PoawxTicketStoreEntry {
+                ticket_id: id,
+                miner_pkh: miner,
+                epoch,
+                assignment_public_key: key,
+                expiry_height: expiry,
+                registered_height: applied_height,
+            },
+        );
+        Ok(true)
+    }
+
+    /// Whether `(miner_pkh, epoch, assignment_public_key)` has an ACTIVE registered
+    /// ticket at `height` (registered earlier, not expired). The eligibility query.
+    pub fn has_active(
+        &self,
+        miner_pkh: &[u8; 20],
+        epoch: u64,
+        assignment_public_key: &[u8; 33],
+        height: u64,
+    ) -> bool {
+        self.by_id.values().any(|e| {
+            &e.miner_pkh == miner_pkh
+                && e.epoch == epoch
+                && &e.assignment_public_key == assignment_public_key
+                && e.registered_height < height
+                && e.expiry_height > height
+        })
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_id.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.by_id.is_empty()
+    }
+    pub fn active_count(&self, height: u64) -> usize {
+        self.by_id
+            .values()
+            .filter(|e| e.expiry_height > height)
+            .count()
+    }
+
+    /// Deterministic state commitment (order-independent; for tests/replay checks).
+    pub fn digest(&self) -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(TICKET_STORE_DOMAIN);
+        h.update((self.by_id.len() as u64).to_le_bytes());
+        for (id, e) in &self.by_id {
+            h.update(id);
+            h.update(e.miner_pkh);
+            h.update(e.epoch.to_le_bytes());
+            h.update(e.assignment_public_key);
+            h.update(e.expiry_height.to_le_bytes());
+            h.update(e.registered_height.to_le_bytes());
+        }
+        h.finalize().into()
+    }
+}
+
+// ── Phase 32 gates (testnet-only; mainnet hard-off) ──────────────────────────
+
+pub fn ticket_store_activation_height() -> Option<u64> {
+    std::env::var("IRIUM_POAWX_TICKET_STORE_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+pub fn ticket_store_gate(network_id: u8, activation: Option<u64>, height: u64) -> bool {
+    if network_id == 0 {
+        return false;
+    }
+    matches!(activation, Some(h) if height >= h)
+}
+
+pub fn ticket_store_active(height: u64) -> bool {
+    ticket_store_gate(network_id_byte(), ticket_store_activation_height(), height)
+}
+
+pub fn ticket_store_required() -> bool {
+    if network_id_byte() == 0 {
+        return false;
+    }
+    std::env::var("IRIUM_POAWX_TICKET_STORE_REQUIRED")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false)
+}
+
+/// Eligibility enforcement (additive) is ON only when active AND required. Mainnet
+/// hard-off. When on, a rewarded role's ticket proof must match an active on-chain
+/// registered ticket.
+pub fn ticket_store_enforced(height: u64) -> bool {
+    ticket_store_active(height) && ticket_store_required()
+}
+
+// ── Bounded LOCAL registration cache (observability only; NOT consensus) ──────
+
+pub struct NodeTicketRegistrationCache {
+    regs: Mutex<BTreeMap<[u8; 32], PoawxTicketRegistrationV1>>,
+}
+
+impl Default for NodeTicketRegistrationCache {
+    fn default() -> Self {
+        Self {
+            regs: Mutex::new(BTreeMap::new()),
+        }
+    }
+}
+
+impl NodeTicketRegistrationCache {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    /// Validate + cache locally. Returns true if newly cached. Mainnet hard-off.
+    pub fn ingest(&self, reg: PoawxTicketRegistrationV1, height: u64) -> bool {
+        let net = network_id_byte();
+        if net == 0 {
+            return false;
+        }
+        if reg.validate(net, height, sybil_threshold_bits()).is_err() {
+            return false;
+        }
+        let id = reg.ticket_id();
+        let mut m = self.regs.lock().unwrap_or_else(|e| e.into_inner());
+        if m.contains_key(&id) {
+            return false;
+        }
+        while m.len() >= TICKET_REG_CACHE_CAP {
+            if let Some((&k, _)) = m.iter().next() {
+                m.remove(&k);
+            } else {
+                break;
+            }
+        }
+        m.insert(id, reg);
+        true
+    }
+    pub fn len(&self) -> usize {
+        self.regs.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+    pub fn clear(&self) {
+        self.regs.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -799,5 +1093,150 @@ mod tests {
         );
         // malformed.
         assert!(TicketProof::deserialize(b"short").is_err());
+    }
+
+    // ── Phase 32: on-chain ticket store tests ───────────────────────────────
+
+    /// Parameterized valid registration on network `net`.
+    fn mk_reg(
+        net: u8,
+        miner_byte: u8,
+        apk_byte: u8,
+        epoch: u64,
+        h_issue: u64,
+        h_exp: u64,
+    ) -> PoawxTicketRegistrationV1 {
+        let pkh = [miner_byte; 20];
+        let apk = [apk_byte; 33];
+        let (nonce, digest) = grind_sybil_nonce(net, &pkh, epoch, &apk, 0, 1).unwrap();
+        PoawxTicketRegistrationV1::new(MinerWorkTicket {
+            version: TICKET_VERSION,
+            network_id: net,
+            miner_pkh: pkh,
+            epoch,
+            assignment_public_key: apk,
+            sybil_work_nonce: nonce,
+            sybil_work_digest: digest,
+            recent_reward_score: 0,
+            valid_work_count: 0,
+            invalid_work_count: 0,
+            penalty_status: PenaltyStatus::Clean.id(),
+            bond_reference: None,
+            issued_height: h_issue,
+            expiry_height: h_exp,
+        })
+    }
+
+    const NET: u8 = 1;
+
+    #[test]
+    fn phase32_registration_roundtrip_and_id() {
+        let r = mk_reg(NET, 0xA1, 0x02, 7, 1, 100);
+        assert!(r.validate(NET, 5, 0).is_ok());
+        assert_eq!(
+            PoawxTicketRegistrationV1::deserialize(&r.serialize()).unwrap(),
+            r
+        );
+        assert_eq!(r.ticket_id(), r.ticket.digest());
+        // mainnet hard-off.
+        assert!(r.validate(0, 5, 0).is_err());
+    }
+
+    #[test]
+    fn phase32_store_apply_and_has_active() {
+        let mut store = PoawxTicketStore::new();
+        let r = mk_reg(NET, 0xA1, 0x02, 7, 1, 100);
+        // applied at height 10 => active from 11.
+        assert_eq!(store.apply_registration(&r, 10), Ok(true));
+        assert!(
+            store.has_active(&[0xA1u8; 20], 7, &[0x02u8; 33], 11),
+            "active at H+1"
+        );
+        assert!(
+            !store.has_active(&[0xA1u8; 20], 7, &[0x02u8; 33], 10),
+            "not active at the registering height (non-retroactive)"
+        );
+        // wrong identity not active.
+        assert!(!store.has_active(&[0xB2u8; 20], 7, &[0x02u8; 33], 11));
+        // re-apply same id is idempotent.
+        assert_eq!(store.apply_registration(&r, 10), Ok(false));
+        assert_eq!(store.len(), 1);
+    }
+
+    #[test]
+    fn phase32_rate_limit_one_per_miner_and_vrf_per_epoch() {
+        let mut store = PoawxTicketStore::new();
+        let a = mk_reg(NET, 0xA1, 0x02, 7, 1, 100);
+        store.apply_registration(&a, 10).unwrap();
+        // Same miner + epoch, different VRF key => miner-epoch rate limit.
+        let same_miner = mk_reg(NET, 0xA1, 0x09, 7, 1, 100);
+        assert_eq!(
+            store.apply_registration(&same_miner, 10),
+            Err(PoawxTicketStoreValidationError::MinerEpochRateLimited)
+        );
+        // Different miner, same VRF key + epoch => vrf-epoch rate limit.
+        let same_vrf = mk_reg(NET, 0xB2, 0x02, 7, 1, 100);
+        assert_eq!(
+            store.apply_registration(&same_vrf, 10),
+            Err(PoawxTicketStoreValidationError::VrfEpochRateLimited)
+        );
+        // Same miner, DIFFERENT epoch => allowed.
+        let next_epoch = mk_reg(NET, 0xA1, 0x02, 8, 1, 100);
+        assert_eq!(store.apply_registration(&next_epoch, 10), Ok(true));
+    }
+
+    #[test]
+    fn phase32_expiry_is_deterministic() {
+        let mut store = PoawxTicketStore::new();
+        let r = mk_reg(NET, 0xA1, 0x02, 7, 1, 50); // expires at height 50
+        store.apply_registration(&r, 10).unwrap();
+        assert!(store.has_active(&[0xA1u8; 20], 7, &[0x02u8; 33], 49));
+        assert!(
+            !store.has_active(&[0xA1u8; 20], 7, &[0x02u8; 33], 50),
+            "expired at expiry_height"
+        );
+        // prune at tip 50 removes it.
+        store.prune_expired(50);
+        assert_eq!(store.len(), 0);
+    }
+
+    #[test]
+    fn phase32_store_digest_deterministic() {
+        let mut a = PoawxTicketStore::new();
+        let mut b = PoawxTicketStore::new();
+        let r1 = mk_reg(NET, 0xA1, 0x02, 7, 1, 100);
+        let r2 = mk_reg(NET, 0xB2, 0x03, 8, 1, 100);
+        a.apply_registration(&r1, 10).unwrap();
+        a.apply_registration(&r2, 11).unwrap();
+        // apply in the other order.
+        b.apply_registration(&r2, 11).unwrap();
+        b.apply_registration(&r1, 10).unwrap();
+        assert_eq!(a.digest(), b.digest(), "store digest order-independent");
+    }
+
+    #[test]
+    fn phase32_local_cache_does_not_touch_consensus() {
+        // The local cache validates + caches but never returns store state.
+        let cache = NodeTicketRegistrationCache::new();
+        let net = network_id_byte();
+        if net == 0 {
+            // mainnet: ingest refuses.
+            let r = mk_reg(2, 0xA1, 0x02, 7, 1, 100);
+            assert!(!cache.ingest(r, 5));
+            return;
+        }
+        let r = mk_reg(net, 0xA1, 0x02, 7, 1, 100);
+        assert!(cache.ingest(r.clone(), 5));
+        assert!(!cache.ingest(r, 5), "dedup");
+        assert_eq!(cache.len(), 1);
+        cache.clear();
+        assert!(cache.is_empty());
+    }
+
+    #[test]
+    fn phase32_gate_mainnet_hard_off() {
+        assert!(!ticket_store_gate(0, Some(1), 100), "mainnet off");
+        assert!(ticket_store_gate(1, Some(1), 100), "testnet on");
+        assert!(!ticket_store_gate(1, None, 100), "no activation off");
     }
 }

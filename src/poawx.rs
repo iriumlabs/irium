@@ -17,7 +17,10 @@ use crate::poawx_doublesign::{
 };
 use crate::poawx_finality::{FinalityProofV1, FINALITY_SECTION_MAGIC};
 use crate::poawx_puzzle::{PuzzleSolutionV1, PUZZLE_SECTION_MAGIC, PUZZLE_SOLUTION_WIRE};
-use crate::poawx_ticket::{TicketProof, TICKET_PROOF_WIRE, TICKET_SECTION_MAGIC};
+use crate::poawx_ticket::{
+    PoawxTicketRegistrationV1, TicketProof, MAX_TICKET_REGISTRATIONS_PER_BLOCK, TICKET_PROOF_WIRE,
+    TICKET_SECTION_MAGIC, TICKET_SECTION_MAGIC_TKT1,
+};
 use sha2::{Digest, Sha256};
 
 const IRX1_TAG: &[u8] = b"irx1";
@@ -663,6 +666,13 @@ pub struct Phase20ReceiptExt {
     /// connect_block (testnet/devnet only; mainnet hard-off) and applied to the
     /// node's deterministic, replayable double-sign penalty state.
     pub double_sign_evidence: Option<Vec<PoawxDoubleSignEvidenceV1>>,
+    /// Phase 32: optional block-carried ticket registrations (trailing TKT1
+    /// section; None => byte-identical to pre-32 exts). Each entry is a validated
+    /// `PoawxTicketRegistrationV1` (a Miner Work Ticket); carried in canonical
+    /// order (by ticket id), deduped, bounded by `MAX_TICKET_REGISTRATIONS_PER_BLOCK`.
+    /// Validated in connect_block (testnet/devnet only; mainnet hard-off) and
+    /// applied to the node's deterministic, replayable on-chain ticket store.
+    pub ticket_registrations: Option<Vec<PoawxTicketRegistrationV1>>,
 }
 
 impl Phase20ReceiptExt {
@@ -700,6 +710,7 @@ impl Phase20ReceiptExt {
                     || self.committed_admission.is_some()
                     || self.role_assignment_v2.is_some()
                     || self.double_sign_evidence.is_some()
+                    || self.ticket_registrations.is_some()
                 {
                     out.push(0);
                 }
@@ -765,6 +776,18 @@ impl Phase20ReceiptExt {
             out.extend_from_slice(&(evidence.len() as u16).to_le_bytes());
             for ev in evidence.iter() {
                 out.extend_from_slice(&ev.serialize());
+            }
+        }
+        // Phase 32 trailing TKT1 ticket-registration section (present-only): magic +
+        // u16 count + (u16 len + ticket bytes) per registration (variable length).
+        // Absent => byte-identical to pre-32 exts. (Producers canonicalize + dedup.)
+        if let Some(regs) = &self.ticket_registrations {
+            out.extend_from_slice(TICKET_SECTION_MAGIC_TKT1);
+            out.extend_from_slice(&(regs.len() as u16).to_le_bytes());
+            for reg in regs.iter() {
+                let body = reg.serialize();
+                out.extend_from_slice(&(body.len() as u16).to_le_bytes());
+                out.extend_from_slice(&body);
             }
         }
         out
@@ -836,6 +859,7 @@ impl Phase20ReceiptExt {
         let mut committed_admission: Option<AdmissionCommitmentV1> = None;
         let mut role_assignment_v2: Option<[AssignmentProofV2; 3]> = None;
         let mut double_sign_evidence: Option<Vec<PoawxDoubleSignEvidenceV1>> = None;
+        let mut ticket_registrations: Option<Vec<PoawxTicketRegistrationV1>> = None;
         while off < raw.len() {
             need(off, 4, "trailing section magic")?;
             let magic = &raw[off..off + 4];
@@ -949,6 +973,31 @@ impl Phase20ReceiptExt {
                     off += EVIDENCE_WIRE;
                 }
                 double_sign_evidence = Some(evs);
+            } else if magic == TICKET_SECTION_MAGIC_TKT1 {
+                if ticket_registrations.is_some() {
+                    return Err("phase20 ext: duplicate ticket-registration section".to_string());
+                }
+                off += 4;
+                need(off, 2, "ticket-registration count")?;
+                let count =
+                    u16::from_le_bytes(raw[off..off + 2].try_into().expect("len 2")) as usize;
+                off += 2;
+                if count > MAX_TICKET_REGISTRATIONS_PER_BLOCK {
+                    return Err("phase20 ext: ticket-registration count over cap".to_string());
+                }
+                let mut regs: Vec<PoawxTicketRegistrationV1> = Vec::with_capacity(count);
+                for _ in 0..count {
+                    need(off, 2, "ticket-registration length")?;
+                    let len =
+                        u16::from_le_bytes(raw[off..off + 2].try_into().expect("len 2")) as usize;
+                    off += 2;
+                    need(off, len, "ticket-registration body")?;
+                    regs.push(PoawxTicketRegistrationV1::deserialize(
+                        &raw[off..off + len],
+                    )?);
+                    off += len;
+                }
+                ticket_registrations = Some(regs);
             } else {
                 return Err("phase20 ext: unknown trailing section magic".to_string());
             }
@@ -969,6 +1018,7 @@ impl Phase20ReceiptExt {
             committed_admission,
             role_assignment_v2,
             double_sign_evidence,
+            ticket_registrations,
         })
     }
 
@@ -1939,6 +1989,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         let bytes = ext.serialize();
         let ext2 = Phase20ReceiptExt::deserialize(&bytes).expect("deserialize");
@@ -2056,6 +2107,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         let none = base();
         let mut some = base();
@@ -2100,6 +2152,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         let proofs = [
             TicketProof::new(
@@ -2220,6 +2273,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: Some(proofs),
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         let good = ext.serialize();
         assert_eq!(Phase20ReceiptExt::deserialize(&good).unwrap(), ext);
@@ -2266,6 +2320,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         let seed = [0x55u8; 32];
         let mk = |secret: u8, role: u8, solver: [u8; 20]| {
@@ -2355,6 +2410,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         let seed = [0x55u8; 32];
         let mut cs = CandidateSet::new(1, 61, seed);
@@ -2436,6 +2492,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         let sk = k256::ecdsa::SigningKey::from_slice(&[0x21u8; 32]).unwrap();
         let mut fp = FinalityProofV1::new(1, 60, prev, [0u8; 32], 0, 1, 1);
@@ -2513,6 +2570,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         let sol = |m: u8, n: u64, t: u8| PuzzleSolutionV1 {
             mode: m,
@@ -2581,6 +2639,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         let mut cs = CandidateSet::new(1, 60, prev);
         cs.push(RoleCandidate::build(
@@ -2655,6 +2714,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         let weights = [1000u64, 800, 900, 950];
         // (1) absent => no DOM1 magic, byte-identical, round-trips.
@@ -2756,6 +2816,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
         // no-ext v3 element == v2 element + a single 0 flag byte (present-only).
         let r = make_test_receipt(9);
@@ -2799,6 +2860,7 @@ mod tests {
             committed_admission: None,
             role_assignment_v2: None,
             double_sign_evidence: None,
+            ticket_registrations: None,
         };
 
         // Base mode-0 receipt with a production extension attached.

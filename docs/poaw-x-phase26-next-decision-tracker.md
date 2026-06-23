@@ -31,8 +31,11 @@ _Last updated: `[YYYY-MM-DD]` by `[name]`_
 > at `docs/devnet/phase40-soak-readiness-signoff/README.md` — execution not yet approved. **Phase 41 ran
 > Stage A** (loopback single-node: 6-block all-gates chain + cold replay PASS; multi-node deferred to an
 > owner-approved Stage B; Phases 31–34 live enforcement blocked by the harness) —
-> `docs/devnet/phase41-soak-execution/PHASE41_FINAL_SOAK_REPORT.md`. Decision 4 (public testnet) stays
-> blocked.
+> `docs/devnet/phase41-soak-execution/PHASE41_FINAL_SOAK_REPORT.md`. **Phase 42** then extended the
+> harness to emit the Phase 31–34 sections (TKT1/DMC1/ADM1), validated by in-process tests + a local smoke
+> under DMC/adaptive **required** (`docs/devnet/phase42-live-harness-phase31-34-sections/README.md`).
+> Decision 4 (public testnet) stays blocked (still needs the independent audit + an owner-approved Stage B
+> cross-host soak).
 
 ## Decision 1 — Choose an independent auditor
 

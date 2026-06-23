@@ -77,6 +77,11 @@ wallets/keys.
 - **For full live coverage**, schedule (a) a future code phase to extend the harness to emit Phase 31–34
   sections, and (b) an owner-approved **Stage B** cross-host run for genuine multi-node convergence /
   fresh-wipe sync / reorg rejection.
+
+> **Update (Phase 42):** the harness was extended to emit the Phase 32 (TKT1) / 33 (DMC1) / 34 (ADM1)
+> sections — closing recommendation (a). A local-only smoke mined blocks accepted by a node with DMC +
+> adaptive **required**. See `docs/devnet/phase42-live-harness-phase31-34-sections/README.md`. Full
+> ticket-eligibility enforcement and Stage B cross-host remain future work.
 - Do **not** treat this soak as a public-testnet or mainnet authorization.
 
 ## Status

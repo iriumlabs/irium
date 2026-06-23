@@ -42,14 +42,16 @@ the project's change rules forbid on consensus-critical code.
   an explicit cap is wanted at all (reduction-only already satisfies "without banning honest miners").
 - **Risk:** Medium (wire change + new rejection semantics).
 
-### D. Reward manifest: versioned wrapper + total≤subsidy+fees gate + low-participation fallback (System 1)
-- **Gap:** the 55/22/13/10 split is enforced via constants + coinbase shape, not a single versioned
-  `PoawxRewardManifestV1` object; no explicit ceiling gate beyond sum-equals-`total_reward`; no explicit
-  low-participation fallback rule (the simulator models a deterministic fold-into-proposer fallback,
-  which the node does not encode).
-- **Decisions needed:** whether a redundant manifest struct is worth a wire-format change to an
-  already-enforced, live-validated path; exact fallback rules.
-- **Risk:** Medium-High (wire change to a working, live-validated path).
+### D. Reward manifest: versioned wrapper + caps + low-participation fallback (System 1) — **DONE in Phase 31**
+- **Status:** ✅ Formalized in Phase 31 (`src/poawx_reward.rs`): a versioned `PoawxRewardManifestV1`
+  wrapper + `PoawxRoleRewardCap` (rounding-aware: non-primary roles hard-capped at their bps floor,
+  PRIMARY is the residual) + `PoawxRewardFallbackMode` (deterministic, non-inflationary: absent roles
+  not minted) + a penalized-recipient link (Phase 30) + an **additive** (gated, off-by-default,
+  mainnet-hard-off) consensus cap gate in `validate_phase20_production_block` that is a strict superset
+  of the existing exact-match. **No new wire/root**, no change to `multi_role_amounts`/the coinbase
+  validator/`block_reward`. See `docs/poaw-x-phase31-reward-manifest-wrapper.md`. 9 `phase31_*` tests;
+  full lib suite 784/0. (Caps/total/non-inflation were already enforced by exact-match; Phase 31
+  formalizes + names + tests them and adds the fallback spec.)
 
 ### E. Miner tickets: on-chain store + epoch rate-limiting (System 2)
 - **Gap:** tickets are validated as external proofs; there is no on-chain `MinerTicketStore`/registry

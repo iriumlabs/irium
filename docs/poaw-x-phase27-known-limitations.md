@@ -23,12 +23,17 @@ the project's change rules forbid on consensus-critical code.
   `docs/poaw-x-phase28-finalized-reorg-rejection.md` and its design doc. 8 `phase28_*` tests; full lib
   suite 756/0. Testnet/devnet only; mainnet hard-off.
 
-### B. Finality: double-sign → penalty wiring (System 5)
-- **Gap:** conflicting finality votes are detected at the gossip layer but are **not** recorded into
-  `PenaltyRecord::record_invalid_work`, so a double-signer's future eligibility is not reduced.
-- **Decisions needed:** reorg-safe penalty state in `ChainState`; deterministic feed into ticket
-  eligibility; epoch accounting.
-- **Risk:** Medium-High (new persistent state feeding eligibility).
+### B. Finality: double-sign → penalty wiring (System 5) — **PARTIAL in Phase 29**
+- **Done (Phase 29):** validated finality double-sign evidence (`PoawxDoubleSignEvidenceV1`) now drives
+  a deterministic, **replayable** penalty (`PoawxDoubleSignPenaltyState`) that suspends the offender and
+  removes finality eligibility/weight — plus a bounded **local** evidence cache + detector. See
+  `docs/poaw-x-phase29-double-sign-penalties.md`. 12 `phase29_*` tests; full lib suite 768/0.
+- **Still deferred (consensus enforcement):** blocks do **not** yet **carry** double-sign evidence, so
+  the penalty is a local/replayable **primitive**, NOT wired into `connect_block` block acceptance, the
+  reward manifest, or committee selection (doing so on local-only evidence would let nodes diverge —
+  forbidden by the consensus-safety rule). The remaining work is a **block-carried evidence** design +
+  reward/committee exclusion in consensus.
+- **Risk:** Medium-High (the remaining consensus path adds persistent state feeding eligibility).
 
 ### C. Anti-domination: state-digest commitment + validation (System 3)
 - **Gap:** `PersistentDominance::digest()` is computed but not committed in the receipt/manifest nor

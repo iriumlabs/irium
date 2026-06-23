@@ -3,6 +3,9 @@
 //! Env-var reads are intentionally absent here — callers own activation gating.
 
 use crate::block::Block;
+use crate::poawx_adaptive::{
+    PoawxAdaptiveCommitmentV1, ADAPTIVE_COMMITMENT_SECTION_MAGIC, ADAPTIVE_COMMITMENT_WIRE,
+};
 use crate::poawx_candidate::{
     AssignmentProofV2, CandidateSet, ASSIGNMENT_PROOF_V2_WIRE, ASSIGNMENT_V2_SECTION_MAGIC,
     CANDIDATE_SECTION_MAGIC,
@@ -682,6 +685,13 @@ pub struct Phase20ReceiptExt {
     /// devnet only; mainnet hard-off): `pre` must equal the current state digest and
     /// `post` the digest after applying this block's role rewards.
     pub dominance_commitment: Option<PoawxDominanceCommitmentV1>,
+    /// Phase 34: optional adaptive-mode commitment (trailing ADM1 section; None =>
+    /// byte-identical to pre-34 exts). Binds the pre/post adaptive-state digests,
+    /// the pre/post modes, and the digest of the chain-derived signals used for the
+    /// transition at this height. Validated in connect_block (testnet/devnet only;
+    /// mainnet hard-off): the modes/digests must match the deterministically
+    /// recomputed adaptive state derived from blocks < H (pre) and including H (post).
+    pub adaptive_mode_commitment: Option<PoawxAdaptiveCommitmentV1>,
 }
 
 impl Phase20ReceiptExt {
@@ -721,6 +731,7 @@ impl Phase20ReceiptExt {
                     || self.double_sign_evidence.is_some()
                     || self.ticket_registrations.is_some()
                     || self.dominance_commitment.is_some()
+                    || self.adaptive_mode_commitment.is_some()
                 {
                     out.push(0);
                 }
@@ -806,6 +817,12 @@ impl Phase20ReceiptExt {
             out.extend_from_slice(DOMINANCE_COMMITMENT_SECTION_MAGIC);
             out.extend_from_slice(&dc.serialize());
         }
+        // Phase 34 trailing ADM1 adaptive-mode commitment section (present-only,
+        // fixed-size). Absent => byte-identical to pre-34 exts.
+        if let Some(amc) = &self.adaptive_mode_commitment {
+            out.extend_from_slice(ADAPTIVE_COMMITMENT_SECTION_MAGIC);
+            out.extend_from_slice(&amc.serialize());
+        }
         out
     }
 
@@ -877,6 +894,7 @@ impl Phase20ReceiptExt {
         let mut double_sign_evidence: Option<Vec<PoawxDoubleSignEvidenceV1>> = None;
         let mut ticket_registrations: Option<Vec<PoawxTicketRegistrationV1>> = None;
         let mut dominance_commitment: Option<PoawxDominanceCommitmentV1> = None;
+        let mut adaptive_mode_commitment: Option<PoawxAdaptiveCommitmentV1> = None;
         while off < raw.len() {
             need(off, 4, "trailing section magic")?;
             let magic = &raw[off..off + 4];
@@ -1025,6 +1043,16 @@ impl Phase20ReceiptExt {
                     &raw[off..off + DOMINANCE_COMMITMENT_WIRE],
                 )?);
                 off += DOMINANCE_COMMITMENT_WIRE;
+            } else if magic == ADAPTIVE_COMMITMENT_SECTION_MAGIC {
+                if adaptive_mode_commitment.is_some() {
+                    return Err("phase20 ext: duplicate adaptive-mode section".to_string());
+                }
+                off += 4;
+                need(off, ADAPTIVE_COMMITMENT_WIRE, "adaptive mode commitment")?;
+                adaptive_mode_commitment = Some(PoawxAdaptiveCommitmentV1::deserialize(
+                    &raw[off..off + ADAPTIVE_COMMITMENT_WIRE],
+                )?);
+                off += ADAPTIVE_COMMITMENT_WIRE;
             } else {
                 return Err("phase20 ext: unknown trailing section magic".to_string());
             }
@@ -1047,6 +1075,7 @@ impl Phase20ReceiptExt {
             double_sign_evidence,
             ticket_registrations,
             dominance_commitment,
+            adaptive_mode_commitment,
         })
     }
 
@@ -2019,6 +2048,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         let bytes = ext.serialize();
         let ext2 = Phase20ReceiptExt::deserialize(&bytes).expect("deserialize");
@@ -2138,6 +2168,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         let none = base();
         let mut some = base();
@@ -2184,6 +2215,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         let proofs = [
             TicketProof::new(
@@ -2306,6 +2338,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         let good = ext.serialize();
         assert_eq!(Phase20ReceiptExt::deserialize(&good).unwrap(), ext);
@@ -2354,6 +2387,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         let seed = [0x55u8; 32];
         let mk = |secret: u8, role: u8, solver: [u8; 20]| {
@@ -2445,6 +2479,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         let seed = [0x55u8; 32];
         let mut cs = CandidateSet::new(1, 61, seed);
@@ -2528,6 +2563,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         let sk = k256::ecdsa::SigningKey::from_slice(&[0x21u8; 32]).unwrap();
         let mut fp = FinalityProofV1::new(1, 60, prev, [0u8; 32], 0, 1, 1);
@@ -2607,6 +2643,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         let sol = |m: u8, n: u64, t: u8| PuzzleSolutionV1 {
             mode: m,
@@ -2677,6 +2714,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         let mut cs = CandidateSet::new(1, 60, prev);
         cs.push(RoleCandidate::build(
@@ -2753,6 +2791,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         let weights = [1000u64, 800, 900, 950];
         // (1) absent => no DOM1 magic, byte-identical, round-trips.
@@ -2856,6 +2895,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
         // no-ext v3 element == v2 element + a single 0 flag byte (present-only).
         let r = make_test_receipt(9);
@@ -2901,6 +2941,7 @@ mod tests {
             double_sign_evidence: None,
             ticket_registrations: None,
             dominance_commitment: None,
+            adaptive_mode_commitment: None,
         };
 
         // Base mode-0 receipt with a production extension attached.

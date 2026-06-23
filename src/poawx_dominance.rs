@@ -398,6 +398,47 @@ impl PersistentDominance {
         (mine.saturating_mul(1000) / net).min(1000) as u32
     }
 
+    /// Phase 34: maximum recent reward share (permille) across all miners with
+    /// recent-window activity at `height`. Deterministic + replayable (derived from
+    /// the same reorg-safe state). Returns 0 when no recent activity exists.
+    pub fn max_recent_reward_share_permille(&self, height: u64) -> u32 {
+        let net = self.network_recent_total(height) as u128;
+        if net == 0 {
+            return 0;
+        }
+        let (lo, hi) = self.recent_range(height);
+        // Aggregate each distinct miner's recent total across the window, then take
+        // the max share (a miner can have multiple window buckets in range).
+        let mut by_miner: BTreeMap<[u8; 20], u128> = BTreeMap::new();
+        for ((pkh, wid), b) in self.buckets.iter() {
+            if *wid >= lo && *wid <= hi {
+                let e = by_miner.entry(*pkh).or_insert(0);
+                *e = e.saturating_add(b.total as u128);
+            }
+        }
+        let mut max_permille = 0u32;
+        for mine in by_miner.values() {
+            let permille = (mine.saturating_mul(1000) / net).min(1000) as u32;
+            if permille > max_permille {
+                max_permille = permille;
+            }
+        }
+        max_permille
+    }
+
+    /// Phase 34: count of distinct miners with recent-window reward activity at
+    /// `height` (chain-derived role participation). Deterministic + replayable.
+    pub fn distinct_recent_miners(&self, height: u64) -> u32 {
+        let (lo, hi) = self.recent_range(height);
+        let mut miners: std::collections::BTreeSet<[u8; 20]> = std::collections::BTreeSet::new();
+        for ((pkh, wid), b) in self.buckets.iter() {
+            if *wid >= lo && *wid <= hi && b.total > 0 {
+                miners.insert(*pkh);
+            }
+        }
+        miners.len() as u32
+    }
+
     /// Deterministic dominance weight for a miner at `height`:
     /// `fairness_weight(valid_work_score, recent_share_permille)`.
     pub fn weight(&self, valid_work_score: u64, pkh: &[u8; 20], height: u64) -> u64 {

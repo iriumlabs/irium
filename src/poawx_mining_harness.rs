@@ -243,26 +243,28 @@ pub fn build_devnet_all_gates_block(
     // Build the 3 role candidates + V2 proofs for a `(target_height, seed)` under a
     // dominance state. Returns proofs + candidates in [compute, verify, support]
     // order plus the canonical candidate set.
-    let build_roles = |th: u64,
-                       sd: [u8; 32],
-                       dom: &PersistentDominance|
-     -> Result<([AssignmentProofV2; 3], [RoleCandidate; 3], CandidateSet), String> {
-        let mk = |secret: u8, role: u8, solver: [u8; 20], ticket: [u8; 32]| {
-            let p = AssignmentProofV2::prove(&[secret; 32], net, th, role, solver, ticket, sd)?;
-            let w = dom.weight(DOMINANCE_BASE_WORK_SCORE, &solver, th);
-            let c = RoleCandidate::from_assignment_v2(&p, PenaltyStatus::Clean.id(), w, [role; 32]);
-            Ok::<_, String>((p, c))
+    let build_roles =
+        |th: u64,
+         sd: [u8; 32],
+         dom: &PersistentDominance|
+         -> Result<([AssignmentProofV2; 3], [RoleCandidate; 3], CandidateSet), String> {
+            let mk = |secret: u8, role: u8, solver: [u8; 20], ticket: [u8; 32]| {
+                let p = AssignmentProofV2::prove(&[secret; 32], net, th, role, solver, ticket, sd)?;
+                let w = dom.weight(DOMINANCE_BASE_WORK_SCORE, &solver, th);
+                let c =
+                    RoleCandidate::from_assignment_v2(&p, PenaltyStatus::Clean.id(), w, [role; 32]);
+                Ok::<_, String>((p, c))
+            };
+            let (pc, cc) = mk(7, ROLE_COMPUTE_CONTRIBUTOR, compute_solver, [0x11u8; 32])?;
+            let (pv, cv) = mk(8, ROLE_VERIFY_CONTRIBUTOR, verify_solver, [0x12u8; 32])?;
+            let (ps, csup) = mk(9, ROLE_SUPPORT_CONTRIBUTOR, support_solver, [0x13u8; 32])?;
+            let mut cs = CandidateSet::new(net, th, sd);
+            for c in [cc.clone(), cv.clone(), csup.clone()] {
+                cs.push(c);
+            }
+            cs.sort_canonical();
+            Ok(([pc, pv, ps], [cc, cv, csup], cs))
         };
-        let (pc, cc) = mk(7, ROLE_COMPUTE_CONTRIBUTOR, compute_solver, [0x11u8; 32])?;
-        let (pv, cv) = mk(8, ROLE_VERIFY_CONTRIBUTOR, verify_solver, [0x12u8; 32])?;
-        let (ps, csup) = mk(9, ROLE_SUPPORT_CONTRIBUTOR, support_solver, [0x13u8; 32])?;
-        let mut cs = CandidateSet::new(net, th, sd);
-        for c in [cc.clone(), cv.clone(), csup.clone()] {
-            cs.push(c);
-        }
-        cs.sort_canonical();
-        Ok(([pc, pv, ps], [cc, cv, csup], cs))
-    };
 
     // INCOMING set for THIS block (height H, epoch seed, weights at H).
     let dom_in = dom_at(height);
@@ -385,6 +387,7 @@ pub fn build_devnet_all_gates_block(
         double_sign_evidence: None,
         ticket_registrations: None,
         dominance_commitment: None,
+        adaptive_mode_commitment: None,
     };
 
     // Worker receipt: real receipt PoW solution + signed challenge (mode-0).

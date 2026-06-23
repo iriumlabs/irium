@@ -7,6 +7,13 @@ Scope: branch `testnet/poawx-phase20-blueprint-completion-local`, source range `
 (8 source files, +1006/−47), docs through HEAD `93fd8f3`. `origin/main` unchanged
 (`19c496dc5f2fa08981a109b10eeb257105c28c43`).
 
+> **Superseded scope note (Phase 35):** this changelog covers Phase 26 only. The later consensus
+> features (Phases 28–34: finalized-checkpoint reorg rejection, block-carried double-sign evidence +
+> penalty exclusion, reward manifest caps/fallback, on-chain ticket store, dominance-state commitment,
+> adaptive-mode integration) are summarized in `docs/poaw-x-phase35-final-closeout.md` and the per-phase
+> draft notes under `docs/release-notes/poaw-x-phase{28..33}-draft-note.md`. Still draft-only; not
+> production-ready / mainnet-ready / audited.
+
 ## Consensus / gate semantics
 
 - **Changed (26B, `081a1bd`):** candidate-set gate (phase21d) now expects the **epoch seed**

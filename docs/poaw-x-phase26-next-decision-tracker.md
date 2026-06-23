@@ -6,6 +6,15 @@ can be auto-resolved by the project. **NOT audited / production-ready / mainnet-
 
 _Last updated: `[YYYY-MM-DD]` by `[name]`_
 
+> **Update (Phase 35 closeout):** Since this tracker was written, the six deferred Phase 27 consensus
+> items were implemented at branch level in Phases 28–34 (5A→28, 5B→29/30, 1D→31, 2E→32, 3C→33, 6F→34).
+> This **does not** change any decision below — the program is still **not audited / not production-ready
+> / not mainnet-ready / public-testnet planning-ready only**, and Decisions 1–5 remain exactly as
+> gated. The audit package now covers Phases 28–34: see
+> `docs/poaw-x-phase35-final-closeout.md`, `docs/poaw-x-phase35-audit-readiness-package.md`, and
+> `docs/audit/phase35-final-handoff/README.md`. The audit (Decision 1) is the unchanged immediate next
+> step.
+
 ## Decision 1 — Choose an independent auditor
 
 - **Owner:** project owner / user

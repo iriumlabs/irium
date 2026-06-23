@@ -7,6 +7,14 @@ Mainnet hard-off (`network_id == 0`); public testnet gated.
 Baseline: branch `testnet/poawx-phase20-blueprint-completion-local`, HEAD `208d5ff`, source `0208368`,
 `origin/main` `19c496dc5f2fa08981a109b10eeb257105c28c43` (unchanged).
 
+> **Successor work (Phases 27–35):** after Phase 26 the six deferred Phase 27 consensus items were
+> implemented (Phases 28–34) and consolidated in the Phase 35 closeout package. See
+> `docs/poaw-x-phase35-final-closeout.md`, `docs/poaw-x-phase35-phases27-34-commit-map.md`,
+> `docs/poaw-x-phase35-consensus-feature-matrix.md`, `docs/poaw-x-phase35-audit-readiness-package.md`,
+> `docs/poaw-x-phase35-risk-register.md`, `docs/poaw-x-phase35-public-testnet-readiness.md`, and
+> `docs/audit/phase35-final-handoff/README.md`. Status is unchanged: **not audited / not
+> production-ready / not mainnet-ready / public-testnet planning-ready only.**
+
 ## A. Core implementation / result docs
 
 - `docs/poaw-x-phase26a-seed-reconciliation-design.md` — 26A design (seed contradiction + Option C).

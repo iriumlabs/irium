@@ -4,6 +4,12 @@ A single orientation document for a new reviewer, operator, or auditor. **NOT au
 production-ready. NOT mainnet-ready.** Mainnet PoAW-X is hard-off (`network_id == 0`); a public testnet
 has not launched and remains gated.
 
+> **Continued in Phases 27–35.** After Phase 26, the Phase 27 blueprint gap audit's six deferred
+> consensus items were implemented (Phases 28–34) and consolidated in the Phase 35 closeout. New
+> reviewers/auditors should now start from `docs/poaw-x-phase35-final-closeout.md` and
+> `docs/audit/phase35-final-handoff/README.md`. Status is unchanged: not audited / not production-ready /
+> not mainnet-ready / public-testnet planning-ready only.
+
 ## Executive summary
 
 Phase 26 took PoAW-X (a multi-role proof-of-aligned-work consensus overlay) from "single-block-only"

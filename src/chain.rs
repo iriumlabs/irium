@@ -3165,6 +3165,30 @@ fn validate_phase20_production_block(
             ext,
             third_party_mode,
         )?;
+        // Phase 31 (ADDITIVE, gated, mainnet hard-off, off by default): re-derive
+        // the reward manifest and assert role caps + non-inflation as defense-in-
+        // depth. A strict SUPERSET of the exact-match payout check above (derives
+        // from the same `multi_role_amounts`), so it can only add named rejections,
+        // never weaken or false-reject a block that already passed.
+        if crate::poawx_reward::reward_manifest_caps_enforced(height) {
+            let manifest = crate::poawx_reward::PoawxRewardManifestV1::new_full(
+                network_id,
+                height,
+                total_reward,
+                r.worker_pkh,
+                ext.role_reward.compute_contributor_pkh,
+                ext.role_reward.verify_contributor_pkh,
+                ext.role_reward.support_contributor_pkh,
+                ext.fee_bps,
+                ext.fee_pkh,
+            );
+            // The PoAW-X multi-role split is over the subsidy (`total_reward ==
+            // block_reward(height)`); fees are bounded separately by the general
+            // coinbase-value check. Declared total must not exceed subsidy.
+            manifest
+                .validate_caps(network_id, total_reward, 0)
+                .map_err(|e| e.to_string())?;
+        }
     }
     // Step 6A: hidden role-precommit commitment-root enforcement (gated; mainnet-off).
     if hidden_precommit_active(height) {
@@ -10677,6 +10701,31 @@ mod tests {
         assert!(!crate::poawx_doublesign::double_sign_penalty_gate(
             1, None, 100
         ));
+    }
+
+    #[test]
+    fn phase31_additive_cap_gate_no_false_reject() {
+        // With the Phase 31 additive reward-manifest cap gate ENABLED, a valid
+        // all-gates chain still connects: the gate is a strict superset of the
+        // existing exact-match payout check and never false-rejects a valid block.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_REWARD_MANIFEST_CAPS_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_REWARD_MANIFEST_CAPS_REQUIRED", "1");
+        assert!(
+            crate::poawx_reward::reward_manifest_caps_enforced(2),
+            "additive cap gate is enabled"
+        );
+        let mut st = base_chain(None);
+        let (hashes, _captured) = phase28_build_connect_chain(&mut st, 4);
+        assert_eq!(st.tip_height(), 4, "valid chain connects with cap gate on");
+        assert_eq!(hashes.len(), 5);
+        std::env::remove_var("IRIUM_POAWX_REWARD_MANIFEST_CAPS_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_REWARD_MANIFEST_CAPS_REQUIRED");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
     }
 
     #[test]

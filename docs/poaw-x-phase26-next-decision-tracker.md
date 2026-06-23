@@ -13,7 +13,10 @@ _Last updated: `[YYYY-MM-DD]` by `[name]`_
 > gated. The audit package now covers Phases 28–34: see
 > `docs/poaw-x-phase35-final-closeout.md`, `docs/poaw-x-phase35-audit-readiness-package.md`, and
 > `docs/audit/phase35-final-handoff/README.md`. The audit (Decision 1) is the unchanged immediate next
-> step.
+> step. The Phase 36 independent-audit **kickoff package** (review guide, invariants checklist, repro
+> commands, findings template, outreach draft, status) is now prepared at
+> `docs/audit/phase36-independent-audit-kickoff/README.md` — auditor still not selected, audit not
+> started.
 
 ## Decision 1 — Choose an independent auditor
 

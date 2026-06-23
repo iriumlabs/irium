@@ -6,6 +6,11 @@ Testnet/devnet only; mainnet hard-off; off by default.
 This document orients an independent reviewer to the PoAW-X consensus additions made in Phases 28–34. It
 does not assert correctness — it points reviewers at the exact code, invariants, and risks to check.
 
+> **Kickoff package (Phase 36):** the operational auditor-kickoff package built on top of this readiness
+> doc is at `docs/audit/phase36-independent-audit-kickoff/` (review guide, invariants checklist, repro
+> commands, findings template, questions, deliverables, status). Auditor not yet selected; audit not yet
+> started.
+
 ## 1. Audit scope
 
 In scope (consensus-relevant additions on the linear chain `40db1aa..78d5ca3`):

@@ -13,7 +13,9 @@ Baseline: branch `testnet/poawx-phase20-blueprint-completion-local`, HEAD `208d5
 > `docs/poaw-x-phase35-consensus-feature-matrix.md`, `docs/poaw-x-phase35-audit-readiness-package.md`,
 > `docs/poaw-x-phase35-risk-register.md`, `docs/poaw-x-phase35-public-testnet-readiness.md`, and
 > `docs/audit/phase35-final-handoff/README.md`. Status is unchanged: **not audited / not
-> production-ready / not mainnet-ready / public-testnet planning-ready only.**
+> production-ready / not mainnet-ready / public-testnet planning-ready only.** The Phase 36
+> independent-audit kickoff package is at `docs/audit/phase36-independent-audit-kickoff/README.md`
+> (auditor not yet selected; audit not yet started).
 
 ## A. Core implementation / result docs
 

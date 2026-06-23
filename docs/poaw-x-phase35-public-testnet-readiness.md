@@ -5,6 +5,10 @@ audited.** This document is a plan, not an approval to launch anything.
 
 Testnet/devnet only; PoAW-X hard-off on mainnet; all features off by default behind env gates.
 
+> **Gating note (Phase 36):** the **independent audit** is the first gate below and its kickoff package
+> is at `docs/audit/phase36-independent-audit-kickoff/README.md`. Auditor not yet selected; audit not yet
+> started. Public testnet remains planning-ready only.
+
 ## 1. What is now implementation-complete enough for planning
 
 The Phase 27 deferred consensus items are closed at branch level (Phases 28–34) and are

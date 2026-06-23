@@ -12,6 +12,10 @@ Scope guard: testnet/devnet only; PoAW-X is **hard-off on mainnet** (`network_id
 feature below is additionally **off by default** behind explicit env activation gates. Nothing here
 approves a mainnet launch.
 
+> **Next (Phase 36):** the independent-audit kickoff package is at
+> `docs/audit/phase36-independent-audit-kickoff/README.md`. Auditor not yet selected; audit not yet
+> started.
+
 ---
 
 ## 1. Executive summary

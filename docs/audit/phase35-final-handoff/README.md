@@ -6,6 +6,11 @@
 This folder is the starting point for an independent review of the PoAW-X consensus additions made in
 Phases 28–34 (closing the six deferred items from the Phase 27 blueprint gap audit).
 
+> **Phase 36 kickoff package:** the operational kickoff package (review guide, invariants checklist,
+> repro commands, findings template, auditor questions, deliverables, outreach draft, status) is at
+> `docs/audit/phase36-independent-audit-kickoff/README.md`. Auditor not yet selected; audit not yet
+> started.
+
 ## Where to start
 
 1. `docs/poaw-x-phase35-final-closeout.md` — executive summary + status + remaining gates.

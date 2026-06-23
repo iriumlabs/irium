@@ -50,6 +50,8 @@ placeholder, a decision log, outreach drafts, a readiness checklist, red flags, 
 - Phase 36 kickoff package: `docs/audit/phase36-independent-audit-kickoff/README.md`
 - Phase 35 audit-readiness: `docs/poaw-x-phase35-audit-readiness-package.md`
 - Decision tracker: `docs/poaw-x-phase26-next-decision-tracker.md`
+- Remediation workflow (Phase 38, used *after* findings exist):
+  `docs/audit/phase38-remediation-workflow/README.md`
 
 After the owner fills the shortlist and scores candidates, proceed via
 `ENGAGEMENT_READINESS_CHECKLIST.md` — outreach is sent **manually by the owner**, never from here.

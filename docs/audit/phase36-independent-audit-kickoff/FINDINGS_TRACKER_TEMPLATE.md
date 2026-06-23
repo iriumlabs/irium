@@ -34,6 +34,8 @@ Critical / High / Medium / Low / Informational.
 
 ## Process references
 
-- Triage / remediation / retest patterns: `docs/audit/phase26k-remediation-workflow/` (reuse).
+- Triage / remediation / retest patterns: `docs/audit/phase26k-remediation-workflow/` (reuse) and the
+  Phase 38 package `docs/audit/phase38-remediation-workflow/` (branch policy, triage policy, workflow,
+  test matrix, retest protocol, decision tree).
 - Remediation branches must follow the no-`main`, no-force-push rules; fixes land on a dedicated
   remediation branch and are retested before any further phase.

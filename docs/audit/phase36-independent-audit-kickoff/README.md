@@ -10,7 +10,9 @@ env activation gates. Nothing here authorizes a public testnet or mainnet launch
 > **Auditor selection (Phase 37):** the owner-facing selection & engagement-prep package (criteria,
 > scorecard, conflict checks, scope options, NDA guide, outreach drafts, decision log) is at
 > `docs/audit/phase37-auditor-selection-engagement/README.md`. Auditor not yet selected; audit not yet
-> started; outreach not sent.
+> started; outreach not sent. The Phase 38 **remediation workflow** (how findings are triaged, fixed on
+> isolated branches, tested, retested, and closed) is at
+> `docs/audit/phase38-remediation-workflow/README.md`. No findings received; remediation not started.
 
 ## What PoAW-X is
 

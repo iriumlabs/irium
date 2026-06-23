@@ -10,7 +10,8 @@ does not assert correctness — it points reviewers at the exact code, invariant
 > doc is at `docs/audit/phase36-independent-audit-kickoff/` (review guide, invariants checklist, repro
 > commands, findings template, questions, deliverables, status). Auditor not yet selected; audit not yet
 > started. The owner-facing auditor **selection & engagement-prep** package (Phase 37) is at
-> `docs/audit/phase37-auditor-selection-engagement/README.md`.
+> `docs/audit/phase37-auditor-selection-engagement/README.md`. The post-findings **remediation
+> workflow** (Phase 38) is at `docs/audit/phase38-remediation-workflow/README.md`.
 
 ## 1. Audit scope
 

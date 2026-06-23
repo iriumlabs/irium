@@ -20,7 +20,10 @@ _Last updated: `[YYYY-MM-DD]` by `[name]`_
 > conflict checks, scope options, NDA guide, budget/timeline templates, outreach drafts, decision log) is
 > at `docs/audit/phase37-auditor-selection-engagement/README.md`. This directly supports **Decision 1
 > (choose auditor)** and **Decision 2 (send package)** below; both remain owner-gated (outreach not sent,
-> NDA pending, budget pending).
+> NDA pending, budget pending). The Phase 38 **remediation workflow** package (branch policy, triage,
+> tracker workflow, test matrix, retest protocol, accepted-risk policy, no-launch gates, decision tree)
+> is at `docs/audit/phase38-remediation-workflow/README.md` — it supports **Decision 3 (handle
+> findings)**, which stays not-started (no findings).
 
 ## Decision 1 — Choose an independent auditor
 

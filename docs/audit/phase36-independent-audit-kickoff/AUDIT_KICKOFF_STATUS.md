@@ -6,7 +6,10 @@ Single-glance state of the independent-audit process. Testnet/devnet only; mainn
 |---|---|
 | Audit kickoff package prepared | **Yes** (Phase 36) |
 | Auditor selection package prepared | **Yes** (Phase 37 — `docs/audit/phase37-auditor-selection-engagement/`) |
+| Remediation workflow prepared | **Yes** (Phase 38 — `docs/audit/phase38-remediation-workflow/`) |
 | Auditor selected | **No** |
+| Findings received | **No** (0) |
+| Remediation started | **No** |
 | Outreach sent | **No** |
 | NDA decision | **Pending** |
 | Budget / timeline | **Pending** |

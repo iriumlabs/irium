@@ -16,7 +16,7 @@ box is checked. No auditor contacted yet.
 | 9 | Outreach approved by owner | ☐ | `OWNER_DECISION_LOG.md` |
 | 10 | No mainnet / public-testnet claims in any outreach material | ☐ | `COMMUNICATION_RULES.md` |
 | 11 | Findings tracker ready | ☐ | `docs/audit/phase36-independent-audit-kickoff/FINDINGS_TRACKER_TEMPLATE.md` |
-| 12 | Remediation branch policy ready | ☐ | `docs/audit/phase26k-remediation-workflow/` |
+| 12 | Remediation branch policy ready | ☐ | `docs/audit/phase38-remediation-workflow/` (+ `docs/audit/phase26k-remediation-workflow/`) |
 
 ## Gate
 

@@ -35,12 +35,16 @@ the project's change rules forbid on consensus-critical code.
 - **Optional future work:** proposer/builder auto-inclusion of locally-cached evidence into candidate
   blocks (out of scope; tests inject evidence + pre-populate penalty state to exercise consensus).
 
-### C. Anti-domination: state-digest commitment + validation (System 3)
-- **Gap:** `PersistentDominance::digest()` is computed but not committed in the receipt/manifest nor
-  validated; there is no explicit cap (weights only *reduce* score).
-- **Decisions needed:** wire-format addition (the receipt/coinbase is live-validated — risky); whether
-  an explicit cap is wanted at all (reduction-only already satisfies "without banning honest miners").
-- **Risk:** Medium (wire change + new rejection semantics).
+### C. Anti-domination: state-digest commitment + validation (System 3) — **DONE in Phase 33**
+- **Status:** ✅ Implemented in Phase 33 (`src/poawx_dominance.rs` + `src/poawx.rs` + `src/chain.rs`):
+  `PoawxDominanceCommitmentV1` (pre/post state digest) is block-carried in a trailing `DMC1` ext section
+  (committed into the irx1 root) and validated in `connect_block` — `pre` against the current state and
+  `post` against the state after applying the block's role rewards (clone-and-apply, non-mutating),
+  non-retroactive (H+1 timing). The dominance state is already reorg-safe + replay-reconstructable, so
+  no new state/reorg handling was needed. See `docs/poaw-x-phase33-dominance-state-commitment.md`. 9
+  `phase33_*` tests; full lib suite 805/0.
+- **Caps deferred:** a hard dominance cap (vs. `fairness_weight` reduction) is a broader policy decision,
+  documented as future work — Phase 33's goal was the state commitment.
 
 ### D. Reward manifest: versioned wrapper + caps + low-participation fallback (System 1) — **DONE in Phase 31**
 - **Status:** ✅ Formalized in Phase 31 (`src/poawx_reward.rs`): a versioned `PoawxRewardManifestV1`

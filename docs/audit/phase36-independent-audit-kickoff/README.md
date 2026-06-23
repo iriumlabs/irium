@@ -13,6 +13,8 @@ env activation gates. Nothing here authorizes a public testnet or mainnet launch
 > started; outreach not sent. The Phase 38 **remediation workflow** (how findings are triaged, fixed on
 > isolated branches, tested, retested, and closed) is at
 > `docs/audit/phase38-remediation-workflow/README.md`. No findings received; remediation not started.
+> A docs-only **pre-audit internal multi-node devnet soak plan** (Phase 39) for the combined Phase 28–34
+> stack is at `docs/devnet/phase39-preaudit-multinode-soak/README.md` — soak not yet executed.
 
 ## What PoAW-X is
 

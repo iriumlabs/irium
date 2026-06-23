@@ -52,3 +52,5 @@ consensus code. No findings are invented; all records here are empty templates/p
 - Kickoff: `docs/audit/phase36-independent-audit-kickoff/README.md`
 - Selection: `docs/audit/phase37-auditor-selection-engagement/README.md`
 - Decision tracker: `docs/poaw-x-phase26-next-decision-tracker.md`
+- Pre-audit internal devnet soak plan (Phase 39): `docs/devnet/phase39-preaudit-multinode-soak/README.md`
+  (complements remediation; soak not yet executed)

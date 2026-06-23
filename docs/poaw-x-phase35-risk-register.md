@@ -28,5 +28,7 @@ the mitigation **not yet done** unless stated.
 - These risks keep the system at **not audited / not production-ready / not mainnet-ready /
   public-testnet planning-ready only**.
 - The highest-leverage next actions are **R1 (audit)** and **R6/R11 (combined internal multi-node
-  devnet soak)** — both gate everything downstream.
+  devnet soak)** — both gate everything downstream. A documentation-only plan for the combined-stack
+  soak (R6/R11) is prepared at `docs/devnet/phase39-preaudit-multinode-soak/README.md`; the soak itself
+  is **not yet executed**, so R6/R11 remain open.
 - Nothing in this register authorizes a public testnet or mainnet launch.

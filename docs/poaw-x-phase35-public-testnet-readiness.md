@@ -23,7 +23,10 @@ These are gates (each must pass before the next), none of which is done:
 
 1. **Independent audit** of Phases 28–34 + remediation of findings + re-test (R1).
 2. **Internal multi-node devnet soak of the combined stack** with all gates active, including
-   fresh-wipe/cold-resync and deep-scale sync (R6/R11).
+   fresh-wipe/cold-resync and deep-scale sync (R6/R11). A documentation-only **soak plan** (scope,
+   topology, safety boundaries, runbook draft, scenarios, metrics, pass/fail, abort/rollback) is prepared
+   at `docs/devnet/phase39-preaudit-multinode-soak/README.md` — **soak not yet executed**; execution is a
+   separate owner-approved phase.
 3. **Economic-incentive review** of the combined system (R9).
 4. **Operator runbook + single coordinated config profile** (consensus parameters pinned; R4/R12).
 5. **Monitoring/metrics + rollback plan** validated on the internal devnet (sections 4–5 below).

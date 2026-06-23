@@ -23,7 +23,11 @@ _Last updated: `[YYYY-MM-DD]` by `[name]`_
 > NDA pending, budget pending). The Phase 38 **remediation workflow** package (branch policy, triage,
 > tracker workflow, test matrix, retest protocol, accepted-risk policy, no-launch gates, decision tree)
 > is at `docs/audit/phase38-remediation-workflow/README.md` — it supports **Decision 3 (handle
-> findings)**, which stays not-started (no findings).
+> findings)**, which stays not-started (no findings). A docs-only **pre-audit internal multi-node devnet
+> soak plan** (Phase 39) for the combined Phase 28–34 stack is at
+> `docs/devnet/phase39-preaudit-multinode-soak/README.md`; it strengthens the evidence base for
+> **Decision 4 (public testnet after audit)** but the **soak is not yet executed** and Decision 4 stays
+> blocked.
 
 ## Decision 1 — Choose an independent auditor
 

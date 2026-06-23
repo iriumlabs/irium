@@ -16,7 +16,9 @@ approves a mainnet launch.
 > `docs/audit/phase36-independent-audit-kickoff/README.md`; the owner-facing auditor selection package is
 > at `docs/audit/phase37-auditor-selection-engagement/README.md`; and the post-findings remediation
 > workflow is at `docs/audit/phase38-remediation-workflow/README.md`. Auditor not yet selected; audit not
-> yet started; no findings; remediation not started.
+> yet started; no findings; remediation not started. A docs-only **pre-audit internal multi-node devnet
+> soak plan** (Phase 39) is at `docs/devnet/phase39-preaudit-multinode-soak/README.md` — soak not yet
+> executed.
 
 ---
 

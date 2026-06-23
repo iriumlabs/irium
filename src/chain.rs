@@ -879,6 +879,14 @@ impl ChainState {
         if crate::poawx_dominance::anti_domination_enforced(expected_height) {
             self.validate_block_dominance_weights(&block, expected_height)?;
         }
+        // Phase 33: validate the block-carried dominance-state commitment (testnet-
+        // gated; mainnet hard-off). `pre` must equal the current (pre-block) state
+        // digest and `post` the digest after applying this block's role rewards
+        // (computed without mutating). Non-retroactive + replayable; additive to the
+        // existing weight validation (does not change reward amounts or weights).
+        if crate::poawx_dominance::dominance_commitment_active(expected_height) {
+            self.validate_block_dominance_commitment(&block, expected_height)?;
+        }
         if crate::poawx_candidate::candidate_set_enforced(expected_height)
             || crate::poawx_admission::candidate_admission_enforced(expected_height)
         {
@@ -1860,6 +1868,51 @@ impl ChainState {
     /// Apply the accepted tip block's reward events to the dominance state.
     /// No-op unless `anti_domination_active(height)` (mainnet hard-off, default
     /// off, so existing behavior is unchanged when the gate is off).
+    /// Phase 33: the dominance-state digest AFTER applying `block`'s role rewards,
+    /// computed WITHOUT mutating self (clone + apply, exactly mirroring
+    /// `apply_block_dominance`, incl. internal pruning). When anti-domination is
+    /// inactive the state does not change, so post == current digest.
+    fn compute_post_dominance_digest(&self, block: &Block, height: u64) -> [u8; 32] {
+        if !crate::poawx_dominance::anti_domination_active(height) {
+            return self.dominance.digest();
+        }
+        let mut clone = self.dominance.clone();
+        for (pkh, kind, amount) in Self::dominance_events_from_block(block, height) {
+            clone.apply_event(pkh, kind, amount, height);
+        }
+        clone.digest()
+    }
+
+    /// Phase 33: validate every DMC1 dominance commitment carried in `block`. `pre`
+    /// must equal the current (pre-block) state digest; `post` the digest after
+    /// applying this block's role rewards. Rejects on mismatch / wrong meta. When
+    /// enforcement is required and NO commitment is present, the block is rejected.
+    fn validate_block_dominance_commitment(
+        &self,
+        block: &Block,
+        height: u64,
+    ) -> Result<(), String> {
+        let net = crate::activation::network_id_byte();
+        let pre = self.dominance.digest();
+        let post = self.compute_post_dominance_digest(block, height);
+        let mut seen = false;
+        if let Some(receipts) = &block.poawx_receipts {
+            for r in receipts {
+                if let Some(ext) = &r.phase20_ext {
+                    if let Some(dc) = &ext.dominance_commitment {
+                        seen = true;
+                        dc.validate(net, height, &pre, &post)
+                            .map_err(|e| format!("phase33: {:?}", e))?;
+                    }
+                }
+            }
+        }
+        if !seen && crate::poawx_dominance::dominance_commitment_enforced(height) {
+            return Err("phase33: dominance commitment required but missing".to_string());
+        }
+        Ok(())
+    }
+
     fn apply_block_dominance(&mut self, height: u64) {
         if !crate::poawx_dominance::anti_domination_active(height) {
             return;
@@ -8458,6 +8511,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         }
     }
 
@@ -11148,6 +11202,224 @@ mod tests {
         phase26b_clear_gate_env();
     }
 
+    // ── Phase 33: dominance-state commitment (consensus) ────────────────────────
+
+    fn phase33_block_with_commitment(
+        src: &Block,
+        c: crate::poawx_dominance::PoawxDominanceCommitmentV1,
+    ) -> Block {
+        let mut blk = src.clone();
+        if let Some(rs) = blk.poawx_receipts.as_mut() {
+            if let Some(ext) = rs[0].phase20_ext.as_mut() {
+                ext.dominance_commitment = Some(c);
+            }
+        }
+        blk
+    }
+
+    #[test]
+    fn phase33_valid_dominance_commitment_accepted() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+        // Compute the correct pre/post for a hypothetical block 4 = chain[3]'s rewards.
+        let pre = st.dominance.digest();
+        let post = st.compute_post_dominance_digest(&st.chain[3], 4);
+        let good = crate::poawx_dominance::PoawxDominanceCommitmentV1::new(net, 4, pre, post);
+        let blk = phase33_block_with_commitment(&st.chain[3], good);
+        assert!(
+            st.validate_block_dominance_commitment(&blk, 4).is_ok(),
+            "matching pre/post accepted"
+        );
+        // ext digest changed (committed) + wire round-trips.
+        let ext = blk.poawx_receipts.as_ref().unwrap()[0]
+            .phase20_ext
+            .clone()
+            .unwrap();
+        let mut none = ext.clone();
+        none.dominance_commitment = None;
+        assert_ne!(ext.digest(), none.digest());
+        assert_eq!(
+            crate::poawx::Phase20ReceiptExt::deserialize(&ext.serialize()).unwrap(),
+            ext
+        );
+        std::env::remove_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase33_bad_dominance_digest_rejected() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        let net = crate::activation::network_id_byte();
+        let pre = st.dominance.digest();
+        let post = st.compute_post_dominance_digest(&st.chain[3], 4);
+        // bad post.
+        let bad_post =
+            crate::poawx_dominance::PoawxDominanceCommitmentV1::new(net, 4, pre, [0x99u8; 32]);
+        let err = st
+            .validate_block_dominance_commitment(
+                &phase33_block_with_commitment(&st.chain[3], bad_post),
+                4,
+            )
+            .expect_err("bad post digest rejected");
+        assert!(
+            err.contains("phase33") && err.contains("PostStateMismatch"),
+            "got: {err}"
+        );
+        // bad pre.
+        let bad_pre =
+            crate::poawx_dominance::PoawxDominanceCommitmentV1::new(net, 4, [0x99u8; 32], post);
+        assert!(st
+            .validate_block_dominance_commitment(
+                &phase33_block_with_commitment(&st.chain[3], bad_pre),
+                4
+            )
+            .is_err());
+        std::env::remove_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase33_dominance_state_updates_from_rewards() {
+        // Connecting all-gates blocks evolves the dominance digest as role rewards
+        // apply; a longer chain has a different digest than a shorter one.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        let mut s1 = base_chain(None);
+        let empty = s1.dominance.digest();
+        let _ = phase28_build_connect_chain(&mut s1, 1);
+        let after1 = s1.dominance.digest();
+        assert_ne!(empty, after1, "rewards change the dominance digest");
+
+        let mut s4 = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut s4, 4);
+        let after4 = s4.dominance.digest();
+        assert_ne!(after1, after4, "more reward events => different digest");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase33_dominance_state_replays_from_blocks() {
+        // The committed digest is a pure function of the active chain: a fresh state
+        // that replays the same blocks reaches the same dominance digest (no local
+        // input). Mirrors the cold-replay path.
+        use crate::poawx_admission::global_admission_cache;
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        let mut st = base_chain(None);
+        let (_h, captured) = phase28_build_connect_chain(&mut st, 4);
+        let original = st.dominance.digest();
+
+        let cache = global_admission_cache();
+        let mut replayed = base_chain(None);
+        for (i, (block, admissions)) in captured.iter().enumerate() {
+            let height = (i + 1) as u64;
+            cache.clear();
+            cache.set_tip(height);
+            for adm in admissions {
+                let _ = cache.ingest_bytes(adm);
+            }
+            replayed.connect_block(block.clone()).unwrap();
+        }
+        assert_eq!(
+            replayed.dominance.digest(),
+            original,
+            "replay reconstructs the dominance digest"
+        );
+        cache.clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase33_enforced_requires_commitment() {
+        // With the gate ACTIVE + REQUIRED, a block lacking a DMC1 commitment is
+        // rejected by connect_block (builder blocks carry None).
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_REQUIRED", "1");
+        assert!(crate::poawx_dominance::dominance_commitment_enforced(2));
+        let mut st = base_chain(None);
+        // Block 1 finalizes genesis; with enforcement on, build+connect H1 must fail
+        // because the builder carries no commitment.
+        let locked = load_locked_genesis().expect("genesis");
+        let genesis = block_from_locked(&locked).expect("block");
+        let net = crate::activation::network_id_byte();
+        let proof = crate::poawx_mining_harness::build_devnet_all_gates_block(
+            net,
+            1,
+            genesis.header.hash_for_height(0),
+            None,
+            st.target_for_height(1).bits,
+            genesis.header.time + 1,
+            4,
+        )
+        .expect("build H1");
+        let cache = crate::poawx_admission::global_admission_cache();
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &proof.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let err = st
+            .connect_block(proof.block)
+            .expect_err("missing required commitment rejected");
+        assert!(
+            err.contains("phase33") && err.contains("required"),
+            "got: {err}"
+        );
+        std::env::remove_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_REQUIRED");
+        cache.clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase33_additive_gate_no_false_reject() {
+        // Gate ACTIVE but NOT required: a valid all-gates chain (no DMC1 carried)
+        // still connects — the commitment is validated-if-present only.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        phase26b_set_gate_env();
+        std::env::set_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT", "1");
+        let mut st = base_chain(None);
+        let _ = phase28_build_connect_chain(&mut st, 3);
+        assert_eq!(st.tip_height(), 3, "valid chain connects with gate active");
+        std::env::remove_var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT");
+        crate::poawx_admission::global_admission_cache().clear();
+        phase26b_clear_gate_env();
+    }
+
+    #[test]
+    fn phase33_mainnet_no_commitment_validation() {
+        assert!(!crate::poawx_dominance::dominance_commitment_gate(
+            0,
+            Some(1),
+            100
+        ));
+    }
+
     #[test]
     fn phase26b_stale_immediate_parent_seed_rejected() {
         // Negative: a height-2 block whose candidate set is seeded by the IMMEDIATE
@@ -12908,6 +13180,7 @@ mod tests {
                 role_assignment_v2: None,
                 double_sign_evidence: None,
                 ticket_registrations: None,
+                dominance_commitment: None,
             }
         };
         let build = |h: u64, prev: &[u8; 32], ext: &crate::poawx::Phase20ReceiptExt| -> Block {

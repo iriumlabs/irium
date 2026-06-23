@@ -53,13 +53,16 @@ the project's change rules forbid on consensus-critical code.
   full lib suite 784/0. (Caps/total/non-inflation were already enforced by exact-match; Phase 31
   formalizes + names + tests them and adds the fallback spec.)
 
-### E. Miner tickets: on-chain store + epoch rate-limiting (System 2)
-- **Gap:** tickets are validated as external proofs; there is no on-chain `MinerTicketStore`/registry
-  or per-epoch issuance rate-limit. (Ticket signatures are a deliberate non-goal — digests are
-  deterministic and recomputable.)
-- **Decisions needed:** persistent, reorg-safe store; epoch quota rule; registration endpoint vs
-  proof-only model.
-- **Risk:** Medium (new persistent consensus state).
+### E. Miner tickets: on-chain store + epoch rate-limiting (System 2) — **DONE in Phase 32**
+- **Status:** ✅ Implemented in Phase 32 (`src/poawx_ticket.rs` + `src/chain.rs`): block-carried ticket
+  registrations (trailing `TKT1` ext section, committed into the irx1 root, cap 16, canonical/deduped),
+  a deterministic replayable `PoawxTicketStore` in `ChainState` (one active per `(miner,epoch)` and per
+  `(vrf,epoch)`, deterministic expiry/pruning), validated + applied in `connect_block` (effective from
+  H+1), reconstructed by replay and rebuilt from the active chain on reorg, with an additive (gated,
+  off-by-default, mainnet-off) eligibility hook that requires a rewarded role's ticket proof to match an
+  active on-chain ticket. Local registration cache stays non-consensus. See
+  `docs/poaw-x-phase32-onchain-ticket-store.md`. 12 `phase32_*` tests; full lib suite 796/0. (Ticket
+  signatures remain a deliberate non-goal — the Sybil PoW is the deterministic identity cost.)
 
 ### F. Adaptive modes: consensus/node integration (System 6)
 - **Gap:** `assess()` + policies exist and are tested, but nothing consumes them — confirmation

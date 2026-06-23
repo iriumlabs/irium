@@ -26,7 +26,9 @@ These are gates (each must pass before the next), none of which is done:
    fresh-wipe/cold-resync and deep-scale sync (R6/R11). A documentation-only **soak plan** (scope,
    topology, safety boundaries, runbook draft, scenarios, metrics, pass/fail, abort/rollback) is prepared
    at `docs/devnet/phase39-preaudit-multinode-soak/README.md` — **soak not yet executed**; execution is a
-   separate owner-approved phase.
+   separate owner-approved phase. The execution-readiness **sign-off gate** (topology/ports/storage/
+   scenarios/duration decisions + go/no-go + owner approval form) is at
+   `docs/devnet/phase40-soak-readiness-signoff/README.md` — execution not yet approved.
 3. **Economic-incentive review** of the combined system (R9).
 4. **Operator runbook + single coordinated config profile** (consensus parameters pinned; R4/R12).
 5. **Monitoring/metrics + rollback plan** validated on the internal devnet (sections 4–5 below).

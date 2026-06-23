@@ -13,6 +13,10 @@ evidence capture.
 - Audited: **no**
 - Public-testnet-ready: **planning-ready only**
 
+> **Execution gate (Phase 40):** the owner-facing execution-readiness sign-off package is at
+> `docs/devnet/phase40-soak-readiness-signoff/README.md`. Execution not yet approved; soak not yet
+> executed.
+
 ## Purpose
 
 Phases 28–34 each had focused tests and (earlier) single-feature live soaks, but the **combined** 28–34

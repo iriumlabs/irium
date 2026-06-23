@@ -27,7 +27,8 @@ _Last updated: `[YYYY-MM-DD]` by `[name]`_
 > soak plan** (Phase 39) for the combined Phase 28–34 stack is at
 > `docs/devnet/phase39-preaudit-multinode-soak/README.md`; it strengthens the evidence base for
 > **Decision 4 (public testnet after audit)** but the **soak is not yet executed** and Decision 4 stays
-> blocked.
+> blocked. The Phase 40 execution-readiness **sign-off** package (owner approval form + go/no-go gate) is
+> at `docs/devnet/phase40-soak-readiness-signoff/README.md` — execution not yet approved.
 
 ## Decision 1 — Choose an independent auditor
 

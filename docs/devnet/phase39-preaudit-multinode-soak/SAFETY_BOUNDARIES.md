@@ -2,6 +2,10 @@
 
 Non-negotiable boundaries for the (future) soak execution. Plan only — nothing is executed in Phase 39.
 
+> These boundaries are enforced through the Phase 40 readiness gate
+> (`docs/devnet/phase40-soak-readiness-signoff/`): the mainnet safety precheck, go/no-go, and final owner
+> approval must all pass before execution. Execution not yet approved.
+
 ## Mainnet / prod protection
 
 - **Inventory mainnet processes before any test** (per host): record the exact PIDs of running mainnet

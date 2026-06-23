@@ -5,7 +5,9 @@
 > phase. No dangerous commands are included; all storage paths are the isolated Phase 39 roots.
 
 ## 0. Pre-checks
-Complete `PRECHECK_CHECKLIST.md` and `OWNER_APPROVAL_CHECKLIST.md` first. Inventory mainnet PIDs.
+Complete `PRECHECK_CHECKLIST.md` and `OWNER_APPROVAL_CHECKLIST.md` first. Inventory mainnet PIDs. Also
+require the Phase 40 go/no-go to be **Go** and `FINAL_OWNER_APPROVAL_TEMPLATE.md` signed
+(`docs/devnet/phase40-soak-readiness-signoff/EXECUTION_GO_NO_GO.md`).
 
 ## 1. Build binaries (from the agreed commit)
 ```

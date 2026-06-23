@@ -3,6 +3,10 @@
 The soak is **not** executed until the owner approves every item below in writing. Phase 39 only prepares
 the plan; execution is a separate phase.
 
+> The consolidated owner sign-off form + go/no-go gate is in the Phase 40 package:
+> `docs/devnet/phase40-soak-readiness-signoff/EXECUTION_READINESS_SIGNOFF.md` and
+> `…/FINAL_OWNER_APPROVAL_TEMPLATE.md`. Execution not yet approved.
+
 | # | Approval needed | Approved? | Notes |
 |---|---|---|---|
 | 1 | **Hosts** to use (Windows only, or + VPS-1 / VPS-2) | ☐ | start loopback-only if unsure |

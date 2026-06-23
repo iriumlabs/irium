@@ -431,6 +431,164 @@ impl PersistentDominance {
     }
 }
 
+// ── Phase 33: block-carried dominance-state commitment ────────────────────────
+//
+// A `PoawxDominanceCommitmentV1` carries the pre-block and post-block digests of
+// the (already reorg-safe) `PersistentDominance` state — committed into a trailing
+// `DMC1` ext section (and thus the irx1 root). `connect_block` validates `pre`
+// against the current state and `post` against the state after applying the
+// block's role rewards (clone-and-apply; non-mutating). Testnet/devnet only;
+// mainnet hard-off. `PersistentDominance` IS the dominance state; `digest()` IS the
+// state digest.
+
+/// Trailing `Phase20ReceiptExt` section magic for the dominance commitment.
+/// (`DOM1` is the Phase 21C dominance-WEIGHTS section; this is distinct.)
+pub const DOMINANCE_COMMITMENT_SECTION_MAGIC: &[u8; 4] = b"DMC1";
+pub const DOMINANCE_COMMITMENT_VERSION: u8 = 1;
+/// version(1) + network(1) + height(8) + pre(32) + post(32).
+pub const DOMINANCE_COMMITMENT_WIRE: usize = 1 + 1 + 8 + 32 + 32;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PoawxDominanceValidationError {
+    MainnetHardOff,
+    WrongVersion,
+    WrongNetwork,
+    WrongHeight,
+    PreStateMismatch,
+    PostStateMismatch,
+    Malformed,
+}
+
+/// Block-carried commitment to the dominance-state transition for a block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PoawxDominanceCommitmentV1 {
+    pub version: u8,
+    pub network_id: u8,
+    pub block_height: u64,
+    pub pre_state_digest: [u8; 32],
+    pub post_state_digest: [u8; 32],
+}
+
+impl PoawxDominanceCommitmentV1 {
+    pub fn new(
+        network_id: u8,
+        block_height: u64,
+        pre_state_digest: [u8; 32],
+        post_state_digest: [u8; 32],
+    ) -> Self {
+        Self {
+            version: DOMINANCE_COMMITMENT_VERSION,
+            network_id,
+            block_height,
+            pre_state_digest,
+            post_state_digest,
+        }
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut o = Vec::with_capacity(DOMINANCE_COMMITMENT_WIRE);
+        o.push(self.version);
+        o.push(self.network_id);
+        o.extend_from_slice(&self.block_height.to_le_bytes());
+        o.extend_from_slice(&self.pre_state_digest);
+        o.extend_from_slice(&self.post_state_digest);
+        o
+    }
+
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        if raw.len() != DOMINANCE_COMMITMENT_WIRE {
+            return Err("dominance commitment: bad length".to_string());
+        }
+        if raw[0] != DOMINANCE_COMMITMENT_VERSION {
+            return Err("dominance commitment: bad version".to_string());
+        }
+        let network_id = raw[1];
+        let block_height = u64::from_le_bytes(raw[2..10].try_into().expect("8"));
+        let mut pre = [0u8; 32];
+        pre.copy_from_slice(&raw[10..42]);
+        let mut post = [0u8; 32];
+        post.copy_from_slice(&raw[42..74]);
+        Ok(Self {
+            version: DOMINANCE_COMMITMENT_VERSION,
+            network_id,
+            block_height,
+            pre_state_digest: pre,
+            post_state_digest: post,
+        })
+    }
+
+    /// Validate the commitment's metadata + pre/post digests. Mainnet hard-off.
+    pub fn validate(
+        &self,
+        expected_network: u8,
+        height: u64,
+        pre: &[u8; 32],
+        post: &[u8; 32],
+    ) -> Result<(), PoawxDominanceValidationError> {
+        use PoawxDominanceValidationError::*;
+        if expected_network == 0 {
+            return Err(MainnetHardOff);
+        }
+        if self.version != DOMINANCE_COMMITMENT_VERSION {
+            return Err(WrongVersion);
+        }
+        if self.network_id != expected_network {
+            return Err(WrongNetwork);
+        }
+        if self.block_height != height {
+            return Err(WrongHeight);
+        }
+        if &self.pre_state_digest != pre {
+            return Err(PreStateMismatch);
+        }
+        if &self.post_state_digest != post {
+            return Err(PostStateMismatch);
+        }
+        Ok(())
+    }
+}
+
+// ── Phase 33 gates (testnet-only; mainnet hard-off) ──────────────────────────
+
+pub fn dominance_commitment_activation_height() -> Option<u64> {
+    std::env::var("IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+pub fn dominance_commitment_gate(network_id: u8, activation: Option<u64>, height: u64) -> bool {
+    if network_id == 0 {
+        return false;
+    }
+    matches!(activation, Some(h) if height >= h)
+}
+
+/// Whether dominance-commitment validation is active at `height`. Requires
+/// anti-domination to be active (the state only evolves then). Mainnet hard-off.
+pub fn dominance_commitment_active(height: u64) -> bool {
+    anti_domination_active(height)
+        && dominance_commitment_gate(
+            network_id_byte(),
+            dominance_commitment_activation_height(),
+            height,
+        )
+}
+
+pub fn dominance_commitment_required() -> bool {
+    if network_id_byte() == 0 {
+        return false;
+    }
+    std::env::var("IRIUM_POAWX_DOMINANCE_COMMITMENT_REQUIRED")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false)
+}
+
+/// A commitment is REQUIRED on every block (vs. validated-if-present) only when
+/// active AND required. Mainnet hard-off. Off by default ⇒ zero regression.
+pub fn dominance_commitment_enforced(height: u64) -> bool {
+    dominance_commitment_active(height) && dominance_commitment_required()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,5 +765,53 @@ mod tests {
         d2.apply_event(b, RoleRewardKind::Compute, 200, 120);
         d2.apply_event(a, RoleRewardKind::Primary, 500, 110);
         assert_eq!(d1.digest(), d2.digest(), "digest is order-independent");
+    }
+
+    // ── Phase 33: dominance-state commitment ────────────────────────────────
+
+    #[test]
+    fn phase33_commitment_roundtrip_and_validate() {
+        let pre = [0x11u8; 32];
+        let post = [0x22u8; 32];
+        let c = PoawxDominanceCommitmentV1::new(1, 10, pre, post);
+        // wire round-trip.
+        assert_eq!(c.serialize().len(), DOMINANCE_COMMITMENT_WIRE);
+        assert_eq!(
+            PoawxDominanceCommitmentV1::deserialize(&c.serialize()).unwrap(),
+            c
+        );
+        // valid against matching pre/post.
+        assert!(c.validate(1, 10, &pre, &post).is_ok());
+        // mismatches rejected.
+        assert_eq!(
+            c.validate(1, 10, &[0x99u8; 32], &post),
+            Err(PoawxDominanceValidationError::PreStateMismatch)
+        );
+        assert_eq!(
+            c.validate(1, 10, &pre, &[0x99u8; 32]),
+            Err(PoawxDominanceValidationError::PostStateMismatch)
+        );
+        assert_eq!(
+            c.validate(2, 10, &pre, &post),
+            Err(PoawxDominanceValidationError::WrongNetwork)
+        );
+        assert_eq!(
+            c.validate(1, 11, &pre, &post),
+            Err(PoawxDominanceValidationError::WrongHeight)
+        );
+        assert_eq!(
+            c.validate(0, 10, &pre, &post),
+            Err(PoawxDominanceValidationError::MainnetHardOff)
+        );
+    }
+
+    #[test]
+    fn phase33_commitment_gate_mainnet_off() {
+        assert!(!dominance_commitment_gate(0, Some(1), 100), "mainnet off");
+        assert!(dominance_commitment_gate(1, Some(1), 100), "testnet on");
+        assert!(
+            !dominance_commitment_gate(1, None, 100),
+            "no activation off"
+        );
     }
 }

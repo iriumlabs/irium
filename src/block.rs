@@ -990,6 +990,7 @@ mod fix2a_boundary_tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let mut r = make_receipt(7);
         r.phase20_ext = Some(ext);

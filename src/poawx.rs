@@ -10,7 +10,10 @@ use crate::poawx_candidate::{
 use crate::poawx_committed_admission::{
     AdmissionCommitmentV1, ADMISSION_COMMITMENT_WIRE, COMMITTED_ADMISSION_SECTION_MAGIC,
 };
-use crate::poawx_dominance::{DOMINANCE_SECTION_MAGIC, DOMINANCE_WEIGHTS_WIRE};
+use crate::poawx_dominance::{
+    PoawxDominanceCommitmentV1, DOMINANCE_COMMITMENT_SECTION_MAGIC, DOMINANCE_COMMITMENT_WIRE,
+    DOMINANCE_SECTION_MAGIC, DOMINANCE_WEIGHTS_WIRE,
+};
 use crate::poawx_doublesign::{
     PoawxDoubleSignEvidenceV1, DOUBLE_SIGN_SECTION_MAGIC, EVIDENCE_WIRE,
     MAX_DOUBLE_SIGN_EVIDENCE_PER_BLOCK,
@@ -673,6 +676,12 @@ pub struct Phase20ReceiptExt {
     /// Validated in connect_block (testnet/devnet only; mainnet hard-off) and
     /// applied to the node's deterministic, replayable on-chain ticket store.
     pub ticket_registrations: Option<Vec<PoawxTicketRegistrationV1>>,
+    /// Phase 33: optional dominance-state commitment (trailing DMC1 section; None
+    /// => byte-identical to pre-33 exts). Binds the pre-block and post-block
+    /// digests of the anti-domination state. Validated in connect_block (testnet/
+    /// devnet only; mainnet hard-off): `pre` must equal the current state digest and
+    /// `post` the digest after applying this block's role rewards.
+    pub dominance_commitment: Option<PoawxDominanceCommitmentV1>,
 }
 
 impl Phase20ReceiptExt {
@@ -711,6 +720,7 @@ impl Phase20ReceiptExt {
                     || self.role_assignment_v2.is_some()
                     || self.double_sign_evidence.is_some()
                     || self.ticket_registrations.is_some()
+                    || self.dominance_commitment.is_some()
                 {
                     out.push(0);
                 }
@@ -790,6 +800,12 @@ impl Phase20ReceiptExt {
                 out.extend_from_slice(&body);
             }
         }
+        // Phase 33 trailing DMC1 dominance-commitment section (present-only,
+        // fixed-size). Absent => byte-identical to pre-33 exts.
+        if let Some(dc) = &self.dominance_commitment {
+            out.extend_from_slice(DOMINANCE_COMMITMENT_SECTION_MAGIC);
+            out.extend_from_slice(&dc.serialize());
+        }
         out
     }
 
@@ -860,6 +876,7 @@ impl Phase20ReceiptExt {
         let mut role_assignment_v2: Option<[AssignmentProofV2; 3]> = None;
         let mut double_sign_evidence: Option<Vec<PoawxDoubleSignEvidenceV1>> = None;
         let mut ticket_registrations: Option<Vec<PoawxTicketRegistrationV1>> = None;
+        let mut dominance_commitment: Option<PoawxDominanceCommitmentV1> = None;
         while off < raw.len() {
             need(off, 4, "trailing section magic")?;
             let magic = &raw[off..off + 4];
@@ -998,6 +1015,16 @@ impl Phase20ReceiptExt {
                     off += len;
                 }
                 ticket_registrations = Some(regs);
+            } else if magic == DOMINANCE_COMMITMENT_SECTION_MAGIC {
+                if dominance_commitment.is_some() {
+                    return Err("phase20 ext: duplicate dominance-commitment section".to_string());
+                }
+                off += 4;
+                need(off, DOMINANCE_COMMITMENT_WIRE, "dominance commitment")?;
+                dominance_commitment = Some(PoawxDominanceCommitmentV1::deserialize(
+                    &raw[off..off + DOMINANCE_COMMITMENT_WIRE],
+                )?);
+                off += DOMINANCE_COMMITMENT_WIRE;
             } else {
                 return Err("phase20 ext: unknown trailing section magic".to_string());
             }
@@ -1019,6 +1046,7 @@ impl Phase20ReceiptExt {
             role_assignment_v2,
             double_sign_evidence,
             ticket_registrations,
+            dominance_commitment,
         })
     }
 
@@ -1990,6 +2018,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let bytes = ext.serialize();
         let ext2 = Phase20ReceiptExt::deserialize(&bytes).expect("deserialize");
@@ -2108,6 +2137,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let none = base();
         let mut some = base();
@@ -2153,6 +2183,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let proofs = [
             TicketProof::new(
@@ -2274,6 +2305,7 @@ mod tests {
             role_assignment_v2: Some(proofs),
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let good = ext.serialize();
         assert_eq!(Phase20ReceiptExt::deserialize(&good).unwrap(), ext);
@@ -2321,6 +2353,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let seed = [0x55u8; 32];
         let mk = |secret: u8, role: u8, solver: [u8; 20]| {
@@ -2411,6 +2444,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let seed = [0x55u8; 32];
         let mut cs = CandidateSet::new(1, 61, seed);
@@ -2493,6 +2527,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let sk = k256::ecdsa::SigningKey::from_slice(&[0x21u8; 32]).unwrap();
         let mut fp = FinalityProofV1::new(1, 60, prev, [0u8; 32], 0, 1, 1);
@@ -2571,6 +2606,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let sol = |m: u8, n: u64, t: u8| PuzzleSolutionV1 {
             mode: m,
@@ -2640,6 +2676,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let mut cs = CandidateSet::new(1, 60, prev);
         cs.push(RoleCandidate::build(
@@ -2715,6 +2752,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         let weights = [1000u64, 800, 900, 950];
         // (1) absent => no DOM1 magic, byte-identical, round-trips.
@@ -2817,6 +2855,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
         // no-ext v3 element == v2 element + a single 0 flag byte (present-only).
         let r = make_test_receipt(9);
@@ -2861,6 +2900,7 @@ mod tests {
             role_assignment_v2: None,
             double_sign_evidence: None,
             ticket_registrations: None,
+            dominance_commitment: None,
         };
 
         // Base mode-0 receipt with a production extension attached.

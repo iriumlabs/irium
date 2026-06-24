@@ -52,10 +52,12 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
             "--emit-dmc1" => a.sections.dominance_commitment = true,
             "--emit-adm1" => a.sections.adaptive_commitment = true,
             "--emit-tkt1" => a.sections.ticket_registrations = true,
+            "--emit-rmf1" => a.sections.reward_manifest = true,
             "--phase31-34" => {
                 a.sections.dominance_commitment = true;
                 a.sections.adaptive_commitment = true;
                 a.sections.ticket_registrations = true;
+                a.sections.reward_manifest = true;
             }
             "--rpc-url" => {
                 i += 1;
@@ -395,9 +397,9 @@ fn usage() -> &'static str {
     "poawx-live-proof-harness (devnet/testnet ONLY)\n\
      usage: poawx-live-proof-harness --devnet --rpc-url http://127.0.0.1:41011 \
      --work-dir <isolated-dir> [--rpc-token <token>] \
-     [--emit-dmc1] [--emit-adm1] [--emit-tkt1] [--phase31-34]\n\
-     (Phase 42: --emit-* / --phase31-34 add the Phase 33/34/32 trailing sections; \
-     node gates must be set to match. Default = legacy all-gates block.)\n\
+     [--emit-dmc1] [--emit-adm1] [--emit-tkt1] [--emit-rmf1] [--phase31-34]\n\
+     (Phase 42/C1: --emit-* / --phase31-34 add the Phase 31-34 trailing sections \
+     (RMF1/TKT1/DMC1/ADM1); node gates must be set to match. Default = legacy block.)\n\
      refuses mainnet, non-loopback RPC, and default %USERPROFILE%\\.irium / $HOME/.irium."
 }
 

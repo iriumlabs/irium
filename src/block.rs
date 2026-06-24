@@ -992,6 +992,7 @@ mod fix2a_boundary_tests {
             ticket_registrations: None,
             dominance_commitment: None,
             adaptive_mode_commitment: None,
+            reward_manifest: None,
         };
         let mut r = make_receipt(7);
         r.phase20_ext = Some(ext);

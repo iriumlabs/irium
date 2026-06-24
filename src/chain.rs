@@ -894,6 +894,11 @@ impl ChainState {
         if crate::poawx_dominance::dominance_commitment_active(expected_height) {
             self.validate_block_dominance_commitment(&block, expected_height)?;
         }
+        // C1: block-carried reward manifest (RMF1). Additive; validate-if-present when
+        // the gate is active, required when enforced. Mainnet hard-off.
+        if crate::poawx_reward::reward_manifest_caps_active(expected_height) {
+            self.validate_block_reward_manifest(&block, expected_height)?;
+        }
         if crate::poawx_candidate::candidate_set_enforced(expected_height)
             || crate::poawx_admission::candidate_admission_enforced(expected_height)
         {
@@ -2148,6 +2153,55 @@ impl ChainState {
         }
         if !seen && crate::poawx_dominance::dominance_commitment_enforced(height) {
             return Err("phase33: dominance commitment required but missing".to_string());
+        }
+        Ok(())
+    }
+
+    /// C1: validate a block-carried RMF1 reward manifest (testnet-gated; mainnet
+    /// hard-off). When the reward-manifest gate is ACTIVE, any carried RMF1 must
+    /// equal the canonically-derived full manifest for this block (binding the exact
+    /// reward recipients + 55/22/13/10 split), pass the additive caps, and not pay a
+    /// penalized finality signer. When ENFORCED, the RMF1 is required. Additive: this
+    /// never relaxes the existing exact-match coinbase validation.
+    fn validate_block_reward_manifest(&self, block: &Block, height: u64) -> Result<(), String> {
+        let net = crate::activation::network_id_byte();
+        let subsidy = block_reward(height);
+        let mut seen = false;
+        if let Some(receipts) = &block.poawx_receipts {
+            for r in receipts {
+                if let Some(ext) = &r.phase20_ext {
+                    if let Some(m) = &ext.reward_manifest {
+                        seen = true;
+                        let expected = crate::poawx_reward::PoawxRewardManifestV1::new_full(
+                            net,
+                            height,
+                            subsidy,
+                            r.worker_pkh,
+                            ext.role_reward.compute_contributor_pkh,
+                            ext.role_reward.verify_contributor_pkh,
+                            ext.role_reward.support_contributor_pkh,
+                            ext.fee_bps,
+                            ext.fee_pkh,
+                        );
+                        if *m != expected {
+                            return Err("phase c1: RMF1 does not match canonical reward manifest"
+                                .to_string());
+                        }
+                        m.validate_caps(net, subsidy, 0)
+                            .map_err(|e| format!("phase c1: {e}"))?;
+                        let epoch = ext
+                            .finality_proof
+                            .as_ref()
+                            .map(|f| f.committee_epoch)
+                            .unwrap_or(0);
+                        m.validate_finality_recipient_eligibility(&self.doublesign_penalty, epoch)
+                            .map_err(|e| format!("phase c1: {e}"))?;
+                    }
+                }
+            }
+        }
+        if !seen && crate::poawx_reward::reward_manifest_section_enforced(height) {
+            return Err("phase c1: reward manifest (RMF1) required but missing".to_string());
         }
         Ok(())
     }
@@ -8768,6 +8822,7 @@ mod tests {
             ticket_registrations: None,
             dominance_commitment: None,
             adaptive_mode_commitment: None,
+            reward_manifest: None,
         }
     }
 
@@ -11970,6 +12025,7 @@ mod tests {
     fn phase42_clear_full_gate_env() {
         for k in [
             "IRIUM_POAWX_REWARD_MANIFEST_CAPS_ACTIVATION_HEIGHT",
+            "IRIUM_POAWX_REWARD_MANIFEST_REQUIRED",
             "IRIUM_POAWX_DOMINANCE_COMMITMENT_ACTIVATION_HEIGHT",
             "IRIUM_POAWX_DOMINANCE_COMMITMENT_REQUIRED",
             "IRIUM_POAWX_ADAPTIVE_MODE_ACTIVATION_HEIGHT",
@@ -12072,6 +12128,7 @@ mod tests {
             dominance_commitment: true,
             adaptive_commitment: true,
             ticket_registrations: true,
+            reward_manifest: false,
         };
         let mut st = base_chain(None);
         let _ = phase42_build_connect_chain(&mut st, 3, opts);
@@ -12103,6 +12160,7 @@ mod tests {
             dominance_commitment: true,
             adaptive_commitment: true,
             ticket_registrations: true,
+            reward_manifest: false,
         };
         let mut st = base_chain(None);
         let _ = phase42_build_connect_chain(&mut st, 2, opts);
@@ -12206,6 +12264,7 @@ mod tests {
             dominance_commitment: true,
             adaptive_commitment: true,
             ticket_registrations: true,
+            reward_manifest: false,
         };
         let mut st = base_chain(None);
         let _ = phase42_build_connect_chain(&mut st, 6, opts);
@@ -12227,6 +12286,7 @@ mod tests {
             dominance_commitment: true,
             adaptive_commitment: true,
             ticket_registrations: true,
+            reward_manifest: false,
         };
         let r = crate::poawx_mining_harness::build_devnet_all_gates_block_with(
             opts,
@@ -12239,6 +12299,239 @@ mod tests {
             4,
         );
         assert!(r.is_err(), "mainnet (network_id 0) refused by the builder");
+    }
+
+    // ── C1: mainnet activation engineering (RMF1, role ticket proofs, schedule) ──
+
+    /// Full C1 gate env: phase42 with-tickets + RMF1 required.
+    fn c1_set_gate_env() {
+        phase42_set_gate_env_with_tickets();
+        // RMF1 SECTION required (distinct from the cap-validation *_CAPS_REQUIRED flag).
+        std::env::set_var("IRIUM_POAWX_REWARD_MANIFEST_REQUIRED", "1");
+    }
+    /// C1 env without ticket store (RMF1 required; DMC/ADM required; adaptive Caution).
+    fn c1_set_gate_env_no_tickets() {
+        phase42_set_gate_env_dmc_adm();
+        std::env::set_var("IRIUM_POAWX_REWARD_MANIFEST_REQUIRED", "1");
+    }
+    fn c1_clear_gate_env() {
+        std::env::remove_var("IRIUM_POAWX_REWARD_MANIFEST_REQUIRED");
+        phase42_clear_full_gate_env();
+    }
+
+    fn c1_build_next(
+        st: &ChainState,
+        height: u64,
+        prev: [u8; 32],
+        parent_prev: Option<[u8; 32]>,
+        opts: crate::poawx_mining_harness::AllGatesSections,
+    ) -> Block {
+        let net = crate::activation::network_id_byte();
+        let bits = st.target_for_height(height).bits;
+        let time = st.chain[0].header.time + height as u32;
+        crate::poawx_mining_harness::build_devnet_all_gates_block_with(
+            opts,
+            net,
+            height,
+            prev,
+            parent_prev,
+            bits,
+            time,
+            4,
+        )
+        .unwrap_or_else(|e| panic!("c1 build H{height}: {e}"))
+        .block
+    }
+
+    #[test]
+    fn mainnet_poawx_full_stack_block_accepted() {
+        // Post-activation full stack: RMF1 + DMC1 + ADM1 required, ticket store active,
+        // role ticket proofs emitted — a 6-block chain connects with every section.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        c1_set_gate_env();
+        let mut st = base_chain(None);
+        let _ = phase42_build_connect_chain(
+            &mut st,
+            6,
+            crate::poawx_mining_harness::AllGatesSections::c1_full(),
+        );
+        assert_eq!(st.height, 7, "genesis + 6 full-stack blocks");
+        let ext = phase42_last_ext(&st, 6);
+        assert!(ext.reward_manifest.is_some(), "RMF1 present");
+        assert!(ext.dominance_commitment.is_some(), "DMC1 present");
+        assert!(ext.adaptive_mode_commitment.is_some(), "ADM1 present");
+        assert!(ext.ticket_registrations.is_some(), "TKT1 present");
+        assert!(
+            ext.role_ticket_proofs.is_some(),
+            "role ticket proofs present"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        c1_clear_gate_env();
+    }
+
+    #[test]
+    fn mainnet_poawx_reward_manifest_overpay_rejected() {
+        // A tampered RMF1 (role overpay / non-canonical) is rejected by connect_block's
+        // reward-manifest validator.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        c1_set_gate_env();
+        let mut st = base_chain(None);
+        let opts = crate::poawx_mining_harness::AllGatesSections::c1_full();
+        let hashes = phase42_build_connect_chain(&mut st, 2, opts);
+        let mut blk = c1_build_next(&st, 3, hashes[2], Some(hashes[1]), opts);
+        // valid first.
+        assert!(st.validate_block_reward_manifest(&blk, 3).is_ok());
+        // tamper: inflate the compute role amount in the RMF1.
+        if let Some(rs) = blk.poawx_receipts.as_mut() {
+            if let Some(ext) = rs[0].phase20_ext.as_mut() {
+                if let Some(m) = ext.reward_manifest.as_mut() {
+                    m.outputs[1].amount += 1_000_000;
+                }
+            }
+        }
+        let err = st
+            .validate_block_reward_manifest(&blk, 3)
+            .expect_err("tampered RMF1 rejected");
+        assert!(err.contains("phase c1"), "got: {err}");
+        crate::poawx_admission::global_admission_cache().clear();
+        c1_clear_gate_env();
+    }
+
+    #[test]
+    fn mainnet_poawx_reward_manifest_required_missing_rejected() {
+        // With RMF1 required but no ticket store (adaptive Caution, DMC present), a block
+        // lacking RMF1 is rejected by the validator.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        c1_set_gate_env_no_tickets();
+        let st = base_chain(None);
+        let opts = crate::poawx_mining_harness::AllGatesSections::phase33_34(); // DMC+ADM, NO RMF
+                                                                                // Build a single unconnected block at height 1 over genesis (no chain build,
+                                                                                // since RMF1 is required and a no-RMF block could not connect).
+        let ghash = st.chain[0].header.hash_for_height(0);
+        let blk = c1_build_next(&st, 1, ghash, None, opts);
+        assert!(blk.poawx_receipts.as_ref().unwrap()[0]
+            .phase20_ext
+            .as_ref()
+            .unwrap()
+            .reward_manifest
+            .is_none());
+        let err = st
+            .validate_block_reward_manifest(&blk, 1)
+            .expect_err("missing RMF1 rejected when required");
+        assert!(
+            err.contains("phase c1") && err.contains("required"),
+            "got: {err}"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        c1_clear_gate_env();
+    }
+
+    #[test]
+    fn mainnet_poawx_reward_manifest_wire_roundtrips_and_legacy_safe() {
+        // RMF1 wire round-trips; absent RMF1 (legacy/pre-activation) ext round-trips
+        // byte-identically and the validator accepts (no RMF gate enforced here).
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        c1_set_gate_env();
+        let mut st = base_chain(None);
+        let opts = crate::poawx_mining_harness::AllGatesSections::c1_full();
+        let hashes = phase42_build_connect_chain(&mut st, 1, opts);
+        let blk = c1_build_next(&st, 2, hashes[1], Some(hashes[0]), opts);
+        let ext = blk.poawx_receipts.as_ref().unwrap()[0]
+            .phase20_ext
+            .clone()
+            .unwrap();
+        let m = ext.reward_manifest.clone().unwrap();
+        // manifest wire round-trip.
+        assert_eq!(
+            crate::poawx_reward::PoawxRewardManifestV1::deserialize(&m.serialize()).unwrap(),
+            m
+        );
+        // ext (with RMF1) round-trip.
+        assert_eq!(
+            crate::poawx::Phase20ReceiptExt::deserialize(&ext.serialize()).unwrap(),
+            ext
+        );
+        // absent RMF1: byte-identical round-trip.
+        let mut none = ext.clone();
+        none.reward_manifest = None;
+        assert_ne!(ext.digest(), none.digest());
+        assert_eq!(
+            crate::poawx::Phase20ReceiptExt::deserialize(&none.serialize()).unwrap(),
+            none
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        c1_clear_gate_env();
+    }
+
+    #[test]
+    fn mainnet_poawx_role_ticket_proofs_eligible_after_registration() {
+        // The harness emits role ticket proofs that pass Phase 32 eligibility because
+        // the matching tickets were registered an earlier block (H->H+1 timing).
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        c1_set_gate_env();
+        let mut st = base_chain(None);
+        let opts = crate::poawx_mining_harness::AllGatesSections::c1_full();
+        let hashes = phase42_build_connect_chain(&mut st, 3, opts);
+        // Build block 4: its role ticket proofs (epoch 4) match block-3 registrations.
+        let blk = c1_build_next(&st, 4, hashes[3], Some(hashes[2]), opts);
+        assert!(
+            st.validate_block_ticket_store_eligibility(&blk, 4).is_ok(),
+            "harness role ticket proofs pass eligibility at H=4"
+        );
+        // Tamper a proof's epoch -> not registered -> eligibility fails.
+        let mut bad = blk.clone();
+        if let Some(rs) = bad.poawx_receipts.as_mut() {
+            if let Some(ext) = rs[0].phase20_ext.as_mut() {
+                if let Some(p) = ext.role_ticket_proofs.as_mut() {
+                    p[0].epoch = 999;
+                }
+            }
+        }
+        assert!(
+            st.validate_block_ticket_store_eligibility(&bad, 4).is_err(),
+            "wrong-epoch ticket proof rejected"
+        );
+        crate::poawx_admission::global_admission_cache().clear();
+        c1_clear_gate_env();
+    }
+
+    #[test]
+    fn mainnet_pre_poawx_activation_default_disabled() {
+        // The phased schedule keeps mainnet (network 0) disabled and all PoAW-X gates
+        // hard-off regardless of env — no real activation height exists.
+        use crate::poawx_activation_schedule as sched;
+        assert!(sched::MAINNET_POAWX_ACTIVATION_HEIGHT.is_none());
+        assert_eq!(sched::poawx_activation_height(0), None);
+        assert!(!sched::poawx_supported_at(0, Some(1), 1_000_000));
+        assert!(!sched::ticket_enforced_at(0, Some(1), 100, 1_000_000));
+        // Every per-feature consensus gate is also hard-off on mainnet (network 0).
+        assert!(!crate::poawx_reward::reward_manifest_caps_gate(
+            0,
+            Some(1),
+            100
+        ));
+        assert!(!crate::poawx_dominance::dominance_commitment_gate(
+            0,
+            Some(1),
+            100
+        ));
+        assert!(!crate::poawx_adaptive::adaptive_mode_gate(0, Some(1), 100));
+        assert!(!crate::poawx_ticket::ticket_store_gate(0, Some(1), 100));
+        assert!(!crate::poawx_doublesign::double_sign_penalty_gate(
+            0,
+            Some(1),
+            100
+        ));
     }
 
     #[test]
@@ -14003,6 +14296,7 @@ mod tests {
                 ticket_registrations: None,
                 dominance_commitment: None,
                 adaptive_mode_commitment: None,
+                reward_manifest: None,
             }
         };
         let build = |h: u64, prev: &[u8; 32], ext: &crate::poawx::Phase20ReceiptExt| -> Block {

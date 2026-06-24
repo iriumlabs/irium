@@ -25,6 +25,13 @@ use sha2::{Digest, Sha256};
 pub const REWARD_MANIFEST_VERSION: u8 = 1;
 const MANIFEST_DOMAIN: &[u8] = b"IRIUM_POAWX_REWARD_MANIFEST_V1";
 
+/// C1: trailing `RMF1` block-carried reward-manifest section magic (mirrors the
+/// DMC1/ADM1 pattern). Present-only; absent ⇒ byte-identical to pre-RMF1 exts.
+pub const REWARD_MANIFEST_SECTION_MAGIC: &[u8; 4] = b"RMF1";
+/// version(1)+network(1)+height(8)+total(8)+fee_bps(2)+fee_pkh(20)+fallback(1)
+/// + 4 × output{ role(1)+pkh(20)+amount(8)+present(1) } = 41 + 120 = 161 bytes.
+pub const REWARD_MANIFEST_WIRE: usize = 1 + 1 + 8 + 8 + 2 + 20 + 1 + 4 * (1 + 20 + 8 + 1);
+
 // ── Roles + caps ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -50,6 +57,31 @@ impl PoawxRewardRole {
             PoawxRewardRole::Compute => MULTI_ROLE_COMPUTE_BPS,
             PoawxRewardRole::Verify => MULTI_ROLE_VERIFY_BPS,
             PoawxRewardRole::Support => MULTI_ROLE_SUPPORT_BPS,
+        }
+    }
+    pub fn from_id(id: u8) -> Option<Self> {
+        match id {
+            0 => Some(PoawxRewardRole::Primary),
+            1 => Some(PoawxRewardRole::Compute),
+            2 => Some(PoawxRewardRole::Verify),
+            3 => Some(PoawxRewardRole::Support),
+            _ => None,
+        }
+    }
+}
+
+impl PoawxRewardFallbackMode {
+    pub fn to_byte(self) -> u8 {
+        match self {
+            PoawxRewardFallbackMode::FullParticipation => 0,
+            PoawxRewardFallbackMode::PresentRolesOnly => 1,
+        }
+    }
+    pub fn from_byte(b: u8) -> Option<Self> {
+        match b {
+            0 => Some(PoawxRewardFallbackMode::FullParticipation),
+            1 => Some(PoawxRewardFallbackMode::PresentRolesOnly),
+            _ => None,
         }
     }
 }
@@ -283,6 +315,86 @@ impl PoawxRewardManifestV1 {
         h.finalize().into()
     }
 
+    /// C1: fixed-size wire encoding for the block-carried `RMF1` section.
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut o = Vec::with_capacity(REWARD_MANIFEST_WIRE);
+        o.push(self.version);
+        o.push(self.network_id);
+        o.extend_from_slice(&self.block_height.to_le_bytes());
+        o.extend_from_slice(&self.total_reward.to_le_bytes());
+        o.extend_from_slice(&self.fee_bps.to_le_bytes());
+        o.extend_from_slice(&self.fee_pkh);
+        o.push(self.fallback.to_byte());
+        for out in &self.outputs {
+            o.push(out.role.id());
+            o.extend_from_slice(&out.pkh);
+            o.extend_from_slice(&out.amount.to_le_bytes());
+            o.push(out.present as u8);
+        }
+        o
+    }
+
+    /// C1: parse the fixed-size `RMF1` wire encoding. Strict: exact length, known
+    /// version, canonical role order `[Primary, Compute, Verify, Support]`, valid
+    /// fallback/present bytes.
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        if raw.len() != REWARD_MANIFEST_WIRE {
+            return Err("reward manifest: bad length".to_string());
+        }
+        if raw[0] != REWARD_MANIFEST_VERSION {
+            return Err("reward manifest: bad version".to_string());
+        }
+        let network_id = raw[1];
+        let block_height = u64::from_le_bytes(raw[2..10].try_into().expect("8"));
+        let total_reward = u64::from_le_bytes(raw[10..18].try_into().expect("8"));
+        let fee_bps = u16::from_le_bytes(raw[18..20].try_into().expect("2"));
+        let mut fee_pkh = [0u8; 20];
+        fee_pkh.copy_from_slice(&raw[20..40]);
+        let fallback = PoawxRewardFallbackMode::from_byte(raw[40])
+            .ok_or_else(|| "reward manifest: bad fallback".to_string())?;
+        let mut outputs: [PoawxRewardRoleOutput; 4] =
+            [role_out(PoawxRewardRole::Primary, [0u8; 20], 0, false); 4];
+        let mut off = 41usize;
+        for (i, expected) in [
+            PoawxRewardRole::Primary,
+            PoawxRewardRole::Compute,
+            PoawxRewardRole::Verify,
+            PoawxRewardRole::Support,
+        ]
+        .iter()
+        .enumerate()
+        {
+            let role = PoawxRewardRole::from_id(raw[off])
+                .ok_or_else(|| "reward manifest: bad role id".to_string())?;
+            if role != *expected {
+                return Err("reward manifest: non-canonical role order".to_string());
+            }
+            off += 1;
+            let mut pkh = [0u8; 20];
+            pkh.copy_from_slice(&raw[off..off + 20]);
+            off += 20;
+            let amount = u64::from_le_bytes(raw[off..off + 8].try_into().expect("8"));
+            off += 8;
+            let present = match raw[off] {
+                0 => false,
+                1 => true,
+                _ => return Err("reward manifest: bad present flag".to_string()),
+            };
+            off += 1;
+            outputs[i] = role_out(role, pkh, amount, present);
+        }
+        Ok(Self {
+            version: REWARD_MANIFEST_VERSION,
+            network_id,
+            block_height,
+            total_reward,
+            fee_bps,
+            fee_pkh,
+            fallback,
+            outputs,
+        })
+    }
+
     /// Validate caps + non-inflation (rounding-aware). `subsidy`/`fees` bound the
     /// declared total. Pure; mainnet hard-off. This is ADDITIVE to the existing
     /// exact-match coinbase validation — it only adds rejections.
@@ -449,6 +561,25 @@ pub fn reward_manifest_caps_required() -> bool {
 /// exact-match check). OFF by default ⇒ zero regression.
 pub fn reward_manifest_caps_enforced(height: u64) -> bool {
     reward_manifest_caps_active(height) && reward_manifest_caps_required()
+}
+
+/// C1: whether the block-carried `RMF1` SECTION must be PRESENT. This is a SEPARATE
+/// flag from the cap-validation `*_CAPS_REQUIRED` (which only requires the additive
+/// cap check, NOT a carried section). Off by default ⇒ pre-RMF1 / legacy blocks are
+/// accepted even when the cap gate is required. Mainnet hard-off.
+pub fn reward_manifest_section_required() -> bool {
+    if network_id_byte() == 0 {
+        return false;
+    }
+    std::env::var("IRIUM_POAWX_REWARD_MANIFEST_REQUIRED")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false)
+}
+
+/// The `RMF1` section is required-present only when the reward-manifest gate is
+/// active AND the section-required flag is set. Mainnet hard-off.
+pub fn reward_manifest_section_enforced(height: u64) -> bool {
+    reward_manifest_caps_active(height) && reward_manifest_section_required()
 }
 
 #[cfg(test)]

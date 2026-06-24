@@ -49,6 +49,7 @@ use crate::poawx_finality::{
 };
 use crate::poawx_penalty::PenaltyStatus;
 use crate::poawx_puzzle::{default_profile, solve_dev, PuzzleChallengeV1};
+use crate::poawx_reward::PoawxRewardManifestV1;
 use crate::pow::{meets_target, sha256d, Target};
 use crate::tx::{p2pkh_script, Transaction, TxInput, TxOutput};
 use k256::ecdsa::SigningKey;
@@ -192,6 +193,8 @@ pub struct AllGatesSections {
     pub adaptive_commitment: bool,
     /// Phase 32: emit `TKT1` ticket registrations (count per block = `ticket_registrations_per_block`).
     pub ticket_registrations: bool,
+    /// C1: emit an `RMF1` block-carried reward manifest (canonical 55/22/13/10 split).
+    pub reward_manifest: bool,
 }
 
 impl AllGatesSections {
@@ -202,6 +205,17 @@ impl AllGatesSections {
             dominance_commitment: true,
             adaptive_commitment: true,
             ticket_registrations: false,
+            reward_manifest: false,
+        }
+    }
+
+    /// C1: enable every newer section (TKT1 + DMC1 + ADM1 + RMF1).
+    pub fn c1_full() -> Self {
+        Self {
+            dominance_commitment: true,
+            adaptive_commitment: true,
+            ticket_registrations: true,
+            reward_manifest: true,
         }
     }
 }
@@ -537,6 +551,55 @@ pub fn build_devnet_all_gates_block_with(
         None
     };
 
+    // ── C1: optional live role ticket proofs (for Phase 32 eligibility) ───────
+    // Each role's proof references epoch = H with the SAME (solver, apk) the harness
+    // registered in block H-1 (epoch H), so from H+1 onward (here: any H≥2) the role
+    // is ACTIVE in the on-chain ticket store and passes `validate_block_ticket_store_eligibility`.
+    let role_ticket_proofs =
+        if opts.ticket_registrations && crate::poawx_ticket::ticket_store_active(height) {
+            let mk = |role: u8, solver: [u8; 20], apk_seed: u8| {
+                crate::poawx_ticket::TicketProof::new(
+                    net,
+                    height,
+                    role,
+                    solver,
+                    height,         // epoch = H (registered for in block H-1)
+                    height + 1000,  // expiry
+                    [apk_seed; 33], // assignment public key (matches the registration)
+                    [0u8; 32],      // sybil nonce (bits 0 on devnet)
+                    PenaltyStatus::Clean.id(),
+                )
+            };
+            Some([
+                mk(ROLE_COMPUTE_CONTRIBUTOR, compute_solver, 0xD1),
+                mk(ROLE_VERIFY_CONTRIBUTOR, verify_solver, 0xD2),
+                mk(ROLE_SUPPORT_CONTRIBUTOR, support_solver, 0xD3),
+            ])
+        } else {
+            None
+        };
+
+    // ── C1: optional RMF1 block-carried reward manifest ───────────────────────
+    // The canonical full-participation 55/22/13/10 split for this block's role
+    // recipients (0% official fee). Matches the node's canonically-derived manifest,
+    // so a node with the reward-manifest gate active+required accepts it.
+    let reward_manifest =
+        if opts.reward_manifest && crate::poawx_reward::reward_manifest_caps_active(height) {
+            Some(PoawxRewardManifestV1::new_full(
+                net,
+                height,
+                block_reward(height),
+                worker_pkh,
+                compute_solver,
+                verify_solver,
+                support_solver,
+                0,
+                [0u8; 20],
+            ))
+        } else {
+            None
+        };
+
     let ext = Phase20ReceiptExt {
         role_reward: RoleReward {
             compute_contributor_pkh: compute_solver,
@@ -549,7 +612,7 @@ pub fn build_devnet_all_gates_block_with(
         fee_bps: 0,
         fee_pkh: [0u8; 20],
         precommit_root: None,
-        role_ticket_proofs: None,
+        role_ticket_proofs,
         role_dominance_weights: Some([
             dw_in(&worker_pkh),
             dw_in(&compute_solver),
@@ -565,6 +628,7 @@ pub fn build_devnet_all_gates_block_with(
         ticket_registrations,
         dominance_commitment,
         adaptive_mode_commitment,
+        reward_manifest,
     };
 
     // Worker receipt: real receipt PoW solution + signed challenge (mode-0).

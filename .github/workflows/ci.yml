@@ -37,7 +37,7 @@ jobs:
         run: cargo build --release
 
       - name: cargo test --all
-        run: cargo test --all
+        run: cargo test --all -- --test-threads=1
 
       - name: cargo audit
         run: |

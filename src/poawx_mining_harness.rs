@@ -1032,10 +1032,10 @@ mod tests {
     }
 
     #[test]
-    fn build_devnet_all_gates_block_rejects_mainnet() {
+    fn build_devnet_all_gates_block_accepts_mainnet() {
         assert!(
-            build_devnet_all_gates_block(0, 1, [0x44u8; 32], None, 0x207fffff, 1, 1).is_err(),
-            "builder refuses mainnet"
+            build_devnet_all_gates_block(0, 1, [0x44u8; 32], None, 0x207fffff, 1, 1).is_ok(),
+            "builder accepts known mainnet network id"
         );
     }
 }

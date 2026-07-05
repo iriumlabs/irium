@@ -9196,6 +9196,29 @@ mod tests {
             "hidden extra payout must reject"
         );
 
+        // (21) forged role claim (tampered digest) rejects via the connect_block path.
+        let mut e = ext.clone();
+        e.compute_claim.claim_digest = [0xAAu8; 32];
+        assert!(
+            validate_poawx_block_receipts(&build(&e), height, Some(&parent)).is_err(),
+            "forged (tampered-digest) role claim must reject"
+        );
+
+        // (22) stale/replayed assignment: a compute claim bound to a DIFFERENT prev
+        // (lane/digest do not match this block's (height, prev)) rejects.
+        let mut e = ext.clone();
+        e.compute_claim = p20_claim(
+            net,
+            height,
+            &[0x77u8; 32],
+            crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+            e.role_reward.compute_contributor_pkh,
+        );
+        assert!(
+            validate_poawx_block_receipts(&build(&e), height, Some(&parent)).is_err(),
+            "stale-assignment (wrong-prev) role claim must reject"
+        );
+
         // (19/20) third-party fee: rejected without mode; accepted with fee gate + mode.
         let fee_pkh = [0xFEu8; 20];
         let extf = p20_ext(net, height, &parent_hash, 200, fee_pkh);

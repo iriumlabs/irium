@@ -54,6 +54,14 @@ use crate::tx::{
 
 const MAX_ORPHAN_BLOCKS: usize = 100;
 
+/// Startup/replay cache-prune batching. `prune_caches` (a pure memory/cache
+/// operation with no effect on validation, block acceptance, or consensus
+/// outcomes) is run every this many blocks instead of after every connected
+/// block. This bounds the header/block cache to window + this many entries
+/// while collapsing the O(blocks x cache_window) startup-replay cost of the
+/// per-block prune to O(blocks / this x cache_window). Identical validation.
+const CACHE_PRUNE_INTERVAL: u64 = 512;
+
 fn header_cache_window() -> u64 {
     env::var("IRIUM_HEADER_CACHE_WINDOW")
         .ok()
@@ -982,7 +990,9 @@ impl ChainState {
                     .max(expected_height.saturating_sub(1));
             }
         }
-        self.prune_caches();
+        if self.tip_height().is_multiple_of(CACHE_PRUNE_INTERVAL) {
+            self.prune_caches();
+        }
 
         Ok(())
     }
@@ -3257,7 +3267,9 @@ impl ChainState {
                 }
             }
         }
-        self.prune_caches();
+        if self.tip_height().is_multiple_of(CACHE_PRUNE_INTERVAL) {
+            self.prune_caches();
+        }
 
         if !advanced_tip && self.tip_hash() != hash {
             return Err("block stored on side chain".to_string());

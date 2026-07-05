@@ -318,7 +318,7 @@ pub fn tickets_active(height: u64) -> bool {
 /// Whether a valid ticket is REQUIRED (vs. advisory) — `IRIUM_POAWX_TICKETS_REQUIRED=1`.
 pub fn tickets_required() -> bool {
     if network_id_byte() == 0 {
-        return true; // mainnet: enforced once the gate is active (height-gated)
+        return false; // mainnet: ticket proofs remain hard-off; optional proofs are ignored.
     }
     std::env::var("IRIUM_POAWX_TICKETS_REQUIRED")
         .map(|v| v.trim() == "1")

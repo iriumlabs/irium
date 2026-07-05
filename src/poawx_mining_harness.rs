@@ -7,12 +7,11 @@
 //! so minerd's shares never match Irium's PoW target. The fix is to mine with
 //! Irium's ACTUAL PoW hash.
 //!
-//! This module provides the small, reusable, **mainnet-hard-off** primitives a
-//! devnet/testnet harness (in-process tests and the explicit
-//! `poawx-live-proof-harness` binary for the Phase 24L Windows live proof) needs
-//! to produce a real all-gates block:
-//!   * [`guard_network`] — refuse mainnet (`network_id == 0`); require an
-//!     explicit devnet/testnet id.
+//! This module provides the small, reusable primitives a live harness
+//! (in-process tests and the explicit `poawx-live-proof-harness` binary for the
+//! Phase 24L Windows live proof) needs to produce a real all-gates block:
+//!   * [`guard_network`] — accept the known Irium network ids and reject unknown
+//!     ids.
 //!   * [`guard_isolated_storage`] — refuse missing/default/`/tmp` runtime
 //!     storage; require an explicit isolated dir that is NOT the production
 //!     default (`$HOME/.irium` on Unix, `%USERPROFILE%\.irium` on Windows).
@@ -25,12 +24,12 @@
 //!     test (so the binary's exact construction is proven node-acceptable).
 //!
 //! Nothing here prints private keys, seeds, or VRF secrets. Harness keys are
-//! deterministic test/dev keys; this is devnet/testnet-only (mainnet hard-off).
+//! deterministic for test/dev paths; live mining supplies external key material.
 
 use crate::block::{Block, BlockHeader};
 use crate::constants::block_reward;
 use crate::poawx::{
-    count_leading_zero_bits, irx1_root_from_block_receipts_gated, multi_role_amounts,
+    count_leading_zero_bits, multi_role_amounts,
     Phase20ReceiptExt, PoawxBlockReceipt, PoawxRoleClaim, RoleReward, ROLE_COMPUTE_CONTRIBUTOR,
     ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
 };
@@ -50,20 +49,14 @@ use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-/// Refuse to run the harness on mainnet. Mainnet is `network_id == 0`
-/// ([`crate::activation::NetworkKind::id_byte`]). Only testnet (1) and devnet
-/// (2) are permitted. The caller MUST pass the resolved network id; this is the
-/// single mainnet-hard-off choke point for every harness entry point.
+/// Accept only known Irium network ids. Mainnet is `network_id == 0`
+/// ([`crate::activation::NetworkKind::id_byte`]), testnet is 1, and devnet is 2.
+/// The caller MUST pass the resolved network id.
 pub fn guard_network(network_id: u8) -> Result<(), String> {
     match network_id {
-        0 => Err(
-            "poawx mining harness: refusing to run on mainnet (network_id==0); \
-             require explicit devnet/testnet"
-                .to_string(),
-        ),
-        1 | 2 => Ok(()),
+        0 | 1 | 2 => Ok(()),
         other => Err(format!(
-            "poawx mining harness: unknown network_id {other}; require testnet(1)/devnet(2)"
+            "poawx mining harness: unknown network_id {other}; require mainnet(0)/testnet(1)/devnet(2)"
         )),
     }
 }
@@ -135,6 +128,14 @@ pub fn mine_pow(
     Err(format!(
         "poawx mining harness: no nonce satisfied target in {cap} iterations"
     ))
+}
+
+fn poawx_mine_pow_max_iters() -> u64 {
+    std::env::var("IRIUM_POAWX_MINE_POW_MAX_ITERS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(50_000_000)
+        .max(1)
 }
 
 fn hash160(data: &[u8]) -> [u8; 20] {
@@ -398,7 +399,7 @@ pub fn build_solo_poawx_block_with_parent_and_dominance(
 /// miner's PRIVATE proposer-VRF assignment (`proposer_ctx`). The caller runs its own
 /// sortition and supplies the assignment only when selected; the builder verifies it
 /// belongs to the worker and binds it into the receipt. `None` => no proposer
-/// assignment (identical to the non-proposer builder). Mainnet-hard-off.
+/// assignment (identical to the non-proposer builder).
 #[allow(clippy::too_many_arguments)]
 pub fn build_solo_poawx_block_with_proposer(
     miner_secret: &[u8; 32],
@@ -452,7 +453,7 @@ pub struct NodeGateFlags {
 /// Phase 31: the miner's already-built proposer-VRF assignment, threaded into the
 /// block builder. The miner runs its private sortition (it owns the secret) and
 /// supplies this only when selected at some allowed cascade round; the builder
-/// verifies it belongs to the worker and binds it into the receipt. Mainnet-off.
+/// verifies it belongs to the worker and binds it into the receipt.
 pub struct ProposerCtx {
     pub assignment: crate::poawx::ProposerAssignmentV1,
 }
@@ -934,7 +935,15 @@ fn build_all_gates_block_with(
         poawx_receipts: Some(vec![receipt]),
     };
     block.header.merkle_root = block.merkle_root();
-    mine_pow(&mut block.header, height, Target { bits }, 50_000_000)?;
+    if std::env::var("IRIUM_POAWX_SKIP_HEADER_POW")
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false)
+    {
+        // Receipt export mode: build/validate the PoAW-X receipt material without
+        // spending mainnet-scale work on the enclosing block header.
+    } else {
+        mine_pow(&mut block.header, height, Target { bits }, poawx_mine_pow_max_iters())?;
+    }
     let block_hash = block.header.hash_for_height(height);
 
     Ok(AllGatesProof {
@@ -951,13 +960,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn guard_network_rejects_mainnet() {
-        // E1: harness refuses mainnet; accepts only testnet/devnet.
-        assert!(guard_network(0).is_err(), "mainnet (0) must be refused");
+    fn guard_network_accepts_known_networks() {
+        // E1: harness accepts known Irium networks and refuses unknown ids.
+        assert!(guard_network(0).is_ok(), "mainnet (0) allowed");
         assert!(guard_network(1).is_ok(), "testnet (1) allowed");
         assert!(guard_network(2).is_ok(), "devnet (2) allowed");
         assert!(guard_network(7).is_err(), "unknown id refused");
-        let msg = guard_network(0).unwrap_err().to_lowercase();
+        let msg = guard_network(7).unwrap_err().to_lowercase();
         assert!(!msg.contains("secret") && !msg.contains("private") && !msg.contains("mnemonic"));
     }
 

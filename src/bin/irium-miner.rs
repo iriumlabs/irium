@@ -493,6 +493,66 @@ mod tests {
         assert_eq!(extract_height_from_coinbase1_hex("not-hex"), None);
         assert_eq!(extract_height_from_coinbase1_hex("00"), None); // too short
     }
+
+    // PoAW-X: prove the miner's receipt parser round-trips receipts emitted in
+    // the node's block_json_for shape, byte-for-byte, including the canonical
+    // receipts-root. This is the miner half of the sync fix
+    // (connect_block_from_json / load_persisted_blocks call parse_poawx_receipts_json).
+    #[test]
+    fn parse_poawx_receipts_json_roundtrips_shape_and_root() {
+        use irium_node_rs::poawx::{irx1_root_from_block_receipts, PoawxBlockReceipt};
+        let receipts = vec![
+            PoawxBlockReceipt {
+                height: 5,
+                lane: b'A',
+                worker_pkh: [0x11u8; 20],
+                worker_pubkey: [0x22u8; 33],
+                worker_sig: [0x33u8; 64],
+                solution: [0x44u8; 8],
+                commitment_nonce: [0x55u8; 32],
+                delegation: None,
+                phase20_ext: None,
+            },
+            PoawxBlockReceipt {
+                height: 5,
+                lane: b'B',
+                worker_pkh: [0x66u8; 20],
+                worker_pubkey: [0x77u8; 33],
+                worker_sig: [0x88u8; 64],
+                solution: [0x99u8; 8],
+                commitment_nonce: [0xaau8; 32],
+                delegation: None,
+                phase20_ext: None,
+            },
+        ];
+        // Build JSON exactly as the node's block_json_for emits it.
+        let arr: Vec<serde_json::Value> = receipts
+            .iter()
+            .map(|r| {
+                serde_json::json!({
+                    "height": r.height,
+                    "lane": std::str::from_utf8(&[r.lane]).unwrap_or("?").to_string(),
+                    "worker_pkh": hex::encode(r.worker_pkh),
+                    "worker_pubkey": hex::encode(r.worker_pubkey),
+                    "worker_sig": hex::encode(r.worker_sig),
+                    "solution": hex::encode(r.solution),
+                    "commitment_nonce": hex::encode(r.commitment_nonce),
+                })
+            })
+            .collect();
+        let v = serde_json::json!({ "poawx_receipts": arr });
+
+        let parsed = super::parse_poawx_receipts_json(&v).expect("receipts parsed");
+        assert_eq!(parsed, receipts, "receipts round-trip byte-for-byte");
+        assert_eq!(
+            irx1_root_from_block_receipts(&parsed),
+            irx1_root_from_block_receipts(&receipts),
+            "receipts-root matches byte-for-byte"
+        );
+
+        // A JSON without the field yields None (pre-activation blocks).
+        assert!(super::parse_poawx_receipts_json(&serde_json::json!({})).is_none());
+    }
 }
 
 fn miner_address_info() -> Option<(String, Vec<u8>)> {
@@ -1190,7 +1250,7 @@ fn load_persisted_blocks(state: &mut ChainState) {
                     },
                     transactions: txs,
                     auxpow: None,
-                    poawx_receipts: None,
+                    poawx_receipts: parse_poawx_receipts_json(&parsed),
                 };
                 // Recompute merkle to be safe.
                 block.header.merkle_root = block.merkle_root();
@@ -1480,6 +1540,98 @@ fn parse_bits(bits_str: &str) -> Result<u32, String> {
     u32::from_str_radix(trimmed, 16).map_err(|e| format!("invalid bits field: {e}"))
 }
 
+/// Parse the `poawx_receipts` array from a block JSON (as served by the node's
+/// `/rpc/block` / `/rpc/blocks` and written to persisted `block_<h>.json`) back
+/// into typed receipts. Without this, a synced block reconstructs with
+/// `poawx_receipts = None` and is rejected at/after PoAW-X activation, so the
+/// miner cannot cross the activation height. Verbatim mirror of the node's
+/// parser in iriumd.rs `parse_persisted_block_file`; a missing field yields
+/// `None` (pre-activation blocks carry no receipts).
+fn parse_poawx_receipts_json(
+    v: &serde_json::Value,
+) -> Option<Vec<irium_node_rs::poawx::PoawxBlockReceipt>> {
+    v.get("poawx_receipts")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|r| {
+                    fn to20(s: &str) -> Option<[u8; 20]> {
+                        let b = hex::decode(s).ok()?;
+                        if b.len() != 20 {
+                            return None;
+                        }
+                        let mut a = [0u8; 20];
+                        a.copy_from_slice(&b);
+                        Some(a)
+                    }
+                    fn to33(s: &str) -> Option<[u8; 33]> {
+                        let b = hex::decode(s).ok()?;
+                        if b.len() != 33 {
+                            return None;
+                        }
+                        let mut a = [0u8; 33];
+                        a.copy_from_slice(&b);
+                        Some(a)
+                    }
+                    fn to64(s: &str) -> Option<[u8; 64]> {
+                        let b = hex::decode(s).ok()?;
+                        if b.len() != 64 {
+                            return None;
+                        }
+                        let mut a = [0u8; 64];
+                        a.copy_from_slice(&b);
+                        Some(a)
+                    }
+                    fn to8(s: &str) -> Option<[u8; 8]> {
+                        let b = hex::decode(s).ok()?;
+                        if b.len() != 8 {
+                            return None;
+                        }
+                        let mut a = [0u8; 8];
+                        a.copy_from_slice(&b);
+                        Some(a)
+                    }
+                    fn to32(s: &str) -> Option<[u8; 32]> {
+                        let b = hex::decode(s).ok()?;
+                        if b.len() != 32 {
+                            return None;
+                        }
+                        let mut a = [0u8; 32];
+                        a.copy_from_slice(&b);
+                        Some(a)
+                    }
+                    Some(irium_node_rs::poawx::PoawxBlockReceipt {
+                        height: r.get("height")?.as_u64()?,
+                        lane: r.get("lane")?.as_str()?.bytes().next()?,
+                        worker_pkh: to20(r.get("worker_pkh")?.as_str()?)?,
+                        worker_pubkey: to33(r.get("worker_pubkey")?.as_str()?)?,
+                        worker_sig: to64(r.get("worker_sig")?.as_str()?)?,
+                        solution: to8(r.get("solution")?.as_str()?)?,
+                        commitment_nonce: to32(r.get("commitment_nonce")?.as_str()?)?,
+                        delegation: match r.get("delegation").and_then(|v| v.as_str()) {
+                            Some(s) if !s.is_empty() => Some(
+                                irium_node_rs::poawx::Delegation::deserialize(
+                                    &hex::decode(s).ok()?,
+                                )
+                                .ok()?,
+                            ),
+                            _ => None,
+                        },
+                        phase20_ext: match r.get("phase20_ext").and_then(|v| v.as_str()) {
+                            Some(s) if !s.is_empty() => Some(
+                                irium_node_rs::poawx::Phase20ReceiptExt::deserialize(
+                                    &hex::decode(s).ok()?,
+                                )
+                                .ok()?,
+                            ),
+                            _ => None,
+                        },
+                    })
+                })
+                .collect::<Vec<_>>()
+        })
+}
+
 fn connect_block_from_json(state: &mut ChainState, v: &serde_json::Value) -> Result<(), String> {
     let header_obj = v.get("header").ok_or("missing header")?;
     let get_hex32 = |key: &str| -> Result<[u8; 32], String> {
@@ -1539,7 +1691,7 @@ fn connect_block_from_json(state: &mut ChainState, v: &serde_json::Value) -> Res
         },
         transactions: txs,
         auxpow: None,
-        poawx_receipts: None,
+        poawx_receipts: parse_poawx_receipts_json(v),
     };
     block.header.merkle_root = block.merkle_root();
     state.connect_block(block).map(|_| ())

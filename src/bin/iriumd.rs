@@ -15321,6 +15321,36 @@ fn block_json_for(height: u64, block: &Block) -> Value {
             .and_then(|inp| extract_coinbase_tag(&inp.script_sig)),
         "poawx_finality_digest": hex::encode(poawx_finality_digest),
         "poawx_precommit_root": hex::encode(poawx_precommit_root),
+        // PoAW-X: emit block-contained receipts so RPC-syncing clients (e.g.
+        // irium-miner) reconstruct the block byte-identically and pass receipt
+        // validation at/after activation. Additive only; shape matches the node's
+        // own persisted-block parser (parse_persisted_block_file) and
+        // storage::write_block_json. null for pre-activation blocks (no receipts).
+        "poawx_receipts": block.poawx_receipts.as_ref().map(|recs| {
+            recs.iter()
+                .map(|r| {
+                    serde_json::json!({
+                        "height": r.height,
+                        "lane": std::str::from_utf8(&[r.lane]).unwrap_or("?").to_string(),
+                        "worker_pkh": hex::encode(r.worker_pkh),
+                        "worker_pubkey": hex::encode(r.worker_pubkey),
+                        "worker_sig": hex::encode(r.worker_sig),
+                        "solution": hex::encode(r.solution),
+                        "commitment_nonce": hex::encode(r.commitment_nonce),
+                        "delegation": r
+                            .delegation
+                            .as_ref()
+                            .map(|d| hex::encode(d.serialize()))
+                            .unwrap_or_default(),
+                        "phase20_ext": r
+                            .phase20_ext
+                            .as_ref()
+                            .map(|e| hex::encode(e.serialize()))
+                            .unwrap_or_default(),
+                    })
+                })
+                .collect::<Vec<serde_json::Value>>()
+        }),
     })
 }
 async fn get_block(
@@ -30311,6 +30341,60 @@ mod tests {
             block.header.nonce = block.header.nonce.wrapping_add(1);
         }
         block
+    }
+
+    // PoAW-X: end-to-end round-trip proving the RPC serializer (block_json_for)
+    // emits block-contained receipts in the exact shape the node's own parser
+    // (parse_persisted_block_file) reads back, byte-for-byte, including the
+    // delegation optional field. This is the node side of the irium-miner sync
+    // fix: connect_block_from_json uses a verbatim mirror of this parser.
+    // Self-contained; touches no live node.
+    #[test]
+    fn block_json_for_receipts_roundtrip_via_persisted_parse() {
+        let _g = p18b_blocks_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let base = p18b_temp_blocks_dir("bjf-roundtrip");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("IRIUM_BLOCKS_DIR", &base);
+
+        let block = p18b_mode1_block();
+        let original = block.poawx_receipts.clone().expect("receipts present");
+        let original_root =
+            irium_node_rs::poawx::irx1_root_from_block_receipts(&original);
+
+        // Real RPC emit path (now includes poawx_receipts).
+        let j = block_json_for(1, &block);
+        assert_eq!(
+            j.get("poawx_receipts")
+                .and_then(|v| v.as_array())
+                .map(|a| a.len()),
+            Some(1),
+            "block_json_for must emit the receipts array"
+        );
+
+        // Persist exactly what /rpc/block returns, then parse via the REAL node
+        // parser (the same logic irium-miner mirrors).
+        let path = base.join("block_1.json");
+        std::fs::write(&path, serde_json::to_string(&j).unwrap()).unwrap();
+        let (_h, reloaded) =
+            parse_persisted_block_file(&path, &"00".repeat(32)).expect("parse");
+
+        let got = reloaded
+            .poawx_receipts
+            .expect("receipts present after reload");
+        assert_eq!(
+            got, original,
+            "receipts survive block_json_for -> parse byte-for-byte"
+        );
+        assert_eq!(
+            irium_node_rs::poawx::irx1_root_from_block_receipts(&got),
+            original_root,
+            "receipts-root matches byte-for-byte after round-trip"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+        std::env::remove_var("IRIUM_BLOCKS_DIR");
     }
 
     #[test]

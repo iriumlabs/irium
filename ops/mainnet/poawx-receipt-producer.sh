@@ -2,7 +2,7 @@
 set -euo pipefail
 SECRET_FILE=/home/irium/.irium/state/poawx_miner_secret.hex
 NODE_RPC=${IRIUM_NODE_RPC:-http://127.0.0.1:38300}
-MINER_BIN=/home/irium/irium/target/release/irium-miner
+MINER_BIN=/home/irium/mainnet/bin/irium-miner-poawx
 WORK_DIR=/tmp/irium-poawx-receipt-producer
 mkdir -p "$WORK_DIR"
 node_token() {

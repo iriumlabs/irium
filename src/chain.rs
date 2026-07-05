@@ -1374,7 +1374,18 @@ impl ChainState {
             }
             // eligibility against the frozen registry; permissive while the registry is
             // empty (bootstrap) since the threshold then admits everyone.
+            // Liveness recovery (gated): under a GENUINE stall (parent older than
+            // proposer_stall_recovery_secs(), above MAX_FUTURE_BLOCK_TIME so the gap
+            // cannot be forged), relax frozen-WINDOW membership to any prior on-chain
+            // registration. VRF sortition priority is still enforced below.
+            let liveness_relaxed = crate::activation::poawx_liveness_recovery_active(height)
+                && (block.header.time.saturating_sub(parent_time) as u64)
+                    >= crate::poawx_proposer::proposer_stall_recovery_secs()
+                && self
+                    .proposer_registry
+                    .is_registered(&pa.proof.assignment_public_key);
             if n > 0
+                && !liveness_relaxed
                 && !self
                     .proposer_registry
                     .is_eligible(&pa.proof.assignment_public_key, height)
@@ -14365,6 +14376,90 @@ mod proposer_consensus_tests {
             .expect("registered proposer key accepted");
         std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
         std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn liveness_recovery_admits_registered_expired_key_under_stall() {
+        // Genuine stall + recovery gate active => a REGISTERED but out-of-window
+        // (expired) proposer key is re-admitted, so a chain whose only in-window
+        // proposer went offline can recover. VRF sortition priority still enforced.
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        std::env::set_var("IRIUM_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT", "0");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let secret = secret_n(1);
+        let proof = prove(&secret, net, height, seed);
+        let block_key = proof.assignment_public_key;
+        let block_pkh = proof.solver_pkh;
+        let tmpl = ext_skeleton(net);
+        // time 30_000 > default stall floor (21_600); previous=None => parent_time=0 => stalled.
+        let block = block_with_proof(&tmpl, prev_hash, height, proof, 0, 30_000);
+        let mut cs = base_chain();
+        // a DIFFERENT key IN-window (height 0) => eligible_count == 1 (n>0, gate reached).
+        let mut other_key = [0u8; 33];
+        other_key[0] = 0x02;
+        other_key[1] = 0xEE;
+        cs.proposer_registry.register(other_key, [0x7Au8; 20], 0);
+        // the block's own key registered but OUT of window (height 1) => expired.
+        cs.proposer_registry.register(block_key, block_pkh, 1);
+        assert_eq!(cs.proposer_registry.eligible_count(height), 1);
+        assert!(cs.proposer_registry.is_registered(&block_key));
+        cs.validate_block_proposer(&block, height, None)
+            .expect("stalled + gated recovery must admit the registered (expired) proposer");
+        std::env::remove_var("IRIUM_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn liveness_recovery_gate_off_leaves_expired_key_rejected() {
+        // Gate OFF => the same stalled block with a registered-but-expired proposer key
+        // is still rejected => default behavior byte-identical.
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        std::env::remove_var("IRIUM_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let secret = secret_n(1);
+        let proof = prove(&secret, net, height, seed);
+        let block_key = proof.assignment_public_key;
+        let block_pkh = proof.solver_pkh;
+        let tmpl = ext_skeleton(net);
+        let block = block_with_proof(&tmpl, prev_hash, height, proof, 0, 30_000);
+        let mut cs = base_chain();
+        let mut other_key = [0u8; 33];
+        other_key[0] = 0x02;
+        other_key[1] = 0xEE;
+        cs.proposer_registry.register(other_key, [0x7Au8; 20], 0);
+        cs.proposer_registry.register(block_key, block_pkh, 1);
+        assert_eq!(cs.proposer_registry.eligible_count(height), 1);
+        let err = cs
+            .validate_block_proposer(&block, height, None)
+            .expect_err("gate off => expired key still rejected");
+        assert!(err.contains("not eligible"), "got: {err}");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn proposer_stall_recovery_secs_has_unforgeable_floor() {
+        // default 6h; floor is 2x MAX_FUTURE_BLOCK_TIME (14_400) so the stall gap cannot
+        // be forged via a future timestamp.
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_STALL_RECOVERY_SECS");
+        assert_eq!(crate::poawx_proposer::proposer_stall_recovery_secs(), 21_600);
+        std::env::set_var("IRIUM_POAWX_PROPOSER_STALL_RECOVERY_SECS", "1");
+        assert_eq!(crate::poawx_proposer::proposer_stall_recovery_secs(), 14_400);
+        std::env::set_var("IRIUM_POAWX_PROPOSER_STALL_RECOVERY_SECS", "30000");
+        assert_eq!(crate::poawx_proposer::proposer_stall_recovery_secs(), 30_000);
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_STALL_RECOVERY_SECS");
     }
 
     #[test]

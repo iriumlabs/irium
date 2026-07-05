@@ -305,6 +305,25 @@ pub fn poawx_serving_active(height: u64) -> bool {
         .unwrap_or(false)
 }
 
+/// Mainnet PoAW-X liveness-recovery activation height. Fixed in consensus code.
+/// At/after this height, if the chain is GENUINELY stalled (parent older than
+/// `proposer_stall_recovery_secs()`, a threshold above MAX_FUTURE_BLOCK_TIME so the
+/// gap cannot be forged), the proposer frozen-WINDOW eligibility test is relaxed to
+/// any prior on-chain registration. Dormant until a real multi-hour stall.
+pub const MAINNET_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT: Option<u64> = Some(50_000);
+
+/// True when mainnet PoAW-X liveness recovery is active at `height`. Testnet/devnet
+/// gate on `IRIUM_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT`.
+pub fn poawx_liveness_recovery_active(height: u64) -> bool {
+    if network_id_byte() == 0 {
+        return matches!(MAINNET_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT, Some(h) if height >= h);
+    }
+    env::var("IRIUM_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map_or(false, |h| height >= h)
+}
+
 pub fn poawx_delegation_activation_height() -> Option<u64> {
     env::var("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT")
         .ok()

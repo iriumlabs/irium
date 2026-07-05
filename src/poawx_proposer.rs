@@ -208,6 +208,20 @@ pub fn proposer_registration_active(height: u64) -> bool {
     )
 }
 
+/// Emergency liveness-recovery stall threshold (seconds). If the parent block is
+/// older than this, the chain is treated as genuinely stalled and (when the recovery
+/// gate is active) the frozen-window proposer check is relaxed to any prior on-chain
+/// registration. Hard floor 14400 (2x MAX_FUTURE_BLOCK_TIME) so a miner cannot forge
+/// the stall gap via a future timestamp.
+pub const DEFAULT_PROPOSER_STALL_RECOVERY_SECS: u64 = 21_600; // 6h
+pub fn proposer_stall_recovery_secs() -> u64 {
+    std::env::var("IRIUM_POAWX_PROPOSER_STALL_RECOVERY_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_PROPOSER_STALL_RECOVERY_SECS)
+        .max(14_400)
+}
+
 pub fn proposer_expiry_window() -> u64 {
     std::env::var("IRIUM_POAWX_PROPOSER_EXPIRY_WINDOW")
         .ok()

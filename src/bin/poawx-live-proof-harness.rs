@@ -1,18 +1,18 @@
-//! Phase 24L — Irium PoAW-X live-proof harness (devnet/testnet ONLY).
+//! Phase 24L — Irium PoAW-X live-proof harness.
 //!
-//! Connects to a LOCAL devnet/testnet node over loopback RPC, builds a complete
+//! Connects to a LOCAL node over loopback RPC, builds a complete
 //! all-gates PoAW-X block with Irium-native PoW (via the proven
 //! `irium_node_rs::poawx_mining_harness::build_devnet_all_gates_block`), ingests
 //! the candidate admissions, submits the block through the real
 //! `/rpc/submit_block_extended` path, and verifies the node accepted it (height
 //! advanced).
 //!
-//! SAFETY (fail-closed): refuses mainnet (`network_id == 0`), requires an
-//! explicit `--devnet`/`--testnet` flag, requires a loopback `--rpc-url`,
+//! SAFETY (fail-closed): accepts only known Irium network ids, requires an
+//! explicit `--devnet`/`--testnet` flag for this CLI, requires a loopback `--rpc-url`,
 //! requires an explicit isolated `--work-dir` that is NOT the production default
 //! (`%USERPROFILE%\.irium` / `$HOME/.irium`). Never prints private keys, seeds,
 //! or VRF secrets. Writes artifacts only under the explicit work dir. This is a
-//! local devnet proof tool: it is NOT a mainnet/production component.
+//! local live-proof tool: it is NOT a general-purpose production miner.
 
 use irium_node_rs::activation::network_id_byte;
 use irium_node_rs::poawx::Phase20ReceiptExt;
@@ -117,9 +117,9 @@ fn validate_work_dir(dir: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Resolve the network id from the explicit flag + the node env, fail-closed on
-/// mainnet. `--devnet` => 2, `--testnet` => 1; the resolved env id must agree and
-/// must not be mainnet.
+/// Resolve the network id from the explicit flag + the node env. The shared
+/// guard accepts known Irium networks; this CLI still exposes only `--devnet` => 2
+/// and `--testnet` => 1, and the resolved env id must agree.
 fn resolve_network(a: &Args) -> Result<u8, String> {
     let env_id = network_id_byte();
     guard_network(env_id)?;
@@ -281,7 +281,7 @@ fn run(a: &Args) -> Result<String, String> {
             })
     };
 
-    // 4) build the all-gates block with Irium-native PoW (mainnet hard-off).
+    // 4) build the all-gates block with Irium-native PoW.
     let proof =
         build_devnet_all_gates_block(net, height, prev_hash, parent_prev_hash, bits, time, receipt_diff)?;
 
@@ -351,7 +351,7 @@ fn run(a: &Args) -> Result<String, String> {
 
     Ok(format!(
         "PoAW-X LIVE PROOF OK\n\
-         network_id        : {net} (non-mainnet)\n\
+         network_id        : {net}\n\
          before_height     : {before}\n\
          after_height      : {after}\n\
          submitted_height  : {height}\n\
@@ -369,10 +369,10 @@ fn run(a: &Args) -> Result<String, String> {
 }
 
 fn usage() -> &'static str {
-    "poawx-live-proof-harness (devnet/testnet ONLY)\n\
+    "poawx-live-proof-harness\n\
      usage: poawx-live-proof-harness --devnet --rpc-url http://127.0.0.1:41011 \
      --work-dir <isolated-dir> [--rpc-token <token>]\n\
-     refuses mainnet, non-loopback RPC, and default %USERPROFILE%\\.irium / $HOME/.irium."
+     refuses unknown networks, non-loopback RPC, and default %USERPROFILE%\\.irium / $HOME/.irium."
 }
 
 fn main() {
@@ -404,10 +404,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rejects_mainnet_network() {
-        // F: harness rejects mainnet at the guard layer.
-        assert!(guard_network(0).is_err());
+    fn accepts_known_networks() {
+        // F: shared harness guard accepts known Irium networks and rejects unknown ids.
+        assert!(guard_network(0).is_ok());
+        assert!(guard_network(1).is_ok());
         assert!(guard_network(2).is_ok());
+        assert!(guard_network(7).is_err());
     }
 
     #[test]

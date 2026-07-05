@@ -246,6 +246,8 @@ struct Job {
     poawx_mode: String,
     /// Phase 10-D: pending receipts from template for irx1 coinbase injection.
     poawx_pending_receipts: Vec<PoawxPendingReceipt>,
+    poawx_reg_activations: Vec<String>,
+    poawx_reg_announces: Vec<String>,
     /// Phase 18B step-3: per-block PoAW-X assignment fetched from the node
     /// (/poawx/assignment) for this job's height. None when delegation is off or
     /// the assignment was unavailable/mismatched (fail-closed → no mode-1).
@@ -279,6 +281,8 @@ struct CanonicalJobSnapshot {
     /// PoAW-X pending receipts (incl. worker_pubkey/worker_sig) carried to the
     /// cpuminer-compat submit path so it can use /rpc/submit_block_extended.
     poawx_pending_receipts: Vec<PoawxPendingReceipt>,
+    poawx_reg_activations: Vec<String>,
+    poawx_reg_announces: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1023,6 +1027,8 @@ struct SubmitBlockExtendedRequest {
     auxpow_hex: Option<String>,
     poawx_receipts: Vec<PoawxPendingReceipt>,
     poawx_receipts_root: String,
+    poawx_reg_activations: Vec<String>,
+    poawx_reg_announces: Vec<String>,
 }
 
 #[derive(serde::Serialize)]
@@ -1639,6 +1645,8 @@ fn build_canonical_job_snapshot(
         irium_header80,
         irium_coinbase_hex,
         poawx_pending_receipts: build_session_poawx_receipts(job, session, config, &pkh),
+        poawx_reg_activations: job.poawx_reg_activations.clone(),
+        poawx_reg_announces: job.poawx_reg_announces.clone(),
     })
 }
 
@@ -2127,6 +2135,8 @@ fn to_job(seq: u64, tpl: &GetBlockTemplate) -> Result<Job> {
         .unwrap_or(false);
     let poawx_mode = tpl.poawx_mode.clone();
     let poawx_pending_receipts = tpl.poawx_pending_receipts.clone();
+    let poawx_reg_activations = tpl.poawx_reg_activations.clone();
+    let poawx_reg_announces = tpl.poawx_reg_announces.clone();
     if poawx_enabled && poawx_mode == "active" && !poawx_pending_receipts.is_empty() {
         let root = compute_receipts_root_from_pending(&poawx_pending_receipts);
         let irx1_script = build_irx1_commitment_script(&root);
@@ -2158,6 +2168,8 @@ fn to_job(seq: u64, tpl: &GetBlockTemplate) -> Result<Job> {
         coinbase_extras,
         poawx_mode,
         poawx_pending_receipts,
+        poawx_reg_activations,
+        poawx_reg_announces,
         // Filled by template_loop (async) from /poawx/assignment when delegation
         // production is enabled; None here keeps to_job sync + mode-0 default.
         poawx_assignment: None,
@@ -3214,6 +3226,8 @@ fn build_submit_variant(
             auxpow_hex: req.auxpow_hex,
             poawx_receipts: snapshot.poawx_pending_receipts.clone(),
             poawx_receipts_root: receipts_root,
+            poawx_reg_activations: snapshot.poawx_reg_activations.clone(),
+            poawx_reg_announces: snapshot.poawx_reg_announces.clone(),
         })
     } else {
         SubmitVariant::Legacy(req)
@@ -4231,6 +4245,8 @@ async fn handle_submit_legacy_rewardable(
                 auxpow_hex: req.auxpow_hex,
                 poawx_receipts: job.poawx_pending_receipts.clone(),
                 poawx_receipts_root: receipts_root.clone(),
+                poawx_reg_activations: job.poawx_reg_activations.clone(),
+                poawx_reg_announces: job.poawx_reg_announces.clone(),
             };
             let url = format!(
                 "{}/rpc/submit_block_extended",
@@ -4684,6 +4700,8 @@ mod tests {
             coinbase_extras: vec![],
             poawx_mode: String::new(),
             poawx_pending_receipts: vec![],
+            poawx_reg_activations: vec![],
+            poawx_reg_announces: vec![],
             poawx_assignment: None,
         }
     }
@@ -4703,6 +4721,8 @@ mod tests {
             coinbase_extras: vec![],
             poawx_mode: String::new(),
             poawx_pending_receipts: vec![],
+            poawx_reg_activations: vec![],
+            poawx_reg_announces: vec![],
             poawx_assignment: None,
         }
     }
@@ -5185,6 +5205,8 @@ mod tests {
             irium_header80: None,
             irium_coinbase_hex: None,
             poawx_pending_receipts: receipts,
+            poawx_reg_activations: vec![],
+            poawx_reg_announces: vec![],
         }
     }
 
@@ -5630,6 +5652,8 @@ mod tests {
             irium_header80: None,
             irium_coinbase_hex: None,
             poawx_pending_receipts: vec![],
+            poawx_reg_activations: vec![],
+            poawx_reg_announces: vec![],
         };
         let solve = CanonicalSolve {
             adapter_id: "cpuminer_compat",

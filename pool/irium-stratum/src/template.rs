@@ -39,6 +39,10 @@ pub struct GetBlockTemplate {
     /// Phase 10-D: pending puzzle receipts from /poawx/receipt.
     #[serde(default)]
     pub poawx_pending_receipts: Vec<PoawxPendingReceipt>,
+    #[serde(default)]
+    pub poawx_reg_activations: Vec<String>,
+    #[serde(default)]
+    pub poawx_reg_announces: Vec<String>,
     /// Phase 10-D: hex receipts_root computed by iriumd.
     #[serde(default)]
     pub receipts_root: String,

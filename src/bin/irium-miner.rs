@@ -3663,6 +3663,39 @@ fn run_poawx_solo() -> Result<(), String> {
             }
         };
 
+        if env::var("IRIUM_POAWX_EXPORT_RECEIPT_JSON")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
+            let receipt = proof
+                .block
+                .poawx_receipts
+                .as_ref()
+                .and_then(|r| r.first())
+                .ok_or("missing receipt in built block")?;
+            let ext_hex = receipt
+                .phase20_ext
+                .as_ref()
+                .map(|e: &irium_node_rs::poawx::Phase20ReceiptExt| hex::encode(e.serialize()))
+                .unwrap_or_default();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "height": receipt.height,
+                    "lane": (receipt.lane as char).to_string(),
+                    "worker_pkh": hex::encode(receipt.worker_pkh),
+                    "solution": hex::encode(receipt.solution),
+                    "commitment_nonce": hex::encode(receipt.commitment_nonce),
+                    "worker_pubkey": hex::encode(receipt.worker_pubkey),
+                    "worker_sig": hex::encode(receipt.worker_sig),
+                    "delegation": "",
+                    "phase20_ext": ext_hex,
+                }))
+                .map_err(|e| format!("receipt json encode: {e}"))?
+            );
+            return Ok(());
+        }
+
         // Candidate-admission gossip is best-effort: with committed-admission
         // (phase22a) enforced the node skips the phase21e admission-cache check, so a
         // rejected/failed gossip post must NOT block block submission.

@@ -1555,6 +1555,10 @@ struct PoawxReceiptRequest {
     worker_pubkey: String,
     #[serde(default)]
     worker_sig: String,
+    #[serde(default)]
+    delegation: String,
+    #[serde(default)]
+    phase20_ext: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -14226,11 +14230,8 @@ fn poawx_receipts_file() -> std::path::PathBuf {
     }
 }
 
-/// Returns empty Vec on mainnet, missing file, or parse failure -- never panics.
+/// Returns empty Vec on missing file or parse failure -- never panics.
 fn load_poawx_pending_receipts() -> Vec<PoawxPendingReceipt> {
-    if network_kind_from_env() == NetworkKind::Mainnet {
-        return Vec::new();
-    }
     let path = poawx_receipts_file();
     let bytes = match std::fs::read(&path) {
         Ok(b) => b,
@@ -14256,11 +14257,8 @@ fn load_poawx_pending_receipts() -> Vec<PoawxPendingReceipt> {
     }
 }
 
-/// Persists receipts to disk. No-op on mainnet or on write failure (logs error).
+/// Persists receipts to disk. Write failures are logged.
 fn save_poawx_pending_receipts(receipts: &[PoawxPendingReceipt]) {
-    if network_kind_from_env() == NetworkKind::Mainnet {
-        return;
-    }
     let path = poawx_receipts_file();
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -14874,11 +14872,8 @@ async fn poawx_post_receipt(
         commitment_nonce: req.commitment_nonce.clone(),
         worker_pubkey: req.worker_pubkey.clone(),
         worker_sig: req.worker_sig.clone(),
-        // Manual-seed endpoint is mode-0 only; delegated receipts arrive via the
-        // pool's submit_block_extended path.
-        delegation: String::new(),
-        // Phase 20: manual-seed receipts carry no production extension.
-        phase20_ext: String::new(),
+        delegation: req.delegation.clone(),
+        phase20_ext: req.phase20_ext.clone(),
     };
     let tip_height = state
         .chain
@@ -28129,6 +28124,8 @@ mod tests {
             commitment_nonce: "00".repeat(32),
             worker_pubkey: String::new(),
             worker_sig: String::new(),
+            delegation: String::new(),
+            phase20_ext: String::new(),
         };
         let result = poawx_post_receipt(
             ConnectInfo(test_socket()),
@@ -28985,6 +28982,8 @@ mod tests {
             commitment_nonce: "bb".repeat(32),
             worker_pubkey: pubkey_hex,
             worker_sig: "cc".repeat(64),
+            delegation: String::new(),
+            phase20_ext: String::new(),
         };
         let result = poawx_post_receipt(
             ConnectInfo(test_socket()),
@@ -29018,6 +29017,8 @@ mod tests {
             commitment_nonce: "bb".repeat(32),
             worker_pubkey: pubkey_hex,
             worker_sig: "cc".repeat(64),
+            delegation: String::new(),
+            phase20_ext: String::new(),
         };
         let result = poawx_post_receipt(
             ConnectInfo(test_socket()),
@@ -29052,6 +29053,8 @@ mod tests {
             commitment_nonce: "bb".repeat(32),
             worker_pubkey: pubkey_hex,
             worker_sig: "cc".repeat(64),
+            delegation: String::new(),
+            phase20_ext: String::new(),
         };
         let result = poawx_post_receipt(
             ConnectInfo(test_socket()),
@@ -29379,6 +29382,8 @@ mod tests {
             commitment_nonce: "bb".repeat(32),
             worker_pubkey: pubkey_hex,
             worker_sig: "cc".repeat(64),
+            delegation: String::new(),
+            phase20_ext: String::new(),
         };
         let result = poawx_post_receipt(
             ConnectInfo(test_socket()),
@@ -29411,6 +29416,8 @@ mod tests {
             commitment_nonce: "bb".repeat(32),
             worker_pubkey: pubkey_hex,
             worker_sig: "cc".repeat(64),
+            delegation: String::new(),
+            phase20_ext: String::new(),
         };
         let result = poawx_post_receipt(
             ConnectInfo(test_socket()),
@@ -29603,6 +29610,8 @@ mod tests {
             commitment_nonce: hex::encode(nonce),
             worker_pubkey: pubkey_hex,
             worker_sig: sig,
+            delegation: String::new(),
+            phase20_ext: String::new(),
         };
         let result = poawx_post_receipt(
             ConnectInfo(test_socket()),
@@ -29653,6 +29662,8 @@ mod tests {
             commitment_nonce: nonce_hex.clone(),
             worker_pubkey: pubkey_hex.clone(),
             worker_sig: sig.clone(),
+            delegation: String::new(),
+            phase20_ext: String::new(),
         };
         let result = poawx_post_receipt(
             ConnectInfo(test_socket()),
@@ -29695,6 +29706,8 @@ mod tests {
             commitment_nonce: "bb".repeat(32),
             worker_pubkey: pubkey_hex,
             worker_sig: "cc".repeat(64),
+            delegation: String::new(),
+            phase20_ext: String::new(),
         };
         let result = poawx_post_receipt(
             ConnectInfo(test_socket()),

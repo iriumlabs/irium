@@ -28269,7 +28269,7 @@ mod tests {
     }
 
     #[test]
-    fn test_poawx_mainnet_save_is_noop() {
+    fn test_poawx_mainnet_save_persists_receipts() {
         let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("IRIUM_NETWORK");
         let tmp = std::env::temp_dir().join("irium_test_poawx_d5.json");
@@ -28289,14 +28289,12 @@ mod tests {
         save_poawx_pending_receipts(&[receipt]);
         let exists = tmp.exists();
         std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        assert!(
-            !exists,
-            "save must be a no-op on mainnet -- no file must be written"
-        );
+        let _ = std::fs::remove_file(&tmp);
+        assert!(exists, "mainnet save must persist pending receipts");
     }
 
     #[test]
-    fn test_poawx_mainnet_load_returns_empty() {
+    fn test_poawx_mainnet_load_returns_persisted_receipts() {
         let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("IRIUM_NETWORK");
         let tmp = std::env::temp_dir().join("irium_test_poawx_d6.json");
@@ -28317,10 +28315,8 @@ mod tests {
         let loaded = load_poawx_pending_receipts();
         std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
         let _ = std::fs::remove_file(&tmp);
-        assert!(
-            loaded.is_empty(),
-            "load must return empty Vec on mainnet even if file exists"
-        );
+        assert_eq!(loaded.len(), 1, "mainnet load must return persisted receipts");
+        assert_eq!(loaded[0].height, 99);
     }
 
     #[test]
@@ -28551,7 +28547,7 @@ mod tests {
     }
 
     #[test]
-    fn test_poawx_mainnet_ignores_persistence_and_pruning() {
+    fn test_poawx_mainnet_persists_and_prunes_receipts() {
         let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("IRIUM_NETWORK");
         let tmp = std::env::temp_dir().join("irium_test_poawx_e8.json");
@@ -28573,12 +28569,9 @@ mod tests {
         let mut v = loaded.clone();
         prune_expired_poawx_receipts(&mut v, 9999);
         std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        assert!(!tmp.exists(), "mainnet must not write any receipt file");
-        assert!(loaded.is_empty(), "mainnet must not load any receipts");
-        assert!(
-            v.is_empty(),
-            "mainnet prune on empty Vec must be safe no-op"
-        );
+        let _ = std::fs::remove_file(&tmp);
+        assert_eq!(loaded.len(), 1, "mainnet must load persisted receipts");
+        assert!(v.is_empty(), "mainnet must prune expired persisted receipts");
     }
 
     #[tokio::test]

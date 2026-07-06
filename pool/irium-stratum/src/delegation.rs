@@ -753,7 +753,12 @@ pub fn build_mode1_pending_receipt(
     let signer_sig = key.sign_challenge(&solution, &ctx.commitment_nonce, ctx.block_height);
     let receipt = crate::template::PoawxPendingReceipt {
         height: ctx.block_height,
-        lane: ctx.lane.clone(),
+        // connect_block audit (chain.rs: r.lane != b'A') requires the canonical
+        // PoAW-X lane 'A' once audit hardening is active (mainnet >= 50000). The
+        // assignment DTO advertises "cpu"; the canonical single-byte receipt lane
+        // is 'A', matching the mode-0 miner. Emit 'A' so mode-1 receipts pass the
+        // audit lane check (the receipts-root canonicalises lane to its first byte).
+        lane: "A".to_string(),
         worker_pkh: miner_pkh_hex,
         solution: hex::encode(solution),
         commitment_nonce: hex::encode(ctx.commitment_nonce),
@@ -5033,7 +5038,7 @@ mod tests {
             "signer = pool delegate"
         );
         assert_eq!(rec.height, 1);
-        assert_eq!(rec.lane, "cpu");
+        assert_eq!(rec.lane, "A"); // canonical audit lane: connect_block requires b__A__
         assert!(!rec.delegation.is_empty(), "carries embedded delegation");
         // Root parity: pool root == node irx1_root_from_block_receipts.
         let block_rec = irium_node_rs::poawx::PoawxBlockReceipt {

@@ -6576,4 +6576,617 @@ mod tests {
             }
         }
     }
+
+    // ── Stage A: mode-1 DELEGATED per-miner receipt proves rewards go to the
+    // MINER's own address, reusing the existing accept path (pay receipt worker)
+    // with NO coinbase-shape change. Against an isolated bb75913 iriumd on :38500
+    // started with delegation activation enabled.
+    //
+    // Flow (all production functions):
+    //   miner keypair + pool delegate key -> miner signs a Delegation authorizing
+    //   the pool -> verify_and_store -> fetch /poawx/assignment -> ctx ->
+    //   build_mode1_pending_receipt (worker_pkh = MINER, delegate-signed) ->
+    //   attach synthetic Phase20 ext -> POST /poawx/receipt -> node accepts,
+    //   template pending=1 with worker_pkh=miner -> build+submit the block via the
+    //   same native path as stage3b -> node ACCEPTS (so poawx_validate_reward_split
+    //   passed for the MINER's worker_pkh) -> decode the accepted coinbase and
+    //   confirm every payout output is the MINER's address.
+    //
+    // Rig node must run with (devnet): delegation + phase20 + audit activation = 1.
+    // Run: cargo test -p irium-stratum --release \
+    //   'stratum::tests::stage_a_mode1_delegated_receipt_pays_miner_e2e' \
+    //   -- --ignored --exact --nocapture --test-threads=1
+    #[tokio::test]
+    #[ignore = "stage-A live E2E: needs bb75913 iriumd on :38500 with delegation activation"]
+    async fn stage_a_mode1_delegated_receipt_pays_miner_e2e() {
+        use k256::ecdsa::{signature::hazmat::PrehashSigner, Signature, SigningKey};
+        use ripemd::Ripemd160;
+        use sha2::{Digest, Sha256};
+
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_AUDIT_HARDENING_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS", "1");
+        std::env::set_var("IRIUM_STRATUM_POAWX", "1");
+
+        let base =
+            std::env::var("E2E_NODE").unwrap_or_else(|_| "http://127.0.0.1:38500".to_string());
+        let token = std::env::var("E2E_TOKEN")
+            .unwrap_or_else(|_| "e2ecompattoken1234567890".to_string());
+        let client = reqwest::Client::new();
+
+        // Deterministic miner key (the address that MUST get paid) + pool delegate key.
+        let miner = SigningKey::from_slice(&[0x5au8; 32]).unwrap();
+        let miner_pub: [u8; 33] = miner
+            .verifying_key()
+            .to_encoded_point(true)
+            .as_bytes()
+            .try_into()
+            .unwrap();
+        let miner_pkh: [u8; 20] = {
+            let s = Sha256::digest(miner_pub);
+            let r = Ripemd160::digest(s);
+            let mut a = [0u8; 20];
+            a.copy_from_slice(&r);
+            a
+        };
+        let miner_pkh_hex = hex::encode(miner_pkh);
+        let worker = "rigA";
+        let dk_path = std::env::temp_dir().join("stage_a_delegate_key.hex");
+        let _ = std::fs::remove_file(&dk_path);
+        let delegate =
+            crate::delegation::DelegateKey::load_or_generate(&dk_path, true).expect("delegate key");
+
+        // Miner signs a Delegation authorizing the pool (mode-1 authorization).
+        let mut d = crate::delegation::Delegation {
+            deleg_version: crate::delegation::Delegation::VERSION,
+            network_id: 2,
+            miner_pubkey: miner_pub,
+            pool_pubkey: delegate.pubkey(),
+            worker_tag: crate::delegation::worker_tag(worker),
+            expiry_height: 10_000_000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [7u8; 32],
+            delegation_sig: [0u8; 64],
+        };
+        let sig: Signature = miner.sign_prehash(&d.message_hash()).unwrap();
+        d.delegation_sig.copy_from_slice(&sig.to_bytes());
+        d.verify_signature().expect("delegation self-verifies");
+
+        // Fetch a template + assignment; require phase20 active at this height.
+        let tpl: crate::template::GetBlockTemplate = client
+            .get(format!("{base}/rpc/getblocktemplate"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .expect("gbt")
+            .json()
+            .await
+            .expect("gbt json");
+        let height = tpl.height;
+        assert!(
+            crate::delegation::node_phase20_production_active(height),
+            "phase20 must be active at height {height}"
+        );
+
+        // Store the delegation (registry holds public material only).
+        let store_path = std::env::temp_dir().join("stage_a_delegations.json");
+        let _ = std::fs::remove_file(&store_path);
+        let store = crate::delegation::JsonDelegationStore::open(&store_path).expect("store");
+        crate::delegation::verify_and_store(
+            &store,
+            &hex::encode(d.serialize()),
+            worker,
+            &miner_pkh_hex,
+            &delegate.pubkey(),
+            2,
+            height.saturating_sub(1),
+            42,
+            None,
+        )
+        .expect("verify_and_store");
+
+        let asg: crate::template::PoawxAssignment = client
+            .get(format!("{base}/poawx/assignment"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .expect("assignment")
+            .json()
+            .await
+            .expect("assignment json");
+        let ctx = crate::delegation::assignment_context_from_dto(&asg, height)
+            .expect("assignment context for this job height");
+
+        // Produce the mode-1 receipt: worker_pkh = MINER, signed by the pool delegate.
+        let mut receipt = crate::delegation::build_mode1_pending_receipt(
+            &store,
+            &delegate,
+            2,
+            miner_pkh,
+            worker,
+            &ctx,
+        )
+        .expect("build_mode1_pending_receipt");
+        assert_eq!(
+            receipt.worker_pkh, miner_pkh_hex,
+            "mode-1 receipt worker_pkh MUST be the miner's pkh"
+        );
+
+        // Attach a synthetic Phase20 ext (devnet) so the block can be built at a
+        // production height; primary = the miner.
+        let prev_hash_internal = crate::block::parse_hex32(&tpl.prev_hash).expect("prev hash");
+        let ext = crate::delegation::build_synthetic_phase20_ext(
+            2,
+            height,
+            &prev_hash_internal,
+            &miner_pkh,
+            &[],
+            None,
+        )
+        .expect("synthetic phase20 ext");
+        receipt.phase20_ext = hex::encode(ext.serialize());
+
+        // POOL architecture: include the pool's own mode-1 receipt DIRECTLY in the
+        // block submission. submit_block_extended validates mode-1 via
+        // verify_delegated_pending_receipt; the node /poawx/receipt endpoint is
+        // mode-0-only (worker_pkh==pkh(worker_pubkey)), so we deliberately do NOT
+        // post there. This matches how the pool actually injects receipts.
+        let mut tpl_with = tpl.clone();
+        tpl_with.poawx_mode = "active".to_string();
+        tpl_with.poawx_pending_receipts = vec![receipt.clone()];
+        let job = to_job(1, &tpl_with).expect("to_job");
+        let gated_root = crate::block::compute_receipts_root_from_pending_gated(
+            &job.poawx_pending_receipts,
+            crate::delegation::node_phase20_production_active(height),
+        );
+        let gated_root_hex = hex::encode(gated_root);
+        let ntime = u32::from_str_radix(&job.ntime_hex, 16).unwrap();
+        let mut tx_hashes_internal = Vec::with_capacity(job.tx_hex.len());
+        for t in &job.tx_hex {
+            tx_hashes_internal.push(crate::pow::sha256d(&hex::decode(t).unwrap()));
+        }
+        let snapshot = CanonicalJobSnapshot {
+            job_id: job.job_id.clone(),
+            template_fingerprint: "stageA".to_string(),
+            height: job.height,
+            version: 1,
+            prev_hash_internal: job.prev_hash,
+            bits: job.bits,
+            block_target: crate::pow::target_from_bits(job.bits),
+            coinbase_value: job.coinbase_value,
+            base_ntime: ntime,
+            extranonce1: vec![],
+            extranonce2_size: 4,
+            coinbase_prefix: vec![],
+            coinbase_suffix: vec![],
+            payout_script: payout_script_from_pkh(&miner_pkh),
+            tx_hex: job.tx_hex.clone(),
+            tx_hashes_internal,
+            branches: job.branches.clone(),
+            tip_hash_at_job_create: job.prev_hash,
+            created_at_unix: 0,
+            auxpow_mode: false,
+            irium_header80: None,
+            irium_coinbase_hex: None,
+            poawx_pending_receipts: job.poawx_pending_receipts.clone(),
+            poawx_reg_activations: job.poawx_reg_activations.clone(),
+            poawx_reg_announces: job.poawx_reg_announces.clone(),
+        };
+        let coinbase = reconstruct_canonical_coinbase(&snapshot, &[0u8; 4]).expect("coinbase");
+        let coinbase_hash = crate::pow::sha256d(&coinbase);
+        let merkle_root = reconstruct_canonical_merkle_root(&snapshot, coinbase_hash);
+        let block_target = crate::pow::target_from_bits(job.bits);
+        let mut nonce_found = None;
+        for nonce in 0u32..=8_000_000 {
+            let h80 = reconstruct_canonical_header80(&snapshot, merkle_root, ntime, nonce, 1);
+            let mut disp = crate::pow::sha256d(&h80);
+            disp.reverse();
+            if num_bigint::BigUint::from_bytes_be(&disp) <= block_target {
+                nonce_found = Some(nonce);
+                break;
+            }
+        }
+        let nonce = nonce_found.expect("grind nonce");
+        let h80 = reconstruct_canonical_header80(&snapshot, merkle_root, ntime, nonce, 1);
+        let mut block_hash = crate::pow::sha256d(&h80);
+        block_hash.reverse();
+
+        let mut tx_hex = Vec::with_capacity(job.tx_hex.len() + 1);
+        tx_hex.push(hex::encode(&coinbase));
+        tx_hex.extend(job.tx_hex.clone());
+        let req = SubmitBlockExtendedRequest {
+            height: job.height,
+            header: SubmitHeader {
+                version: 1,
+                prev_hash: hex::encode(job.prev_hash),
+                merkle_root: hex::encode(merkle_root),
+                time: ntime,
+                bits: format!("{:08x}", job.bits),
+                nonce,
+                hash: hex::encode(block_hash),
+            },
+            tx_hex,
+            submit_source: "stage_a_mode1_submitter".to_string(),
+            auxpow_hex: None,
+            poawx_receipts: job.poawx_pending_receipts.clone(),
+            poawx_receipts_root: gated_root_hex.clone(),
+            poawx_reg_activations: job.poawx_reg_activations.clone(),
+            poawx_reg_announces: job.poawx_reg_announces.clone(),
+        };
+        let resp = client
+            .post(format!("{base}/rpc/submit_block_extended"))
+            .bearer_auth(&token)
+            .json(&req)
+            .send()
+            .await
+            .expect("submit");
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+
+        // Decode the submitted coinbase payout pkhs directly (not assumed).
+        let mut payout_pkhs: Vec<String> = Vec::new();
+        {
+            let cb = &coinbase;
+            let mut i = 4usize;
+            let _vin = cb[i];
+            i += 1;
+            let hlen = cb[i] as usize;
+            i += 1 + hlen;
+            i += 4;
+            let slen = cb[i] as usize;
+            i += 1 + slen;
+            i += 4;
+            let vout = cb[i] as usize;
+            i += 1;
+            for _ in 0..vout {
+                i += 8;
+                let sl = cb[i] as usize;
+                i += 1;
+                let s = &cb[i..i + sl];
+                i += sl;
+                if sl == 25 && s[0] == 0x76 && s[1] == 0xa9 {
+                    payout_pkhs.push(hex::encode(&s[3..23]));
+                }
+            }
+        }
+        println!("STAGEA miner_pkh={miner_pkh_hex}");
+        println!("STAGEA receipt_worker_pkh={}", receipt.worker_pkh);
+        println!("STAGEA gated_root={gated_root_hex}");
+        println!("STAGEA coinbase_payout_pkhs={payout_pkhs:?}");
+        println!("STAGEA submit_status={status} body={body}");
+
+        assert!(status.is_success(), "block must be ACCEPTED (status={status} body={body})");
+        assert!(!payout_pkhs.is_empty(), "coinbase has payout outputs");
+        assert!(
+            payout_pkhs.iter().all(|p| p == &miner_pkh_hex),
+            "EVERY coinbase payout output must pay the MINER's pkh, got {payout_pkhs:?}"
+        );
+    }
+
+    // ── Stage B: 3+ distinct miners each own a mode-1 delegated receipt; each
+    // block's coinbase pays that miner's OWN address (matching their receipt),
+    // proving rewards go to individual miner addresses, not a shared pool address.
+    // Same rig as Stage A (role-puzzle-work relaxed to isolate the attribution
+    // property; the role-protocol ext is Stage D). No coinbase-shape change.
+    #[tokio::test]
+    #[ignore = "stage-B live E2E: needs bb75913 iriumd on :38500 with delegation activation"]
+    async fn stage_b_distinct_miners_distinct_payouts_e2e() {
+        use k256::ecdsa::{signature::hazmat::PrehashSigner, Signature, SigningKey};
+        use ripemd::Ripemd160;
+        use sha2::{Digest, Sha256};
+
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_AUDIT_HARDENING_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS", "1");
+        std::env::set_var("IRIUM_STRATUM_POAWX", "1");
+
+        let base =
+            std::env::var("E2E_NODE").unwrap_or_else(|_| "http://127.0.0.1:38500".to_string());
+        let token = std::env::var("E2E_TOKEN")
+            .unwrap_or_else(|_| "e2ecompattoken1234567890".to_string());
+        let client = reqwest::Client::new();
+
+        // One pool delegate key + one shared store; three distinct miner keys.
+        let dk_path = std::env::temp_dir().join("stage_b_delegate_key.hex");
+        let _ = std::fs::remove_file(&dk_path);
+        let delegate =
+            crate::delegation::DelegateKey::load_or_generate(&dk_path, true).expect("delegate key");
+        let store_path = std::env::temp_dir().join("stage_b_delegations.json");
+        let _ = std::fs::remove_file(&store_path);
+        let store = crate::delegation::JsonDelegationStore::open(&store_path).expect("store");
+
+        let miner_seeds: [[u8; 32]; 3] = [[0x5au8; 32], [0x6bu8; 32], [0x7cu8; 32]];
+        let mut results: Vec<(u64, String, Vec<String>)> = Vec::new();
+
+        for (idx, seed) in miner_seeds.iter().enumerate() {
+            let miner = SigningKey::from_slice(seed).unwrap();
+            let miner_pub: [u8; 33] = miner
+                .verifying_key()
+                .to_encoded_point(true)
+                .as_bytes()
+                .try_into()
+                .unwrap();
+            let miner_pkh: [u8; 20] = {
+                let s = Sha256::digest(miner_pub);
+                let r = Ripemd160::digest(s);
+                let mut a = [0u8; 20];
+                a.copy_from_slice(&r);
+                a
+            };
+            let miner_pkh_hex = hex::encode(miner_pkh);
+            let worker = format!("rigB{idx}");
+
+            let mut d = crate::delegation::Delegation {
+                deleg_version: crate::delegation::Delegation::VERSION,
+                network_id: 2,
+                miner_pubkey: miner_pub,
+                pool_pubkey: delegate.pubkey(),
+                worker_tag: crate::delegation::worker_tag(&worker),
+                expiry_height: 10_000_000,
+                fee_bps: 0,
+                fee_pkh: [0u8; 20],
+                deleg_nonce: [7u8; 32],
+                delegation_sig: [0u8; 64],
+            };
+            let sig: Signature = miner.sign_prehash(&d.message_hash()).unwrap();
+            d.delegation_sig.copy_from_slice(&sig.to_bytes());
+
+            let tpl: crate::template::GetBlockTemplate = client
+                .get(format!("{base}/rpc/getblocktemplate"))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .expect("gbt")
+                .json()
+                .await
+                .expect("gbt json");
+            let height = tpl.height;
+            crate::delegation::verify_and_store(
+                &store,
+                &hex::encode(d.serialize()),
+                &worker,
+                &miner_pkh_hex,
+                &delegate.pubkey(),
+                2,
+                height.saturating_sub(1),
+                42,
+                None,
+            )
+            .expect("verify_and_store");
+
+            let asg: crate::template::PoawxAssignment = client
+                .get(format!("{base}/poawx/assignment"))
+                .bearer_auth(&token)
+                .send()
+                .await
+                .expect("assignment")
+                .json()
+                .await
+                .expect("assignment json");
+            let ctx = crate::delegation::assignment_context_from_dto(&asg, height)
+                .expect("assignment context");
+
+            let mut receipt = crate::delegation::build_mode1_pending_receipt(
+                &store, &delegate, 2, miner_pkh, &worker, &ctx,
+            )
+            .expect("build_mode1_pending_receipt");
+            assert_eq!(receipt.worker_pkh, miner_pkh_hex);
+
+            let prev_hash_internal = crate::block::parse_hex32(&tpl.prev_hash).unwrap();
+            let ext = crate::delegation::build_synthetic_phase20_ext(
+                2, height, &prev_hash_internal, &miner_pkh, &[], None,
+            )
+            .expect("synthetic ext");
+            receipt.phase20_ext = hex::encode(ext.serialize());
+
+            let mut tpl_with = tpl.clone();
+            tpl_with.poawx_mode = "active".to_string();
+            tpl_with.poawx_pending_receipts = vec![receipt.clone()];
+            let job = to_job(1, &tpl_with).expect("to_job");
+
+            let gated_root = crate::block::compute_receipts_root_from_pending_gated(
+                &job.poawx_pending_receipts,
+                crate::delegation::node_phase20_production_active(height),
+            );
+            let gated_root_hex = hex::encode(gated_root);
+            let ntime = u32::from_str_radix(&job.ntime_hex, 16).unwrap();
+            let mut tx_hashes_internal = Vec::with_capacity(job.tx_hex.len());
+            for t in &job.tx_hex {
+                tx_hashes_internal.push(crate::pow::sha256d(&hex::decode(t).unwrap()));
+            }
+            let snapshot = CanonicalJobSnapshot {
+                job_id: job.job_id.clone(),
+                template_fingerprint: "stageB".to_string(),
+                height: job.height,
+                version: 1,
+                prev_hash_internal: job.prev_hash,
+                bits: job.bits,
+                block_target: crate::pow::target_from_bits(job.bits),
+                coinbase_value: job.coinbase_value,
+                base_ntime: ntime,
+                extranonce1: vec![],
+                extranonce2_size: 4,
+                coinbase_prefix: vec![],
+                coinbase_suffix: vec![],
+                payout_script: payout_script_from_pkh(&miner_pkh),
+                tx_hex: job.tx_hex.clone(),
+                tx_hashes_internal,
+                branches: job.branches.clone(),
+                tip_hash_at_job_create: job.prev_hash,
+                created_at_unix: 0,
+                auxpow_mode: false,
+                irium_header80: None,
+                irium_coinbase_hex: None,
+                poawx_pending_receipts: job.poawx_pending_receipts.clone(),
+                poawx_reg_activations: job.poawx_reg_activations.clone(),
+                poawx_reg_announces: job.poawx_reg_announces.clone(),
+            };
+            let coinbase = reconstruct_canonical_coinbase(&snapshot, &[0u8; 4]).expect("coinbase");
+            let coinbase_hash = crate::pow::sha256d(&coinbase);
+            let merkle_root = reconstruct_canonical_merkle_root(&snapshot, coinbase_hash);
+            let block_target = crate::pow::target_from_bits(job.bits);
+            let mut nonce_found = None;
+            for nonce in 0u32..=8_000_000 {
+                let h80 = reconstruct_canonical_header80(&snapshot, merkle_root, ntime, nonce, 1);
+                let mut disp = crate::pow::sha256d(&h80);
+                disp.reverse();
+                if num_bigint::BigUint::from_bytes_be(&disp) <= block_target {
+                    nonce_found = Some(nonce);
+                    break;
+                }
+            }
+            let nonce = nonce_found.expect("grind nonce");
+            let h80 = reconstruct_canonical_header80(&snapshot, merkle_root, ntime, nonce, 1);
+            let mut block_hash = crate::pow::sha256d(&h80);
+            block_hash.reverse();
+
+            let mut tx_hex = Vec::with_capacity(job.tx_hex.len() + 1);
+            tx_hex.push(hex::encode(&coinbase));
+            tx_hex.extend(job.tx_hex.clone());
+            let req = SubmitBlockExtendedRequest {
+                height: job.height,
+                header: SubmitHeader {
+                    version: 1,
+                    prev_hash: hex::encode(job.prev_hash),
+                    merkle_root: hex::encode(merkle_root),
+                    time: ntime,
+                    bits: format!("{:08x}", job.bits),
+                    nonce,
+                    hash: hex::encode(block_hash),
+                },
+                tx_hex,
+                submit_source: "stage_b_mode1_submitter".to_string(),
+                auxpow_hex: None,
+                poawx_receipts: job.poawx_pending_receipts.clone(),
+                poawx_receipts_root: gated_root_hex.clone(),
+                poawx_reg_activations: job.poawx_reg_activations.clone(),
+                poawx_reg_announces: job.poawx_reg_announces.clone(),
+            };
+            let resp = client
+                .post(format!("{base}/rpc/submit_block_extended"))
+                .bearer_auth(&token)
+                .json(&req)
+                .send()
+                .await
+                .expect("submit");
+            let status = resp.status();
+            let body = resp.text().await.unwrap_or_default();
+
+            let mut payout_pkhs: Vec<String> = Vec::new();
+            {
+                let cb = &coinbase;
+                let mut i = 4usize;
+                let _vin = cb[i];
+                i += 1;
+                let hlen = cb[i] as usize;
+                i += 1 + hlen;
+                i += 4;
+                let slen = cb[i] as usize;
+                i += 1 + slen;
+                i += 4;
+                let vout = cb[i] as usize;
+                i += 1;
+                for _ in 0..vout {
+                    i += 8;
+                    let sl = cb[i] as usize;
+                    i += 1;
+                    let s = &cb[i..i + sl];
+                    i += sl;
+                    if sl == 25 && s[0] == 0x76 && s[1] == 0xa9 {
+                        payout_pkhs.push(hex::encode(&s[3..23]));
+                    }
+                }
+            }
+            println!(
+                "STAGEB miner#{idx} height={height} miner_pkh={miner_pkh_hex} status={status} payouts={payout_pkhs:?} body={body}"
+            );
+            assert!(status.is_success(), "block {idx} must be accepted (body={body})");
+            assert!(
+                payout_pkhs.iter().all(|p| p == &miner_pkh_hex),
+                "block {idx} must pay ONLY miner {miner_pkh_hex}, got {payout_pkhs:?}"
+            );
+            results.push((height, miner_pkh_hex.clone(), payout_pkhs));
+        }
+
+        // The 3 blocks paid 3 DISTINCT miner addresses, each matching its receipt.
+        let paid: Vec<String> = results.iter().map(|(_, m, _)| m.clone()).collect();
+        let distinct: std::collections::HashSet<&String> = paid.iter().collect();
+        println!("STAGEB distinct_payout_addresses={distinct:?}");
+        assert_eq!(distinct.len(), 3, "3 distinct miner addresses were paid, got {paid:?}");
+    }
+
+    // ── Stage C: no-stall fallback. When a session's mode-1 receipt CANNOT be built
+    // (missing/expired delegation), build_session_poawx_receipts must fall back to
+    // the daemon mode-0 receipt (job.poawx_pending_receipts) rather than returning
+    // empty. Empty receipts would stall block production; the fallback keeps the
+    // chain producing valid blocks. (The fallback receipt's acceptance is already
+    // proven by the stage3b native-rewardable E2E.)
+    #[test]
+    fn stage_c_mode1_failure_falls_back_to_daemon_receipt_no_stall() {
+        // No global env mutation: build_mode1 fails at delegation_missing (empty
+        // store) before any env-gated branch, so this is env-independent and does
+        // not pollute other tests (network_id comes from producer.network_id).
+        let mut config = test_config(MinerFamilyMode::Asic);
+        config.poawx_enabled = true;
+        let dk_path = std::env::temp_dir().join("stage_c_delegate_key.hex");
+        let _ = std::fs::remove_file(&dk_path);
+        let delegate =
+            crate::delegation::DelegateKey::load_or_generate(&dk_path, true).expect("delegate key");
+        let store_path = std::env::temp_dir().join("stage_c_delegations.json");
+        let _ = std::fs::remove_file(&store_path);
+        // EMPTY store: the session miner has NO registered delegation -> mode-1 fails.
+        let store = crate::delegation::JsonDelegationStore::open(&store_path).expect("store");
+        let producer = std::sync::Arc::new(crate::delegation::PoawxProducer {
+            store: std::sync::Arc::new(store) as std::sync::Arc<dyn crate::delegation::DelegationStore>,
+            key: std::sync::Arc::new(delegate),
+            network_id: 2,
+            role_store: std::sync::Arc::new(crate::delegation::RoleProtocolStore::new()),
+        });
+        config.poawx_producer = Some(producer);
+
+        let mut session = test_session(AdapterKind::NativeRewardableReserved);
+        session.worker = Some("QMinerC.rigC".to_string()); // has a worker
+        let session_pkh = session.pkh.expect("pkh"); // [0x11; 20], not in the store
+
+        // Job carries an assignment (so the producer path is reached) AND a daemon
+        // mode-0 fallback receipt.
+        let daemon_receipt = sample_poawx_receipt();
+        let mut job = native_test_job();
+        job.poawx_mode = "active".to_string();
+        job.poawx_pending_receipts = vec![daemon_receipt.clone()];
+        job.poawx_assignment = Some(crate::template::PoawxAssignment {
+            height: job.height - 1, // assignment for this job's parent tip
+            seed: "00".repeat(32),
+            commitment_nonce: "11".repeat(32),
+            puzzle_difficulty: 8,
+            lane: "cpu".to_string(),
+        });
+
+        let out = build_session_poawx_receipts(&job, &session, &config, &session_pkh);
+
+        // The mode-1 build failed (no delegation for the session miner), so the
+        // result MUST be the daemon fallback receipt -- non-empty, so no stall.
+        assert_eq!(out.len(), 1, "fallback must yield exactly the daemon receipt (no stall)");
+        assert_eq!(
+            out[0].worker_pkh, daemon_receipt.worker_pkh,
+            "fallback receipt must be the daemon mode-0 receipt, not a mode-1 for the session miner"
+        );
+        assert_ne!(
+            out[0].worker_pkh,
+            hex::encode(session_pkh),
+            "no mode-1 receipt was produced for the un-delegated session miner"
+        );
+        assert!(out[0].delegation.is_empty(), "fallback daemon receipt is mode-0 (no delegation)");
+        println!(
+            "STAGEC mode-1 failed (no delegation) -> fell back to daemon receipt worker={} (no stall)",
+            out[0].worker_pkh
+        );
+    }
 }

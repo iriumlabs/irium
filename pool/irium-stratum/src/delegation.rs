@@ -6109,6 +6109,163 @@ mod tests {
         println!("=== Part C stage 1 soak complete: {n} full blocks, distinct attribution + exact split enforced, fail-closed proven ===");
     }
 
+    // Part C stage 2 (in-memory, read-only, no live node touched): mainnet-enablement
+    // DRY RUN. Uses REAL recent mainnet params -- height 50316 (past the 50000 activation,
+    // from collected watch data) and the real consensus block subsidy at that height --
+    // to show (1) the network_id gate currently BLOCKS multi-participant attribution on
+    // mainnet (builder hard-returns None on network_id==0), and (2) if that gate were
+    // enabled, the SAME path fed real mainnet params produces a node-acceptable block
+    // with correct distinct attribution + exact split of the real coinbase. Nothing is
+    // submitted; the live node/pool is never contacted.
+    #[test]
+    fn partc_stage2_mainnet_enablement_dryrun() {
+        use irium_node_rs::chain::validate_phase20_production_payout;
+        use irium_node_rs::constants::block_reward;
+        use irium_node_rs::poawx::{
+            assign_lane, multi_role_amounts, role_claim_digest, Phase20ReceiptExt,
+            PoawxRoleClaim, RoleReward, ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR,
+            ROLE_VERIFY_CONTRIBUTOR,
+        };
+        use irium_node_rs::poawx_admission::CandidateAdmissionV1 as NAV;
+        use irium_node_rs::poawx_candidate::RoleCandidate as NRC;
+        use irium_node_rs::tx::TxOutput;
+
+        let _g = p20_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+
+        // Real recent mainnet template params (read-only; no live node touched).
+        let h: u64 = 50_316; // real mainnet height past activation (collected watch data)
+        let total = block_reward(h); // real consensus subsidy at that height
+        // representative prev_hash: the exact tip hash would need a live node query, which
+        // we deliberately avoid; attribution correctness is prev-agnostic.
+        let prev = {
+            let mut p = [0u8; 32];
+            p[0..8].copy_from_slice(&h.to_le_bytes());
+            p[8] = 0x5A;
+            p
+        };
+        let primary = [0xA0u8; 20];
+        let a = multi_role_amounts(total);
+        assert_eq!(a[0] + a[1] + a[2] + a[3], total, "split sums to the real coinbase exactly");
+
+        // (1) GATE CLOSED on live mainnet: builder hard-returns None on network_id==0.
+        assert!(
+            build_synthetic_phase20_ext(0, h, &prev, &primary, &[], None).is_none(),
+            "mainnet (network_id==0) attribution gate is CLOSED today"
+        );
+        println!(
+            "=== Part C stage 2 dry-run: REAL mainnet h={h} reward={total} split P/C/V/S={}/{}/{}/{} ===",
+            a[0], a[1], a[2], a[3]
+        );
+        println!("gate-closed on live mainnet (network_id=0): builder -> None (verified)");
+
+        // (2) GATE-ON SIMULATION: same real params, network_id simulated non-mainnet;
+        // three distinct role-miners submit candidate admissions at the real height.
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1");
+        std::env::set_var("IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS", "1");
+        let net = network_id_from_env();
+        assert_ne!(net, 0, "gate-on simulation must run under a non-mainnet id");
+        pool_admitted_cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
+
+        let miners = [[0xD1u8; 20], [0xD2u8; 20], [0xD3u8; 20]];
+        let roles = [
+            ROLE_COMPUTE_CONTRIBUTOR,
+            ROLE_VERIFY_CONTRIBUTOR,
+            ROLE_SUPPORT_CONTRIBUTOR,
+        ];
+        let hexes: Vec<String> = roles
+            .iter()
+            .zip(miners.iter())
+            .map(|(&role, &solver)| {
+                let cand = NRC::build(
+                    net, h, &prev, role, solver, [0x02u8; 33], [role; 32], 0, 1000,
+                    [role.wrapping_add(1); 32],
+                );
+                hex::encode(NAV::new(net, h, prev, cand).serialize())
+            })
+            .collect();
+        pool_admitted_cache().lock().unwrap_or_else(|e| e.into_inner()).insert(h, hexes);
+
+        let rr = pool_role_reward_from_admitted(net, h, &prev).expect("attribution from admitted");
+        let (cpk, vpk, spk) = (
+            rr.compute_contributor_pkh,
+            rr.verify_contributor_pkh,
+            rr.support_contributor_pkh,
+        );
+        assert_eq!(cpk, miners[0]);
+        assert_eq!(vpk, miners[1]);
+        assert_eq!(spk, miners[2]);
+        assert!(
+            cpk != vpk && vpk != spk && cpk != spk && cpk != primary && vpk != primary && spk != primary,
+            "distinct role solvers, no collapse to primary"
+        );
+
+        let claim = |role: u8, solver: [u8; 20]| -> PoawxRoleClaim {
+            let lane = assign_lane(net, h, &prev, role, 0);
+            let nonce = [0x01u8; 32];
+            let secret = [0x02u8; 32];
+            let cd = role_claim_digest(net, h, &prev, role, lane.id(), &solver, &nonce, &secret);
+            PoawxRoleClaim {
+                role_id: role,
+                lane_id: lane.id(),
+                solver_pkh: solver,
+                nonce,
+                secret,
+                claim_digest: cd,
+                commitment_hash: None,
+            }
+        };
+        let ext = Phase20ReceiptExt {
+            role_reward: RoleReward {
+                compute_contributor_pkh: cpk,
+                verify_contributor_pkh: vpk,
+                support_contributor_pkh: spk,
+            },
+            compute_claim: claim(ROLE_COMPUTE_CONTRIBUTOR, cpk),
+            verify_claim: claim(ROLE_VERIFY_CONTRIBUTOR, vpk),
+            support_claim: claim(ROLE_SUPPORT_CONTRIBUTOR, spk),
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            precommit_root: None,
+            role_ticket_proofs: None,
+            role_dominance_weights: None,
+            candidate_set: None,
+            role_puzzle_proofs: None,
+            finality_proof: None,
+            committed_admission: None,
+            role_assignment_v2: None,
+            fraud_proofs: None,
+            proposer_assignment: None,
+            proposer_registrations: None,
+        };
+        let p2pkh = |pkh: &[u8; 20]| {
+            let mut s = vec![0x76, 0xa9, 0x14];
+            s.extend_from_slice(pkh);
+            s.extend_from_slice(&[0x88, 0xac]);
+            s
+        };
+        let outs = vec![
+            TxOutput { value: a[0], script_pubkey: p2pkh(&primary) },
+            TxOutput { value: a[1], script_pubkey: p2pkh(&cpk) },
+            TxOutput { value: a[2], script_pubkey: p2pkh(&vpk) },
+            TxOutput { value: a[3], script_pubkey: p2pkh(&spk) },
+        ];
+        validate_phase20_production_payout(&outs, &primary, total, h, &prev, net, &ext, false)
+            .unwrap_or_else(|e| panic!("gate-on dry-run must produce a node-acceptable block: {e}"));
+        println!(
+            "gate-on simulation: node ACCEPTS real-param block @ h{h} -> compute={} verify={} support={} paid {}/{}/{} (primary {})",
+            hex::encode(&cpk[..1]), hex::encode(&vpk[..1]), hex::encode(&spk[..1]), a[1], a[2], a[3], a[0]
+        );
+
+        pool_admitted_cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
+        std::env::remove_var("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED");
+        std::env::remove_var("IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS");
+        std::env::remove_var("IRIUM_NETWORK");
+        println!("=== Part C stage 2 complete: mainnet gate CLOSED today; if enabled, real-param block is node-valid with distinct attribution ===");
+    }
+
     #[test]
     fn phase21e_pool_admitted_candidate_set_parity_and_failclosed() {
         let _g = p20_env_lock().lock().unwrap_or_else(|e| e.into_inner());

@@ -1211,7 +1211,17 @@ fn select_adapter_kind(config: &StratumConfig) -> AdapterKind {
                 AdapterKind::NativeRewardableReserved
             }
             MinerFamilyMode::Cpuminer => AdapterKind::CpuminerCompatibility,
-            _ if config.native_rewardable_enabled => AdapterKind::NativeRewardableReserved,
+            // PoAW-X: the block reward goes to the RECEIPT worker (the node's
+            // poawx_validate_reward_split requires it). The legacy path pays the
+            // share submitter (session.pkh), so when the receipt worker differs
+            // from the miner the node rejects with reward-split payout 0 (this
+            // stalled mainnet 2026-07-06). Route poawx sessions to the native-
+            // rewardable path (notify + submit both build the multi-role coinbase
+            // paying first.worker_pkh), byte-identically, so the mined and
+            // submitted coinbase match and pay the receipt worker.
+            _ if config.poawx_enabled || config.native_rewardable_enabled => {
+                AdapterKind::NativeRewardableReserved
+            }
             _ => AdapterKind::LegacyRewardable,
         },
     }
@@ -7189,6 +7199,392 @@ mod tests {
         println!(
             "STAGEC mode-1 failed (no delegation) -> fell back to daemon receipt worker={} (no stall)",
             out[0].worker_pkh
+        );
+    }
+
+    // ── Arbiter test for the untracked coinbase/reward-split fix. Reproduces the
+    // EXACT live scenario that stalled mainnet on 2026-07-06: an ASIC-style block
+    // whose pending receipt's worker (W, analog of c2fc869e) DIFFERS from the
+    // session miner (M, the share submitter). No prior test covered W != M.
+    //
+    //   PART 1 (reproduce failure): the LEGACY coinbase the git source builds --
+    //     build_coinbase_tx(&session.pkh=M) -- pays the session MINER. The node's
+    //     poawx_validate_reward_split requires the RECEIPT worker W be paid, so W
+    //     gets 0 -> reject. This is tonight's exact failure.
+    //   PART 2 (validate fix + resolve the earlier uncertainty): the NATIVE-
+    //     rewardable coinbase -- build_native_rewardable_coinbase -- must pay the
+    //     RECEIPT worker W (first.worker_pkh), decoded directly, and the node must
+    //     ACCEPT. If it pays M or 0 (the earlier unexplained rejection), the fix is
+    //     NOT sufficient and this test fails loudly.
+    //
+    // Rig node on :38500 with phase20/audit active + role-puzzle-work relaxed
+    // (isolates payout attribution; matches the stage_a rig config).
+    #[tokio::test]
+    #[ignore = "arbiter test: receipt-worker != session-miner; needs rig iriumd on :38500"]
+    async fn fix_receipt_worker_differs_from_session_miner_e2e() {
+        use k256::ecdsa::{signature::hazmat::PrehashSigner, Signature, SigningKey};
+        use ripemd::Ripemd160;
+        use sha2::{Digest, Sha256};
+
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_AUDIT_HARDENING_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS", "1");
+        std::env::set_var("IRIUM_STRATUM_POAWX", "1");
+
+        let base =
+            std::env::var("E2E_NODE").unwrap_or_else(|_| "http://127.0.0.1:38500".to_string());
+        let token = std::env::var("E2E_TOKEN")
+            .unwrap_or_else(|_| "e2ecompattoken1234567890".to_string());
+        let client = reqwest::Client::new();
+
+        // W = receipt worker (analog of c2fc869e). M = session miner (share submitter).
+        let w = SigningKey::from_slice(&[0xCCu8; 32]).unwrap();
+        let w_pub: [u8; 33] = w
+            .verifying_key()
+            .to_encoded_point(true)
+            .as_bytes()
+            .try_into()
+            .unwrap();
+        let w_pkh: [u8; 20] = {
+            let s = Sha256::digest(w_pub);
+            let r = Ripemd160::digest(s);
+            let mut a = [0u8; 20];
+            a.copy_from_slice(&r);
+            a
+        };
+        let w_pkh_hex = hex::encode(w_pkh);
+        let m_pkh = [0xAAu8; 20];
+        let m_pkh_hex = hex::encode(m_pkh);
+        assert_ne!(w_pkh, m_pkh, "the receipt worker must differ from the session miner");
+
+        // Template + assignment.
+        let tpl: crate::template::GetBlockTemplate = client
+            .get(format!("{base}/rpc/getblocktemplate"))
+            .bearer_auth(&token).send().await.unwrap().json().await.unwrap();
+        let height = tpl.height;
+        assert!(crate::delegation::node_phase20_production_active(height), "phase20 active");
+        let asg: crate::template::PoawxAssignment = client
+            .get(format!("{base}/poawx/assignment"))
+            .bearer_auth(&token).send().await.unwrap().json().await.unwrap();
+        let seed = crate::block::parse_hex32(&asg.seed).unwrap();
+        let nonce = crate::block::parse_hex32(&asg.commitment_nonce).unwrap();
+        let difficulty = asg.puzzle_difficulty;
+
+        // Build a valid MODE-0 receipt owned by W: grind the puzzle + W self-signs.
+        let count_leading_zero_bits = |h: &[u8; 32]| -> u32 {
+            let mut n = 0u32;
+            for b in h.iter() {
+                if *b == 0 { n += 8; } else { n += b.leading_zeros(); break; }
+            }
+            n
+        };
+        let mut solution = [0u8; 8];
+        let mut solved = false;
+        for i in 0u64..8_000_000 {
+            solution = i.to_le_bytes();
+            let mut inp = Vec::with_capacity(72);
+            inp.extend_from_slice(&seed);
+            inp.extend_from_slice(&nonce);
+            inp.extend_from_slice(&solution);
+            if count_leading_zero_bits(&crate::pow::sha256d(&inp)) >= difficulty { solved = true; break; }
+        }
+        assert!(solved, "grind mode-0 puzzle solution");
+        let challenge: [u8; 32] = {
+            let mut h = Sha256::new();
+            h.update(solution);
+            h.update(nonce);
+            h.update(height.to_le_bytes());
+            h.finalize().into()
+        };
+        let wsig: Signature = w.sign_prehash(&challenge).unwrap();
+        let prev_hash = crate::block::parse_hex32(&tpl.prev_hash).unwrap();
+        let ext = crate::delegation::build_synthetic_phase20_ext(2, height, &prev_hash, &w_pkh, &[], None)
+            .expect("synthetic ext (primary = W)");
+        let receipt = crate::template::PoawxPendingReceipt {
+            height,
+            lane: "A".to_string(),
+            worker_pkh: w_pkh_hex.clone(),
+            solution: hex::encode(solution),
+            commitment_nonce: hex::encode(nonce),
+            worker_pubkey: hex::encode(w_pub),
+            worker_sig: hex::encode(wsig.to_bytes()),
+            delegation: String::new(),
+            phase20_ext: hex::encode(ext.serialize()),
+        };
+        let gated_root = crate::block::compute_receipts_root_from_pending_gated(
+            std::slice::from_ref(&receipt),
+            crate::delegation::node_phase20_production_active(height),
+        );
+        let gated_root_hex = hex::encode(gated_root);
+        let ntime = tpl.time + 1;
+        let nbits = u32::from_str_radix(tpl.bits.trim_start_matches("0x"), 16).unwrap();
+        let tx_hex: Vec<String> = tpl.txs.iter().map(|t| t.hex.clone()).collect();
+        let branches = crate::block::build_merkle_branches(&tx_hex).unwrap();
+        let extras = vec![(0u64, crate::block::build_irx1_commitment_script(&gated_root))];
+
+        // Decode the p2pkh payees of a coinbase.
+        let decode_payees = |cb: &[u8]| -> Vec<String> {
+            let mut i = 4usize;
+            let _vin = cb[i]; i += 1;
+            let hlen = cb[i] as usize; i += 1 + hlen;
+            i += 4;
+            let slen = cb[i] as usize; i += 1 + slen;
+            i += 4;
+            let vout = cb[i] as usize; i += 1;
+            let mut out = Vec::new();
+            for _ in 0..vout {
+                i += 8;
+                let sl = cb[i] as usize; i += 1;
+                let s = &cb[i..i + sl]; i += sl;
+                if sl == 25 && s[0] == 0x76 && s[1] == 0xa9 { out.push(hex::encode(&s[3..23])); }
+            }
+            out
+        };
+
+        // Submit a coinbase as a block; returns (http status, body).
+        let block_target = crate::pow::target_from_bits(nbits);
+        let submit_cb = |cb: Vec<u8>, source: &'static str| {
+            let client = client.clone();
+            let base = base.clone();
+            let token = token.clone();
+            let branches = branches.clone();
+            let tx_hex = tx_hex.clone();
+            let receipt = receipt.clone();
+            let gated_root_hex = gated_root_hex.clone();
+            let block_target = block_target.clone();
+            async move {
+                let cb_hash = crate::pow::sha256d(&cb);
+                let merkle_root = crate::block::merkle_root_from_coinbase(cb_hash, &branches);
+                let mut prev_wire = prev_hash; prev_wire.reverse();
+                let mut merkle_wire = merkle_root;
+                if height < standard_header_activation_height() { merkle_wire.reverse(); }
+                let mut header = [0u8; 80];
+                header[0..4].copy_from_slice(&1u32.to_le_bytes());
+                header[4..36].copy_from_slice(&prev_wire);
+                header[36..68].copy_from_slice(&merkle_wire);
+                header[68..72].copy_from_slice(&ntime.to_le_bytes());
+                header[72..76].copy_from_slice(&nbits.to_le_bytes());
+                let mut nonce_found = 0u32;
+                for n in 0u32..=8_000_000 {
+                    header[76..80].copy_from_slice(&n.to_le_bytes());
+                    let mut disp = crate::pow::sha256d(&header); disp.reverse();
+                    if num_bigint::BigUint::from_bytes_be(&disp) <= block_target { nonce_found = n; break; }
+                }
+                header[76..80].copy_from_slice(&nonce_found.to_le_bytes());
+                let mut block_hash = crate::pow::sha256d(&header); block_hash.reverse();
+                let mut txs = vec![hex::encode(&cb)];
+                txs.extend(tx_hex.clone());
+                let req = SubmitBlockExtendedRequest {
+                    height,
+                    header: SubmitHeader {
+                        version: 1,
+                        prev_hash: hex::encode(prev_hash),
+                        merkle_root: hex::encode(merkle_root),
+                        time: ntime,
+                        bits: format!("{:08x}", nbits),
+                        nonce: nonce_found,
+                        hash: hex::encode(block_hash),
+                    },
+                    tx_hex: txs,
+                    submit_source: source.to_string(),
+                    auxpow_hex: None,
+                    poawx_receipts: vec![receipt],
+                    poawx_receipts_root: gated_root_hex,
+                    poawx_reg_activations: vec![],
+                    poawx_reg_announces: vec![],
+                };
+                let resp = client.post(format!("{base}/rpc/submit_block_extended"))
+                    .bearer_auth(&token).json(&req).send().await.unwrap();
+                let status = resp.status();
+                let body = resp.text().await.unwrap_or_default();
+                (status, body)
+            }
+        };
+
+        // === PART 1: LEGACY coinbase (build_coinbase_tx paying session miner M). ===
+        let en = [0u8; 8];
+        let legacy_cb = crate::block::build_coinbase_tx(height, tpl.coinbase_value, &m_pkh, &en, true, &extras);
+        let legacy_payees = decode_payees(&legacy_cb);
+        let (legacy_status, legacy_body) = submit_cb(legacy_cb, "fixtest_legacy").await;
+        println!("FIXTEST W(receipt)={w_pkh_hex} M(session)={m_pkh_hex}");
+        println!("FIXTEST legacy payees={legacy_payees:?} status={legacy_status} body={legacy_body}");
+        assert!(legacy_payees.iter().all(|p| p == &m_pkh_hex), "legacy coinbase pays the SESSION MINER (reproduces the bug)");
+        assert!(!legacy_status.is_success(), "legacy coinbase (pays miner, not receipt worker W) MUST be REJECTED");
+
+        // === PART 2: NATIVE-REWARDABLE coinbase (must pay receipt worker W). ===
+        let mut tx_hashes_internal = Vec::new();
+        for t in &tx_hex { tx_hashes_internal.push(crate::pow::sha256d(&hex::decode(t).unwrap())); }
+        let snapshot = CanonicalJobSnapshot {
+            job_id: "fixtest".to_string(),
+            template_fingerprint: "fixtest".to_string(),
+            height,
+            version: 1,
+            prev_hash_internal: prev_hash,
+            bits: nbits,
+            block_target: crate::pow::target_from_bits(nbits),
+            coinbase_value: tpl.coinbase_value,
+            base_ntime: ntime,
+            extranonce1: vec![],
+            extranonce2_size: 4,
+            coinbase_prefix: vec![],
+            coinbase_suffix: vec![],
+            payout_script: payout_script_from_pkh(&m_pkh), // session fallback = M (must NOT be used)
+            tx_hex: tx_hex.clone(),
+            tx_hashes_internal,
+            branches: branches.clone(),
+            tip_hash_at_job_create: prev_hash,
+            created_at_unix: 0,
+            auxpow_mode: false,
+            irium_header80: None,
+            irium_coinbase_hex: None,
+            poawx_pending_receipts: vec![receipt.clone()],
+            poawx_reg_activations: vec![],
+            poawx_reg_announces: vec![],
+        };
+        let native_cb = reconstruct_canonical_coinbase(&snapshot, &[0u8; 4]).expect("native coinbase");
+        let native_payees = decode_payees(&native_cb);
+        println!("FIXTEST native payees={native_payees:?}");
+        // Resolves the earlier uncertainty: does the native path pay W or M?
+        assert!(!native_payees.is_empty(), "native coinbase has payout outputs");
+        assert!(native_payees.iter().all(|p| p == &w_pkh_hex),
+            "native coinbase MUST pay the RECEIPT WORKER W (not the session miner M); got {native_payees:?}");
+        let (native_status, native_body) = submit_cb(native_cb, "fixtest_native").await;
+        println!("FIXTEST native status={native_status} body={native_body}");
+        assert!(native_status.is_success(),
+            "native coinbase (pays receipt worker W) MUST be ACCEPTED (status={native_status} body={native_body})");
+    }
+
+    // Reroute correctness (unit; no node): confirms the ACTUAL pool snapshot
+    // builder keeps the RECEIPT worker (W) when the session miner (M) differs, and
+    // that select_adapter_kind routes ASIC+poawx to the native path. This is the
+    // exact property whose failure recurring would mean the reroute is unsafe --
+    // if build_canonical_job_snapshot swapped W for M, the coinbase would pay M and
+    // the node would reject (the incident). It must pay W.
+    #[test]
+    fn reroute_asic_poawx_snapshot_keeps_receipt_worker_not_session_miner() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_AUDIT_HARDENING_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS", "1");
+
+        // ASIC + poawx config (native_rewardable NOT enabled -- the tonight case).
+        let mut cfg = test_config(MinerFamilyMode::Asic);
+        cfg.poawx_enabled = true;
+        cfg.native_rewardable_enabled = false;
+        cfg.poawx_producer = None;
+        // The reroute: ASIC+poawx must now pick the native path (notify + submit).
+        assert_eq!(
+            select_adapter_kind(&cfg),
+            AdapterKind::NativeRewardableReserved,
+            "reroute: ASIC + poawx must select NativeRewardableReserved (not LegacyRewardable)"
+        );
+
+        // Session miner M; receipt owned by a DIFFERENT worker W.
+        let m_pkh = [0xAAu8; 20];
+        let w_pkh_hex = "bb".repeat(20);
+        let mut sess = test_session(AdapterKind::NativeRewardableReserved);
+        sess.pkh = Some(m_pkh);
+        sess.worker = Some("Qminer.rig".to_string());
+
+        // A phase20 receipt owned by W, with a synthetic ext (primary = W).
+        let height = 60_000u64; // >= mainnet activation so phase20 multi-role is on
+        let mut w_pkh = [0u8; 20];
+        w_pkh.copy_from_slice(&hex::decode(&w_pkh_hex).unwrap());
+        let ext = crate::delegation::build_synthetic_phase20_ext(2, height, &[0x22u8; 32], &w_pkh, &[], None)
+            .expect("synthetic ext primary=W");
+        let receipt = crate::template::PoawxPendingReceipt {
+            height,
+            lane: "A".to_string(),
+            worker_pkh: w_pkh_hex.clone(),
+            solution: "00".repeat(8),
+            commitment_nonce: "cd".repeat(32),
+            worker_pubkey: format!("02{}", "ef".repeat(32)),
+            worker_sig: "11".repeat(64),
+            delegation: String::new(),
+            phase20_ext: hex::encode(ext.serialize()),
+        };
+
+        let job = Job {
+            job_id: "reroute".to_string(),
+            height,
+            prev_hash: [0x22u8; 32],
+            bits: 0x207fffff,
+            nbits_hex: "207fffff".to_string(),
+            ntime_hex: "5f5e1000".to_string(),
+            coinbase_value: 50_0000_0000,
+            tx_hex: vec![],
+            branches: vec![],
+            template_target_hex: biguint_to_32hex(&target_from_bits(0x207fffff)),
+            coinbase_extras: vec![],
+            poawx_mode: "active".to_string(),
+            poawx_pending_receipts: vec![receipt.clone()],
+            poawx_reg_activations: vec![],
+            poawx_reg_announces: vec![],
+            poawx_assignment: None,
+        };
+
+        // The ACTUAL pool snapshot builder.
+        let snap = build_canonical_job_snapshot(&job, &sess, &cfg).expect("snapshot");
+        assert_eq!(snap.poawx_pending_receipts.len(), 1, "one receipt carried");
+        // CRUX: the snapshot must keep W (the template receipt), NOT the session miner M.
+        assert_eq!(
+            snap.poawx_pending_receipts[0].worker_pkh, w_pkh_hex,
+            "realistic snapshot must keep the RECEIPT worker W, not swap to the session miner M"
+        );
+
+        // The native coinbase built from that snapshot must pay W, and notify ==
+        // submit (byte-identity), so a real ASIC miner mines exactly what is submitted.
+        let en2 = [0u8; 4];
+        let submit_cb = reconstruct_canonical_coinbase(&snap, &en2).expect("reconstruct coinbase");
+        let (cb1, cb2) = native_rewardable_notify_split(&snap).expect("notify split");
+        let mut mined = Vec::new();
+        mined.extend_from_slice(&cb1);
+        mined.extend_from_slice(&snap.extranonce1);
+        mined.extend_from_slice(&en2);
+        mined.extend_from_slice(&cb2);
+        assert_eq!(
+            hex::encode(&mined),
+            hex::encode(&submit_cb),
+            "notify-mined coinbase == submitted coinbase (byte-identity)"
+        );
+
+        // Decode payees: every payout output must be W (the receipt worker).
+        let mut i = 4usize;
+        let _vin = submit_cb[i];
+        i += 1;
+        let hlen = submit_cb[i] as usize;
+        i += 1 + hlen;
+        i += 4;
+        let slen = submit_cb[i] as usize;
+        i += 1 + slen;
+        i += 4;
+        let vout = submit_cb[i] as usize;
+        i += 1;
+        let mut payees = Vec::new();
+        for _ in 0..vout {
+            i += 8;
+            let sl = submit_cb[i] as usize;
+            i += 1;
+            let s = &submit_cb[i..i + sl];
+            i += sl;
+            if sl == 25 && s[0] == 0x76 && s[1] == 0xa9 {
+                payees.push(hex::encode(&s[3..23]));
+            }
+        }
+        assert!(!payees.is_empty(), "coinbase has payout outputs");
+        assert!(
+            payees.iter().all(|p| p == &w_pkh_hex),
+            "reroute coinbase MUST pay the RECEIPT worker W, not the session miner M; got {payees:?}"
+        );
+        assert!(
+            payees.iter().all(|p| p != &hex::encode(m_pkh)),
+            "reroute coinbase MUST NOT pay the session miner M"
+        );
+        println!(
+            "REROUTE-UNIT ok: adapter=native, snapshot keeps W, coinbase pays W (4 outputs), notify==submit; M never paid"
         );
     }
 }

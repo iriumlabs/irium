@@ -404,6 +404,33 @@ impl Default for NodeCandidateAdmissionCache {
     }
 }
 
+/// Stage 3a: build canonical candidate-admission wire bytes attributing a role to a
+/// miner pkh. The pool does the role-lane VRF work under its OWN secret (via
+/// AssignmentProofV2::prove) and carries miner_pkh as the solver attribution tag.
+/// Used by irium-miner admission-emit mode, since the stratum has no VRF crypto.
+/// Returns None only if the secret is invalid.
+pub fn build_pool_admission_bytes(
+    network_id: u8,
+    pool_secret: &[u8; 32],
+    height: u64,
+    seed: &[u8; 32],
+    miner_pkh: [u8; 20],
+    role: u8,
+) -> Option<Vec<u8>> {
+    let proof = crate::poawx_candidate::AssignmentProofV2::prove(
+        pool_secret, network_id, height, role, miner_pkh, [role; 32], *seed,
+    )
+    .ok()?;
+    let cand = crate::poawx_candidate::RoleCandidate::from_assignment_v2(
+        &proof,
+        crate::poawx_penalty::PenaltyStatus::Clean.id(),
+        1000,
+        [role; 32],
+    );
+    let adm = CandidateAdmissionV1::new_with_v2(network_id, height, *seed, cand, Some(proof));
+    Some(adm.serialize())
+}
+
 impl NodeCandidateAdmissionCache {
     pub fn new() -> Self {
         Self::default()
@@ -1090,5 +1117,30 @@ mod tests {
         );
 
         std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn stage3a_build_pool_admission_bytes_attributes_miner() {
+        use crate::poawx::{ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
+        let net = 3u8;
+        let secret = [0x9Au8; 32];
+        let seed = [0x44u8; 32];
+        let height = 12_345u64;
+        for (pkh, role) in [
+            ([0xB1u8; 20], ROLE_COMPUTE_CONTRIBUTOR),
+            ([0xB2u8; 20], ROLE_VERIFY_CONTRIBUTOR),
+            ([0xB3u8; 20], ROLE_SUPPORT_CONTRIBUTOR),
+        ] {
+            let bytes = super::build_pool_admission_bytes(net, &secret, height, &seed, pkh, role)
+                .expect("admission bytes");
+            let adm = super::CandidateAdmissionV1::deserialize(&bytes).expect("deserialize");
+            assert_eq!(adm.network_id, net);
+            assert_eq!(adm.target_height, height);
+            assert_eq!(adm.seed, seed);
+            assert_eq!(adm.candidate.solver_pkh, pkh, "attributes role to miner pkh");
+            assert_eq!(adm.candidate.role_id, role);
+            assert!(adm.assignment_proof_v2.is_some(), "carries pool VRF proof");
+            assert_eq!(adm.serialize(), bytes, "round-trips");
+        }
     }
 }

@@ -1790,6 +1790,10 @@ Options:
 
   --rpc             <url>     Node RPC URL for solo mining (env: IRIUM_NODE_RPC)
 
+  --poawx                     PoAW-X solo proposer mining (auto-registration +
+                              VRF eligibility + role work); header nonce on GPU.
+                              Requires IRIUM_POAWX_MINER_SECRET_HEX (64 hex).
+
   --list-platforms            List all OpenCL platforms and devices, then exit
 
   --help                      Show this message
@@ -1808,6 +1812,337 @@ CLI flags take priority over environment variables."
     );
 }
 
+/// Stage G1: solo PoAW-X mining loop for the GPU miner. Mirrors the CPU miner's
+/// `run_poawx_solo` EXACTLY (same shared `poawx_miner_client` helpers, same
+/// registration submission + proposer-VRF sortition + all-gates block builder),
+/// with ONE difference: the enclosing block-header nonce is ground by the OpenCL
+/// kernel (`GpuMiner::mine_batch`) through the G0 pluggable-solver interface
+/// instead of the CPU `mine_pow`. The PoAW-X body (receipts / admissions /
+/// candidate set / VRF assignment / registration section) is assembled
+/// identically, and every kernel-found nonce is re-verified on the CPU with the
+/// REAL consensus check (`meets_target` over `hash_for_height`) before use.
+/// Mainnet is gated by the node exactly as for the CPU path.
+fn run_poawx_solo_gpu(gpus: &mut [GpuMiner]) -> Result<(), String> {
+    // Shared Stage-G0 client helpers. Function-scoped so they shadow this
+    // binary's own plain-PoW RPC helpers (which keep their local BlockTemplate
+    // without the poawx_* template fields) only inside the PoAW-X path.
+    use irium_node_rs::poawx_miner_client::{
+        build_poawx_submit_request, fetch_block_template, poawx_decode_hash32,
+        poawx_fetch_dominance, poawx_fetch_parent_info, poawx_miner_interval_secs,
+        poawx_miner_secret, poawx_post_admission, poawx_receipt_difficulty_bits,
+        poawx_submit_extended, poawx_submit_registration, rpc_client,
+    };
+    use std::thread;
+
+    if gpus.is_empty() {
+        return Err("no initialised GPU devices".to_string());
+    }
+    if gpus.len() > 1 {
+        println!(
+            "[poawx] note: PoAW-X GPU solo mining currently uses the first initialised device only ({} initialised)",
+            gpus.len()
+        );
+    }
+    // The harness solver interface is a shared-ref closure (&dyn Fn) while
+    // mine_batch needs &mut GpuMiner; a RefCell provides the interior
+    // mutability (the solver only ever runs on this thread).
+    let gpu_cell = std::cell::RefCell::new(&mut gpus[0]);
+    let gpu_solver =
+        |header: &mut BlockHeader, height: u64, target: Target| -> Result<u32, String> {
+            let mut gpu = gpu_cell.borrow_mut();
+            // Height-bound serialization: the same preimage the node's
+            // hash_for_height validates (and the same call the plain GPU
+            // solo loop uses for its midstate).
+            let ser = header.serialize_for_height(height);
+            let midstate = sha256_midstate(ser[..64].try_into().unwrap());
+            let tail = tail_from_header(&ser);
+            let target_words = target_to_words(target);
+            gpu.update_template(&midstate, &tail, &target_words)?;
+            let mut nonce_base: u64 = 0;
+            while nonce_base <= u32::MAX as u64 {
+                match gpu.mine_batch(nonce_base as u32)? {
+                    Some(nonce) => {
+                        header.nonce = nonce;
+                        // Re-verify on CPU with the REAL consensus check before
+                        // trusting the kernel result.
+                        if meets_target(&header.hash_for_height(height), target) {
+                            return Ok(nonce);
+                        }
+                        return Err(format!(
+                            "poawx gpu solver: kernel nonce {nonce} fails CPU verification at height {height}"
+                        ));
+                    }
+                    None => {
+                        // Same watchdog-stall handling as the plain solo loop:
+                        // a suspicious batch does not advance the nonce base;
+                        // after 3 in a row halve the batch, and give up at the
+                        // hard limit.
+                        if gpu.suspicious_batch_count > 0 {
+                            if gpu.suspicious_batch_count >= SUSPICIOUS_BATCH_LIMIT {
+                                return Err(
+                                    "poawx gpu solver: GPU stall detected (watchdog)".to_string()
+                                );
+                            }
+                            if gpu.suspicious_batch_count >= 3 {
+                                gpu.shrink_batch()?;
+                            }
+                            continue;
+                        }
+                        nonce_base += gpu.batch_size as u64;
+                    }
+                }
+            }
+            Err("poawx gpu solver: nonce space exhausted without meeting target".to_string())
+        };
+
+    let net = irium_node_rs::activation::network_id_byte();
+    // PoAW-X mining is permitted on mainnet from the consensus activation height
+    // (50_000); before then the node assignment/submit RPCs return 503 and this loop
+    // idles until activation. Non-mainnet is gated by the node env as before.
+    let secret = poawx_miner_secret()?;
+    let client = rpc_client()?;
+    let diff = poawx_receipt_difficulty_bits();
+    let interval = poawx_miner_interval_secs();
+    println!("[poawx] solo PoAW-X mining started on GPU (net={net}, interval={interval}s); building all-gates blocks with the miner key; header nonce via OpenCL");
+    let mut last_reg_submit: u64 = 0;
+    loop {
+        let tmpl = match fetch_block_template(&client, false) {
+            Ok(t) => t,
+            Err(e) => {
+                eprintln!("[poawx] template fetch failed: {e}; retrying");
+                thread::sleep(Duration::from_secs(3));
+                continue;
+            }
+        };
+        let height = tmpl.height;
+        let prev_hash = poawx_decode_hash32(&tmpl.prev_hash)?;
+        let bits = u32::from_str_radix(tmpl.bits.trim_start_matches("0x"), 16)
+            .map_err(|e| format!("bad template bits {}: {e}", tmpl.bits))?;
+        let (parent_prev_hash, parent_seed_components) =
+            poawx_fetch_parent_info(&client, height)?;
+        let dominance = match poawx_fetch_dominance(&client) {
+            Ok(d) => d,
+            Err(e) => {
+                eprintln!("[poawx] dominance fetch failed: {e}; retrying");
+                thread::sleep(Duration::from_secs(3));
+                continue;
+            }
+        };
+
+        // Gate flags from the node template (authoritative). When the node provides
+        // them, build per the node; otherwise (older node) fall back to env.
+        let node_gates = match (
+            tmpl.poawx_hidden_precommit_active,
+            tmpl.poawx_tickets_active,
+            tmpl.poawx_multisource_seed_active,
+            tmpl.poawx_penalty_state_active,
+            tmpl.poawx_puzzle_anchor_bits,
+            tmpl.poawx_effective_sybil_bits,
+        ) {
+            (Some(hp), Some(tk), Some(ms), Some(pn), Some(pb), Some(sb)) => {
+                Some(irium_node_rs::poawx_mining_harness::NodeGateFlags {
+                    hidden_precommit_active: hp,
+                    tickets_active: tk,
+                    multisource_seed_active: ms,
+                    penalty_state_active: pn,
+                    puzzle_anchor_bits: pb,
+                    effective_sybil_bits: sb,
+                    // Node-authoritative audit flag; fall back to env if an older node
+                    // does not advertise it in the template.
+                    audit_hardening_active: tmpl.poawx_audit_hardening_active.unwrap_or_else(
+                        || irium_node_rs::poawx_proposer::audit_hardening_active(height),
+                    ),
+                })
+            }
+            _ => None,
+        };
+
+        // Phase 31: private proposer-VRF sortition. When the node advertises the
+        // proposer gate as active, prove our VRF over the committee seed and only
+        // build if we are selected at some cascade round the elapsed time allows;
+        // otherwise wait (a later round, or accrued registrations, may admit us).
+        // Phase 31R: keep our proposer VRF key registered on-chain so we can become
+        // eligible (fixes the onboarding chicken-and-egg). Submit (throttled) to our node,
+        // which gossips it; a producer announces it, and we are eligible FREEZE_DEPTH
+        // blocks later. Harmless if already known (deduped by the pool / connect_block).
+        if tmpl.poawx_reg_active.unwrap_or(false)
+            && (last_reg_submit == 0 || height.saturating_sub(last_reg_submit) >= 20)
+        {
+            if let Some(a_hash_hex) = tmpl.poawx_reg_anchor_hash.clone() {
+                if let Ok(a_hash) = poawx_decode_hash32(&a_hash_hex) {
+                    let a_h = tmpl.poawx_reg_anchor_height.unwrap_or(0);
+                    let bits = tmpl.poawx_reg_required_sybil_bits.unwrap_or(0);
+                    match irium_node_rs::poawx::ProposerRegistrationV1::build_signed(
+                        &secret, net, a_h, &a_hash, bits,
+                    ) {
+                        Ok(reg) => match poawx_submit_registration(&client, &reg.serialize()) {
+                            Ok(()) => {
+                                println!("[poawx] submitted proposer registration (anchor={a_h})");
+                                last_reg_submit = height;
+                            }
+                            Err(e) => eprintln!("[poawx] registration submit failed: {e}"),
+                        },
+                        Err(e) => eprintln!("[poawx] registration build failed: {e}"),
+                    }
+                }
+            }
+        }
+
+        let proposer_ctx = if tmpl.poawx_proposer_vrf_active.unwrap_or(false) {
+            let seed = match tmpl.poawx_proposer_seed.as_deref() {
+                Some(s) => match poawx_decode_hash32(s) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        eprintln!("[poawx] bad proposer seed: {e}; retrying");
+                        thread::sleep(Duration::from_secs(3));
+                        continue;
+                    }
+                },
+                None => {
+                    eprintln!("[poawx] proposer active but template carried no seed; retrying");
+                    thread::sleep(Duration::from_secs(3));
+                    continue;
+                }
+            };
+            let eligible = tmpl.poawx_proposer_eligible_count.unwrap_or(0);
+            let max_round = tmpl.poawx_proposer_max_allowed_round.unwrap_or(0);
+            let proof = match irium_node_rs::poawx_candidate::AssignmentProofV2::prove_self_solver(
+                &secret,
+                net,
+                height,
+                irium_node_rs::poawx_proposer::ROLE_PROPOSER,
+                [0u8; 32],
+                seed,
+            ) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("[poawx] proposer proof failed: {e}; retrying");
+                    thread::sleep(Duration::from_secs(3));
+                    continue;
+                }
+            };
+            let priority = irium_node_rs::poawx_proposer::proposer_priority(&proof.vrf_output);
+            let round = (0..=max_round)
+                .find(|r| irium_node_rs::poawx_proposer::is_selected(priority, eligible, *r));
+            match round {
+                Some(r) => {
+                    println!(
+                        "[poawx] proposer SELECTED height={height} round={r} priority={priority} eligible={eligible}"
+                    );
+                    Some(irium_node_rs::poawx_mining_harness::ProposerCtx {
+                        assignment: irium_node_rs::poawx::ProposerAssignmentV1 {
+                            round: r,
+                            proof,
+                        },
+                    })
+                }
+                None => {
+                    println!(
+                        "[poawx] not proposer this slot height={height} (priority={priority} eligible={eligible} max_round={max_round}); waiting"
+                    );
+                    thread::sleep(Duration::from_secs(3));
+                    continue;
+                }
+            }
+        } else {
+            None
+        };
+
+        // Phase 31R: the producer must force-drain the node's queue head (activations)
+        // and may announce pool candidates; assemble the section from the template.
+        let registration_section = {
+            let parse = |v: &Option<Vec<String>>| -> Vec<irium_node_rs::poawx::ProposerRegistrationV1> {
+                v.as_ref()
+                    .map(|l| {
+                        l.iter()
+                            .filter_map(|h| hex::decode(h).ok())
+                            .filter_map(|b| {
+                                irium_node_rs::poawx::ProposerRegistrationV1::deserialize(&b).ok()
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            };
+            let activations = parse(&tmpl.poawx_reg_activations);
+            let announces = parse(&tmpl.poawx_reg_announces);
+            if tmpl.poawx_reg_active.unwrap_or(false)
+                && (!activations.is_empty() || !announces.is_empty())
+            {
+                Some(irium_node_rs::poawx::ProposerRegistrationSection {
+                    announces,
+                    activations,
+                })
+            } else {
+                None
+            }
+        };
+
+        // Stage G1: same entry point as the CPU miner, but the header nonce is
+        // ground by the OpenCL kernel via the injected GPU solver.
+        let proof = match irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver(
+            &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,
+            parent_seed_components, &dominance, node_gates.as_ref(), proposer_ctx.as_ref(),
+            registration_section.as_ref(),
+            &gpu_solver,
+        ) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("[poawx] build failed at height {height}: {e}; retrying");
+                thread::sleep(Duration::from_secs(3));
+                continue;
+            }
+        };
+
+        if env::var("IRIUM_POAWX_EXPORT_RECEIPT_JSON")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false)
+        {
+            let receipt = proof
+                .block
+                .poawx_receipts
+                .as_ref()
+                .and_then(|r| r.first())
+                .ok_or("missing receipt in built block")?;
+            let ext_hex = receipt
+                .phase20_ext
+                .as_ref()
+                .map(|e: &irium_node_rs::poawx::Phase20ReceiptExt| hex::encode(e.serialize()))
+                .unwrap_or_default();
+            println!(
+                "{}",
+                serde_json::to_string_pretty(&json!({
+                    "height": receipt.height,
+                    "lane": (receipt.lane as char).to_string(),
+                    "worker_pkh": hex::encode(receipt.worker_pkh),
+                    "solution": hex::encode(receipt.solution),
+                    "commitment_nonce": hex::encode(receipt.commitment_nonce),
+                    "worker_pubkey": hex::encode(receipt.worker_pubkey),
+                    "worker_sig": hex::encode(receipt.worker_sig),
+                    "delegation": "",
+                    "phase20_ext": ext_hex,
+                }))
+                .map_err(|e| format!("receipt json encode: {e}"))?
+            );
+            return Ok(());
+        }
+
+        // Candidate-admission gossip is best-effort: with committed-admission
+        // (phase22a) enforced the node skips the phase21e admission-cache check, so a
+        // rejected/failed gossip post must NOT block block submission.
+        for (i, adm) in proof.admissions.iter().enumerate() {
+            if let Err(e) = poawx_post_admission(&client, adm) {
+                eprintln!("[poawx] admission[{i}] gossip post failed (non-fatal): {e}");
+            }
+        }
+        let req = build_poawx_submit_request(&proof)?;
+        match poawx_submit_extended(&client, &req) {
+            Ok(()) => println!("[poawx] submitted all-gates block height={height}"),
+            Err(e) => eprintln!("[poawx] submit failed at height {height}: {e}"),
+        }
+        thread::sleep(Duration::from_secs(interval));
+    }
+}
+
 fn main() {
     // Load .env file if present (same search order as the CPU miner)
     for path in [".env", "miner.env", "irium.env"] {
@@ -1819,8 +2154,15 @@ fn main() {
     // Parse CLI args and override env vars
     let mut args = std::env::args().skip(1).peekable();
     let mut list_platforms_flag = false;
+    let mut poawx_flag = false;
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            // Stage G1: PoAW-X solo proposer mining (auto-registration + VRF
+            // eligibility + all-gates block building), header nonce on GPU.
+            // Mirrors irium-miner --poawx.
+            "--poawx" => {
+                poawx_flag = true;
+            }
             "--pool" => {
                 let val = args.next().unwrap_or_else(|| {
                     eprintln!("--pool requires a value");
@@ -1908,7 +2250,11 @@ fn main() {
         std::process::exit(0);
     }
 
-    if miner_pubkey_hash().is_none() {
+    // PoAW-X solo mining derives every role/reward key from
+    // IRIUM_POAWX_MINER_SECRET_HEX (checked inside run_poawx_solo_gpu), not from
+    // the plain-PoW payout address — same as irium-miner --poawx, whose dispatch
+    // runs before this guard.
+    if !poawx_flag && miner_pubkey_hash().is_none() {
         eprintln!(
             "error: missing or invalid miner payout address; set IRIUM_MINER_ADDRESS (base58) or IRIUM_MINER_PKH (40-hex)"
         );
@@ -1962,6 +2308,18 @@ fn main() {
         }
     };
     println!("[GPU] {} device(s) initialised.", gpus.len());
+
+    // Stage G1: PoAW-X solo proposer mining on GPU. Dispatch after device init so
+    // the OpenCL kernel is ready; everything else (registration, VRF sortition,
+    // all-gates building, submission) mirrors irium-miner --poawx via the shared
+    // poawx_miner_client module.
+    if poawx_flag {
+        if let Err(e) = run_poawx_solo_gpu(&mut gpus) {
+            eprintln!("[poawx] GPU solo mining error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
 
     // If IRIUM_STRATUM_URL is set, use pool/Stratum mode; otherwise solo GBT mode.
     if stratum_url().is_some() {

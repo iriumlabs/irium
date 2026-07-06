@@ -1119,6 +1119,67 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
+    // Stage 3a soak assertion 3: run offline against REAL admissions fetched from a
+    // live devnet node (file set via IRIUM_SOAK_ADMISSIONS_FILE, json:
+    // [{"height":H,"seed":"hex64","hexes":["..",..]}, ..]). Ingests through the real
+    // node cache and asserts build/select yields DISTINCT solvers per role.
+    #[test]
+    #[ignore]
+    fn stage3a_soak_verify_admitted_selection() {
+        use crate::poawx::{ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
+        let path = std::env::var("IRIUM_SOAK_ADMISSIONS_FILE").expect("set IRIUM_SOAK_ADMISSIONS_FILE");
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1");
+        let net = crate::activation::network_id_byte();
+        let raw = std::fs::read_to_string(&path).expect("read admissions file");
+        let entries: serde_json::Value = serde_json::from_str(&raw).expect("parse admissions file");
+        let mut heights_checked = 0u32;
+        for e in entries.as_array().expect("array") {
+            let height = e.get("height").and_then(|v| v.as_u64()).expect("height");
+            let seed_vec = hex::decode(e.get("seed").and_then(|v| v.as_str()).expect("seed")).unwrap();
+            let seed: [u8; 32] = seed_vec.as_slice().try_into().unwrap();
+            let hexes: Vec<String> = e
+                .get("hexes")
+                .and_then(|v| v.as_array())
+                .expect("hexes")
+                .iter()
+                .filter_map(|h| h.as_str().map(|s| s.to_string()))
+                .collect();
+            if hexes.is_empty() {
+                continue;
+            }
+            let cache = NodeCandidateAdmissionCache::new();
+            cache.set_tip(height);
+            let mut accepted = 0;
+            for hx in &hexes {
+                let bytes = hex::decode(hx).expect("hex");
+                match cache.ingest_bytes(&bytes) {
+                    crate::poawx_gossip::GossipOutcome::AcceptedNew
+                    | crate::poawx_gossip::GossipOutcome::Duplicate => accepted += 1,
+                    crate::poawx_gossip::GossipOutcome::Rejected(r) => {
+                        panic!("h{height}: real admission rejected on re-ingest: {r}")
+                    }
+                }
+            }
+            let cs = cache.admitted_candidate_set(net, height, &seed);
+            let c = cs.best_for_role(ROLE_COMPUTE_CONTRIBUTOR).map(|x| x.solver_pkh);
+            let v = cs.best_for_role(ROLE_VERIFY_CONTRIBUTOR).map(|x| x.solver_pkh);
+            let s = cs.best_for_role(ROLE_SUPPORT_CONTRIBUTOR).map(|x| x.solver_pkh);
+            let hx2 = |o: &Option<[u8; 20]>| o.map(|p| hex::encode(&p[..2])).unwrap_or("NONE".into());
+            println!(
+                "h{height}: ingested={accepted}/{} compute->{} verify->{} support->{}",
+                hexes.len(), hx2(&c), hx2(&v), hx2(&s)
+            );
+            let (c, v, s) = (c.expect("compute"), v.expect("verify"), s.expect("support"));
+            assert!(c != v && v != s && c != s, "h{height}: solvers must be distinct");
+            heights_checked += 1;
+        }
+        assert!(heights_checked >= 3, "need at least 3 heights of real admissions");
+        println!("VERIFIED: {heights_checked} heights, distinct solver per role at every height");
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT");
+    }
+
     #[test]
     fn stage3a_build_pool_admission_bytes_attributes_miner() {
         use crate::poawx::{ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};

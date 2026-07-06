@@ -3434,7 +3434,126 @@ fn run_poawx_solo() -> Result<(), String> {
     }
 }
 
+// -- Stage 3a: admission-emit mode ------------------------------------------
+// Reads a roster file (height + [{pkh, role}] entries recorded by the pool from
+// accepted shares), fetches the node template for the authoritative height/seed,
+// builds one candidate admission per roster miner via the node-crate helper
+// (build_pool_admission_bytes: pool VRF work under our secret, miner pkh as the
+// solver attribution tag), and POSTs each to the node loopback
+// /poawx/candidate-admission ingest. Gated by IRIUM_POAWX_GENERATE_ADMISSIONS=1
+// (off => exits without emitting). Submission-only: block production untouched.
+fn run_poawx_emit_admissions() -> Result<(), String> {
+    if env::var("IRIUM_POAWX_GENERATE_ADMISSIONS").map(|v| v.trim() != "1").unwrap_or(true) {
+        println!("[emit-admissions] IRIUM_POAWX_GENERATE_ADMISSIONS not set to 1; nothing emitted");
+        return Ok(());
+    }
+    let roster_path = env::var("IRIUM_POAWX_ADMISSION_ROSTER")
+        .map_err(|_| "IRIUM_POAWX_ADMISSION_ROSTER not set".to_string())?;
+    let roster_raw = std::fs::read_to_string(&roster_path)
+        .map_err(|e| format!("roster read {roster_path}: {e}"))?;
+    let roster: serde_json::Value =
+        serde_json::from_str(&roster_raw).map_err(|e| format!("roster parse: {e}"))?;
+    let roster_height = roster
+        .get("height")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| "roster: missing height".to_string())?;
+    let miners = roster
+        .get("miners")
+        .and_then(|v| v.as_array())
+        .ok_or_else(|| "roster: missing miners".to_string())?;
+
+    let secret = poawx_miner_secret()?;
+    let net = irium_node_rs::activation::network_id_byte();
+    let client = rpc_client()?;
+
+    // authoritative height + seed from the node template (single source of truth).
+    let tpl: serde_json::Value = with_rpc_base(|base| {
+        let url = format!("{}/rpc/getblocktemplate", base.trim_end_matches('/'));
+        let mut req = client.get(url);
+        if let Some(token) = rpc_token() {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().map_err(|e| format!("template fetch: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(rpc_status_error("template fetch", resp.status()));
+        }
+        resp.json().map_err(|e| format!("template json: {e}"))
+    })?;
+    let tpl_height = tpl.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
+    if tpl_height != roster_height {
+        println!(
+            "[emit-admissions] roster height {roster_height} != template height {tpl_height}; skipping (stale roster)"
+        );
+        return Ok(());
+    }
+    let seed_hex = tpl
+        .get("poawx_proposer_seed")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "template: missing poawx_proposer_seed".to_string())?;
+    let seed_vec = hex::decode(seed_hex).map_err(|e| format!("seed hex: {e}"))?;
+    let seed: [u8; 32] = seed_vec
+        .as_slice()
+        .try_into()
+        .map_err(|_| "seed not 32 bytes".to_string())?;
+
+    let mut emitted = 0usize;
+    for m in miners {
+        let pkh_hex = m.get("pkh").and_then(|v| v.as_str()).unwrap_or("");
+        let role = m.get("role").and_then(|v| v.as_u64()).unwrap_or(255) as u8;
+        let pkh_vec = match hex::decode(pkh_hex) {
+            Ok(v) if v.len() == 20 => v,
+            _ => {
+                eprintln!("[emit-admissions] bad pkh {pkh_hex}; skipping entry");
+                continue;
+            }
+        };
+        let mut pkh = [0u8; 20];
+        pkh.copy_from_slice(&pkh_vec);
+        let bytes = match irium_node_rs::poawx_admission::build_pool_admission_bytes(
+            net, &secret, roster_height, &seed, pkh, role,
+        ) {
+            Some(b) => b,
+            None => {
+                eprintln!("[emit-admissions] admission build failed for {pkh_hex}");
+                continue;
+            }
+        };
+        let status = with_rpc_base(|base| {
+            let url = format!("{}/poawx/candidate-admission", base.trim_end_matches('/'));
+            let mut req = client.post(url).body(bytes.clone());
+            if let Some(token) = rpc_token() {
+                req = req.bearer_auth(token);
+            }
+            let resp = req.send().map_err(|e| format!("admission post: {e}"))?;
+            let code = resp.status();
+            let body: serde_json::Value = resp.json().unwrap_or(serde_json::Value::Null);
+            Ok(format!(
+                "{} {}",
+                code.as_u16(),
+                body.get("status").and_then(|s| s.as_str()).unwrap_or("-")
+            ))
+        })?;
+        println!(
+            "[emit-admissions] height={roster_height} miner={} role={role} -> {status}",
+            &pkh_hex[..8.min(pkh_hex.len())]
+        );
+        emitted += 1;
+        // stay well under the node per-source-IP admission rate limit.
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    println!("[emit-admissions] done: {emitted} admissions emitted for height {roster_height}");
+    Ok(())
+}
+
 fn main() {
+    if env::args().any(|a| a == "--poawx-emit-admissions") {
+        load_env_file("/etc/irium/miner.env");
+        if let Err(e) = run_poawx_emit_admissions() {
+            eprintln!("[emit-admissions] error: {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if env::args().any(|a| a == "--poawx") {
         load_env_file("/etc/irium/miner.env");
         if let Err(e) = run_poawx_solo() {

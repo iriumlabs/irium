@@ -1532,6 +1532,29 @@ pub fn phase20_production_active(height: u64) -> bool {
         && activation_height_reached("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", height)
 }
 
+/// Mirror of the NODE's real `phase20_production_active`: on mainnet the node
+/// activates at block 50,000 via `poawx_effective_activation` (the pool's own
+/// `phase20_production_active` mirror above keeps mainnet-hard-off semantics for
+/// POOL features; this one exists so block assembly matches what the live node
+/// validates). Non-mainnet follows the same env mirror as the pool gate.
+pub fn node_phase20_production_active(height: u64) -> bool {
+    if network_id_from_env() == 0 {
+        return height >= 50_000;
+    }
+    activation_height_reached("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", height)
+        && activation_height_reached("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", height)
+}
+
+/// Mirror of the NODE's real `audit_hardening_active` (Fix #5 receipt-root field
+/// binding): active on mainnet from block 50,000; env-gated elsewhere. Drives the
+/// audit branch of the pool receipts-root so submitted roots match the node.
+pub fn node_audit_hardening_active(height: u64) -> bool {
+    if network_id_from_env() == 0 {
+        return height >= 50_000;
+    }
+    activation_height_reached("IRIUM_POAWX_AUDIT_HARDENING_ACTIVATION_HEIGHT", height)
+}
+
 /// Whether the gated SYNTHETIC role-claim builder is enabled. Testnet/devnet-only
 /// (`IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS=1`), mainnet hard-off, disabled by default.
 /// This is for production-wiring validation; it is NOT the live hidden-precommit

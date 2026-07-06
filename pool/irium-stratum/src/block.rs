@@ -293,6 +293,63 @@ pub fn compute_receipts_root_from_pending_gated(
     receipts: &[PoawxPendingReceipt],
     phase20_active: bool,
 ) -> [u8; 32] {
+    // Fix #5 compat: the live node's root uses the audit layout from mainnet
+    // block 50,000 (env-gated elsewhere); derive it from the receipt height.
+    let audit_active = receipts
+        .first()
+        .map(|r| crate::delegation::node_audit_hardening_active(r.height))
+        .unwrap_or(false);
+    compute_receipts_root_from_pending_gated_with(receipts, phase20_active, audit_active)
+}
+
+/// Pure worker for the gated root: `audit_active` selects the node's Fix #5 audit
+/// layout (binds worker_pubkey + worker_sig, sorts the INNER hashes) mirroring
+/// `irium_node_rs::poawx::irx1_root_from_block_receipts_audit`; otherwise the
+/// legacy Phase 20 layout below. Split out (no env reads) for byte-parity tests.
+pub fn compute_receipts_root_from_pending_gated_with(
+    receipts: &[PoawxPendingReceipt],
+    phase20_active: bool,
+    audit_active: bool,
+) -> [u8; 32] {
+    if audit_active {
+        let mut inners: Vec<[u8; 32]> = receipts
+            .iter()
+            .map(|r| {
+                let mut inner = Sha256::new();
+                inner.update(r.height.to_le_bytes());
+                inner.update([r.lane.bytes().next().unwrap_or(b'A')]);
+                inner.update(hex::decode(&r.worker_pkh).unwrap_or_default());
+                // Fix #5 mirror: bind signer pubkey + signature exactly like the node.
+                inner.update(hex::decode(&r.worker_pubkey).unwrap_or_default());
+                inner.update(hex::decode(&r.worker_sig).unwrap_or_default());
+                inner.update(hex::decode(&r.solution).unwrap_or_default());
+                inner.update(hex::decode(&r.commitment_nonce).unwrap_or_default());
+                if !r.delegation.is_empty() {
+                    if let Ok(b) = hex::decode(&r.delegation) {
+                        let mut dh = Sha256::new();
+                        dh.update(&b);
+                        let dd: [u8; 32] = dh.finalize().into();
+                        inner.update(dd);
+                    }
+                }
+                if phase20_active && !r.phase20_ext.is_empty() {
+                    if let Ok(b) = hex::decode(&r.phase20_ext) {
+                        let mut eh = Sha256::new();
+                        eh.update(&b);
+                        let ed: [u8; 32] = eh.finalize().into();
+                        inner.update(ed);
+                    }
+                }
+                inner.finalize().into()
+            })
+            .collect();
+        inners.sort_unstable();
+        let mut outer = Sha256::new();
+        for h in &inners {
+            outer.update(h);
+        }
+        return outer.finalize().into();
+    }
     let mut sorted: Vec<&PoawxPendingReceipt> = receipts.iter().collect();
     sorted.sort_unstable_by(|a, b| {
         a.height
@@ -348,6 +405,96 @@ pub fn compute_receipts_root_from_pending_gated(
 mod tests {
     use super::*;
     use crate::template::PoawxPendingReceipt;
+
+    // Compat fix: pool receipts-root == node lib root across ALL gate combos, for a
+    // realistic receipt (pubkey+sig+non-empty phase20_ext, delegation empty like the
+    // live daemon receipt). Pure fns on both sides -- no env.
+    #[test]
+    fn compat_receipts_root_matches_node_all_gate_combos() {
+        use irium_node_rs::poawx::{
+            irx1_root_from_block_receipts_audit, PoawxBlockReceipt,
+        };
+        // realistic node-side ext (non-empty), serialized -> hex for the pending side.
+        let ext = irium_node_rs::poawx::Phase20ReceiptExt {
+            role_reward: irium_node_rs::poawx::RoleReward {
+                compute_contributor_pkh: [0xC1u8; 20],
+                verify_contributor_pkh: [0xC2u8; 20],
+                support_contributor_pkh: [0xC3u8; 20],
+            },
+            compute_claim: node_claim(1),
+            verify_claim: node_claim(2),
+            support_claim: node_claim(3),
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            precommit_root: None,
+            role_ticket_proofs: None,
+            role_dominance_weights: None,
+            candidate_set: None,
+            role_puzzle_proofs: None,
+            finality_proof: None,
+            committed_admission: None,
+            role_assignment_v2: None,
+            fraud_proofs: None,
+            proposer_assignment: None,
+            proposer_registrations: None,
+        };
+        let ext_hex = hex::encode(ext.serialize());
+
+        let height = 50_123u64;
+        let pkh = [0xABu8; 20];
+        let pubkey = [0x02u8; 33];
+        let sig = [0x5Au8; 64];
+        let sol = [0x11u8; 8];
+        let nonce = [0x22u8; 32];
+
+        let pending = PoawxPendingReceipt {
+            height,
+            lane: "A".to_string(),
+            worker_pkh: hex::encode(pkh),
+            worker_pubkey: hex::encode(pubkey),
+            worker_sig: hex::encode(sig),
+            solution: hex::encode(sol),
+            commitment_nonce: hex::encode(nonce),
+            delegation: String::new(),
+            phase20_ext: ext_hex,
+        };
+        let node_r = PoawxBlockReceipt {
+            height,
+            lane: b'A',
+            worker_pkh: pkh,
+            worker_pubkey: pubkey,
+            worker_sig: sig,
+            solution: sol,
+            commitment_nonce: nonce,
+            delegation: None,
+            phase20_ext: Some(ext),
+        };
+
+        for (p20, audit) in [(false, false), (true, false), (false, true), (true, true)] {
+            let pool_root =
+                compute_receipts_root_from_pending_gated_with(&[pending.clone()], p20, audit);
+            let node_root = irx1_root_from_block_receipts_audit(&[node_r.clone()], p20, audit);
+            assert_eq!(
+                pool_root, node_root,
+                "pool root must equal node root for phase20={p20} audit={audit}"
+            );
+        }
+        // gate mirrors: mainnet branch = height >= 50000.
+        println!("PARITY OK: pool root == node root for all 4 gate combos at h{height}");
+    }
+
+    fn node_claim(role: u8) -> irium_node_rs::poawx::PoawxRoleClaim {
+        irium_node_rs::poawx::PoawxRoleClaim {
+            role_id: role,
+            lane_id: 0,
+            solver_pkh: [role; 20],
+            nonce: [1u8; 32],
+            secret: [2u8; 32],
+            claim_digest: [3u8; 32],
+            commitment_hash: None,
+        }
+    }
+
 
     fn mkr(height: u64, lane: &str, pkh: &str, sol: &str, nonce: &str) -> PoawxPendingReceipt {
         PoawxPendingReceipt {

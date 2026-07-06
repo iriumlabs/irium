@@ -1728,7 +1728,7 @@ fn build_native_rewardable_coinbase(
     // GATED root (binds the extension digest) so it matches connect_block /
     // submit_block_extended. No fee output, no delegate output. Mainnet hard-off.
     // Duplicate pkhs (MVP single-miner: all role pkhs == primary) stay separate.
-    let phase20_multi_role = crate::delegation::phase20_production_active(snapshot.height)
+    let phase20_multi_role = crate::delegation::node_phase20_production_active(snapshot.height)
         && snapshot
             .poawx_pending_receipts
             .first()
@@ -1740,7 +1740,10 @@ fn build_native_rewardable_coinbase(
             crate::delegation::role_reward_pkhs_from_ext_hex(&first.phase20_ext)
                 .ok_or_else(|| anyhow!("phase20 coinbase: malformed phase20_ext"))?;
         let amts = crate::delegation::multi_role_amounts(snapshot.coinbase_value);
-        let root = compute_receipts_root_from_pending_gated(&snapshot.poawx_pending_receipts, true);
+        let root = compute_receipts_root_from_pending_gated(
+            &snapshot.poawx_pending_receipts,
+            crate::delegation::node_phase20_production_active(snapshot.height),
+        );
         let irx1_script = build_irx1_commitment_script(&root);
         // Step 4: OPTIONAL third-party fee output, taken ONLY from the PRIMARY
         // allocation (fee = floor(primary_gross * fee_bps / 10000); miner keeps the
@@ -1754,8 +1757,20 @@ fn build_native_rewardable_coinbase(
             (amts[0], 0)
         };
         // Canonical order: irx1, PRIMARY(net), COMPUTE, VERIFY, SUPPORT [, FEE].
+        // Compat: PRIMARY pays the RECEIPT worker (the proposer whose phase20_ext
+        // this is), matching the node's payout validation and the accepted
+        // mainnet block shape (the old pool's poawx_role_payouts).
+        let primary_script = hex::decode(&first.worker_pkh)
+            .ok()
+            .filter(|v| v.len() == 20)
+            .map(|v| {
+                let mut p = [0u8; 20];
+                p.copy_from_slice(&v);
+                payout_script_from_pkh(&p)
+            })
+            .unwrap_or_else(|| snapshot.payout_script.clone());
         let mut role_outs: Vec<(u64, Vec<u8>)> = vec![
-            (primary_net, snapshot.payout_script.clone()),
+            (primary_net, primary_script),
             (amts[1], payout_script_from_pkh(&compute_pkh)),
             (amts[2], payout_script_from_pkh(&verify_pkh)),
             (amts[3], payout_script_from_pkh(&support_pkh)),
@@ -3223,7 +3238,7 @@ fn build_submit_variant(
         // root (no extension to bind).
         let receipts_root = hex::encode(compute_receipts_root_from_pending_gated(
             &snapshot.poawx_pending_receipts,
-            crate::delegation::phase20_production_active(snapshot.height),
+            crate::delegation::node_phase20_production_active(snapshot.height),
         ));
         SubmitVariant::Extended(SubmitBlockExtendedRequest {
             height: req.height,
@@ -4256,7 +4271,7 @@ async fn handle_submit_legacy_rewardable(
             // extension rather than on a root mismatch.
             let receipts_root = hex::encode(compute_receipts_root_from_pending_gated(
                 &job.poawx_pending_receipts,
-                crate::delegation::phase20_production_active(job.height),
+                crate::delegation::node_phase20_production_active(job.height),
             ));
             let ext_req = SubmitBlockExtendedRequest {
                 height: req.height,

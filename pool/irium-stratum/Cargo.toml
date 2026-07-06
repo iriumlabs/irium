@@ -28,6 +28,8 @@ bs58 = "0.5"
 # to lazily initialise the two DashMaps as statics.
 dashmap = "5"
 once_cell = "1"
+# Durable share persistence (git-tracked; replaces the lost untracked accounting.rs).
+rusqlite = { version = "0.31", features = ["bundled"] }
 
 [dev-dependencies]
 irium-node-rs = { path = "../../" }

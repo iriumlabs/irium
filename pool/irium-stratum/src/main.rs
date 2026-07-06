@@ -1,3 +1,4 @@
+mod accounting;
 mod block;
 mod delegation;
 mod events;
@@ -23,6 +24,9 @@ async fn main() -> Result<()> {
         .with_target(false)
         .compact()
         .init();
+
+    // Restore durable share persistence (env-gated). See accounting.rs.
+    accounting::init();
 
     let bind = env::var("STRATUM_BIND").unwrap_or_else(|_| "0.0.0.0:3333".to_string());
     let default_diff_raw = env::var("STRATUM_DEFAULT_DIFF")

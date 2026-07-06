@@ -763,6 +763,7 @@ fn record_miner_share_accepted(worker: &str, diff: f64) {
         entry.last_share_at = now;
         entry.current_diff = diff;
     }
+    crate::accounting::record_share(worker, &worker_address(worker), diff, true, None);
 }
 
 // Record a rejected share for the given worker with a reason category.
@@ -782,6 +783,7 @@ fn record_miner_share_rejected(worker: &str, reason: &'static str) {
     if let Ok(mut g) = GLOBAL_REJECT_REASONS.lock() {
         *g.entry(reason).or_insert(0) += 1;
     }
+    crate::accounting::record_share(worker, &worker_address(worker), 0.0, false, Some(reason));
 }
 
 fn mark_candidate_detected() {

@@ -90,6 +90,7 @@ pub mod poawx_committed_admission;
 pub mod poawx_dominance;
 pub mod poawx_finality;
 pub mod poawx_gossip;
+pub mod poawx_miner_client;
 pub mod poawx_mining_harness;
 pub mod poawx_penalty;
 pub mod poawx_proposer;

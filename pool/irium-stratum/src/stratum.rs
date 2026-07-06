@@ -6382,4 +6382,198 @@ mod tests {
             "submit_block_extended must ACCEPT the multi-role coinbase (status={status} body={body})"
         );
     }
+
+    // ── Stage 3a option (b): verify the REAL native-rewardable job pipeline end-to-
+    // end against an isolated bb75913-lineage iriumd on :38500 -- exactly what the
+    // live Phase 2 retry would run (native-rewardable/multi-role enabled), driven
+    // through the true job-issuance path rather than a hand-built snapshot.
+    //
+    // Pipeline exercised (production functions, no shortcuts):
+    //   template -> to_job(tpl) -> build_canonical_job_snapshot(job, session, config)
+    //     -> build_native_rewardable_job (the mining.notify issuance)
+    //     -> decode_native_rewardable_submit (share reconstruction, real solve)
+    //     -> submit_canonical_block (build_submit_variant -> /rpc/submit_block_extended)
+    //
+    // Asserts, with the same rigor as the last test:
+    //   - notify-mined coinbase == submitted coinbase (byte-identity: no PoW/merkle
+    //     drift between what a miner hashes and what the pool submits),
+    //   - the coinbase carries the GATED irx1 commitment,
+    //   - the coinbase has the 4 role payout outputs (+ irx1 OP_RETURN) that
+    //     connect_block's phase20 validator requires,
+    //   - the node ACCEPTS the block (NodeSubmitResult::Accepted), zero rejects.
+    //
+    // Requires the isolated rig up on :38500 (bb75913 iriumd + receipt producer).
+    // Run: cargo test -p irium-stratum --release \
+    //        'stratum::tests::stage3a_native_rewardable_pipeline_submit_accepted_e2e' \
+    //        -- --ignored --exact --nocapture --test-threads=1
+    #[tokio::test]
+    #[ignore = "stage3a option-b live E2E: needs isolated bb75913 iriumd + producer on :38500"]
+    async fn stage3a_native_rewardable_pipeline_submit_accepted_e2e() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_AUDIT_HARDENING_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_STRATUM_POAWX", "1");
+
+        let base =
+            std::env::var("E2E_NODE").unwrap_or_else(|_| "http://127.0.0.1:38500".to_string());
+        let token = std::env::var("E2E_TOKEN")
+            .unwrap_or_else(|_| "e2ecompattoken1234567890".to_string());
+        let client = reqwest::Client::new();
+
+        // 1) Poll for a template with a pending, ext-bearing receipt.
+        let tpl: crate::template::GetBlockTemplate = {
+            let mut got = None;
+            for _ in 0..60 {
+                let resp = client
+                    .get(format!("{base}/rpc/getblocktemplate"))
+                    .bearer_auth(&token)
+                    .send()
+                    .await
+                    .expect("getblocktemplate request");
+                let t: crate::template::GetBlockTemplate =
+                    resp.json().await.expect("template json");
+                if t.poawx_mode == "active"
+                    && !t.poawx_pending_receipts.is_empty()
+                    && t.poawx_pending_receipts.iter().all(|r| !r.phase20_ext.is_empty())
+                {
+                    got = Some(t);
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            got.expect("template carrying a pending ext-bearing receipt within 120s")
+        };
+        let height = tpl.height;
+        assert!(
+            crate::delegation::node_phase20_production_active(height),
+            "phase20 production must be active at height {height} in the test env"
+        );
+
+        // 2) REAL job pipeline: to_job -> snapshot, native-rewardable config.
+        let job = to_job(1, &tpl).expect("to_job");
+        let mut config = test_config(MinerFamilyMode::Asic);
+        config.adapter_mode = AdapterMode::NativeRewardableOnly;
+        config.native_rewardable_enabled = true;
+        config.poawx_enabled = true;
+        config.poawx_producer = None; // fallback -> template receipts (roots match node)
+        config.rpc_base = base.clone();
+        config.rpc_token = token.clone();
+        let session = test_session(AdapterKind::NativeRewardableReserved);
+        let snapshot =
+            build_canonical_job_snapshot(&job, &session, &config).expect("snapshot");
+        assert_eq!(
+            snapshot.poawx_pending_receipts.len(),
+            tpl.poawx_pending_receipts.len(),
+            "snapshot must carry the template's pending receipts (producer-absent fallback)"
+        );
+
+        // 3) Build the native-rewardable job (the real mining.notify issuance).
+        let _issued =
+            build_native_rewardable_job(&snapshot, &session, &config).expect("native job");
+
+        let gated_root = crate::block::compute_receipts_root_from_pending_gated(
+            &snapshot.poawx_pending_receipts,
+            crate::delegation::node_phase20_production_active(height),
+        );
+        let gated_root_hex = hex::encode(gated_root);
+
+        // 4) Grind a nonce through the REAL decode path until block_ok.
+        let ntime_hex = format!("{:08x}", snapshot.base_ntime);
+        let extranonce2_hex = "00000000".to_string();
+        let mut solve = None;
+        for nonce in 0u32..=8_000_000 {
+            let submit = NativeSubmit {
+                job_id: snapshot.job_id.clone(),
+                extranonce2_hex: extranonce2_hex.clone(),
+                ntime_hex: ntime_hex.clone(),
+                nonce_hex: format!("{:08x}", nonce),
+            };
+            let s = decode_native_rewardable_submit(&snapshot, &submit).expect("decode");
+            if s.block_ok {
+                solve = Some(s);
+                break;
+            }
+        }
+        let solve = solve.expect("grind a nonce vs the trivial devnet target");
+
+        // Byte-identity: the coinbase a miner would mine from the notify split must
+        // equal the coinbase the pool submits (else the PoW/merkle would not match).
+        let (cb1, cb2) =
+            native_rewardable_notify_split(&snapshot).expect("notify split");
+        let en2 = hex::decode(&extranonce2_hex).unwrap();
+        let mut mined = Vec::with_capacity(cb1.len() + snapshot.extranonce1.len() + en2.len() + cb2.len());
+        mined.extend_from_slice(&cb1);
+        mined.extend_from_slice(&snapshot.extranonce1);
+        mined.extend_from_slice(&en2);
+        mined.extend_from_slice(&cb2);
+        assert_eq!(
+            hex::encode(&mined),
+            solve.coinbase_hex,
+            "notify-mined coinbase must equal the submitted coinbase (byte-identity)"
+        );
+
+        // Inspect the coinbase structure: irx1 (gated root) + 4 role payout outputs.
+        let coinbase = hex::decode(&solve.coinbase_hex).unwrap();
+        let has_irx1 = coinbase.windows(38).any(|w| {
+            w[0] == 0x6a && w[1] == 0x24 && &w[2..6] == b"irx1" && w[6..38] == gated_root[..]
+        });
+        assert!(has_irx1, "native coinbase must carry the gated irx1 commitment");
+        let (total_outputs, opreturn_outputs, payout_outputs) = {
+            let mut i = 4usize; // version
+            let _vin = coinbase[i]; // input count
+            i += 1;
+            let hlen = coinbase[i] as usize; // length-prefixed prevout hash (0x20)
+            i += 1 + hlen;
+            i += 4; // prevout index
+            let slen = coinbase[i] as usize; // scriptsig length
+            i += 1 + slen;
+            i += 4; // sequence
+            let vout = coinbase[i] as usize; // outputs < 253 here
+            i += 1;
+            let (mut op, mut pay) = (0usize, 0usize);
+            for _ in 0..vout {
+                i += 8; // value
+                let sl = coinbase[i] as usize;
+                i += 1;
+                let script = &coinbase[i..i + sl];
+                i += sl;
+                if !script.is_empty() && script[0] == 0x6a {
+                    op += 1;
+                } else {
+                    pay += 1;
+                }
+            }
+            (vout, op, pay)
+        };
+        assert_eq!(payout_outputs, 4, "phase20 coinbase must have exactly 4 payout outputs");
+        assert_eq!(opreturn_outputs, 1, "exactly one irx1 OP_RETURN output");
+
+        // 5) REAL submit: submit_canonical_block -> build_submit_variant (gated root)
+        //    -> POST /rpc/submit_block_extended.
+        let result = submit_canonical_block(&client, &config, &snapshot, &solve)
+            .await
+            .expect("submit_canonical_block");
+
+        println!("STAGE3B height={height} block_ok_nonce={}", solve.nonce_hex);
+        println!("STAGE3B gated_irx1_root={gated_root_hex}");
+        println!(
+            "STAGE3B coinbase outputs total={total_outputs} payout={payout_outputs} opreturn={opreturn_outputs}"
+        );
+        println!("STAGE3B coinbase_hex={}", solve.coinbase_hex);
+        match result {
+            NodeSubmitResult::Accepted {
+                accepted_height,
+                canonical_block_hash,
+            } => {
+                println!(
+                    "STAGE3B ACCEPTED height={accepted_height} hash={}",
+                    hex::encode(canonical_block_hash)
+                );
+            }
+            NodeSubmitResult::Rejected { reason } => {
+                panic!("STAGE3B REJECTED: {reason}");
+            }
+        }
+    }
 }

@@ -464,6 +464,9 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            fraud_proofs: None,
+            proposer_assignment: None,
+            proposer_registrations: None,
         };
         let worker_pkh = [0xabu8; 20];
         let sol = [0x01u8; 8];

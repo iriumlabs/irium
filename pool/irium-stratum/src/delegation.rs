@@ -2167,6 +2167,75 @@ pub fn build_pool_candidate_set_for_height(
     build_admitted_candidate_set(&hexes, network_id, height, seed)
 }
 
+// -- Stage 3a: crypto-free pool admission roster feed ------------------------
+// Records which miner pkhs did accepted work at which height, with a share-
+// weighted rotated role per miner, and atomically writes a roster file the
+// admission-emit mode (irium-miner --poawx-emit-admissions) consumes. NO crypto:
+// this only records pkh bytes + a role integer. Gated OFF by default: without
+// IRIUM_POAWX_POOL_ROSTER_FILE set, every call is a no-op. It never affects
+// share validation, receipts, or block production.
+
+/// Roster gate + destination: the file path, or None (feature off, default).
+pub fn pool_roster_file() -> Option<String> {
+    match std::env::var("IRIUM_POAWX_POOL_ROSTER_FILE") {
+        Ok(p) if !p.trim().is_empty() => Some(p),
+        _ => None,
+    }
+}
+
+/// Share-weighted role rotation: deterministic per (miner, height) so distinct
+/// miners land distinct roles and each miner's role rotates across heights.
+/// Mirrors the rotation proven in the Stage 3a soak.
+pub fn pool_role_for_miner(miner_pkh: &[u8; 20], height: u64) -> u8 {
+    let roles = [
+        ROLE_COMPUTE_CONTRIBUTOR,
+        ROLE_VERIFY_CONTRIBUTOR,
+        ROLE_SUPPORT_CONTRIBUTOR,
+    ];
+    let mix = (miner_pkh[0] as u64)
+        .wrapping_mul(31)
+        .wrapping_add(miner_pkh[19] as u64)
+        .wrapping_add(height);
+    roles[(mix % 3) as usize]
+}
+
+fn pool_roster_map(
+) -> &'static std::sync::Mutex<BTreeMap<u64, BTreeMap<[u8; 20], u8>>> {
+    static S: std::sync::OnceLock<std::sync::Mutex<BTreeMap<u64, BTreeMap<[u8; 20], u8>>>> =
+        std::sync::OnceLock::new();
+    S.get_or_init(|| std::sync::Mutex::new(BTreeMap::new()))
+}
+
+/// Record an accepted-share miner into the roster for `height`. One entry per
+/// (height, miner); the roster file always reflects the newest recorded height
+/// (an older-height share never regresses the file). Atomic write via temp+rename.
+pub fn pool_roster_record(height: u64, miner_pkh: [u8; 20]) {
+    let Some(path) = pool_roster_file() else {
+        return; // feature off (default)
+    };
+    let role = pool_role_for_miner(&miner_pkh, height);
+    let entries: Vec<([u8; 20], u8)> = {
+        let mut m = pool_roster_map().lock().unwrap_or_else(|e| e.into_inner());
+        let max_before = m.keys().next_back().copied().unwrap_or(0);
+        m.retain(|h, _| h.saturating_add(8) >= height);
+        let e = m.entry(height).or_default();
+        let newly = e.insert(miner_pkh, role).is_none();
+        if height < max_before || !newly {
+            return; // stale-height share, or already recorded: no rewrite
+        }
+        e.iter().map(|(p, r)| (*p, *r)).collect()
+    };
+    let miners: Vec<serde_json::Value> = entries
+        .iter()
+        .map(|(p, r)| serde_json::json!({"pkh": hex::encode(p), "role": r}))
+        .collect();
+    let doc = serde_json::json!({"height": height, "miners": miners});
+    let tmp = format!("{path}.tmp");
+    if std::fs::write(&tmp, doc.to_string()).is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
 /// Fetch node-admitted candidate admissions for a height (hex; empty on error).
 pub async fn fetch_node_candidate_admissions(
     rpc_base: &str,
@@ -6264,6 +6333,68 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS");
         std::env::remove_var("IRIUM_NETWORK");
         println!("=== Part C stage 2 complete: mainnet gate CLOSED today; if enabled, real-param block is node-valid with distinct attribution ===");
+    }
+
+    // Stage 3a: roster feed records accepted miners per height with rotated roles,
+    // writes the file atomically, never regresses to an older height, and is a
+    // strict no-op with the gate off.
+    #[test]
+    fn stage3a_roster_feed_records_and_rotates() {
+        let _g = p20_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let path = std::env::temp_dir().join("s3a-roster-test.json");
+        let path_s = path.to_string_lossy().to_string();
+        let _ = std::fs::remove_file(&path);
+        pool_roster_map().lock().unwrap_or_else(|e| e.into_inner()).clear();
+
+        // gate off (default): strict no-op, no file.
+        std::env::remove_var("IRIUM_POAWX_POOL_ROSTER_FILE");
+        pool_roster_record(100, [0xB1u8; 20]);
+        assert!(!path.exists(), "gate off must write nothing");
+
+        // gate on: three miners at h=100.
+        std::env::set_var("IRIUM_POAWX_POOL_ROSTER_FILE", &path_s);
+        for m in [[0xB1u8; 20], [0xB2u8; 20], [0xB3u8; 20]] {
+            pool_roster_record(100, m);
+        }
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(doc["height"], 100);
+        let miners = doc["miners"].as_array().unwrap();
+        assert_eq!(miners.len(), 3, "three distinct miners recorded");
+        for m in miners {
+            let pkh = hex::decode(m["pkh"].as_str().unwrap()).unwrap();
+            let mut p = [0u8; 20];
+            p.copy_from_slice(&pkh);
+            assert_eq!(
+                m["role"].as_u64().unwrap() as u8,
+                pool_role_for_miner(&p, 100),
+                "role matches the share-weighted rotation"
+            );
+        }
+        // duplicate share from the same miner: no duplicate entry.
+        pool_roster_record(100, [0xB1u8; 20]);
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(doc["miners"].as_array().unwrap().len(), 3);
+
+        // new height: file follows; role rotates for the same miner.
+        pool_roster_record(101, [0xB1u8; 20]);
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(doc["height"], 101);
+        let r100 = pool_role_for_miner(&[0xB1u8; 20], 100);
+        let r101 = pool_role_for_miner(&[0xB1u8; 20], 101);
+        assert_ne!(r100, r101, "same miner rotates role across heights");
+
+        // stale-height share after a newer height: file must NOT regress.
+        pool_roster_record(100, [0xB4u8; 20]);
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(doc["height"], 101, "older-height share never regresses the file");
+
+        let _ = std::fs::remove_file(&path);
+        pool_roster_map().lock().unwrap_or_else(|e| e.into_inner()).clear();
+        std::env::remove_var("IRIUM_POAWX_POOL_ROSTER_FILE");
     }
 
     #[test]

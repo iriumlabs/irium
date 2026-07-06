@@ -2980,6 +2980,13 @@ fn process_cpuminer_compat_solve(
 
     mark_accepted_share();
     record_miner_share_accepted(worker, diff);
+    // Stage 3a: record this accepted miner into the pool admission roster
+    // (crypto-free; gated by IRIUM_POAWX_POOL_ROSTER_FILE; no effect on shares).
+    if let Some(addr) = worker.split('.').next() {
+        if let Ok(pkh) = parse_address_to_pkh(addr) {
+            crate::delegation::pool_roster_record(snapshot.height, pkh);
+        }
+    }
     info!(
         "[SHARE_ACCEPTED] worker={} adapter_id={} rewardable={} variant={} hash={} canonical_hash={}",
         worker,
@@ -3437,6 +3444,13 @@ async fn handle_submit_native_rewardable(
     mark_accepted_share();
     record_miner_share_accepted(&worker, session.difficulty);
     mark_rewardable_share_accepted();
+    // Stage 3a: record this accepted miner into the pool admission roster
+    // (crypto-free; gated by IRIUM_POAWX_POOL_ROSTER_FILE; no effect on shares).
+    if let Some(addr) = worker.split('.').next() {
+        if let Ok(pkh) = parse_address_to_pkh(addr) {
+            crate::delegation::pool_roster_record(snapshot.height, pkh);
+        }
+    }
     info!(
         "[REWARDABLE_SHARE_ACCEPTED] worker={} adapter_id={} rewardable={} job={} canonical_hash={} share_target={}",
         worker,
@@ -3583,6 +3597,13 @@ async fn handle_submit_auxpow(
     mark_accepted_share();
     record_miner_share_accepted(&worker, session.difficulty);
     mark_rewardable_share_accepted();
+    // Stage 3a: record this accepted miner into the pool admission roster
+    // (crypto-free; gated by IRIUM_POAWX_POOL_ROSTER_FILE; no effect on shares).
+    if let Some(addr) = worker.split('.').next() {
+        if let Ok(pkh) = parse_address_to_pkh(addr) {
+            crate::delegation::pool_roster_record(snapshot.height, pkh);
+        }
+    }
     info!(
         "[AUXPOW_SHARE_ACCEPTED] worker={} hash={} block_target={}",
         worker,

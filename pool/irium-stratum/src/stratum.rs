@@ -6174,4 +6174,212 @@ mod tests {
         assert!(height_msg.starts_with("__STALE_SHARE__"));
         assert!(job_id_msg.starts_with("__STALE_SHARE__"));
     }
+
+    // ── Stage 3a: purpose-made block-submitter proving the EXACT live phase20
+    // mining path end-to-end against an isolated bb75913-lineage iriumd on :38500.
+    //
+    // Two facts this proves:
+    //   (A) The ec6c914 fix: to_job's coinbase-irx1 root (computed via the
+    //       `compute_receipts_root_from_pending` WRAPPER, stratum.rs:2156) now equals
+    //       the GATED submit-field root AND the node's recomputed root -- no more
+    //       "no irx1 commitment in coinbase" divergence. (asserted below)
+    //   (B) The real production coinbase the pool reconstructs for a phase20 block
+    //       (build_native_rewardable_coinbase => irx1 OP_RETURN + the 4 role payout
+    //       outputs PRIMARY/COMPUTE/VERIFY/SUPPORT with the gated irx1 root) is
+    //       ACCEPTED by /rpc/submit_block_extended: zero receipts_root mismatch,
+    //       zero "no irx1 commitment", and it passes connect_block's phase20 payout
+    //       validation (which requires exactly 4 payout outputs -- the single-payout
+    //       to_job shape is structurally invalid at phase20, so native-rewardable /
+    //       multi-role is the only valid live path).
+    //
+    // Requires the isolated rig up on :38500 (bb75913 iriumd + receipt producer).
+    // Run: cargo test -p irium-stratum --release \
+    //        'stratum::tests::stage3a_to_job_coinbase_submit_accepted_e2e' \
+    //        -- --ignored --exact --nocapture --test-threads=1
+    #[tokio::test]
+    #[ignore = "stage3a live E2E: needs isolated bb75913 iriumd + producer on :38500"]
+    async fn stage3a_to_job_coinbase_submit_accepted_e2e() {
+        // Env parity with the isolated devnet node (e2e-compat/node.env): net_id=2,
+        // all phase20/audit gates active from height 1 -> the pool's gated root ==
+        // the node's expected root at every height.
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_AUDIT_HARDENING_ACTIVATION_HEIGHT", "1");
+        // to_job only injects the irx1 coinbase extra when the pool poawx flag is on.
+        std::env::set_var("IRIUM_STRATUM_POAWX", "1");
+
+        let base =
+            std::env::var("E2E_NODE").unwrap_or_else(|_| "http://127.0.0.1:38500".to_string());
+        let token = std::env::var("E2E_TOKEN")
+            .unwrap_or_else(|_| "e2ecompattoken1234567890".to_string());
+        let client = reqwest::Client::new();
+
+        // 1) Poll for a template with a pending, ext-bearing receipt.
+        let tpl: crate::template::GetBlockTemplate = {
+            let mut got = None;
+            for _ in 0..60 {
+                let resp = client
+                    .get(format!("{base}/rpc/getblocktemplate"))
+                    .bearer_auth(&token)
+                    .send()
+                    .await
+                    .expect("getblocktemplate request");
+                let t: crate::template::GetBlockTemplate =
+                    resp.json().await.expect("template json");
+                if t.poawx_mode == "active"
+                    && !t.poawx_pending_receipts.is_empty()
+                    && t.poawx_pending_receipts.iter().all(|r| !r.phase20_ext.is_empty())
+                {
+                    got = Some(t);
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            got.expect("template carrying a pending ext-bearing receipt within 120s")
+        };
+        let height = tpl.height;
+        assert!(
+            crate::delegation::node_phase20_production_active(height),
+            "phase20 production must be active at height {height} in the test env"
+        );
+
+        // 2) FACT (A): to_job builds coinbase_extras irx1 via the wrapper; assert it
+        //    equals the gated submit/node root.
+        let job = to_job(1, &tpl).expect("to_job");
+        let irx1_extra = job
+            .coinbase_extras
+            .iter()
+            .find(|(_v, s)| {
+                s.len() == 38 && s[0] == 0x6a && s[1] == 0x24 && &s[2..6] == b"irx1"
+            })
+            .expect("to_job must inject the irx1 OP_RETURN extra");
+        let coinbase_irx1_root = hex::encode(&irx1_extra.1[6..38]);
+        let gated_root = crate::block::compute_receipts_root_from_pending_gated(
+            &job.poawx_pending_receipts,
+            crate::delegation::node_phase20_production_active(height),
+        );
+        let gated_root_hex = hex::encode(gated_root);
+        assert_eq!(
+            coinbase_irx1_root, gated_root_hex,
+            "to_job coinbase-irx1 root (wrapper) MUST equal the gated submit/node root"
+        );
+
+        let worker_pkh_hex = tpl.poawx_pending_receipts[0].worker_pkh.clone();
+        let pkh_v = hex::decode(&worker_pkh_hex).expect("worker_pkh hex");
+        assert_eq!(pkh_v.len(), 20, "worker_pkh must be 20 bytes");
+        let mut pkh = [0u8; 20];
+        pkh.copy_from_slice(&pkh_v);
+        let ntime = u32::from_str_radix(&job.ntime_hex, 16).expect("ntime hex");
+
+        // 3) FACT (B): build a CanonicalJobSnapshot from the live template and
+        //    reconstruct the coinbase via the PRODUCTION path. At phase20 this yields
+        //    the canonical multi-role coinbase (irx1 + 4 role payouts, gated root).
+        let mut tx_hashes_internal = Vec::with_capacity(job.tx_hex.len());
+        for t in &job.tx_hex {
+            tx_hashes_internal.push(crate::pow::sha256d(&hex::decode(t).expect("tx hex")));
+        }
+        let snapshot = CanonicalJobSnapshot {
+            job_id: job.job_id.clone(),
+            template_fingerprint: "e2e".to_string(),
+            height: job.height,
+            version: 1,
+            prev_hash_internal: job.prev_hash,
+            bits: job.bits,
+            block_target: crate::pow::target_from_bits(job.bits),
+            coinbase_value: job.coinbase_value,
+            base_ntime: ntime,
+            extranonce1: vec![],
+            extranonce2_size: 4,
+            coinbase_prefix: vec![],
+            coinbase_suffix: vec![],
+            payout_script: payout_script_from_pkh(&pkh),
+            tx_hex: job.tx_hex.clone(),
+            tx_hashes_internal,
+            branches: job.branches.clone(),
+            tip_hash_at_job_create: job.prev_hash,
+            created_at_unix: 0,
+            auxpow_mode: false,
+            irium_header80: None,
+            irium_coinbase_hex: None,
+            poawx_pending_receipts: job.poawx_pending_receipts.clone(),
+            poawx_reg_activations: job.poawx_reg_activations.clone(),
+            poawx_reg_announces: job.poawx_reg_announces.clone(),
+        };
+        let extranonce2: [u8; 4] = [0, 0, 0, 0];
+        let coinbase = reconstruct_canonical_coinbase(&snapshot, &extranonce2)
+            .expect("reconstruct multi-role coinbase");
+
+        // The reconstructed coinbase must commit the GATED irx1 root.
+        let has_irx1 = coinbase.windows(38).any(|w| {
+            w[0] == 0x6a && w[1] == 0x24 && &w[2..6] == b"irx1" && w[6..38] == gated_root[..]
+        });
+        assert!(has_irx1, "reconstructed coinbase must carry the gated irx1 commitment");
+
+        // 4) Merkle + header via the production reconstruction, then grind the nonce
+        //    against the trivial devnet target.
+        let coinbase_hash = crate::pow::sha256d(&coinbase);
+        let merkle_root = reconstruct_canonical_merkle_root(&snapshot, coinbase_hash);
+        let block_target = crate::pow::target_from_bits(job.bits);
+        let mut nonce_found = None;
+        for nonce in 0u32..=8_000_000 {
+            let h80 = reconstruct_canonical_header80(&snapshot, merkle_root, ntime, nonce, 1);
+            let mut disp = crate::pow::sha256d(&h80);
+            disp.reverse();
+            if num_bigint::BigUint::from_bytes_be(&disp) <= block_target {
+                nonce_found = Some(nonce);
+                break;
+            }
+        }
+        let nonce = nonce_found.expect("grind a nonce vs the trivial devnet target");
+        let h80 = reconstruct_canonical_header80(&snapshot, merkle_root, ntime, nonce, 1);
+        let mut block_hash = crate::pow::sha256d(&h80);
+        block_hash.reverse();
+        let block_hash_hex = hex::encode(block_hash);
+
+        // 5) Submit via /rpc/submit_block_extended exactly like build_submit_variant.
+        let mut tx_hex = Vec::with_capacity(job.tx_hex.len() + 1);
+        tx_hex.push(hex::encode(&coinbase));
+        tx_hex.extend(job.tx_hex.clone());
+        let req = SubmitBlockExtendedRequest {
+            height: job.height,
+            header: SubmitHeader {
+                version: 1,
+                prev_hash: hex::encode(job.prev_hash),
+                merkle_root: hex::encode(merkle_root),
+                time: ntime,
+                bits: format!("{:08x}", job.bits),
+                nonce,
+                hash: block_hash_hex.clone(),
+            },
+            tx_hex,
+            submit_source: "stage3a_e2e_multirole_submitter".to_string(),
+            auxpow_hex: None,
+            poawx_receipts: job.poawx_pending_receipts.clone(),
+            poawx_receipts_root: gated_root_hex.clone(),
+            poawx_reg_activations: job.poawx_reg_activations.clone(),
+            poawx_reg_announces: job.poawx_reg_announces.clone(),
+        };
+
+        let resp = client
+            .post(format!("{base}/rpc/submit_block_extended"))
+            .bearer_auth(&token)
+            .json(&req)
+            .send()
+            .await
+            .expect("submit_block_extended request");
+        let status = resp.status();
+        let body = resp.text().await.unwrap_or_default();
+
+        println!("STAGE3A height={height} nonce={nonce}");
+        println!("STAGE3A wrapper_irx1_root={coinbase_irx1_root}");
+        println!("STAGE3A gated_submit_root={gated_root_hex}");
+        println!("STAGE3A block_hash={block_hash_hex}");
+        println!("STAGE3A submit_status={status} body={body}");
+
+        assert!(
+            status.is_success(),
+            "submit_block_extended must ACCEPT the multi-role coinbase (status={status} body={body})"
+        );
+    }
 }

@@ -5895,6 +5895,220 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS");
     }
 
+    // Part C stage 1 (devnet-only, network_id != 0): 6 distinct miner keys perform
+    // role-lane candidate admissions across many FULL blocks. For each block we derive
+    // role attribution through the real pool path (pool_role_reward_from_admitted ->
+    // best_for_role over the admitted set), build node-valid role claims for the
+    // derived solvers, and assert the NODE consensus payout validator
+    // (validate_phase20_production_payout) accepts with the exact 55/22/13/10 split paid
+    // to the correct distinct pkhs. Then prove the failure mode does NOT occur: an
+    // empty or partial admitted set fails closed (None) and never collapses to one key.
+    // Raw per-block evidence is printed.
+    #[test]
+    fn partc_stage1_six_key_fullblock_soak_and_failclosed() {
+        use irium_node_rs::chain::validate_phase20_production_payout;
+        use irium_node_rs::poawx::{
+            assign_lane, multi_role_amounts, role_claim_digest, Phase20ReceiptExt,
+            PoawxRoleClaim, RoleReward, ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR,
+            ROLE_VERIFY_CONTRIBUTOR,
+        };
+        use irium_node_rs::poawx_admission::CandidateAdmissionV1 as NAV;
+        use irium_node_rs::poawx_candidate::RoleCandidate as NRC;
+        use irium_node_rs::tx::TxOutput;
+
+        let _g = p20_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1");
+        std::env::set_var("IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS", "1");
+        let net = network_id_from_env();
+        assert_ne!(net, 0, "must be devnet/testnet, never mainnet");
+        pool_admitted_cache()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
+
+        const TOTAL: u64 = 5_000_000_000; // multiple of 10_000 => exact split
+        let primary = [0xA0u8; 20];
+        // six genuinely distinct external-miner keys (pkh fill == secret fill).
+        let miners: [u8; 6] = [0xB1, 0xB2, 0xB3, 0xB4, 0xB5, 0xB6];
+        let key = |i: usize| -> [u8; 20] { [miners[i]; 20] };
+        let hx = |p: &[u8; 20]| -> String { hex::encode(&p[..2]) };
+        // per-height prev == the admission seed for that height (they MUST match:
+        // build_pool_candidate_set_for_height re-derives admitted candidates with it).
+        let prev_of = |h: u64| -> [u8; 32] {
+            let mut p = [0u8; 32];
+            p[0..8].copy_from_slice(&h.to_le_bytes());
+            p[8] = 0xEE;
+            p
+        };
+        let p2pkh = |pkh: &[u8; 20]| -> Vec<u8> {
+            let mut s = vec![0x76, 0xa9, 0x14];
+            s.extend_from_slice(pkh);
+            s.extend_from_slice(&[0x88, 0xac]);
+            s
+        };
+        let outp = |pkh: &[u8; 20], value: u64| TxOutput { value, script_pubkey: p2pkh(pkh) };
+        // a node-valid role claim for `solver` at slot 0, bound to (net,h,prev).
+        let claim = |role: u8, solver: [u8; 20], prev: &[u8; 32], h: u64| -> PoawxRoleClaim {
+            let lane = assign_lane(net, h, prev, role, 0);
+            let nonce = [0x01u8; 32];
+            let secret = [0x02u8; 32];
+            let cd = role_claim_digest(net, h, prev, role, lane.id(), &solver, &nonce, &secret);
+            PoawxRoleClaim {
+                role_id: role,
+                lane_id: lane.id(),
+                solver_pkh: solver,
+                nonce,
+                secret,
+                claim_digest: cd,
+                commitment_hash: None,
+            }
+        };
+        // admit exactly one distinct candidate per role for height h (seed == prev).
+        let admit = |h: u64, seed: &[u8; 32], roles: &[(u8, usize)]| {
+            let hexes: Vec<String> = roles
+                .iter()
+                .map(|&(role, mi)| {
+                    let cand = NRC::build(
+                        net, h, seed, role, key(mi), [0x02u8; 33], [role; 32], 0, 1000,
+                        [role.wrapping_add(1); 32],
+                    );
+                    hex::encode(NAV::new(net, h, *seed, cand).serialize())
+                })
+                .collect();
+            pool_admitted_cache()
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(h, hexes);
+        };
+
+        let a = multi_role_amounts(TOTAL);
+        assert_eq!(a[0], TOTAL * 5500 / 10000, "primary 55%");
+        assert_eq!(a[1], TOTAL * 2200 / 10000, "compute 22%");
+        assert_eq!(a[2], TOTAL * 1300 / 10000, "verify 13%");
+        assert_eq!(a[3], TOTAL * 1000 / 10000, "support 10%");
+        assert_eq!(a[0] + a[1] + a[2] + a[3], TOTAL, "split sums to total exactly");
+        println!(
+            "=== Part C stage 1: 6-key full-block soak (net={net}, NOT mainnet) | split P/C/V/S = {}/{}/{}/{} sum={} ===",
+            a[0], a[1], a[2], a[3], a[0] + a[1] + a[2] + a[3]
+        );
+
+        // ---- soak: 18 full blocks, 6 keys rotated through the 3 roles ----
+        let n = 18u64;
+        for h in 100..(100 + n) {
+            let prev = prev_of(h);
+            let base = (h as usize) % 6;
+            let (ci, vi, si) = (base, (base + 1) % 6, (base + 2) % 6);
+            admit(
+                h,
+                &prev,
+                &[
+                    (ROLE_COMPUTE_CONTRIBUTOR, ci),
+                    (ROLE_VERIFY_CONTRIBUTOR, vi),
+                    (ROLE_SUPPORT_CONTRIBUTOR, si),
+                ],
+            );
+            // real pool attribution path.
+            let rr = pool_role_reward_from_admitted(net, h, &prev)
+                .expect("role reward derived from admitted set");
+            let (cpk, vpk, spk) = (
+                rr.compute_contributor_pkh,
+                rr.verify_contributor_pkh,
+                rr.support_contributor_pkh,
+            );
+            // distinct, and never the primary/proposer.
+            assert_eq!(cpk, key(ci));
+            assert_eq!(vpk, key(vi));
+            assert_eq!(spk, key(si));
+            assert!(cpk != vpk && vpk != spk && cpk != spk, "3 distinct role solvers");
+            assert!(cpk != primary && vpk != primary && spk != primary, "no collapse to primary");
+            // cross-check: the real pool ext-builder derives the same attribution.
+            let built = build_synthetic_phase20_ext(net, h, &prev, &primary, &[], None)
+                .expect("pool ext built from admitted set");
+            assert_eq!(built.role_reward.compute_contributor_pkh, cpk);
+            assert_eq!(built.role_reward.verify_contributor_pkh, vpk);
+            assert_eq!(built.role_reward.support_contributor_pkh, spk);
+            // build node ext w/ valid claims for the derived solvers + the exact coinbase.
+            let ext = Phase20ReceiptExt {
+                role_reward: RoleReward {
+                    compute_contributor_pkh: cpk,
+                    verify_contributor_pkh: vpk,
+                    support_contributor_pkh: spk,
+                },
+                compute_claim: claim(ROLE_COMPUTE_CONTRIBUTOR, cpk, &prev, h),
+                verify_claim: claim(ROLE_VERIFY_CONTRIBUTOR, vpk, &prev, h),
+                support_claim: claim(ROLE_SUPPORT_CONTRIBUTOR, spk, &prev, h),
+                fee_bps: 0,
+                fee_pkh: [0u8; 20],
+                precommit_root: None,
+                role_ticket_proofs: None,
+                role_dominance_weights: None,
+                candidate_set: None,
+                role_puzzle_proofs: None,
+                finality_proof: None,
+                committed_admission: None,
+                role_assignment_v2: None,
+                fraud_proofs: None,
+                proposer_assignment: None,
+                proposer_registrations: None,
+            };
+            let outs = vec![
+                outp(&primary, a[0]),
+                outp(&cpk, a[1]),
+                outp(&vpk, a[2]),
+                outp(&spk, a[3]),
+            ];
+            // NODE consensus enforces: distinct attribution + exact split.
+            validate_phase20_production_payout(&outs, &primary, TOTAL, h, &prev, net, &ext, false)
+                .unwrap_or_else(|e| panic!("block {h}: node payout must validate: {e}"));
+            println!(
+                "h{h}: compute->{} verify->{} support->{}  pays c={} v={} s={} primary={} (VALID)",
+                hx(&cpk), hx(&vpk), hx(&spk), a[1], a[2], a[3], a[0]
+            );
+        }
+
+        // ---- fail-closed (1): partial admitted set (2/3 roles) must NOT collapse ----
+        let hp = 500u64;
+        let prevp = prev_of(hp);
+        pool_admitted_cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
+        admit(hp, &prevp, &[(ROLE_COMPUTE_CONTRIBUTOR, 0), (ROLE_VERIFY_CONTRIBUTOR, 1)]); // support missing
+        let partial = pool_role_reward_from_admitted(net, hp, &prevp);
+        println!(
+            "fail-closed partial(2/3 roles admitted) => {}",
+            if partial.is_none() { "None (correct -- no collapse)" } else { "SOME (WRONG)" }
+        );
+        assert!(partial.is_none(), "partial admitted set must fail closed, not collapse to one key");
+        assert!(
+            build_synthetic_phase20_ext(net, hp, &prevp, &primary, &[], None).is_none(),
+            "pool ext-builder must fail closed on a partial admitted set"
+        );
+
+        // ---- fail-closed (2): empty admitted set ----
+        pool_admitted_cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
+        let he = 501u64;
+        let preve = prev_of(he);
+        let empty = pool_role_reward_from_admitted(net, he, &preve);
+        println!(
+            "fail-closed empty admitted => {}",
+            if empty.is_none() { "None (correct)" } else { "SOME (WRONG)" }
+        );
+        assert!(empty.is_none(), "empty admitted set must fail closed");
+        assert!(
+            build_synthetic_phase20_ext(net, he, &preve, &primary, &[], None).is_none(),
+            "pool ext-builder must fail closed on an empty admitted set"
+        );
+
+        pool_admitted_cache().lock().unwrap_or_else(|e| e.into_inner()).clear();
+        // Clean up process-global env so we do not leak enforcement flags into
+        // other serialized tests (mirrors the cleanup convention in this module).
+        std::env::remove_var("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED");
+        std::env::remove_var("IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS");
+        std::env::remove_var("IRIUM_NETWORK");
+        println!("=== Part C stage 1 soak complete: {n} full blocks, distinct attribution + exact split enforced, fail-closed proven ===");
+    }
+
     #[test]
     fn phase21e_pool_admitted_candidate_set_parity_and_failclosed() {
         let _g = p20_env_lock().lock().unwrap_or_else(|e| e.into_inner());

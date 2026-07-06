@@ -3759,6 +3759,35 @@ fn main() {
             }
         };
 
+        // PoAW-X activation guard (node-authoritative via the template): once
+        // poawx_mode is "active", legacy plain-PoW blocks are rejected by
+        // consensus (/rpc/submit_block returns 405), so grinding one would only
+        // waste hashrate. Auto-switch to PoAW-X solo mining when the miner
+        // secret is available; otherwise refuse with a clear error. Checked on
+        // every template so a long-running miner also switches when the chain
+        // crosses the activation height mid-run.
+        if template.poawx_mode.as_deref() == Some("active") {
+            let have_secret = env::var("IRIUM_POAWX_MINER_SECRET_HEX")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false);
+            if have_secret {
+                println!(
+                    "[poawx] template reports PoAW-X active at height {}; plain-PoW blocks are rejected by consensus - switching to PoAW-X solo mining",
+                    template.height
+                );
+                if let Err(e) = run_poawx_solo() {
+                    eprintln!("[poawx] solo mining error: {e}");
+                    std::process::exit(1);
+                }
+                return;
+            }
+            eprintln!(
+                "error: PoAW-X is active at this height ({}); plain-PoW blocks are rejected by consensus. Set IRIUM_POAWX_MINER_SECRET_HEX and use --poawx (or mine via a pool).",
+                template.height
+            );
+            std::process::exit(1);
+        }
+
         reconcile_with_template(&mut state, &params, &template, &client);
 
         let local_tip = template.height.saturating_sub(1);

@@ -476,6 +476,12 @@ struct BlockTemplate {
     bits: String,
     time: u32,
     txs: Vec<TemplateTx>,
+    /// Node-authoritative PoAW-X serving state for this height ("active" /
+    /// "disabled"). `None` from older nodes. Once "active", legacy plain-PoW
+    /// submissions are rejected by the node (405), so the solo loop must take
+    /// the PoAW-X path instead of grinding unsubmittable blocks.
+    #[serde(default)]
+    poawx_mode: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -2355,6 +2361,35 @@ fn main() {
                 continue;
             }
         };
+
+        // PoAW-X activation guard (node-authoritative via the template): once
+        // poawx_mode is "active", legacy plain-PoW blocks are rejected by
+        // consensus (/rpc/submit_block returns 405), so grinding one would only
+        // waste hashrate. Auto-switch to PoAW-X solo mining on GPU when the
+        // miner secret is available; otherwise refuse with a clear error.
+        // Checked on every template so a long-running miner also switches when
+        // the chain crosses the activation height mid-run.
+        if template.poawx_mode.as_deref() == Some("active") {
+            let have_secret = env::var("IRIUM_POAWX_MINER_SECRET_HEX")
+                .map(|v| !v.trim().is_empty())
+                .unwrap_or(false);
+            if have_secret {
+                println!(
+                    "[poawx] template reports PoAW-X active at height {}; plain-PoW blocks are rejected by consensus - switching to PoAW-X solo mining on GPU",
+                    template.height
+                );
+                if let Err(e) = run_poawx_solo_gpu(&mut gpus) {
+                    eprintln!("[poawx] GPU solo mining error: {e}");
+                    std::process::exit(1);
+                }
+                return;
+            }
+            eprintln!(
+                "error: PoAW-X is active at this height ({}); plain-PoW blocks are rejected by consensus. Set IRIUM_POAWX_MINER_SECRET_HEX and use --poawx (or mine via a pool).",
+                template.height
+            );
+            std::process::exit(1);
+        }
 
         let height = template.height;
         let bits =

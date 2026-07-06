@@ -30,6 +30,12 @@ pub struct BlockTemplate {
     pub bits: String,
     pub time: u32,
     pub txs: Vec<TemplateTx>,
+    /// Node-authoritative PoAW-X serving state for this height ("active" /
+    /// "disabled"). `None` from older nodes that do not send the field. Once
+    /// "active", legacy plain-PoW submissions are rejected by the node (405),
+    /// so solo miners must take the PoAW-X path.
+    #[serde(default)]
+    pub poawx_mode: Option<String>,
     #[serde(default)]
     pub poawx_hidden_precommit_active: Option<bool>,
     #[serde(default)]

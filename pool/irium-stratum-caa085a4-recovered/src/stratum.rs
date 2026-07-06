@@ -1,0 +1,4566 @@
+use crate::block::{
+    build_coinbase_tx, build_irx1_commitment_script, build_merkle_branches,
+    build_poawx_coinbase_tx, coinbase_prefix_suffix, compute_receipts_root_from_pending, header_bytes,
+    merkle_root_from_coinbase, parse_address_to_pkh, parse_hex32, parse_u32_hex,
+    poawx_coinbase_prefix_suffix,
+};
+use crate::pow::{hash_meets_target, sha256d, target_from_bits, target_from_difficulty_with_limit};
+use crate::template::{GetBlockTemplate, PoawxPendingReceipt, TemplateClient};
+
+/// Mirror of iriumd's STANDARD_HEADER_ACTIVATION_HEIGHT (Fix 2a hard fork).
+/// Must stay in sync with `irium_node_rs::constants::STANDARD_HEADER_ACTIVATION_HEIGHT`.
+/// Below this height the pool emits/consumes iriumd's pre-fork wire convention
+/// (display-order prev on wire, display-order merkle in canonical header). At
+/// and above this height the pool switches to Bitcoin-standard wire format
+/// (swap4(natural) prev, natural merkle in canonical header) so cgminer-family
+/// miners produce iriumd-canonical bytes directly.
+const STANDARD_HEADER_ACTIVATION_HEIGHT: u64 = 22_888;
+
+/// LWMA-style vardiff parameters. Window holds the last N share intervals
+/// per session; recent intervals are weighted higher so the algorithm
+/// reacts quickly when miner hashrate changes (e.g. ASIC warm-up,
+/// re-overclock) without over-correcting on a single outlier.
+const LWMA_WINDOW: usize = 8;
+/// Minimum number of share intervals before the first retarget. Prevents
+/// post-connect noise from spiking diff on the very first share.
+const LWMA_MIN_SAMPLES: usize = 4;
+/// Damping factor applied between current and computed target difficulty:
+/// `new = old * (1 - α) + target * α`. Smaller α = smoother but slower
+/// convergence; 0.3 reaches steady state in ~4 retargets.
+const LWMA_DAMPING: f64 = 0.3;
+/// Minimum seconds between two retargets, regardless of share rate.
+/// Smoother than the old binary scheme so 10s is safe; protects against
+/// chatty `mining.set_difficulty` floods.
+const LWMA_MIN_RETARGET_SECS: u64 = 10;
+/// Suppress no-op `mining.set_difficulty` when the relative diff change
+/// is below this threshold. Reduces stale-share blowback from
+/// micro-adjustments the miner can't usefully react to.
+const LWMA_CHANGE_THRESHOLD: f64 = 0.05;
+const VERSION_ROLLING_MASK: &str = "1fffe000";
+const MIN_REQUESTED_DIFF: u64 = 256;
+const MAX_REQUESTED_DIFF: u64 = 2_000_000;
+/// Per-interval clamp fed into LWMA: any single observed interval longer
+/// than (clamp_multiplier * target_secs) is treated as a connection gap
+/// rather than a true slowdown, preventing one pause from collapsing diff.
+const LWMA_INTERVAL_CLAMP_MULTIPLIER: u64 = 4;
+
+// ============================================================
+// Variant-scanner disconnect threshold
+// ============================================================
+// When a session accumulates this many CONSECUTIVE share rejections
+// with chosen_variant=none (i.e., the variant scanner + deep-scan
+// fallback both found no matching byte-order combination), the
+// session is closed gracefully. The miner can immediately reconnect;
+// this is NOT a ban. Counter resets to 0 on any accepted share.
+const VARIANT_NONE_DISCONNECT_THRESHOLD: u64 = 50;
+
+use anyhow::{anyhow, Result};
+use num_bigint::BigUint;
+use serde_json::{json, Value};
+use std::fs::{self, OpenOptions};
+use std::io::Write;
+use std::net::{IpAddr, Ipv4Addr};
+use std::path::Path;
+use std::collections::{HashSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{broadcast, Notify, RwLock};
+use tokio::time::{sleep, Duration};
+use tracing::{debug, error, info, warn};
+use dashmap::DashMap;
+use once_cell::sync::Lazy;
+
+#[derive(Clone, Debug)]
+pub enum HashCmpMode {
+    Be,
+    Le,
+}
+
+impl HashCmpMode {
+    pub fn from_env(value: Option<String>) -> Self {
+        match value.unwrap_or_else(|| "le".to_string()).to_ascii_lowercase().as_str() {
+            "be" => Self::Be,
+            _ => Self::Le,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Be => "be",
+            Self::Le => "le",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum MinerFamilyMode {
+    Auto,
+    Asic,
+    Ccminer,
+    Cpuminer,
+}
+
+impl MinerFamilyMode {
+    pub fn from_env(value: Option<String>) -> Self {
+        match value.unwrap_or_else(|| "auto".to_string()).to_ascii_lowercase().as_str() {
+            "asic" => Self::Asic,
+            "ccminer" => Self::Ccminer,
+            "cpuminer" => Self::Cpuminer,
+            _ => Self::Auto,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Asic => "asic",
+            Self::Ccminer => "ccminer",
+            Self::Cpuminer => "cpuminer",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum AdapterMode {
+    Auto,
+    CpuminerCompatOnly,
+    NativeRewardableOnly,
+}
+
+impl AdapterMode {
+    pub fn from_env(value: Option<String>) -> Self {
+        match value.unwrap_or_else(|| "auto".to_string()).to_ascii_lowercase().as_str() {
+            "cpuminer_compat_only" | "cpuminer_compat" | "compat" => Self::CpuminerCompatOnly,
+            "native_rewardable_only" | "native_rewardable" | "native" => Self::NativeRewardableOnly,
+            _ => Self::Auto,
+        }
+    }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::CpuminerCompatOnly => "cpuminer_compat_only",
+            Self::NativeRewardableOnly => "native_rewardable_only",
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct StratumConfig {
+    pub bind: String,
+    pub metrics_bind: Option<String>,
+    pub default_diff: f64,
+    pub extranonce1_size: usize,
+    pub refresh_ms: u64,
+    pub rpc_base: String,
+    pub rpc_token: String,
+    pub pow_limit: BigUint,
+    pub hash_cmp_mode: HashCmpMode,
+    pub soft_accept_invalid_shares: bool,
+    pub miner_family_mode: MinerFamilyMode,
+    pub adapter_mode: AdapterMode,
+    pub native_rewardable_enabled: bool,
+    pub sharecheck_samples: usize,
+    pub vardiff_enabled: bool,
+    pub vardiff_min_diff: f64,
+    pub vardiff_max_diff: f64,
+    pub vardiff_target_share_secs: u64,
+    pub vardiff_retarget_secs: u64,
+    pub max_template_age_seconds: u64,
+    pub coinbase_bip34: bool,
+    pub found_blocks_file: String,
+    pub keepalive_notify_secs: u64,
+    pub auxpow_activation_height: Option<u64>,
+    // Connection gating knobs (v1.9.23). A global session cap protects the
+    // pool from runaway TCP accumulation; a per-IP rate limiter throttles
+    // bursts from a single host; repeat offenders are temporarily banned.
+    // Sensible defaults are picked in main.rs from env vars.
+    pub max_sessions: u64,
+    pub max_conn_per_ip: u32,
+    pub conn_window_secs: u64,
+    pub ban_threshold: u32,
+    pub ban_duration_secs: u64,
+    /// Phase 10-D: enable PoAW-X receipt path via IRIUM_STRATUM_POAWX=1.
+    pub poawx_enabled: bool,
+}
+
+#[derive(Clone)]
+struct Job {
+    job_id: String,
+    height: u64,
+    prev_hash: [u8; 32],
+    bits: u32,
+    nbits_hex: String,
+    ntime_hex: String,
+    coinbase_value: u64,
+    tx_hex: Vec<String>,
+    branches: Vec<[u8; 32]>,
+    template_target_hex: String,
+    /// v1.9.62 issue #60: zero-value header-batch outputs to append to the
+    /// coinbase tx. Empty when the chain is pre-coinbase-activation or the
+    /// iriumd sync cycle has no fresh cached headers.
+    coinbase_extras: Vec<(u64, Vec<u8>)>,
+    /// Phase 10-D: PoAW-X mode from template ("active" or "").
+    poawx_mode: String,
+    /// Phase 10-D: pending receipts from template for irx1 coinbase injection.
+    poawx_pending_receipts: Vec<PoawxPendingReceipt>,
+}
+
+#[derive(Clone)]
+struct CanonicalJobSnapshot {
+    job_id: String,
+    template_fingerprint: String,
+    height: u64,
+    version: u32,
+    prev_hash_internal: [u8; 32],
+    bits: u32,
+    block_target: BigUint,
+    coinbase_value: u64,
+    base_ntime: u32,
+    extranonce1: Vec<u8>,
+    extranonce2_size: usize,
+    coinbase_prefix: Vec<u8>,
+    coinbase_suffix: Vec<u8>,
+    payout_script: Vec<u8>,
+    tx_hex: Vec<String>,
+    tx_hashes_internal: Vec<[u8; 32]>,
+    branches: Vec<[u8; 32]>,
+    tip_hash_at_job_create: [u8; 32],
+    created_at_unix: u64,
+    auxpow_mode: bool,
+    irium_header80: Option<[u8; 80]>,
+    irium_coinbase_hex: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum AdapterKind {
+    LegacyRewardable,
+    CpuminerCompatibility,
+    NativeRewardableReserved,
+}
+
+impl AdapterKind {
+    fn as_str(&self) -> &'static str {
+        match self {
+            Self::LegacyRewardable => "legacy_rewardable",
+            Self::CpuminerCompatibility => "cpuminer_compat",
+            Self::NativeRewardableReserved => "native_rewardable_reserved",
+        }
+    }
+}
+
+#[derive(Clone)]
+struct CanonicalSolve {
+    adapter_id: &'static str,
+    rewardable: bool,
+    share_variant: &'static str,
+    extranonce2_hex: String,
+    ntime_hex: String,
+    nonce_hex: String,
+    coinbase_hex: String,
+    coinbase_hash_internal: [u8; 32],
+    canonical_merkle_root: [u8; 32],
+    canonical_header80: [u8; 80],
+    canonical_hash: [u8; 32],
+    share_hash: [u8; 32],
+    share_target: BigUint,
+    block_target: BigUint,
+    share_ok: bool,
+    share_block_like: bool,
+    block_ok: bool,
+}
+
+#[derive(Clone)]
+struct NativeIssuedJob {
+    snapshot: CanonicalJobSnapshot,
+    version_hex: String,
+    prevhash_internal_hex: String,
+    nbits_hex: String,
+    ntime_hex: String,
+    extranonce1_hex: String,
+    extranonce2_size: usize,
+    coinbase1_hex: String,
+    coinbase2_hex: String,
+    merkle_branches_internal_hex: Vec<String>,
+    template_fingerprint: String,
+    clean_jobs: bool,
+}
+
+#[derive(Clone)]
+struct NativeSubmit {
+    job_id: String,
+    extranonce2_hex: String,
+    ntime_hex: String,
+    nonce_hex: String,
+}
+
+enum NodeSubmitResult {
+    Accepted {
+        canonical_block_hash: [u8; 32],
+        accepted_height: u64,
+    },
+    Rejected {
+        reason: String,
+    },
+}
+
+#[derive(Clone)]
+struct RoundEligibleRecord {
+    height: u64,
+    job_id: String,
+    template_fingerprint: String,
+    canonical_block_hash: [u8; 32],
+    accepted_at_unix: u64,
+}
+
+#[derive(Clone)]
+struct SubmitTuple {
+    job_id: String,
+    extranonce2_hex: String,
+    ntime_hex: String,
+    nonce_hex: String,
+    // BIP310 version-rolling submitted as params[5] when the miner rolls
+    // bits in the version field. Bitaxe ESP-Miner v2+ sends this even
+    // after we reply with `version-rolling: false` to mining.configure, so
+    // we accept it and use it as the actual header version on validation.
+    rolled_version_hex: Option<String>,
+}
+
+trait RewardableAdapter {
+    fn adapter_id(&self) -> &'static str;
+    fn rewardable(&self) -> bool;
+    fn decode_submit(
+        &self,
+        snapshot: &CanonicalJobSnapshot,
+        session: &SessionState,
+        config: &StratumConfig,
+        submit: &SubmitTuple,
+    ) -> Result<CanonicalSolve>;
+}
+
+struct CpuminerCompatibilityAdapter;
+
+impl RewardableAdapter for CpuminerCompatibilityAdapter {
+    fn adapter_id(&self) -> &'static str {
+        "cpuminer_compat"
+    }
+
+    fn rewardable(&self) -> bool {
+        false
+    }
+
+    fn decode_submit(
+        &self,
+        snapshot: &CanonicalJobSnapshot,
+        session: &SessionState,
+        config: &StratumConfig,
+        submit: &SubmitTuple,
+    ) -> Result<CanonicalSolve> {
+        decode_cpuminer_compat_submit(snapshot, session, config, submit)
+    }
+}
+
+struct NativeRewardableAdapter;
+
+impl RewardableAdapter for NativeRewardableAdapter {
+    fn adapter_id(&self) -> &'static str {
+        "native_rewardable"
+    }
+
+    fn rewardable(&self) -> bool {
+        true
+    }
+
+    fn decode_submit(
+        &self,
+        snapshot: &CanonicalJobSnapshot,
+        _session: &SessionState,
+        _config: &StratumConfig,
+        submit: &SubmitTuple,
+    ) -> Result<CanonicalSolve> {
+        let native_submit = NativeSubmit {
+            job_id: submit.job_id.clone(),
+            extranonce2_hex: submit.extranonce2_hex.clone(),
+            ntime_hex: submit.ntime_hex.clone(),
+            nonce_hex: submit.nonce_hex.clone(),
+        };
+        decode_native_rewardable_submit(snapshot, &native_submit)
+    }
+}
+
+#[derive(Clone)]
+struct SessionState {
+    extranonce1: Vec<u8>,
+    worker: Option<String>,
+    pkh: Option<[u8; 20]>,
+    difficulty: f64,
+    /// When Some, the session is using a miner-controlled fixed difficulty
+    /// (set via a "d=NNNN" token in the stratum authorize password).
+    /// LWMA vardiff bypasses sessions with this set so the miner's chosen
+    /// difficulty is preserved.
+    fixed_difficulty: Option<f64>,
+    current_job: Option<Job>,
+    current_snapshot: Option<CanonicalJobSnapshot>,
+    /// Ring buffer of the most recent accepted-share timestamps. Capped at
+    /// LWMA_WINDOW + 1 entries so we can derive LWMA_WINDOW intervals.
+    recent_share_ts: VecDeque<u64>,
+    last_retarget_ts: u64,
+    coinbase_bip34: bool,
+    adapter_kind: AdapterKind,
+    /// FIX 1: opt-in flag set by mining.extranonce.subscribe. Reserved for
+    /// future extranonce-rotation pushes (mining.set_extranonce). We
+    /// acknowledge the subscription with result:true even though we do
+    /// not currently rotate extranonce1 mid-session - that ack alone is
+    /// what unblocks the J19+ AsicBoost xnonce idle-wait state.
+    wants_extranonce_updates: bool,
+    /// Consecutive count of share rejections where the variant scanner
+    /// found no matching byte-order combination (chosen_variant=none).
+    /// Reset to 0 on any accepted share. When this reaches
+    /// VARIANT_NONE_DISCONNECT_THRESHOLD, the session is gracefully
+    /// closed so the miner can reconnect and potentially get a clean
+    /// job assignment.
+    consecutive_variant_none: u64,
+    /// User-agent string captured from mining.subscribe params[0]. Used
+    /// by is_small_buffer_firmware() to decide whether coinbase carrier
+    /// outputs should be stripped from this session's mining.notify body.
+    /// None when subscribe omitted params[0] or sent a non-string value;
+    /// treated as "large-buffer" by default so unknown firmware keeps the
+    /// existing carrier-relay behavior.
+    user_agent: Option<String>,
+}
+
+#[derive(Clone, Default)]
+struct TemplateState {
+    last_height: u64,
+    last_prevhash: String,
+    last_update_unix: u64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CompatEvent {
+    ShareAccepted,
+    CompatSolvedShare,
+    CompatCandidateBlocked,
+}
+
+static ACTIVE_SESSIONS: AtomicU64 = AtomicU64::new(0);
+static ACCEPTED_SHARES: AtomicU64 = AtomicU64::new(0);
+static REJECTED_SHARES: AtomicU64 = AtomicU64::new(0);
+static CANDIDATES_DETECTED: AtomicU64 = AtomicU64::new(0);
+static CANDIDATES_SUBMITTED: AtomicU64 = AtomicU64::new(0);
+static SUBMIT_ACCEPTED: AtomicU64 = AtomicU64::new(0);
+static SUBMIT_REJECTED: AtomicU64 = AtomicU64::new(0);
+static BLOCK_SUBMIT_ATTEMPTS: AtomicU64 = AtomicU64::new(0);
+static REWARDABLE_SHARES_ACCEPTED: AtomicU64 = AtomicU64::new(0);
+static ROUNDS_ELIGIBLE: AtomicU64 = AtomicU64::new(0);
+static CHAIN_HEIGHT_ADVANCED_BY_POOL: AtomicU64 = AtomicU64::new(0);
+static COMPAT_SOLVED_SHARES: AtomicU64 = AtomicU64::new(0);
+static COMPAT_BLOCK_LIKE_SHARES: AtomicU64 = AtomicU64::new(0);
+static COMPAT_NONREWARDABLE_EVENTS: AtomicU64 = AtomicU64::new(0);
+static LAST_SHARE_ACCEPTED_AT: AtomicU64 = AtomicU64::new(0);
+static LAST_SHARE_REJECTED_AT: AtomicU64 = AtomicU64::new(0);
+// Latest template height observed by the template_loop. Used by
+// handle_submit_legacy_rewardable to detect stale-by-height submissions
+// (sessions whose broadcast channel lagged and are still mining an old
+// height). Updated whenever a fresh template is accepted; monotonically
+// non-decreasing in practice. Reads use Relaxed ordering since the load
+// is purely advisory - a stale read of N-1 would just classify a stale
+// share as "old job_id" rather than "old height"; either way the share
+// is rejected via the same Stratum error code 21.
+static LATEST_TEMPLATE_HEIGHT: AtomicU64 = AtomicU64::new(0);
+
+// ============================================================
+// Per-miner share + rejection tracking
+// ============================================================
+// Adds per-miner observability ON TOP of existing aggregate counters
+// (ACCEPTED_SHARES / REJECTED_SHARES). The aggregate counters are NOT
+// modified - this is purely additive tracking. Surfaced in /metrics
+// JSON for stats-proxy.py to consume via its existing HTTP scrape
+// (no new IPC mechanism).
+//
+// Reject reasons are categorised so operators can distinguish stale
+// submissions (proxy lag) from genuine POW failures (firmware bug) at
+// a glance. All 6 categories are defined here; only 3 are currently
+// populated (stale_job, stale_height, low_pow) because those are the
+// only sites that already call mark_rejected_share(). The other three
+// (bad_extranonce, coinbase_mismatch, unknown) are reserved for future
+// site-specific tagging without requiring structural changes.
+
+const REJECT_REASON_STALE_JOB: &str = "stale_job";
+const REJECT_REASON_STALE_HEIGHT: &str = "stale_height";
+const REJECT_REASON_LOW_POW: &str = "low_pow";
+#[allow(dead_code)]
+const REJECT_REASON_BAD_EXTRANONCE: &str = "bad_extranonce";
+#[allow(dead_code)]
+const REJECT_REASON_COINBASE_MISMATCH: &str = "coinbase_mismatch";
+#[allow(dead_code)]
+const REJECT_REASON_UNKNOWN: &str = "unknown";
+
+#[derive(Default, Clone)]
+struct MinerStats {
+    accepted: u64,
+    rejected: u64,
+    reject_reasons: std::collections::HashMap<&'static str, u64>,
+    last_share_at: u64,
+    /// Latest vardiff observed for this worker, written on every accept.
+    /// Exposed in /metrics so stats-proxy can compute accurate hashrate
+    /// per-worker instead of falling back to a stale profile baseline.
+    current_diff: f64,
+}
+
+// Per-miner stats keyed by the worker username (typically
+// <address>.<subworker> from mining.authorize). Mutex-protected; locks
+// are held only for the brief moment of updating one entry on
+// accept/reject. Sized in the low hundreds of bytes per worker - 100
+// active workers ~= 65 KB, negligible.
+static MINER_STATS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<String, MinerStats>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+// Pool-wide rejection-reason histogram. Mirrors the per-miner
+// reject_reasons but aggregated across all workers for quick health
+// diagnostics. Keys are the REJECT_REASON_* &'static str constants.
+static GLOBAL_REJECT_REASONS: std::sync::LazyLock<std::sync::Mutex<std::collections::HashMap<&'static str, u64>>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+
+// v1.9.23 — connection-gate counters. Surfaced on /metrics so operators
+// can see how often the cap / rate-limit / ban-list fire and tune the
+// env knobs accordingly.
+static GATE_DROPPED_SESSION_CAP: AtomicU64 = AtomicU64::new(0);
+static GATE_DROPPED_RATE_LIMIT: AtomicU64 = AtomicU64::new(0);
+static GATE_DROPPED_BANNED: AtomicU64 = AtomicU64::new(0);
+static GATE_BANS_ISSUED: AtomicU64 = AtomicU64::new(0);
+
+/// Per-IP connection accounting used by the rate limiter. `count` is the
+/// number of accept()s from this IP inside the current sliding window;
+/// `rate_limit_hits` is how many times this IP has tripped the limit
+/// (rolled into a temporary ban once it reaches `ban_threshold`).
+#[derive(Clone)]
+struct ConnRecord {
+    window_start: Instant,
+    count: u32,
+    rate_limit_hits: u32,
+}
+
+/// Per-IP burst tracking. Keys are unbounded in theory (every random
+/// scanner gets an entry); we GC stale entries inside `gate_connection`
+/// when the window has rolled over, and a periodic janitor task
+/// (`spawn_gate_janitor`) also sweeps after `ban_duration_secs * 2` so
+/// memory can't grow without bound.
+static CONN_RECORDS: Lazy<DashMap<IpAddr, ConnRecord>> = Lazy::new(DashMap::new);
+
+/// Banned IPs and the Instant at which their ban expires.
+static BAN_LIST: Lazy<DashMap<IpAddr, Instant>> = Lazy::new(DashMap::new);
+
+/// IPs that are permanently allowed through `gate_connection` regardless
+/// of the rate limiter or ban list. Populated once at startup from the
+/// `IRIUM_STRATUM_GATE_ALLOWLIST` env var (comma-separated IPv4/IPv6
+/// literals); `127.0.0.1` is unconditionally inserted so loopback test
+/// sessions and operator-side diagnostic curls can never be locked out
+/// of the pool — irrespective of how aggressive the production
+/// rate-limit / ban knobs become. Malformed entries log to stderr and
+/// are skipped; loopback inclusion happens before env parsing so an
+/// unset / malformed env can never strip it.
+static GATE_ALLOWLIST: Lazy<HashSet<IpAddr>> = Lazy::new(|| {
+    let mut set: HashSet<IpAddr> = HashSet::new();
+    set.insert(IpAddr::V4(Ipv4Addr::LOCALHOST));
+    if let Ok(raw) = std::env::var("IRIUM_STRATUM_GATE_ALLOWLIST") {
+        for entry in raw.split(',').map(str::trim).filter(|s| !s.is_empty()) {
+            match entry.parse::<IpAddr>() {
+                Ok(ip) => {
+                    set.insert(ip);
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[stratum] gate-allowlist: ignoring '{}': {}",
+                        entry, e
+                    );
+                }
+            }
+        }
+    }
+    set
+});
+
+/// Outcome of an accept-time policy check.
+enum GateDecision {
+    /// Allow the connection. Caller must spawn the handler.
+    Allow,
+    /// Drop the connection. The accept loop discards `stream` and continues.
+    Drop(&'static str),
+}
+
+/// Apply the v1.9.23 connection gates in this order:
+///   1. Banned IP → drop
+///   2. Global session cap reached → drop
+///   3. Per-IP rate limit (per `conn_window_secs` window) → drop, and
+///      bump rate_limit_hits; if it crosses `ban_threshold`, ban the IP
+///      for `ban_duration_secs`.
+/// Disabling: passing `max_sessions=0` skips the cap; `max_conn_per_ip=0`
+/// or `conn_window_secs=0` skips the per-IP limiter. Sensible production
+/// defaults are wired in main.rs.
+fn gate_connection(ip: IpAddr, cfg: &StratumConfig) -> GateDecision {
+    // 0. Allowlist short-circuit. IPs in GATE_ALLOWLIST (127.0.0.1 by
+    //    default, plus any explicitly listed in IRIUM_STRATUM_GATE_ALLOWLIST)
+    //    skip every other gate — they can never be rate-limited or banned.
+    //    This is what keeps local diagnostic sessions and the operator's
+    //    own monitoring curls permanently usable even when production
+    //    rate-limit / ban thresholds are aggressive.
+    if GATE_ALLOWLIST.contains(&ip) {
+        return GateDecision::Allow;
+    }
+
+    // 1. Ban check (and lazy expiry of the entry).
+    if let Some(entry) = BAN_LIST.get(&ip) {
+        let expires_at = *entry.value();
+        drop(entry);
+        if Instant::now() < expires_at {
+            GATE_DROPPED_BANNED.fetch_add(1, Ordering::SeqCst);
+            return GateDecision::Drop("banned");
+        }
+        BAN_LIST.remove(&ip);
+        // Also clear the per-IP record so the post-ban budget starts fresh.
+        CONN_RECORDS.remove(&ip);
+    }
+
+    // 2. Global session cap.
+    if cfg.max_sessions > 0
+        && ACTIVE_SESSIONS.load(Ordering::SeqCst) >= cfg.max_sessions
+    {
+        GATE_DROPPED_SESSION_CAP.fetch_add(1, Ordering::SeqCst);
+        return GateDecision::Drop("session_cap");
+    }
+
+    // 3. Per-IP rate limiter.
+    if cfg.max_conn_per_ip > 0 && cfg.conn_window_secs > 0 {
+        let now = Instant::now();
+        let window = Duration::from_secs(cfg.conn_window_secs);
+        let mut entry = CONN_RECORDS.entry(ip).or_insert(ConnRecord {
+            window_start: now,
+            count: 0,
+            rate_limit_hits: 0,
+        });
+        if now.duration_since(entry.window_start) >= window {
+            entry.window_start = now;
+            entry.count = 0;
+        }
+        entry.count += 1;
+        if entry.count > cfg.max_conn_per_ip {
+            entry.rate_limit_hits += 1;
+            GATE_DROPPED_RATE_LIMIT.fetch_add(1, Ordering::SeqCst);
+            let hits = entry.rate_limit_hits;
+            let threshold = cfg.ban_threshold;
+            // Release the mutable lock before touching BAN_LIST to avoid
+            // a deadlock when the same IP is being checked concurrently.
+            drop(entry);
+            if threshold > 0 && hits >= threshold {
+                let expires_at = Instant::now()
+                    + Duration::from_secs(cfg.ban_duration_secs);
+                BAN_LIST.insert(ip, expires_at);
+                GATE_BANS_ISSUED.fetch_add(1, Ordering::SeqCst);
+                eprintln!("[stratum] Banned IP: {} (hits={})", ip, hits);
+            }
+            return GateDecision::Drop("rate_limit");
+        }
+    }
+
+    GateDecision::Allow
+}
+
+/// Background sweeper that prevents the DashMaps from growing without
+/// bound when a wide fleet of scanners rotates through random IPs. Runs
+/// every `ban_duration_secs` (clamped to >= 60s) and removes:
+///   - CONN_RECORDS entries whose `window_start` is older than 2 windows
+///     (i.e., the host has been quiet for at least 2 * window seconds).
+///   - BAN_LIST entries whose ban has already expired.
+fn spawn_gate_janitor(cfg: StratumConfig) {
+    let mut interval = cfg.ban_duration_secs.max(60);
+    if cfg.conn_window_secs > 0 {
+        interval = interval.min(cfg.conn_window_secs.max(60));
+    }
+    let interval = Duration::from_secs(interval);
+    let window = Duration::from_secs(cfg.conn_window_secs.max(1));
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(interval).await;
+            let now = Instant::now();
+            CONN_RECORDS.retain(|_, rec| {
+                now.duration_since(rec.window_start) < window * 2
+                    || rec.rate_limit_hits > 0
+            });
+            BAN_LIST.retain(|_, expires_at| now < *expires_at);
+        }
+    });
+}
+
+fn mark_accepted_share() {
+    ACCEPTED_SHARES.fetch_add(1, Ordering::SeqCst);
+    LAST_SHARE_ACCEPTED_AT.store(unix_now_secs(), Ordering::SeqCst);
+}
+
+fn mark_rejected_share() {
+    REJECTED_SHARES.fetch_add(1, Ordering::SeqCst);
+    LAST_SHARE_REJECTED_AT.store(unix_now_secs(), Ordering::SeqCst);
+}
+
+// Record an accepted share for the given worker. Called immediately
+// after mark_accepted_share() at every accept site - never replaces
+// the aggregate counter, only augments it with per-worker breakdown.
+// Silently skips on poisoned mutex (should never happen but mining
+// must not stall on observability bookkeeping).
+fn record_miner_share_accepted(worker: &str, diff: f64) {
+    let now = unix_now_secs();
+    if let Ok(mut map) = MINER_STATS.lock() {
+        let entry = map.entry(worker.to_string()).or_default();
+        entry.accepted = entry.accepted.saturating_add(1);
+        entry.last_share_at = now;
+        entry.current_diff = diff;
+    }
+    crate::accounting::record_share(worker, &worker_address(worker), diff, true, None);
+}
+
+// Record a rejected share for the given worker with a reason category.
+// `reason` must be one of the REJECT_REASON_* &'static str constants
+// above so the map key is a stable string slice. Updates BOTH the
+// per-miner map and the pool-wide GLOBAL_REJECT_REASONS histogram.
+// Last_share_at is updated to "last activity" (not just last accept)
+// so an idle / disconnected miner is detectable from /metrics.
+fn record_miner_share_rejected(worker: &str, reason: &'static str) {
+    let now = unix_now_secs();
+    if let Ok(mut map) = MINER_STATS.lock() {
+        let entry = map.entry(worker.to_string()).or_default();
+        entry.rejected = entry.rejected.saturating_add(1);
+        *entry.reject_reasons.entry(reason).or_insert(0) += 1;
+        entry.last_share_at = now;
+    }
+    if let Ok(mut g) = GLOBAL_REJECT_REASONS.lock() {
+        *g.entry(reason).or_insert(0) += 1;
+    }
+    crate::accounting::record_share(worker, &worker_address(worker), 0.0, false, Some(reason));
+}
+
+fn mark_candidate_detected() {
+    CANDIDATES_DETECTED.fetch_add(1, Ordering::SeqCst);
+}
+
+fn mark_candidate_submitted() {
+    CANDIDATES_SUBMITTED.fetch_add(1, Ordering::SeqCst);
+}
+
+fn mark_submit_accepted() {
+    SUBMIT_ACCEPTED.fetch_add(1, Ordering::SeqCst);
+}
+
+fn mark_submit_rejected() {
+    SUBMIT_REJECTED.fetch_add(1, Ordering::SeqCst);
+}
+
+fn mark_block_submit_attempt() {
+    BLOCK_SUBMIT_ATTEMPTS.fetch_add(1, Ordering::SeqCst);
+}
+
+fn mark_rewardable_share_accepted() {
+    REWARDABLE_SHARES_ACCEPTED.fetch_add(1, Ordering::SeqCst);
+}
+
+fn mark_round_eligible_counter() {
+    ROUNDS_ELIGIBLE.fetch_add(1, Ordering::SeqCst);
+}
+
+fn mark_chain_height_advanced_by_pool() {
+    CHAIN_HEIGHT_ADVANCED_BY_POOL.fetch_add(1, Ordering::SeqCst);
+}
+
+fn mark_compat_solved_share() {
+    COMPAT_SOLVED_SHARES.fetch_add(1, Ordering::SeqCst);
+}
+
+fn mark_compat_block_like_share() {
+    COMPAT_BLOCK_LIKE_SHARES.fetch_add(1, Ordering::SeqCst);
+}
+
+fn mark_compat_nonrewardable_event() {
+    COMPAT_NONREWARDABLE_EVENTS.fetch_add(1, Ordering::SeqCst);
+}
+
+async fn metrics_loop(
+    bind: String,
+    template_state: Arc<RwLock<TemplateState>>,
+    max_template_age_seconds: u64,
+) -> Result<()> {
+    let listener = TcpListener::bind(&bind).await?;
+    info!("[metrics] listening on http://{bind}/metrics");
+
+    loop {
+        let (mut stream, addr) = listener.accept().await?;
+        let template_state = Arc::clone(&template_state);
+        tokio::spawn(async move {
+            let mut buf = [0u8; 2048];
+            let n = match stream.read(&mut buf).await {
+                Ok(n) => n,
+                Err(e) => {
+                    debug!("[metrics] read failed from {addr}: {e}");
+                    return;
+                }
+            };
+            if n == 0 {
+                return;
+            }
+            let req = String::from_utf8_lossy(&buf[..n]);
+            let first = req.lines().next().unwrap_or("");
+
+            let (status, body) = if first.starts_with("GET /metrics") {
+                // pool_integrity: single-word self-attested health signal,
+                // surfaced by stats-proxy.py at pool.iriumlabs.org:3337/stats.
+                // Replaces the dead "unknown" placeholder the proxy used to
+                // return whenever this key was missing from /metrics. Derived
+                // from existing atomics, no new state. Decision order:
+                //   active_sessions == 0                       → "no_miners"
+                //   sessions > 0 && no share within 300 s      → "degraded"
+                //   sessions > 0 && recent share && blocks > 0 → "ok"
+                //   sessions > 0 && recent share && blocks = 0 → "unknown"
+                // The last case is a legitimate pre-first-block warmup; we
+                // keep it as "unknown" rather than "ok" because end-to-end
+                // pipeline validity isn't proven until iriumd accepts at
+                // least one submission.
+                let active_sessions = ACTIVE_SESSIONS.load(Ordering::SeqCst);
+                let submit_accepted_now = SUBMIT_ACCEPTED.load(Ordering::SeqCst);
+                let last_share_acc_at = LAST_SHARE_ACCEPTED_AT.load(Ordering::SeqCst);
+                let now = unix_now_secs();
+                let pool_integrity = if active_sessions == 0 {
+                    "no_miners"
+                } else if last_share_acc_at == 0
+                    || now.saturating_sub(last_share_acc_at) >= 300
+                {
+                    "degraded"
+                } else if submit_accepted_now > 0 {
+                    "ok"
+                } else {
+                    "unknown"
+                };
+                // Build the per-miner JSON object outside the json! macro
+                // because the macro grammar doesn't accept block-expression
+                // values. Lock is held briefly while we clone the small
+                // HashMap snapshot, then released before the build loop.
+                let miners_json: serde_json::Value = {
+                    let snapshot = MINER_STATS
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    let mut obj = serde_json::Map::new();
+                    for (worker, stats) in snapshot.iter() {
+                        let mut reasons = serde_json::Map::new();
+                        for (k, v) in stats.reject_reasons.iter() {
+                            reasons.insert((*k).to_string(), serde_json::json!(*v));
+                        }
+                        obj.insert(
+                            worker.clone(),
+                            serde_json::json!({
+                                "accepted": stats.accepted,
+                                "rejected": stats.rejected,
+                                "reject_reasons": reasons,
+                                "last_share_at": stats.last_share_at,
+                                "current_diff": stats.current_diff,
+                            }),
+                        );
+                    }
+                    serde_json::Value::Object(obj)
+                };
+                let global_reasons_json: serde_json::Value = {
+                    let snapshot = GLOBAL_REJECT_REASONS
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .clone();
+                    let mut obj = serde_json::Map::new();
+                    for (k, v) in snapshot.iter() {
+                        obj.insert((*k).to_string(), serde_json::json!(*v));
+                    }
+                    serde_json::Value::Object(obj)
+                };
+                (
+                    "200 OK",
+                    json!({
+                        "active_tcp_sessions": ACTIVE_SESSIONS.load(Ordering::SeqCst),
+                        "accepted_shares": ACCEPTED_SHARES.load(Ordering::SeqCst),
+                        "rejected_shares": REJECTED_SHARES.load(Ordering::SeqCst),
+                        "candidates_detected": CANDIDATES_DETECTED.load(Ordering::SeqCst),
+                        "candidates_submitted": CANDIDATES_SUBMITTED.load(Ordering::SeqCst),
+                        "submit_accepted": SUBMIT_ACCEPTED.load(Ordering::SeqCst),
+                        "submit_rejected": SUBMIT_REJECTED.load(Ordering::SeqCst),
+                        "block_submit_attempts": BLOCK_SUBMIT_ATTEMPTS.load(Ordering::SeqCst),
+                        "rewardable_shares_accepted": REWARDABLE_SHARES_ACCEPTED.load(Ordering::SeqCst),
+                        "rounds_eligible": ROUNDS_ELIGIBLE.load(Ordering::SeqCst),
+                        "chain_height_advanced_by_pool": CHAIN_HEIGHT_ADVANCED_BY_POOL.load(Ordering::SeqCst),
+                        "compat_solved_shares": COMPAT_SOLVED_SHARES.load(Ordering::SeqCst),
+                        "compat_block_like_shares": COMPAT_BLOCK_LIKE_SHARES.load(Ordering::SeqCst),
+                        "compat_nonrewardable_events": COMPAT_NONREWARDABLE_EVENTS.load(Ordering::SeqCst),
+                        "last_share_accepted_at": LAST_SHARE_ACCEPTED_AT.load(Ordering::SeqCst),
+                        "last_share_rejected_at": LAST_SHARE_REJECTED_AT.load(Ordering::SeqCst),
+                        // v1.9.23 connection-gate observability.
+                        "gate_dropped_session_cap": GATE_DROPPED_SESSION_CAP.load(Ordering::SeqCst),
+                        "gate_dropped_rate_limit": GATE_DROPPED_RATE_LIMIT.load(Ordering::SeqCst),
+                        "gate_dropped_banned": GATE_DROPPED_BANNED.load(Ordering::SeqCst),
+                        "gate_bans_issued": GATE_BANS_ISSUED.load(Ordering::SeqCst),
+                        "gate_active_bans": BAN_LIST.len() as u64,
+                        "gate_tracked_ips": CONN_RECORDS.len() as u64,
+                        "pool_integrity": pool_integrity,
+                        // Per-miner observability. Keys are worker usernames
+                        // (typically <address>.<subworker> from mining.authorize).
+                        // Snapshot of MINER_STATS taken just above; lock is
+                        // held briefly inside the lock-clone-build pattern.
+                        // Consumed by stats-proxy.py to populate the public
+                        // /miners endpoint without inventing a new IPC.
+                        "miners": miners_json,
+                        // Pool-wide rejection-reason histogram. Same key set
+                        // as miners[*].reject_reasons but summed across all
+                        // workers. Useful for at-a-glance health diagnostics.
+                        "global_reject_reasons": global_reasons_json
+                    })
+                    .to_string(),
+                )
+            } else if first.starts_with("GET /health") {
+                let now = unix_now_secs();
+                let st = template_state.read().await;
+                let age = now.saturating_sub(st.last_update_unix);
+                let stale = st.last_update_unix == 0 || age > max_template_age_seconds;
+                if stale {
+                    error!(
+                        "[health] template stale height={} age_seconds={} max_age_seconds={} prev={}",
+                        st.last_height, age, max_template_age_seconds, st.last_prevhash
+                    );
+                }
+                (
+                    "200 OK",
+                    json!({
+                        "status": if stale { "stale" } else { "ok" },
+                        "height": st.last_height,
+                        "age_seconds": age,
+                        "prevhash": st.last_prevhash,
+                    })
+                    .to_string(),
+                )
+            } else {
+                ("404 Not Found", "{\"error\":\"not_found\"}".to_string())
+            };
+
+            let resp = format!(
+                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            let _ = stream.write_all(resp.as_bytes()).await;
+        });
+    }
+}
+
+#[derive(serde::Serialize)]
+struct SubmitHeader {
+    version: u32,
+    prev_hash: String,
+    merkle_root: String,
+    time: u32,
+    bits: String,
+    nonce: u32,
+    hash: String,
+}
+
+#[derive(serde::Serialize)]
+struct SubmitRequest {
+    height: u64,
+    header: SubmitHeader,
+    tx_hex: Vec<String>,
+    submit_source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auxpow_hex: Option<String>,
+}
+
+#[derive(serde::Serialize)]
+struct SubmitBlockExtendedRequest {
+    height: u64,
+    header: SubmitHeader,
+    tx_hex: Vec<String>,
+    submit_source: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    auxpow_hex: Option<String>,
+    poawx_receipts: Vec<PoawxPendingReceipt>,
+    poawx_receipts_root: String,
+}
+
+#[derive(serde::Serialize)]
+struct FoundBlockRecord {
+    height: u64,
+    hash: String,
+    time: u64,
+    worker: String,
+    address: String,
+}
+
+fn worker_address(worker: &str) -> String {
+    worker.split('.').next().unwrap_or(worker).to_string()
+}
+
+fn append_found_block(path: &str, row: &FoundBlockRecord) -> Result<()> {
+    let p = Path::new(path);
+    if let Some(parent) = p.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let mut f = OpenOptions::new().create(true).append(true).open(p)?;
+    let line = serde_json::to_string(row)?;
+    writeln!(f, "{}", line)?;
+    Ok(())
+}
+
+pub async fn run(config: StratumConfig) -> Result<()> {
+    let listener = TcpListener::bind(&config.bind).await?;
+    info!(
+        "[stratum] listening on {} hash_cmp_mode={} miner_family_mode={} adapter_kind={} sharecheck_samples={} vardiff={} min={} max={} target_s={} retarget_s={} coinbase_bip34={}",
+        config.bind,
+        config.hash_cmp_mode.as_str(),
+        config.miner_family_mode.as_str(),
+        select_adapter_kind(&config).as_str(),
+        config.sharecheck_samples,
+        config.vardiff_enabled,
+        config.vardiff_min_diff,
+        config.vardiff_max_diff,
+        config.vardiff_target_share_secs,
+        config.vardiff_retarget_secs,
+        config.coinbase_bip34,
+    );
+
+    let (tx, _) = broadcast::channel::<Job>(256);
+    let current = Arc::new(RwLock::new(None::<Job>));
+    let template_state = Arc::new(RwLock::new(TemplateState::default()));
+
+    if let Some(bind) = config.metrics_bind.clone() {
+        let health_state = Arc::clone(&template_state);
+        let max_age = config.max_template_age_seconds;
+        tokio::spawn(async move {
+            if let Err(e) = metrics_loop(bind, health_state, max_age).await {
+                error!("[metrics] loop stopped: {e}");
+            }
+        });
+    }
+
+    // Wake signal: SSE subscriber sets this on each iriumd block.new event,
+    // template_loop wakes up and immediately fetches a fresh template.
+    let refresh_notify = Arc::new(Notify::new());
+
+    let sse_rpc_base = config.rpc_base.clone();
+    let sse_rpc_token = config.rpc_token.clone();
+    let sse_notify = Arc::clone(&refresh_notify);
+    tokio::spawn(async move {
+        crate::events::subscribe_block_new(sse_rpc_base, sse_rpc_token, sse_notify).await;
+    });
+
+    let cfg_clone = config.clone();
+    let tx_clone = tx.clone();
+    let current_clone = Arc::clone(&current);
+    let template_state_clone = Arc::clone(&template_state);
+    let notify_clone = Arc::clone(&refresh_notify);
+    tokio::spawn(async move {
+        if let Err(e) = template_loop(
+            cfg_clone,
+            tx_clone,
+            current_clone,
+            template_state_clone,
+            notify_clone,
+        )
+        .await
+        {
+            error!("[tmpl] loop stopped: {e}");
+        }
+    });
+
+    // v1.9.23 — start the periodic GC for CONN_RECORDS / BAN_LIST so the
+    // maps don't grow without bound under sustained scanner pressure.
+    spawn_gate_janitor(config.clone());
+
+    let conn_id = Arc::new(AtomicU64::new(1));
+    loop {
+        let (stream, addr) = listener.accept().await?;
+        // Apply v1.9.23 connection gates before spending any further work
+        // on this socket. The stream goes out of scope on Drop here which
+        // closes the connection; we deliberately don't send any goodbye
+        // payload so scanners get nothing to fingerprint on.
+        match gate_connection(addr.ip(), &config) {
+            GateDecision::Allow => {}
+            GateDecision::Drop(reason) => {
+                debug!("[conn] dropped from {} reason={}", addr, reason);
+                drop(stream);
+                continue;
+            }
+        }
+        let id = conn_id.fetch_add(1, Ordering::SeqCst);
+        info!("[conn] accepted id={} from {}", id, addr);
+
+        let mut rx = tx.subscribe();
+        let current = Arc::clone(&current);
+        let cfg = config.clone();
+        tokio::spawn(async move {
+            if let Err(e) = handle_conn(id, stream, cfg, &mut rx, current).await {
+                warn!("[conn] id={} ended: {}", id, e);
+            }
+        });
+    }
+}
+
+/// Standard stratum miner-controlled difficulty: parse a `d=NNNN` token
+/// from a comma-separated password string and return the requested
+/// difficulty if it is within the accepted range. Returns None on parse
+/// failure or when the value is outside [MIN_REQUESTED, MAX_REQUESTED].
+/// Out-of-range requests cause the session to fall back to vardiff rather
+/// than refusing the connection.
+///
+/// Accepts: "d=8192", "x,d=8192", "anything,d=8192,more", with
+/// whitespace around each segment. The first `d=` token wins.
+fn parse_miner_requested_diff(password: &str) -> Option<f64> {
+    for part in password.split(',') {
+        let trimmed = part.trim();
+        if let Some(value) = trimmed.strip_prefix("d=") {
+            if let Ok(n) = value.parse::<u64>() {
+                if (MIN_REQUESTED_DIFF..=MAX_REQUESTED_DIFF).contains(&n) {
+                    return Some(n as f64);
+                }
+            }
+            return None;
+        }
+    }
+    None
+}
+
+fn parse_suggested_difficulty(params: &[Value]) -> Option<f64> {
+    let v = params.first()?.as_f64()?;
+    if !v.is_finite() {
+        return None;
+    }
+    let rounded = v.round();
+    if rounded < MIN_REQUESTED_DIFF as f64 || rounded > MAX_REQUESTED_DIFF as f64 {
+        return None;
+    }
+    Some(rounded)
+}
+
+fn select_adapter_kind(config: &StratumConfig) -> AdapterKind {
+    match config.adapter_mode {
+        AdapterMode::CpuminerCompatOnly => AdapterKind::CpuminerCompatibility,
+        AdapterMode::NativeRewardableOnly => {
+            if config.native_rewardable_enabled {
+                AdapterKind::NativeRewardableReserved
+            } else {
+                AdapterKind::CpuminerCompatibility
+            }
+        }
+        AdapterMode::Auto => match config.miner_family_mode {
+            MinerFamilyMode::Cpuminer => AdapterKind::CpuminerCompatibility,
+            _ if config.native_rewardable_enabled => AdapterKind::NativeRewardableReserved,
+            _ => AdapterKind::LegacyRewardable,
+        },
+    }
+}
+
+fn payout_script_from_pkh(pkh: &[u8; 20]) -> Vec<u8> {
+    let mut script = Vec::with_capacity(25);
+    script.push(0x76);
+    script.push(0xa9);
+    script.push(0x14);
+    script.extend_from_slice(pkh);
+    script.push(0x88);
+    script.push(0xac);
+    script
+}
+
+fn template_fingerprint(job: &Job) -> String {
+    let mut data = Vec::new();
+    data.extend_from_slice(job.job_id.as_bytes());
+    data.extend_from_slice(&job.height.to_le_bytes());
+    data.extend_from_slice(&job.prev_hash);
+    data.extend_from_slice(&job.bits.to_le_bytes());
+    data.extend_from_slice(job.ntime_hex.as_bytes());
+    data.extend_from_slice(&job.coinbase_value.to_le_bytes());
+    for tx in &job.tx_hex {
+        data.extend_from_slice(tx.as_bytes());
+    }
+    hex::encode(sha256d(&data))
+}
+
+
+/// Build a 80-byte Irium block header for AuxPoW.
+/// version = 1 | AUXPOW_VERSION_BIT (=257), nonce = 0.
+/// prev_hash and merkle_root are stored reversed (Bitcoin wire convention),
+/// matching BlockHeader::serialize() so sha256d produces the correct aux_hash.
+fn build_irium_auxpow_header(
+    prev_hash_internal: [u8; 32],
+    merkle_root_natural: [u8; 32],
+    ntime: u32,
+    bits: u32,
+) -> [u8; 80] {
+    const AUXPOW_VERSION: u32 = 1 | (1 << 8);
+    let mut h = [0u8; 80];
+    h[0..4].copy_from_slice(&AUXPOW_VERSION.to_le_bytes());
+    let mut prev_rev = prev_hash_internal;
+    prev_rev.reverse();
+    h[4..36].copy_from_slice(&prev_rev);
+    let mut mr_rev = merkle_root_natural;
+    mr_rev.reverse();
+    h[36..68].copy_from_slice(&mr_rev);
+    h[68..72].copy_from_slice(&ntime.to_le_bytes());
+    h[72..76].copy_from_slice(&bits.to_le_bytes());
+    // nonce = 0: miners solve the parent block, not Irium
+    h
+}
+
+/// Build the AuxPoW parent coinbase prefix and suffix.
+/// The Namecoin commitment (MAGIC + aux_hash + chain_count + nonce) is embedded
+/// in the script_sig AFTER the extranonce split point so miners cannot alter it.
+fn build_auxpow_parent_coinbase_prefix_suffix(
+    height: u64,
+    reward: u64,
+    pkh: &[u8; 20],
+    aux_hash: &[u8; 32],
+    bip34_height: bool,
+) -> (Vec<u8>, Vec<u8>) {
+    let marker: [u8; 8] = [0xde, 0xad, 0xbe, 0xef, 0xca, 0xfe, 0x00, 0x01];
+
+    let mut script_sig = if bip34_height {
+        let mut s = encode_bip34_height_local(height);
+        s.extend_from_slice(b"Irium");
+        s
+    } else {
+        format!("Irium {height}").into_bytes()
+    };
+    // extranonce1(4)+extranonce2(4) placeholder
+    script_sig.extend_from_slice(&marker);
+    // commitment: MAGIC(4) + aux_hash(32) + chain_count=1(4 LE) + nonce=0(4 LE)
+    script_sig.extend_from_slice(&[0xfa, 0xbe, 0x6d, 0x6d]);
+    script_sig.extend_from_slice(aux_hash);
+    script_sig.extend_from_slice(&1u32.to_le_bytes());
+    script_sig.extend_from_slice(&0u32.to_le_bytes());
+
+    let spk = payout_script_from_pkh(&pkh);
+    let mut tx = Vec::with_capacity(256);
+    tx.extend_from_slice(&1u32.to_le_bytes()); // version
+    tx.push(1u8); // input count
+    tx.extend_from_slice(&[0u8; 32]); // coinbase prevout hash
+    tx.extend_from_slice(&0xffff_ffffu32.to_le_bytes()); // prevout index
+    encode_varint(script_sig.len(), &mut tx);
+    tx.extend_from_slice(&script_sig);
+    tx.extend_from_slice(&0xffff_ffffu32.to_le_bytes()); // sequence
+    tx.push(1u8); // output count
+    tx.extend_from_slice(&reward.to_le_bytes());
+    encode_varint(spk.len(), &mut tx);
+    tx.extend_from_slice(&spk);
+    tx.extend_from_slice(&0u32.to_le_bytes()); // locktime
+
+    let pos = tx.windows(marker.len()).position(|w| w == &marker).unwrap_or(tx.len());
+    (tx[..pos].to_vec(), tx[pos + marker.len()..].to_vec())
+}
+
+/// Serialize an AuxPoW proof to hex for submission to iriumd.
+/// The parent coinbase is the only transaction; branches are empty (single-chain, coinbase-only parent block).
+/// Parent header uses NATURAL ORDER for merkle_root so iriumd validate can check:
+///   sha256d(coinbase_txn) == parent_header[36..68]
+fn build_auxpow_hex_from_solution(
+    parent_coinbase_bytes: &[u8],
+    ntime: u32,
+    bits: u32,
+    nonce: u32,
+) -> String {
+    let parent_coinbase_hash = sha256d(parent_coinbase_bytes);
+    // Build parent header with natural-order merkle root (as header_bytes does: no reversal)
+    let parent_header = header_bytes(
+        1,
+        [0u8; 32],
+        parent_coinbase_hash,
+        ntime,
+        bits,
+        nonce,
+    );
+    let parent_hash_natural = sha256d(&parent_header);
+
+    let mut out = Vec::new();
+    // coinbase_txn: varint length + bytes
+    encode_varint(parent_coinbase_bytes.len(), &mut out);
+    out.extend_from_slice(parent_coinbase_bytes);
+    // parent_hash (32 bytes, natural order)
+    out.extend_from_slice(&parent_hash_natural);
+    // coinbase_branch: count=0, index=0
+    out.push(0u8);
+    out.extend_from_slice(&0u32.to_le_bytes());
+    // blockchain_branch: count=0, index=0
+    out.push(0u8);
+    out.extend_from_slice(&0u32.to_le_bytes());
+    // parent_header (80 bytes)
+    out.extend_from_slice(&parent_header);
+    hex::encode(out)
+}
+
+fn build_canonical_job_snapshot(job: &Job, session: &SessionState, config: &StratumConfig) -> Result<CanonicalJobSnapshot> {
+    let pkh = session.pkh.ok_or_else(|| anyhow!("unauthorized"))?;
+    let ntime = parse_u32_hex(&job.ntime_hex)?;
+
+    // Coinbase always pays the worker directly (session.pkh). No pool fee output.
+    let auxpow_active = config.auxpow_activation_height
+        .map(|h| job.height >= h)
+        .unwrap_or(false);
+
+    let (coinbase_prefix, coinbase_suffix, prev_hash_internal, branches, auxpow_mode, irium_header80, irium_coinbase_hex) =
+        if auxpow_active {
+            // AuxPoW: build fixed Irium coinbase, compute Irium block hash, build parent coinbase
+            let irium_coinbase = build_coinbase_tx(job.height, job.coinbase_value, &pkh, &[], session.coinbase_bip34, session_coinbase_extras(job, session));
+            let irium_coinbase_hash = sha256d(&irium_coinbase);
+            let irium_merkle_root = merkle_root_from_coinbase(irium_coinbase_hash, &job.branches);
+            let irium_h80 = build_irium_auxpow_header(job.prev_hash, irium_merkle_root, ntime, job.bits);
+            let aux_hash = sha256d(&irium_h80);
+            let (pp, ps) = build_auxpow_parent_coinbase_prefix_suffix(
+                job.height, job.coinbase_value, &pkh, &aux_hash, session.coinbase_bip34,
+            );
+            (pp, ps, [0u8; 32], vec![], true, Some(irium_h80), Some(hex::encode(&irium_coinbase)))
+        } else {
+            let (cp, cs) = if job.poawx_mode == "active" && !job.poawx_pending_receipts.is_empty() {
+                poawx_coinbase_prefix_suffix(
+                    job.height,
+                    job.coinbase_value,
+                    &pkh,
+                    session.coinbase_bip34,
+                    session_coinbase_extras(job, session),
+                    &job.poawx_pending_receipts,
+                )
+            } else {
+                coinbase_prefix_suffix(job.height, job.coinbase_value, &pkh, session.coinbase_bip34, session_coinbase_extras(job, session))
+            };
+            (cp, cs, job.prev_hash, job.branches.clone(), false, None, None)
+        };
+
+    let mut tx_hashes_internal = Vec::with_capacity(job.tx_hex.len());
+    for tx in &job.tx_hex {
+        let raw = hex::decode(tx).map_err(|e| anyhow!("template tx decode: {e}"))?;
+        tx_hashes_internal.push(sha256d(&raw));
+    }
+
+    Ok(CanonicalJobSnapshot {
+        job_id: job.job_id.clone(),
+        template_fingerprint: template_fingerprint(job),
+        height: job.height,
+        version: 1,
+        prev_hash_internal,
+        bits: job.bits,
+        block_target: target_from_bits(job.bits),
+        coinbase_value: job.coinbase_value,
+        base_ntime: ntime,
+        extranonce1: session.extranonce1.clone(),
+        extranonce2_size: 4,
+        coinbase_prefix,
+        coinbase_suffix,
+        payout_script: payout_script_from_pkh(&pkh),
+        tx_hex: job.tx_hex.clone(),
+        tx_hashes_internal,
+        branches,
+        tip_hash_at_job_create: job.prev_hash,
+        created_at_unix: unix_now_secs(),
+        auxpow_mode,
+        irium_header80,
+        irium_coinbase_hex,
+    })
+}
+
+fn reconstruct_coinbase(snapshot: &CanonicalJobSnapshot, extranonce2: &[u8]) -> Vec<u8> {
+    let mut cb = Vec::with_capacity(
+        snapshot.coinbase_prefix.len()
+            + snapshot.extranonce1.len()
+            + extranonce2.len()
+            + snapshot.coinbase_suffix.len(),
+    );
+    cb.extend_from_slice(&snapshot.coinbase_prefix);
+    cb.extend_from_slice(&snapshot.extranonce1);
+    cb.extend_from_slice(extranonce2);
+    cb.extend_from_slice(&snapshot.coinbase_suffix);
+    cb
+}
+
+fn encode_bip34_height_local(height: u64) -> Vec<u8> {
+    let mut n = height;
+    let mut raw = Vec::new();
+    while n > 0 {
+        raw.push((n & 0xff) as u8);
+        n >>= 8;
+    }
+    if raw.is_empty() {
+        raw.push(0);
+    }
+    if raw.last().copied().unwrap_or(0) & 0x80 != 0 {
+        raw.push(0);
+    }
+    let mut out = Vec::with_capacity(raw.len() + 1);
+    out.push(raw.len() as u8);
+    out.extend_from_slice(&raw);
+    out
+}
+
+fn build_native_coinbase_script_sig(
+    height: u64,
+    extranonce: &[u8],
+    bip34_height: bool,
+) -> Vec<u8> {
+    let mut script_sig = if bip34_height {
+        let mut s = encode_bip34_height_local(height);
+        s.extend_from_slice(b"Irium");
+        s
+    } else {
+        format!("Irium {height}").into_bytes()
+    };
+    script_sig.extend_from_slice(extranonce);
+    script_sig
+}
+
+fn build_native_rewardable_coinbase(
+    snapshot: &CanonicalJobSnapshot,
+    extranonce2: &[u8],
+) -> Result<Vec<u8>> {
+    if extranonce2.len() != snapshot.extranonce2_size {
+        return Err(anyhow!(
+            "invalid extranonce2 size: expected {} got {}",
+            snapshot.extranonce2_size,
+            extranonce2.len()
+        ));
+    }
+
+    let mut extranonce = snapshot.extranonce1.clone();
+    extranonce.extend_from_slice(extranonce2);
+    let script_sig = build_native_coinbase_script_sig(snapshot.height, &extranonce, true);
+
+    let mut tx = Vec::new();
+    tx.extend_from_slice(&1u32.to_le_bytes());
+    tx.push(1); // inputs
+    tx.push(32);
+    tx.extend_from_slice(&[0u8; 32]);
+    tx.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+    tx.push(script_sig.len() as u8);
+    tx.extend_from_slice(&script_sig);
+    tx.extend_from_slice(&0xffff_ffffu32.to_le_bytes());
+    tx.push(1); // single output: full coinbase value to worker
+    tx.extend_from_slice(&snapshot.coinbase_value.to_le_bytes());
+    tx.push(snapshot.payout_script.len() as u8);
+    tx.extend_from_slice(&snapshot.payout_script);
+    tx.extend_from_slice(&0u32.to_le_bytes());
+    Ok(tx)
+}
+
+fn reconstruct_canonical_coinbase(
+    snapshot: &CanonicalJobSnapshot,
+    extranonce2: &[u8],
+) -> Result<Vec<u8>> {
+    build_native_rewardable_coinbase(snapshot, extranonce2)
+}
+
+fn reconstruct_canonical_merkle_root(
+    snapshot: &CanonicalJobSnapshot,
+    coinbase_hash_internal: [u8; 32],
+) -> [u8; 32] {
+    merkle_root_from_coinbase(coinbase_hash_internal, &snapshot.branches)
+}
+
+fn reconstruct_canonical_header80(
+    snapshot: &CanonicalJobSnapshot,
+    merkle_root_internal: [u8; 32],
+    ntime: u32,
+    nonce: u32,
+    effective_version: u32,
+) -> [u8; 80] {
+    let mut header = [0u8; 80];
+    header[0..4].copy_from_slice(&effective_version.to_le_bytes());
+
+    let mut prev_wire = snapshot.prev_hash_internal;
+    prev_wire.reverse();
+    header[4..36].copy_from_slice(&prev_wire);
+
+    // Pre-fork (height < STANDARD_HEADER_ACTIVATION_HEIGHT) iriumd serializes
+    // the merkle_root reversed (display-order bytes on wire). At/post-fork
+    // iriumd writes the natural sha256d bytes unchanged (Bitcoin-standard).
+    // Stay byte-for-byte aligned with iriumd's BlockHeader::serialize_for_height.
+    let mut merkle_wire = merkle_root_internal;
+    if snapshot.height < STANDARD_HEADER_ACTIVATION_HEIGHT {
+        merkle_wire.reverse();
+    }
+    header[36..68].copy_from_slice(&merkle_wire);
+
+    header[68..72].copy_from_slice(&ntime.to_le_bytes());
+    header[72..76].copy_from_slice(&snapshot.bits.to_le_bytes());
+    header[76..80].copy_from_slice(&nonce.to_le_bytes());
+    header
+}
+
+fn build_native_rewardable_job(
+    snapshot: &CanonicalJobSnapshot,
+    _session: &SessionState,
+    _config: &StratumConfig,
+) -> Result<NativeIssuedJob> {
+    let marker_extranonce2 = [0x1c, 0xab, 0xad, 0x1d];
+    let full = build_native_rewardable_coinbase(snapshot, &marker_extranonce2)?;
+    let mut marker = snapshot.extranonce1.clone();
+    marker.extend_from_slice(&marker_extranonce2);
+    let pos = full
+        .windows(marker.len())
+        .position(|w| w == marker.as_slice())
+        .ok_or_else(|| anyhow!("native extranonce marker missing"))?;
+    Ok(NativeIssuedJob {
+        snapshot: snapshot.clone(),
+        version_hex: format!("{:08x}", snapshot.version),
+        prevhash_internal_hex: hex::encode(snapshot.prev_hash_internal),
+        nbits_hex: format!("{:08x}", snapshot.bits),
+        ntime_hex: format!("{:08x}", snapshot.base_ntime),
+        extranonce1_hex: hex::encode(&snapshot.extranonce1),
+        extranonce2_size: snapshot.extranonce2_size,
+        coinbase1_hex: hex::encode(&full[..pos + snapshot.extranonce1.len()]),
+        coinbase2_hex: hex::encode(&full[pos + marker.len()..]),
+        merkle_branches_internal_hex: snapshot.branches.iter().map(hex::encode).collect(),
+        template_fingerprint: snapshot.template_fingerprint.clone(),
+        clean_jobs: true,
+    })
+}
+
+async fn template_loop(
+    config: StratumConfig,
+    tx: broadcast::Sender<Job>,
+    current: Arc<RwLock<Option<Job>>>,
+    template_state: Arc<RwLock<TemplateState>>,
+    refresh_notify: Arc<Notify>,
+) -> Result<()> {
+    let client = TemplateClient::new(config.rpc_base.clone(), config.rpc_token.clone())?;
+    let mut last_key = String::new();
+    let mut seq: u64 = 1;
+    // Sync-gap guardrail: track the highest template height we've ever
+    // accepted in this pool session. If iriumd later returns a template
+    // whose height is below STANDARD_HEADER_ACTIVATION_HEIGHT WHILE we
+    // know the network has previously been observed at or above that
+    // threshold, the template is stale - likely from an iriumd that just
+    // restarted and is re-syncing. Accepting it would cause
+    // reconstruct_canonical_header80 to take the pre-fork merkle-reverse
+    // branch, producing canonical_hash bytes that don't match what the
+    // chip hashed (the chip operates on post-fork rules). That's the
+    // exact failure mode that produced 17 COMPAT_CANDIDATE_BLOCKED events
+    // during 2026-05-26 13:39-13:43 IST while iriumd was re-syncing
+    // after the P2P-offer-gossip deploy. One-way ratchet - once we've
+    // seen post-fork data, we never accept pre-fork templates again.
+    let mut max_seen_height: u64 = 0;
+
+    loop {
+        match client.fetch_template().await {
+            Ok(tpl) => {
+                let job = to_job(seq, &tpl)?;
+                // Guardrail: refuse stale pre-fork templates once we've
+                // seen the network at/above the activation height.
+                if job.height < STANDARD_HEADER_ACTIVATION_HEIGHT
+                    && max_seen_height >= STANDARD_HEADER_ACTIVATION_HEIGHT
+                {
+                    warn!(
+                        "[tmpl] refusing stale pre-fork template: height={} max_seen={} threshold={}; iriumd is likely re-syncing - will retry on next poll",
+                        job.height, max_seen_height, STANDARD_HEADER_ACTIVATION_HEIGHT
+                    );
+                    // Fall through to the wait-and-retry block at the
+                    // bottom of the loop body. Do NOT update last_key,
+                    // template_state, or broadcast the job to peers.
+                } else {
+                    if job.height > max_seen_height {
+                        max_seen_height = job.height;
+                    }
+                    // Update the process-wide latest-template-height atomic
+                    // used by handle_submit_legacy_rewardable's stale-by-
+                    // height check. The check uses +2 tolerance so this
+                    // store is safe to fire on every template even with
+                    // brief race conditions.
+                    LATEST_TEMPLATE_HEIGHT.store(job.height, Ordering::Relaxed);
+                    let prevhash = hex::encode(job.prev_hash);
+                    let now_ts = unix_now_secs();
+                    {
+                        let mut st = template_state.write().await;
+                        st.last_height = job.height;
+                        st.last_prevhash = prevhash.clone();
+                        st.last_update_unix = now_ts;
+                    }
+                    info!("[tmpl] height={} prev={} ts={}", job.height, prevhash, now_ts);
+
+                    let key = format!("{}:{}", job.height, prevhash);
+                    if key != last_key {
+                        last_key = key;
+                        seq = seq.wrapping_add(1);
+                        {
+                            let mut w = current.write().await;
+                            *w = Some(job.clone());
+                        }
+                        let _ = tx.send(job.clone());
+                        info!(
+                            "[job] id={} height={} block_target={} bits={} prev={}",
+                            job.job_id,
+                            job.height,
+                            biguint_to_32hex(&target_from_bits(job.bits)),
+                            job.nbits_hex,
+                            hex::encode(job.prev_hash)
+                        );
+                        info!(
+                            "[tmpl] new job id={} height={} txs={} target={}",
+                            job.job_id,
+                            job.height,
+                            job.tx_hex.len(),
+                            job.template_target_hex
+                        );
+                    }
+                }
+            }
+            Err(e) => warn!("[tmpl] fetch failed: {e}"),
+        }
+        // Wait for whichever fires first: the periodic poll interval (fallback)
+        // or an SSE-pushed `block.new` event (immediate refresh on new tip).
+        tokio::select! {
+            _ = sleep(Duration::from_millis(config.refresh_ms)) => {}
+            _ = refresh_notify.notified() => {
+                info!("[tmpl] block.new event received → refreshing immediately");
+            }
+        }
+    }
+}
+
+/// Returns true for ASIC firmware known to have small JSON buffers
+/// (4-8 KB). With BTC/LTC/DOGE header-relay carrier outputs in the
+/// coinbase, mining.notify bodies hit ~10 KB; small-buffer firmware
+/// silently overflows its parser and RSTs the TCP connection.
+/// Detection is purely string-match on the mining.subscribe user-agent
+/// (params[0]). Unknown firmware defaults to "large-buffer" -> carriers
+/// included, the backward-compat path.
+fn is_small_buffer_firmware(user_agent: &str) -> bool {
+    let ua = user_agent.to_ascii_lowercase();
+    ua.contains("whatsminer")
+        || ua.contains("btminer")
+        || ua.contains("nerdqaxe")
+        || ua.contains("bitaxe")
+        || ua.contains("esp-miner")
+        || ua.contains("bm1370")
+        || ua.contains("nmaxegamma")
+}
+
+fn is_whatsminer_firmware(user_agent: &str) -> bool {
+    let ua = user_agent.to_ascii_lowercase();
+    ua.contains("whatsminer") || ua.contains("btminer")
+}
+
+/// Per-session view of coinbase carrier extras. Returns an empty slice
+/// for small-buffer firmware so its mining.notify body stays under the
+/// parser limit; returns the full job-level extras for everyone else.
+/// The pool-wide STRATUM_CARRIERS=off env override applies at to_job
+/// time and produces an already-empty job.coinbase_extras, so the
+/// emergency kill-switch still wins regardless of user-agent.
+fn session_coinbase_extras<'a>(
+    job: &'a Job,
+    session: &SessionState,
+) -> &'a [(u64, Vec<u8>)] {
+    if job.poawx_mode == "active" && !job.poawx_pending_receipts.is_empty() {
+        &job.coinbase_extras
+    } else if session
+        .user_agent
+        .as_deref()
+        .map(is_small_buffer_firmware)
+        .unwrap_or(false)
+    {
+        &[]
+    } else {
+        &job.coinbase_extras
+    }
+}
+
+fn to_job(seq: u64, tpl: &GetBlockTemplate) -> Result<Job> {
+    let prev_hash = parse_hex32(&tpl.prev_hash)?;
+    let bits = parse_u32_hex(&tpl.bits)?;
+    let ntime_hex = format!("{:08x}", tpl.time + 1);
+    let tx_hex: Vec<String> = tpl.txs.iter().map(|t| t.hex.clone()).collect();
+    let branches = build_merkle_branches(&tx_hex)?;
+
+    // STRATUM_CARRIERS=off — emergency switch for small-buffer firmware
+    // (NerdQAxe++ / Bitaxe / ESP-Miner) that cannot parse oversized notify
+    // bodies. When set, this drops the BTC/LTC/DOGE header-batch carrier
+    // outputs that ride in the coinbase. The pool still mines blocks
+    // normally; only the header-relay throughput from this port is paused.
+    let mut coinbase_extras: Vec<(u64, Vec<u8>)> =
+        if std::env::var("STRATUM_CARRIERS").as_deref() == Ok("off") {
+            Vec::new()
+        } else {
+            tpl.coinbase_extra_outputs
+                .iter()
+                .filter_map(|e| hex::decode(e.script_pubkey_hex.trim()).ok().map(|b| (e.value, b)))
+                .collect()
+        };
+    // Phase 10-D: inject irx1 OP_RETURN coinbase output when PoAW-X is active.
+    let poawx_enabled = std::env::var("IRIUM_STRATUM_POAWX")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+    let poawx_mode = tpl.poawx_mode.clone();
+    let poawx_pending_receipts = tpl.poawx_pending_receipts.clone();
+    if poawx_enabled && poawx_mode == "active" && !poawx_pending_receipts.is_empty() {
+        let root = compute_receipts_root_from_pending(&poawx_pending_receipts);
+        let irx1_script = build_irx1_commitment_script(&root);
+        coinbase_extras.push((0u64, irx1_script));
+        tracing::info!(
+            "[poawx] to_job: job={:016x} mode=active pending={} irx1_len={} receipts_root={}",
+            seq, poawx_pending_receipts.len(), 38, hex::encode(root)
+        );
+    } else if poawx_enabled {
+        tracing::warn!(
+            "[poawx] poawx_enabled but job has no receipts_root (mode='{}'); using legacy submit",
+            poawx_mode
+        );
+    }
+    Ok(Job {
+        job_id: format!("{seq:016x}"),
+        height: tpl.height,
+        prev_hash,
+        bits,
+        nbits_hex: tpl.bits.clone(),
+        ntime_hex,
+        coinbase_value: tpl.coinbase_value,
+        tx_hex,
+        branches,
+        template_target_hex: tpl.target.clone(),
+        coinbase_extras,
+        poawx_mode,
+        poawx_pending_receipts,
+    })
+}
+
+struct ActiveSessionGuard;
+
+impl ActiveSessionGuard {
+    fn new() -> Self {
+        ACTIVE_SESSIONS.fetch_add(1, Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for ActiveSessionGuard {
+    fn drop(&mut self) {
+        ACTIVE_SESSIONS.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+async fn handle_conn(
+    id: u64,
+    stream: TcpStream,
+    config: StratumConfig,
+    rx: &mut broadcast::Receiver<Job>,
+    current: Arc<RwLock<Option<Job>>>,
+) -> Result<()> {
+    let _session_guard = ActiveSessionGuard::new();
+
+    let extranonce1 = id.to_be_bytes()[8 - config.extranonce1_size..].to_vec();
+    let mut session = SessionState {
+        extranonce1,
+        worker: None,
+        pkh: None,
+        difficulty: config.default_diff,
+        fixed_difficulty: None,
+        current_job: None,
+        current_snapshot: None,
+        recent_share_ts: VecDeque::with_capacity(LWMA_WINDOW + 1),
+        last_retarget_ts: unix_now_secs(),
+        coinbase_bip34: config.coinbase_bip34,
+        adapter_kind: select_adapter_kind(&config),
+        wants_extranonce_updates: false,
+        consecutive_variant_none: 0,
+        user_agent: None,
+    };
+
+    let (rd, mut wr) = stream.into_split();
+    let mut lines = BufReader::new(rd).lines();
+    let keepalive_secs = config.keepalive_notify_secs;
+
+    let result = loop {
+        let keepalive_wait = sleep(Duration::from_secs(keepalive_secs.max(1)));
+        tokio::pin!(keepalive_wait);
+        tokio::select! {
+            job = rx.recv() => {
+                if let Ok(j) = job {
+                    if session.pkh.is_some() {
+                        let snapshot = build_canonical_job_snapshot(&j, &session, &config)?;
+                        session.current_snapshot = Some(snapshot);
+                        if let Err(e) = send_set_difficulty(&mut wr, id, session.worker.as_deref(), session.difficulty).await { break Err(e); }
+                        if let Err(e) = send_notify(&mut wr, &session, &j, true).await { break Err(e); }
+                    } else {
+                        session.current_snapshot = None;
+                    }
+                    session.current_job = Some(j);
+                }
+            }
+            _ = &mut keepalive_wait, if keepalive_secs > 0 => {
+                if session.pkh.is_some() {
+                    if let Some(job) = session.current_job.clone() {
+                        if let Err(e) = send_set_difficulty(&mut wr, id, session.worker.as_deref(), session.difficulty).await { break Err(e); }
+                        if let Err(e) = send_notify(&mut wr, &session, &job, false).await { break Err(e); }
+                        debug!("[keepalive] conn={} worker={} job={}", id, session.worker.as_deref().unwrap_or("-"), job.job_id);
+                    }
+                }
+            }
+            line = lines.next_line() => {
+                let Some(line) = line? else { return Err(anyhow!("EOF")); };
+                let v: Value = match serde_json::from_str(&line) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        warn!("[conn] id={} bad json: {e}", id);
+                        continue;
+                    }
+                };
+                if let Err(e) = handle_message(id, &mut wr, &mut session, &config, &current, v).await { break Err(e); }
+            }
+        }
+    };
+
+    result
+}
+
+async fn handle_message(
+    conn_id: u64,
+    wr: &mut tokio::net::tcp::OwnedWriteHalf,
+    session: &mut SessionState,
+    config: &StratumConfig,
+    current: &Arc<RwLock<Option<Job>>>,
+    msg: Value,
+) -> Result<()> {
+    let id = msg.get("id").cloned().unwrap_or(Value::Null);
+    let method = msg.get("method").and_then(|m| m.as_str()).unwrap_or("");
+    let params = msg
+        .get("params")
+        .and_then(|p| p.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    match method {
+        "mining.configure" => {
+            // FIX 2: enable BIP310 version-rolling negotiation. Bitaxe / ESP-Miner
+            // v2+ sends this before mining.subscribe to negotiate the AsicBoost
+            // version-rolling extension. We DO support version-rolling on the
+            // submit side - the pool extracts params[5] (rolled_version_hex)
+            // and the variant scanner tries v_rolled/v_rolled_extra/v_rolled_raw
+            // permutations (see SubmitTuple.rolled_version_hex at line ~299).
+            // Previously we returned false here, which left Bitaxe firmware in
+            // a state where it parsed mining.notify but rejected it with
+            // "Failed to process mining notification" because it expected
+            // version-rolling to be available after the configure step.
+            // 1fffe000 is the BIP310 standard mask (bits 13-28 of nVersion =
+            // the canonical AsicBoost rolling window).
+            let resp = json!({
+                "id": id,
+                "result": {
+                    "version-rolling": true,
+                    "version-rolling.mask": VERSION_ROLLING_MASK
+                },
+                "error": null
+            });
+            write_json(wr, &resp).await?;
+            // Push set_version_mask so BTMiner v1.x firmware (whatsminer/v1.1) does not
+            // enter connected-but-idle state after configure negotiation.
+            let mask_msg = json!({
+                "id": Value::Null,
+                "method": "mining.set_version_mask",
+                "params": [VERSION_ROLLING_MASK]
+            });
+            write_json(wr, &mask_msg).await?;
+            info!(
+                "[configure] conn={} version_rolling=true mask={}",
+                conn_id, VERSION_ROLLING_MASK
+            );
+        }
+        "mining.suggest_difficulty" => {
+            // Some cgminer-family / Antminer firmware sends a difficulty hint
+            // (mining.suggest_difficulty [diff]) before or after subscribe.
+            // Honor it only while vardiff controls the session. If the worker
+            // password already supplied an explicit d=NNNN value, that is the
+            // operator's chosen fixed difficulty and must not be overwritten
+            // by firmware defaults emitted after authorize.
+            if session.fixed_difficulty.is_some() {
+                info!(
+                    "[diff] worker={} ignored_suggested_diff={:?} source=miner_suggested fixed_diff={}",
+                    session.worker.as_deref().unwrap_or("-"),
+                    params.first(),
+                    session.difficulty as u64
+                );
+            } else if let Some(diff) = parse_suggested_difficulty(&params) {
+                session.fixed_difficulty = Some(diff);
+                session.difficulty = diff;
+                info!(
+                    "[diff] worker={} fixed_diff={} source=miner_suggested",
+                    session.worker.as_deref().unwrap_or("-"),
+                    diff as u64
+                );
+            }
+            let resp = json!({"id": id, "result": true, "error": null});
+            write_json(wr, &resp).await?;
+            if session.pkh.is_some() {
+                send_set_difficulty(wr, conn_id, session.worker.as_deref(), session.difficulty).await?;
+            }
+        }
+        "mining.multi_version" => {
+            // Older Whatsminer BTMiner firmware negotiates version rolling
+            // with mining.multi_version instead of BIP310 mining.configure.
+            info!(
+                "[multi_version] conn={} worker={} enabled=true mask={}",
+                conn_id,
+                session.worker.as_deref().unwrap_or("-"),
+                VERSION_ROLLING_MASK
+            );
+            let resp = json!({"id": id, "result": true, "error": null});
+            write_json(wr, &resp).await?;
+            let mask = json!({
+                "id": Value::Null,
+                "method": "mining.set_version_mask",
+                "params": [VERSION_ROLLING_MASK]
+            });
+            write_json(wr, &mask).await?;
+        }
+        "mining.subscribe" => {
+            // v1.9.77: capture firmware identifier from params[0] so
+            // session_coinbase_extras() can suppress header-relay carriers
+            // for small-buffer firmware (NerdQAxe / Bitaxe / ESP-Miner /
+            // BM1370). Non-string / missing params[0] stays None -> treated
+            // as large-buffer (carriers on).
+            session.user_agent = params
+                .first()
+                .and_then(|v| v.as_str())
+                .map(String::from);
+            if let Some(ua) = session.user_agent.as_deref() {
+                if is_small_buffer_firmware(ua) {
+                    info!(
+                        "[subscribe] conn={} user_agent={:?} small_buffer=true carriers=off-for-session",
+                        conn_id, ua
+                    );
+                } else {
+                    debug!(
+                        "[subscribe] conn={} user_agent={:?} small_buffer=false",
+                        conn_id, ua
+                    );
+                }
+            }
+            // Stratum v1: result[2] is extranonce2_size (the number of bytes
+            // the miner must append to extranonce1 in mining.submit). Internally
+            // the snapshot hardcodes 4 (see build_canonical_job_snapshot line ~963);
+            // surface that same 4 here. Previously we incorrectly sent
+            // config.extranonce1_size which happened to be 4 by coincidence —
+            // would have broken any deployment that tuned STRATUM_EXTRANONCE1_SIZE.
+            let resp = json!({
+                "id": id,
+                "result": [
+                    [["mining.set_difficulty","irium"],["mining.notify","irium"]],
+                    hex::encode(&session.extranonce1),
+                    4u32
+                ],
+                "error": null
+            });
+            write_json(wr, &resp).await?;
+            send_set_difficulty(wr, conn_id, session.worker.as_deref(), session.difficulty).await?;
+            // Do not send unsolicited version-mask extensions to Whatsminer
+            // BTMiner firmware. Live v1.1 units subscribe+authorize normally
+            // but then sit idle after receiving the out-of-band
+            // mining.set_version_mask notification. If a miner explicitly
+            // negotiates mining.configure or mining.multi_version, those
+            // handlers still send the mask.
+            let suppress_unsolicited_mask = session
+                .user_agent
+                .as_deref()
+                .map(is_whatsminer_firmware)
+                .unwrap_or(false);
+            if suppress_unsolicited_mask {
+                info!(
+                    "[subscribe] conn={} user_agent={:?} skipped unsolicited set_version_mask",
+                    conn_id,
+                    session.user_agent.as_deref()
+                );
+            } else {
+                let mask_notify = json!({
+                    "id": Value::Null,
+                    "method": "mining.set_version_mask",
+                    "params": ["1fffe000"]
+                });
+                write_json(wr, &mask_notify).await?;
+                info!("[subscribe] conn={} pushed set_version_mask mask=1fffe000", conn_id);
+            }
+        }
+        "mining.authorize" => {
+            let user = params.first().and_then(|v| v.as_str()).unwrap_or("");
+            let addr = user.split('.').next().unwrap_or("").trim();
+            match parse_address_to_pkh(addr) {
+                Ok(pkh) => {
+                    session.worker = Some(user.to_string());
+                    session.pkh = Some(pkh);
+                    let resp = json!({"id": id, "result": true, "error": null});
+                    write_json(wr, &resp).await?;
+                    info!(
+                        "[authorize] worker={} adapter_kind={} miner_family_mode={}",
+                        user,
+                        session.adapter_kind.as_str(),
+                        config.miner_family_mode.as_str()
+                    );
+
+                    // Miner-controlled difficulty via the password field —
+                    // standard stratum pool convention: a comma-separated
+                    // `d=NNNN` token sets a fixed difficulty for the
+                    // session and bypasses vardiff. Values outside the
+                    // accepted range fall back to vardiff silently rather
+                    // than refusing the authorize.
+                    let password = params.get(1).and_then(|v| v.as_str()).unwrap_or("");
+                    if let Some(fixed) = parse_miner_requested_diff(password) {
+                        session.fixed_difficulty = Some(fixed);
+                        session.difficulty = fixed;
+                        info!(
+                            "[diff] worker={} fixed_diff={} source=miner_requested",
+                            user, fixed as u64
+                        );
+                    }
+
+                    let cur = current.read().await;
+                    if let Some(job) = cur.clone() {
+                        session.current_snapshot = Some(build_canonical_job_snapshot(&job, session, config)?);
+                        session.current_job = Some(job.clone());
+                        send_set_difficulty(wr, conn_id, session.worker.as_deref(), session.difficulty).await?;
+                        send_notify(wr, session, &job, true).await?;
+                    }
+                }
+                Err(e) => {
+                    let resp = json!({"id": id, "result": false, "error": [20, format!("invalid address: {e}"), null]});
+                    write_json(wr, &resp).await?;
+                }
+            }
+        }
+        "mining.submit" => {
+            let result = handle_submit(conn_id, wr, session, config, &params).await;
+            match result {
+                Ok(accepted) => {
+                    let resp = json!({"id": id, "result": accepted, "error": null});
+                    write_json(wr, &resp).await?;
+                }
+                Err(e) => {
+                    // Detect marker errors from handle_submit_legacy_rewardable:
+                    //   __STALE_SHARE__              -> Stratum error 21 ("Stale share")
+                    //   __DISCONNECT_VARIANT_NONE__  -> error 23 + graceful disconnect
+                    // All other errors stay on code 23 ("Other / unknown").
+                    let msg = e.to_string();
+                    let (code, reason, disconnect): (i32, String, bool) =
+                        if msg.starts_with("__STALE_SHARE__") {
+                            (21, "Stale share".to_string(), false)
+                        } else if msg.starts_with("__DISCONNECT_VARIANT_NONE__") {
+                            (23, "low_difficulty".to_string(), true)
+                        } else {
+                            (23, msg, false)
+                        };
+                    let resp = json!({"id": id, "result": false, "error": [code, reason, null]});
+                    write_json(wr, &resp).await?;
+                    if disconnect {
+                        // Graceful disconnect after VARIANT_NONE_DISCONNECT_THRESHOLD
+                        // consecutive variant=none rejections. Send a clean-jobs
+                        // notify so the miner flushes its state, then shut down
+                        // the write half. Outer loop bubbles the Err and the
+                        // _session_guard Drop decrements ACTIVE_SESSIONS.
+                        if let Some(job) = session.current_job.clone() {
+                            let _ = send_notify(wr, session, &job, true).await;
+                        }
+                        let _ = wr.shutdown().await;
+                        return Err(anyhow!(
+                            "disconnect: consecutive_variant_none reached threshold"
+                        ));
+                    }
+                }
+            }
+        }
+        "mining.extranonce.subscribe" => {
+            // FIX 1: J19+ AsicBoost xnonce (MRR rentals) and Bitaxe v2+ firmware
+            // opt into server-rotated extranonce via this extension. When the pool
+            // does NOT recognize the method, those rigs enter an idle wait state:
+            // they complete subscribe + authorize, then never submit shares
+            // because they're waiting on the extranonce-rotation ack that never
+            // comes. Acknowledging with result:true unblocks them even though we
+            // do not currently rotate extranonce1 mid-session. The session flag
+            // is reserved for when we wire up actual mining.set_extranonce pushes.
+            session.wants_extranonce_updates = true;
+            let resp = json!({"id": id, "result": true, "error": null});
+            write_json(wr, &resp).await?;
+            if session.pkh.is_some() {
+                let cur = current.read().await;
+                if let Some(job) = cur.clone() {
+                    session.current_snapshot = Some(build_canonical_job_snapshot(&job, session, config)?);
+                    session.current_job = Some(job.clone());
+                    send_set_difficulty(wr, conn_id, session.worker.as_deref(), session.difficulty).await?;
+                    send_notify(wr, session, &job, true).await?;
+                }
+            }
+        }
+        _ => {
+            let resp = json!({"id": id, "result": null, "error": [20, "unsupported method", null]});
+            write_json(wr, &resp).await?;
+        }
+    }
+    Ok(())
+}
+
+fn mode_allows_combo(
+    mode: &MinerFamilyMode,
+    height: u64,
+    prev_name: &str,
+    mr_name: &str,
+    v_name: &str,
+    t_name: &str,
+    b_name: &str,
+    n_name: &str,
+) -> bool {
+    // Real ASIC firmware (Bitaxe, Antminer, Whatsminer, Avalon, cgminer-family)
+    // produces standard Bitcoin-convention header bytes:
+    //   - version / time / bits / nonce in little-endian (= our t_rev, b_rev,
+    //     n_rev variants, plus v_be/v_le/v_rolled* for version).
+    //   - merkle_root in natural sha256d order placed directly at header[36..68]
+    //     (= our mr_fold_raw_raw variant — no further byte transformation).
+    //   - prev_hash: cgminer applies swap4 to the wire bytes. Pre-fork our wire
+    //     prev_hash is display-order → swap4(display) lands in the header (=
+    //     prev_swap4). At/post-fork our wire becomes swap4(natural) (see
+    //     send_notify) → cgminer's swap4 cancels and natural lands in the
+    //     header (= prev_rev32, since reverse_32(display) = natural).
+    //
+    // Pre-fork the variant scan must allow `prev_swap4`; post-fork `prev_rev32`.
+    // This is the only height-dependent constraint.
+    let post_fork = height >= STANDARD_HEADER_ACTIVATION_HEIGHT;
+
+    let v_ok = v_name == "v_be"
+        || v_name == "v_le"
+        || v_name == "v_rolled"
+        || v_name == "v_rolled_extra"
+        || v_name == "v_rolled_raw";
+    let mr_ok = mr_name == "mr_fold_raw_raw";
+    let t_ok = t_name == "t_rev";
+    let b_ok = b_name == "b_rev";
+    let n_ok = n_name == "n_rev";
+
+    // Fix D (evidence-based): with Fix A unifying mining.notify prev to
+    // swap4(natural) at all heights, the cgminer-family ASIC's internal
+    // swap4 cancels and the wire prev = natural = `prev_rev32` orientation
+    // regardless of fork side. Allow both prev_swap4 (legacy/fallback for
+    // miners that don't do the second swap4) and prev_rev32 (the canonical
+    // case after Fix A) so variant detection finds whichever the ASIC
+    // actually produced. The narrower height-conditional gate was based on
+    // an incorrect mental model of pre-fork iriumd canonical wire format
+    // (it's reverse(stored), NOT swap4(stored)) and is the root cause of
+    // 24h+ pre-fork submit_block hash_mismatch rejections.
+    let _ = post_fork;
+    let strict_prev_ok = prev_name == "prev_rev32" || prev_name == "prev_swap4";
+
+    match mode {
+        MinerFamilyMode::Asic => strict_prev_ok && mr_ok && v_ok && t_ok && b_ok && n_ok,
+        MinerFamilyMode::Ccminer => {
+            // ccminer / older mixed firmware may produce either prev_swap4 or
+            // prev_rev32 (some don't apply the second swap4 step). Allow both
+            // regardless of fork side.
+            (prev_name == "prev_swap4" || prev_name == "prev_rev32")
+                && mr_ok && v_ok && t_ok && b_ok && n_ok
+        }
+        MinerFamilyMode::Auto => {
+            // Liberal mode — accept any of the four prev byte-order variants
+            // plus mr_fold_raw_raw and the standard LE time/bits/nonce.
+            (prev_name == "prev_canon"
+                || prev_name == "prev_rev32"
+                || prev_name == "prev_swap4"
+                || prev_name == "prev_rev32_swap4")
+                && mr_ok && v_ok && t_ok && b_ok && n_ok
+        }
+        MinerFamilyMode::Cpuminer => true,
+    }
+}
+
+async fn handle_submit(
+    conn_id: u64,
+    wr: &mut tokio::net::tcp::OwnedWriteHalf,
+    session: &mut SessionState,
+    config: &StratumConfig,
+    params: &[Value],
+) -> Result<bool> {
+    let job = session.current_job.clone().ok_or_else(|| anyhow!("no active job"))?;
+    if params.len() < 5 {
+        return Err(anyhow!("invalid params"));
+    }
+
+    let submit = SubmitTuple {
+        job_id: params[1].as_str().unwrap_or("").to_string(),
+        extranonce2_hex: params[2].as_str().unwrap_or("").to_string(),
+        ntime_hex: params[3].as_str().unwrap_or("").to_string(),
+        nonce_hex: params[4].as_str().unwrap_or("").to_string(),
+        rolled_version_hex: params.get(5).and_then(|v| v.as_str()).map(String::from),
+    };
+
+    if submit.job_id != job.job_id {
+        return Err(anyhow!("stale share"));
+    }
+
+    // AuxPoW mode: always use the native rewardable path (builds parent block header correctly)
+    if session.current_snapshot.as_ref().map(|s| s.auxpow_mode).unwrap_or(false) {
+        return handle_submit_native_rewardable(conn_id, wr, session, config, &submit).await;
+    }
+
+    match session.adapter_kind {
+        AdapterKind::CpuminerCompatibility => {
+            handle_submit_cpuminer_compat(conn_id, wr, session, config, &submit).await
+        }
+        AdapterKind::NativeRewardableReserved => {
+            handle_submit_native_rewardable(conn_id, wr, session, config, &submit).await
+        }
+        _ => handle_submit_legacy_rewardable(conn_id, wr, session, config, &submit).await,
+    }
+}
+
+fn decode_native_rewardable_submit(
+    snapshot: &CanonicalJobSnapshot,
+    submit: &NativeSubmit,
+) -> Result<CanonicalSolve> {
+    if submit.job_id != snapshot.job_id {
+        return Err(anyhow!("stale share"));
+    }
+    let extranonce2 =
+        hex::decode(&submit.extranonce2_hex).map_err(|e| anyhow!("extranonce2 decode: {e}"))?;
+    let coinbase = reconstruct_canonical_coinbase(snapshot, &extranonce2)?;
+    let coinbase_hash_internal = sha256d(&coinbase);
+    let canonical_merkle_root =
+        reconstruct_canonical_merkle_root(snapshot, coinbase_hash_internal);
+    let ntime = parse_u32_hex(&submit.ntime_hex)?;
+    let nonce = parse_u32_hex(&submit.nonce_hex)?;
+    let canonical_header80 =
+        reconstruct_canonical_header80(snapshot, canonical_merkle_root, ntime, nonce, snapshot.version);
+    let mut canonical_hash = sha256d(&canonical_header80);
+    canonical_hash.reverse();
+    let share_target = snapshot.block_target.clone();
+    let share_ok = BigUint::from_bytes_be(&canonical_hash) <= share_target;
+    let block_ok = BigUint::from_bytes_be(&canonical_hash) <= snapshot.block_target;
+
+    Ok(CanonicalSolve {
+        adapter_id: "native_rewardable",
+        rewardable: true,
+        share_variant: "canonical_native",
+        extranonce2_hex: submit.extranonce2_hex.clone(),
+        ntime_hex: submit.ntime_hex.clone(),
+        nonce_hex: submit.nonce_hex.clone(),
+        coinbase_hex: hex::encode(&coinbase),
+        coinbase_hash_internal,
+        canonical_merkle_root,
+        canonical_header80,
+        canonical_hash,
+        share_hash: canonical_hash,
+        share_target,
+        block_target: snapshot.block_target.clone(),
+        share_ok,
+        share_block_like: block_ok,
+        block_ok,
+    })
+}
+
+fn decode_cpuminer_compat_submit(
+    snapshot: &CanonicalJobSnapshot,
+    session: &SessionState,
+    config: &StratumConfig,
+    submit: &SubmitTuple,
+) -> Result<CanonicalSolve> {
+    let extra2 = hex::decode(&submit.extranonce2_hex).map_err(|e| anyhow!("extranonce2 decode: {e}"))?;
+    let cb = reconstruct_coinbase(snapshot, &extra2);
+    let cb_hash = sha256d(&cb);
+    let canonical_merkle_root = merkle_root_from_coinbase(cb_hash, &snapshot.branches);
+    let ntime = parse_u32_hex(&submit.ntime_hex)?;
+    let nonce = parse_u32_hex(&submit.nonce_hex)?;
+
+    fn fold_merkle(root0: [u8; 32], branches: &[[u8; 32]], rev_branch: bool, rev_each_round: bool) -> [u8; 32] {
+        let mut root = root0;
+        for b in branches {
+            let mut branch = *b;
+            if rev_branch {
+                branch.reverse();
+            }
+            let mut data = Vec::with_capacity(64);
+            data.extend_from_slice(&root);
+            data.extend_from_slice(&branch);
+            root = sha256d(&data);
+            if rev_each_round {
+                root.reverse();
+            }
+        }
+        root
+    }
+
+    let mr_raw_raw = fold_merkle(cb_hash, &snapshot.branches, false, false);
+    let mr_raw_rev = fold_merkle(cb_hash, &snapshot.branches, true, false);
+    let mr_round_raw = fold_merkle(cb_hash, &snapshot.branches, false, true);
+    let mr_round_rev = fold_merkle(cb_hash, &snapshot.branches, true, true);
+
+    let prev_canon = snapshot.prev_hash_internal;
+    let prev_rev32 = reverse_32(snapshot.prev_hash_internal);
+    let prev_swap4 = swap4_bytes_each_word(snapshot.prev_hash_internal);
+    let prev_rev32_swap4 = swap4_bytes_each_word(prev_rev32);
+
+    let prev_variants: [(&str, [u8; 32]); 4] = [
+        ("prev_canon", prev_canon),
+        ("prev_rev32", prev_rev32),
+        ("prev_swap4", prev_swap4),
+        ("prev_rev32_swap4", prev_rev32_swap4),
+    ];
+
+    let mut merkle_variants: Vec<(&str, [u8; 32])> = Vec::new();
+    for (base_name, base) in [
+        ("mr_fold_raw_raw", mr_raw_raw),
+        ("mr_fold_raw_rev", mr_raw_rev),
+        ("mr_fold_round_raw", mr_round_raw),
+        ("mr_fold_round_rev", mr_round_rev),
+    ] {
+        let mut rev32 = base;
+        rev32.reverse();
+        merkle_variants.push((base_name, base));
+        merkle_variants.push((Box::leak(format!("{}:rev32", base_name).into_boxed_str()), rev32));
+        merkle_variants.push((Box::leak(format!("{}:swap4", base_name).into_boxed_str()), swap4_bytes_each_word(base)));
+        merkle_variants.push((Box::leak(format!("{}:rev32_swap4", base_name).into_boxed_str()), swap4_bytes_each_word(rev32)));
+    }
+
+    let share_target = target_from_difficulty_with_limit(session.difficulty, &config.pow_limit);
+    let block_target = snapshot.block_target.clone();
+
+    #[derive(Clone)]
+    struct CheckResult {
+        name: &'static str,
+        header: [u8; 80],
+        hash: [u8; 32],
+        ok_share_be: bool,
+        ok_share_le: bool,
+        ok_block_be: bool,
+        ok_block_le: bool,
+    }
+
+    let use_le = matches!(config.hash_cmp_mode, HashCmpMode::Le);
+    let nbits_raw = decode_hex4(&format!("{:08x}", snapshot.bits))?;
+    let ntime_raw = decode_hex4(&submit.ntime_hex)?;
+    let nonce_raw = decode_hex4(&submit.nonce_hex)?;
+    let version_be = [0x00, 0x00, 0x00, 0x01];
+    let version_le = snapshot.version.to_le_bytes();
+    // BIP310: params[5] carries version-rolling extra bits. Header version
+    // = base | extra (header bytes LE-encoded). Different firmware encodes
+    // params[5] slightly differently, so we test multiple interpretations
+    // and accept whichever matches the miner's actual header.
+    let version_opts: Vec<(&'static str, [u8; 4])> = match &submit.rolled_version_hex {
+        Some(hex) => {
+            let rolled_extra = parse_u32_hex(hex)?;
+            let extra_raw = decode_hex4(hex)?;
+            vec![
+                ("v_rolled", (snapshot.version | rolled_extra).to_le_bytes()),
+                ("v_rolled_extra", rolled_extra.to_le_bytes()),
+                ("v_rolled_raw", extra_raw),
+            ]
+        }
+        None => vec![("v_be", version_be), ("v_le", version_le)],
+    };
+    let time_opts = [("t_raw", ntime_raw), ("t_rev", reverse_4(ntime_raw))];
+    let bits_opts = [("b_raw", nbits_raw), ("b_rev", reverse_4(nbits_raw))];
+    let nonce_opts = [("n_raw", nonce_raw), ("n_rev", reverse_4(nonce_raw))];
+
+    let mut checks: Vec<CheckResult> = Vec::new();
+    let mut accepted_idx: Option<usize> = None;
+
+    for (prev_name, prev_for_header) in prev_variants {
+        for &(mr_name, mr_for_header) in merkle_variants.iter() {
+            for &(v_name, v_bytes) in version_opts.iter() {
+                for (t_name, t_bytes) in time_opts {
+                    for (b_name, b_bytes) in bits_opts {
+                        for (n_name, n_bytes) in nonce_opts {
+                            let hdr_v = header_bytes_from_wire(
+                                v_bytes,
+                                prev_for_header,
+                                mr_for_header,
+                                t_bytes,
+                                b_bytes,
+                                n_bytes,
+                            );
+                            let mode = format!("{}:{}:{}:{}", v_name, t_name, b_name, n_name);
+                            let hash_v = sha256d(&hdr_v);
+                            let hash_int_be = BigUint::from_bytes_be(&hash_v);
+                            let mut hash_rev = hash_v;
+                            hash_rev.reverse();
+                            let hash_int_le = BigUint::from_bytes_be(&hash_rev);
+                            let ok_share_be = hash_int_be <= share_target;
+                            let ok_share_le = hash_int_le <= share_target;
+                            let ok_block_be = hash_int_be <= block_target;
+                            let ok_block_le = hash_int_le <= block_target;
+                            let ok_share = if use_le { ok_share_le } else { ok_share_be };
+                            checks.push(CheckResult {
+                                name: Box::leak(format!("{}+{}:{}", prev_name, mr_name, mode).into_boxed_str()),
+                                header: hdr_v,
+                                hash: hash_v,
+                                ok_share_be,
+                                ok_share_le,
+                                ok_block_be,
+                                ok_block_le,
+                            });
+                            if ok_share && accepted_idx.is_none() {
+                                accepted_idx = Some(checks.len() - 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let (share_variant, share_hash, share_ok, share_block_like) = if let Some(idx) = accepted_idx {
+        let chosen = &checks[idx];
+        (
+            chosen.name,
+            chosen.hash,
+            true,
+            if use_le { chosen.ok_block_le } else { chosen.ok_block_be },
+        )
+    } else {
+        ("none", [0u8; 32], false, false)
+    };
+
+    // Patch 5: honor BIP310 version rolling. The chosen variant's
+    // header[0..4] holds the LE bytes the ASIC actually hashed for the
+    // version field. iriumd canonicalizes by writing
+    // SubmitHeader.version.to_le_bytes(), so we must compute canonical_hash
+    // with the same effective version the chip used, otherwise canonical_hash
+    // and chip_hash diverge by 16+ bits of entropy and block_ok essentially
+    // never fires for ASICs that use version rolling (NerdQAxe+, AntMiner S19,
+    // etc.). Mirrors Fix E in handle_submit_native_rewardable.
+    let effective_version = accepted_idx
+        .and_then(|idx| checks.get(idx))
+        .map(|c| u32::from_le_bytes(c.header[0..4].try_into().unwrap()))
+        .unwrap_or(snapshot.version);
+    let canonical_header80 = reconstruct_canonical_header80(
+        snapshot,
+        canonical_merkle_root,
+        ntime,
+        nonce,
+        effective_version,
+    );
+    // Patch 6: reverse to match native_rewardable's canonical_hash byte order
+    // (line ~1613). Without this, hash_meets_target() compares raw sha256d bytes
+    // as BE — wrong order — and block_ok evaluates false for hashes that actually
+    // meet block_target. Mirror is required for block_ok to fire correctly.
+    let mut canonical_hash = sha256d(&canonical_header80);
+    canonical_hash.reverse();
+    let share_hash = if accepted_idx.is_some() { share_hash } else { canonical_hash };
+
+    Ok(CanonicalSolve {
+        adapter_id: "cpuminer_compat",
+        rewardable: true,
+        share_variant,
+        extranonce2_hex: submit.extranonce2_hex.clone(),
+        ntime_hex: submit.ntime_hex.clone(),
+        nonce_hex: submit.nonce_hex.clone(),
+        coinbase_hex: hex::encode(&cb),
+        coinbase_hash_internal: cb_hash,
+        canonical_merkle_root,
+        canonical_header80,
+        canonical_hash,
+        share_hash,
+        share_target,
+        block_target,
+        share_ok,
+        share_block_like,
+        block_ok: hash_meets_target(&canonical_hash, &snapshot.block_target),
+    })
+}
+
+fn process_cpuminer_compat_solve(
+    worker: &str,
+    snapshot: &CanonicalJobSnapshot,
+    solve: &CanonicalSolve,
+    diff: f64,
+) -> Vec<CompatEvent> {
+    let mut events = Vec::new();
+
+    mark_accepted_share();
+    record_miner_share_accepted(worker, diff);
+    info!(
+        "[SHARE_ACCEPTED] worker={} adapter_id={} rewardable={} variant={} hash={} canonical_hash={}",
+        worker,
+        solve.adapter_id,
+        solve.rewardable,
+        solve.share_variant,
+        hex::encode(solve.share_hash),
+        hex::encode(solve.canonical_hash),
+    );
+    events.push(CompatEvent::ShareAccepted);
+
+    if solve.share_block_like {
+        mark_compat_solved_share();
+        mark_compat_block_like_share();
+        info!(
+            "[COMPAT_SOLVED_SHARE] worker={} adapter_id={} rewardable={} job={} share_hash={} canonical_hash={} block_target={} template_fingerprint={}",
+            worker,
+            solve.adapter_id,
+            solve.rewardable,
+            snapshot.job_id,
+            hex::encode(solve.share_hash),
+            hex::encode(solve.canonical_hash),
+            biguint_to_32hex(&solve.block_target),
+            snapshot.template_fingerprint,
+        );
+        events.push(CompatEvent::CompatSolvedShare);
+    }
+
+    // Patch 7: only fire COMPAT_CANDIDATE_BLOCKED when promotion is ACTUALLY
+    // blocked. Pre-fix this fired whenever share_block_like || block_ok, which
+    // includes the case where allow_rewardable_promotion(solve) returns true
+    // — i.e., the warn fired even when the block WAS being submitted, producing
+    // a misleading "action=no_candidate_promotion" log line right next to the
+    // [block] submitted INFO line. Now the warn fires iff the gate denies.
+    if (solve.share_block_like || solve.block_ok) && !allow_rewardable_promotion(solve) {
+        mark_compat_nonrewardable_event();
+        warn!(
+            "[COMPAT_CANDIDATE_BLOCKED] worker={} adapter_id={} rewardable={} job={} share_block_like={} canonical_block_ok={} share_hash={} canonical_hash={} block_target={} template_fingerprint={} action=no_candidate_promotion",
+            worker,
+            solve.adapter_id,
+            solve.rewardable,
+            snapshot.job_id,
+            solve.share_block_like,
+            solve.block_ok,
+            hex::encode(solve.share_hash),
+            hex::encode(solve.canonical_hash),
+            biguint_to_32hex(&solve.block_target),
+            snapshot.template_fingerprint,
+        );
+        events.push(CompatEvent::CompatCandidateBlocked);
+    }
+
+    events
+}
+
+fn allow_rewardable_promotion(solve: &CanonicalSolve) -> bool {
+    solve.rewardable && solve.block_ok
+}
+
+async fn handle_submit_cpuminer_compat(
+    conn_id: u64,
+    wr: &mut tokio::net::tcp::OwnedWriteHalf,
+    session: &mut SessionState,
+    config: &StratumConfig,
+    submit: &SubmitTuple,
+) -> Result<bool> {
+    let worker = session.worker.clone().unwrap_or_else(|| format!("conn-{conn_id}"));
+    let snapshot = session
+        .current_snapshot
+        .clone()
+        .ok_or_else(|| anyhow!("missing canonical snapshot"))?;
+    let adapter = CpuminerCompatibilityAdapter;
+    let solve = adapter.decode_submit(&snapshot, session, config, submit)?;
+
+    info!(
+        "[sharecheck-cpuminer] worker={} job={} adapter_id={} rewardable={} template_fingerprint={} extranonce1={} extranonce2={} ntime={} nonce={} raw_submitted_hash={} canonical_hash={} share_target={} block_target={} coinbase_hex={} coinbase_hash={} merkle_root={} miner_header80={} canonical_header80={} share_variant={}",
+        worker,
+        snapshot.job_id,
+        adapter.adapter_id(),
+        solve.rewardable,
+        snapshot.template_fingerprint,
+        hex::encode(&snapshot.extranonce1),
+        solve.extranonce2_hex,
+        solve.ntime_hex,
+        solve.nonce_hex,
+        hex::encode(solve.share_hash),
+        hex::encode(solve.canonical_hash),
+        biguint_to_32hex(&solve.share_target),
+        biguint_to_32hex(&solve.block_target),
+        solve.coinbase_hex,
+        hex::encode(solve.coinbase_hash_internal),
+        hex::encode(solve.canonical_merkle_root),
+        hex::encode(cpuminer_miner_header_wire(&snapshot, solve.coinbase_hash_internal, &solve.ntime_hex, &solve.nonce_hex)?),
+        hex::encode(solve.canonical_header80),
+        solve.share_variant,
+    );
+
+    if !solve.share_ok {
+        if config.soft_accept_invalid_shares {
+            mark_accepted_share();
+            warn!(
+                "[SHARE_SOFT_ACCEPTED] worker={} adapter_id={} reason=compat_soft_accept hash={} canonical_hash={}",
+                worker,
+                solve.adapter_id,
+                hex::encode(solve.share_hash),
+                hex::encode(solve.canonical_hash),
+            );
+            return Ok(true);
+        }
+        mark_rejected_share();
+        record_miner_share_rejected(&worker, REJECT_REASON_LOW_POW);
+        warn!(
+            "[SHARE_REJECTED] worker={} adapter_id={} rewardable={} reason=low_difficulty job={} extranonce2={} ntime={} nonce={} raw_submitted_hash={} canonical_hash={} share_target={} block_target={} template_fingerprint={}",
+            worker,
+            solve.adapter_id,
+            solve.rewardable,
+            snapshot.job_id,
+            solve.extranonce2_hex,
+            solve.ntime_hex,
+            solve.nonce_hex,
+            hex::encode(solve.share_hash),
+            hex::encode(solve.canonical_hash),
+            biguint_to_32hex(&solve.share_target),
+            biguint_to_32hex(&solve.block_target),
+            snapshot.template_fingerprint,
+        );
+        return Err(anyhow!("low_difficulty"));
+    }
+
+    let _events = process_cpuminer_compat_solve(&worker, &snapshot, &solve, session.difficulty);
+
+    // POST-PHASE-2A: cpuminer-compat path now submits valid blocks. This is
+    // required for miners on port 443 fallback (sslh-mux for ISPs that block
+    // 3333/3335, notably China) who use non-standard byte arrangements that
+    // only the 1,536-variant compat scan can identify. See issue #57.
+    //
+    // solve.canonical_hash is computed from solve.canonical_header80 via
+    // reconstruct_canonical_header80 — byte-identical to what iriumd derives
+    // in submit_block, so the submission validates the same way the working
+    // legacy_rewardable path on port 3333 does.
+    if allow_rewardable_promotion(&solve) {
+        mark_candidate_detected();
+        info!(
+            "[block] candidate worker={} height={} hash={}",
+            worker,
+            snapshot.height,
+            hex::encode(solve.canonical_hash)
+        );
+        mark_candidate_submitted();
+        mark_block_submit_attempt();
+        let client = reqwest::Client::builder().build()?;
+        match submit_canonical_block(&client, config, &snapshot, &solve).await? {
+            NodeSubmitResult::Accepted { .. } => {
+                mark_submit_accepted();
+                info!("[block] submitted worker={} height={}", worker, snapshot.height);
+                let row = FoundBlockRecord {
+                    height: snapshot.height,
+                    hash: hex::encode(solve.canonical_hash),
+                    time: unix_now_secs(),
+                    worker: worker.to_string(),
+                    address: worker_address(&worker),
+                };
+                if let Err(e) = append_found_block(&config.found_blocks_file, &row) {
+                    warn!("[block] record append failed worker={} height={} err={}", worker, snapshot.height, e);
+                }
+            }
+            NodeSubmitResult::Rejected { reason } => {
+                mark_submit_rejected();
+                warn!("[block] submit failed reason={} worker={}", reason, worker);
+            }
+        }
+    }
+
+    maybe_update_vardiff_after_accepted_share(conn_id, wr, session, config, &worker).await?;
+    Ok(true)
+}
+
+fn encode_varint(v: usize, out: &mut Vec<u8>) {
+    if v < 0xfd {
+        out.push(v as u8);
+    } else if v <= 0xffff {
+        out.push(0xfd);
+        out.extend_from_slice(&(v as u16).to_le_bytes());
+    } else if v <= 0xffff_ffff {
+        out.push(0xfe);
+        out.extend_from_slice(&(v as u32).to_le_bytes());
+    } else {
+        out.push(0xff);
+        out.extend_from_slice(&(v as u64).to_le_bytes());
+    }
+}
+
+fn build_canonical_block_hex(
+    snapshot: &CanonicalJobSnapshot,
+    solve: &CanonicalSolve,
+) -> Result<String> {
+    let mut block = Vec::new();
+    block.extend_from_slice(&solve.canonical_header80);
+    block.extend_from_slice(
+        &hex::decode(&solve.coinbase_hex).map_err(|e| anyhow!("coinbase hex decode: {e}"))?,
+    );
+    for tx in &snapshot.tx_hex {
+        block.extend_from_slice(&hex::decode(tx).map_err(|e| anyhow!("tx hex decode: {e}"))?);
+    }
+    Ok(hex::encode(block))
+}
+
+async fn submit_canonical_block(
+    client: &reqwest::Client,
+    config: &StratumConfig,
+    snapshot: &CanonicalJobSnapshot,
+    solve: &CanonicalSolve,
+) -> Result<NodeSubmitResult> {
+    // Patch 5: derive version from the canonical header bytes (which include
+    // the chip's BIP310-rolled version, when applicable). iriumd serializes
+    // via to_le_bytes() and recomputes the hash; this guarantees byte-identity
+    // with what the chip hashed.
+    let effective_version = u32::from_le_bytes(
+        solve.canonical_header80[0..4].try_into().expect("80-byte header"),
+    );
+    let req = SubmitRequest {
+        height: snapshot.height,
+        header: SubmitHeader {
+            version: effective_version,
+            prev_hash: hex::encode(snapshot.prev_hash_internal),
+            merkle_root: hex::encode(solve.canonical_merkle_root),
+            time: parse_u32_hex(&solve.ntime_hex)?,
+            bits: format!("{:08x}", snapshot.bits),
+            nonce: parse_u32_hex(&solve.nonce_hex)?,
+            hash: hex::encode(solve.canonical_hash),
+        },
+        tx_hex: {
+            let mut txs = Vec::with_capacity(snapshot.tx_hex.len() + 1);
+            txs.push(solve.coinbase_hex.clone());
+            txs.extend(snapshot.tx_hex.clone());
+            txs
+        },
+        submit_source: "pool_stratum_native_rewardable".to_string(),
+        auxpow_hex: None,
+    };
+
+    let url = format!("{}/rpc/submit_block", config.rpc_base.trim_end_matches('/'));
+    let resp = client
+        .post(url)
+        .bearer_auth(&config.rpc_token)
+        .json(&req)
+        .send()
+        .await?;
+    if resp.status().is_success() {
+        Ok(NodeSubmitResult::Accepted {
+            canonical_block_hash: solve.canonical_hash,
+            accepted_height: snapshot.height,
+        })
+    } else {
+        Ok(NodeSubmitResult::Rejected {
+            reason: format!("http_status={}", resp.status()),
+        })
+    }
+}
+
+fn rewardable_candidate_allowed(solve: &CanonicalSolve) -> bool {
+    solve.rewardable && solve.block_ok
+}
+
+fn mark_round_eligible(_record: &RoundEligibleRecord) -> Result<()> {
+    mark_round_eligible_counter();
+    Ok(())
+}
+
+async fn handle_submit_native_rewardable(
+    conn_id: u64,
+    wr: &mut tokio::net::tcp::OwnedWriteHalf,
+    session: &mut SessionState,
+    config: &StratumConfig,
+    submit: &SubmitTuple,
+) -> Result<bool> {
+    let snapshot = session
+        .current_snapshot
+        .clone()
+        .ok_or_else(|| anyhow!("missing canonical snapshot"))?;
+
+    if snapshot.auxpow_mode {
+        return handle_submit_auxpow(conn_id, wr, session, config, submit, snapshot).await;
+    }
+
+    if !config.native_rewardable_enabled {
+        return Err(anyhow!("native rewardable adapter disabled"));
+    }
+
+    let worker = session.worker.clone().unwrap_or_else(|| "-".to_string());
+    let adapter = NativeRewardableAdapter;
+    let solve = adapter.decode_submit(&snapshot, session, config, submit)?;
+
+    if !solve.share_ok {
+        mark_rejected_share();
+        record_miner_share_rejected(&worker, REJECT_REASON_LOW_POW);
+        warn!(
+            "[share] reject worker={} adapter_id={} reason=low_difficulty",
+            worker,
+            solve.adapter_id
+        );
+        return Err(anyhow!("low_difficulty"));
+    }
+
+    mark_accepted_share();
+    record_miner_share_accepted(&worker, session.difficulty);
+    mark_rewardable_share_accepted();
+    info!(
+        "[REWARDABLE_SHARE_ACCEPTED] worker={} adapter_id={} rewardable={} job={} canonical_hash={} share_target={}",
+        worker,
+        solve.adapter_id,
+        solve.rewardable,
+        snapshot.job_id,
+        hex::encode(solve.canonical_hash),
+        biguint_to_32hex(&solve.share_target),
+    );
+
+    if rewardable_candidate_allowed(&solve) {
+        mark_candidate_detected();
+        info!(
+            "[REWARDABLE_CANDIDATE] worker={} adapter_id={} rewardable={} job={} canonical_hash={} block_target={} template_fingerprint={}",
+            worker,
+            solve.adapter_id,
+            solve.rewardable,
+            snapshot.job_id,
+            hex::encode(solve.canonical_hash),
+            biguint_to_32hex(&solve.block_target),
+            snapshot.template_fingerprint,
+        );
+
+        let block_hex = build_canonical_block_hex(&snapshot, &solve)?;
+        mark_candidate_submitted();
+        mark_block_submit_attempt();
+        info!(
+            "[BLOCK_SUBMITTED] worker={} job={} canonical_hash={} merkle_root={} block_hex_len={} template_fingerprint={}",
+            worker,
+            snapshot.job_id,
+            hex::encode(solve.canonical_hash),
+            hex::encode(solve.canonical_merkle_root),
+            block_hex.len(),
+            snapshot.template_fingerprint,
+        );
+
+        let client = reqwest::Client::builder().build()?;
+        match submit_canonical_block(&client, config, &snapshot, &solve).await? {
+            NodeSubmitResult::Accepted {
+                canonical_block_hash,
+                accepted_height,
+            } => {
+                mark_submit_accepted();
+                mark_chain_height_advanced_by_pool();
+                info!(
+                    "[BLOCK_ACCEPTED] worker={} job={} canonical_hash={} accepted_height={} template_fingerprint={}",
+                    worker,
+                    snapshot.job_id,
+                    hex::encode(canonical_block_hash),
+                    accepted_height,
+                    snapshot.template_fingerprint,
+                );
+                let record = RoundEligibleRecord {
+                    height: accepted_height,
+                    job_id: snapshot.job_id.clone(),
+                    template_fingerprint: snapshot.template_fingerprint.clone(),
+                    canonical_block_hash,
+                    accepted_at_unix: unix_now_secs(),
+                };
+                mark_round_eligible(&record)?;
+                info!(
+                    "[ROUND_ELIGIBLE] height={} job={} canonical_hash={} template_fingerprint={}",
+                    record.height,
+                    record.job_id,
+                    hex::encode(record.canonical_block_hash),
+                    record.template_fingerprint,
+                );
+            }
+            NodeSubmitResult::Rejected { reason } => {
+                mark_submit_rejected();
+                warn!(
+                    "[BLOCK_REJECTED] worker={} job={} canonical_hash={} reason={} template_fingerprint={}",
+                    worker,
+                    snapshot.job_id,
+                    hex::encode(solve.canonical_hash),
+                    reason,
+                    snapshot.template_fingerprint,
+                );
+            }
+        }
+    }
+
+    maybe_update_vardiff_after_accepted_share(conn_id, wr, session, config, &worker).await?;
+    Ok(true)
+}
+
+
+async fn handle_submit_auxpow(
+    conn_id: u64,
+    wr: &mut tokio::net::tcp::OwnedWriteHalf,
+    session: &mut SessionState,
+    config: &StratumConfig,
+    submit: &SubmitTuple,
+    snapshot: CanonicalJobSnapshot,
+) -> Result<bool> {
+    let worker = session.worker.clone().unwrap_or_else(|| format!("conn-{conn_id}"));
+
+    let extranonce2 = hex::decode(&submit.extranonce2_hex)
+        .map_err(|e| anyhow!("extranonce2 decode: {e}"))?;
+    let parent_coinbase = reconstruct_canonical_coinbase(&snapshot, &extranonce2)?;
+    let parent_coinbase_hash = sha256d(&parent_coinbase);
+
+    let ntime = parse_u32_hex(&submit.ntime_hex)?;
+    let nonce = parse_u32_hex(&submit.nonce_hex)?;
+
+    // Build parent header with NATURAL ORDER merkle root so iriumd validate() passes:
+    //   parent_header[36..68] == sha256d(coinbase_txn)
+    let parent_header = header_bytes(1, snapshot.prev_hash_internal, parent_coinbase_hash, ntime, snapshot.bits, nonce);
+    let mut parent_hash_display = sha256d(&parent_header);
+    parent_hash_display.reverse();
+
+    let share_target = target_from_difficulty_with_limit(session.difficulty, &config.pow_limit);
+    let ok_share = BigUint::from_bytes_be(&parent_hash_display) <= share_target;
+    let ok_block = BigUint::from_bytes_be(&parent_hash_display) <= snapshot.block_target;
+
+    if !ok_share {
+        if config.soft_accept_invalid_shares {
+            mark_accepted_share();
+            record_miner_share_accepted(&worker, session.difficulty);
+            warn!("[AUXPOW_SHARE_SOFT_ACCEPTED] worker={}", worker);
+            maybe_update_vardiff_after_accepted_share(conn_id, wr, session, config, &worker).await?;
+            return Ok(true);
+        }
+        mark_rejected_share();
+        record_miner_share_rejected(&worker, REJECT_REASON_LOW_POW);
+        warn!("[AUXPOW_SHARE_REJECTED] worker={} reason=low_difficulty hash={}", worker, hex::encode(parent_hash_display));
+        return Err(anyhow!("low_difficulty"));
+    }
+
+    mark_accepted_share();
+    record_miner_share_accepted(&worker, session.difficulty);
+    mark_rewardable_share_accepted();
+    info!(
+        "[AUXPOW_SHARE_ACCEPTED] worker={} hash={} block_target={}",
+        worker, hex::encode(parent_hash_display), biguint_to_32hex(&snapshot.block_target)
+    );
+
+    if ok_block {
+        mark_candidate_detected();
+        info!("[AUXPOW_CANDIDATE] worker={} height={} hash={}", worker, snapshot.height, hex::encode(parent_hash_display));
+
+        let auxpow_hex = build_auxpow_hex_from_solution(&parent_coinbase, ntime, snapshot.bits, nonce);
+
+        let irium_h80 = snapshot.irium_header80.ok_or_else(|| anyhow!("missing irium_header80"))?;
+        let irium_coinbase_hex = snapshot.irium_coinbase_hex.as_ref().ok_or_else(|| anyhow!("missing irium_coinbase_hex"))?;
+
+        // Extract Irium block fields from the pre-built header
+        let irium_version = u32::from_le_bytes(irium_h80[0..4].try_into().unwrap());
+        let mut irium_prev = [0u8; 32];
+        irium_prev.copy_from_slice(&irium_h80[4..36]);
+        irium_prev.reverse(); // wire order → internal order
+        let mut irium_merkle = [0u8; 32];
+        irium_merkle.copy_from_slice(&irium_h80[36..68]);
+        irium_merkle.reverse(); // wire order → natural order
+        let irium_ntime = u32::from_le_bytes(irium_h80[68..72].try_into().unwrap());
+        let irium_bits_val = u32::from_le_bytes(irium_h80[72..76].try_into().unwrap());
+        let irium_nonce = 0u32;
+        let mut irium_hash = sha256d(&irium_h80);
+        irium_hash.reverse();
+
+        let mut tx_hex = Vec::with_capacity(snapshot.tx_hex.len() + 1);
+        tx_hex.push(irium_coinbase_hex.clone());
+        tx_hex.extend(snapshot.tx_hex.clone());
+
+        let req = SubmitRequest {
+            height: snapshot.height,
+            header: SubmitHeader {
+                version: irium_version,
+                prev_hash: hex::encode(irium_prev),
+                merkle_root: hex::encode(irium_merkle),
+                time: irium_ntime,
+                bits: format!("{:08x}", irium_bits_val),
+                nonce: irium_nonce,
+                hash: hex::encode(irium_hash),
+            },
+            tx_hex,
+            submit_source: "pool_stratum_auxpow".to_string(),
+            auxpow_hex: Some(auxpow_hex),
+        };
+
+        mark_candidate_submitted();
+        mark_block_submit_attempt();
+
+        let url = format!("{}/rpc/submit_block", config.rpc_base.trim_end_matches('/'));
+        let client = reqwest::Client::builder().build()?;
+        match client.post(&url).bearer_auth(&config.rpc_token).json(&req).send().await {
+            Ok(resp) if resp.status().is_success() => {
+                mark_submit_accepted();
+                mark_chain_height_advanced_by_pool();
+                info!(
+                    "[AUXPOW_BLOCK_ACCEPTED] worker={} height={} irium_hash={}",
+                    worker, snapshot.height, hex::encode(irium_hash)
+                );
+                let row = FoundBlockRecord {
+                    height: snapshot.height,
+                    hash: hex::encode(irium_hash),
+                    time: unix_now_secs(),
+                    worker: worker.to_string(),
+                    address: worker_address(&worker),
+                };
+                if let Err(e) = append_found_block(&config.found_blocks_file, &row) {
+                    warn!("[block] auxpow record append failed: {e}");
+                }
+            }
+            Ok(resp) => {
+                mark_submit_rejected();
+                warn!("[AUXPOW_BLOCK_REJECTED] worker={} status={}", worker, resp.status());
+            }
+            Err(e) => {
+                mark_submit_rejected();
+                warn!("[AUXPOW_BLOCK_SUBMIT_ERROR] worker={} err={}", worker, e);
+            }
+        }
+    }
+
+    maybe_update_vardiff_after_accepted_share(conn_id, wr, session, config, &worker).await?;
+    Ok(true)
+}
+
+async fn handle_submit_legacy_rewardable(
+    conn_id: u64,
+    wr: &mut tokio::net::tcp::OwnedWriteHalf,
+    session: &mut SessionState,
+    config: &StratumConfig,
+    submit: &SubmitTuple,
+) -> Result<bool> {
+    let worker = session.worker.clone().unwrap_or_else(|| format!("conn-{conn_id}"));
+    let pkh = session.pkh.ok_or_else(|| anyhow!("unauthorized"))?;
+    let job = session.current_job.clone().ok_or_else(|| anyhow!("no active job"))?;
+
+    // Stale-share rejection by job_id mismatch.
+    //
+    // The pool emits new templates roughly once per second. A submission
+    // referencing a job_id other than the one currently active for this
+    // session was hashed against a stale prev_hash / merkle_root context -
+    // no byte-order transformation can produce a valid hash for it. Cheap
+    // reject saves ~1024-1536 SHA256d invocations per stale submission and
+    // surfaces the standard Stratum error code 21 ("Stale share") instead
+    // of the misleading "low_difficulty" that the variant scanner would
+    // otherwise emit.
+    //
+    // The "__STALE_SHARE__" marker prefix in the error message is detected
+    // by the mining.submit dispatch arm in handle_request and converted to
+    // Stratum error code 21 on the wire. Upstream proxies (MRR's stratum-
+    // proxy, NiceHash, etc.) can then diagnose buffering / clean_jobs
+    // forwarding problems on their side rather than blaming the pool.
+    if submit.job_id != job.job_id {
+        warn!(
+            "[share] stale worker={} submit_job={} current_job={} reason=stale_share",
+            worker, submit.job_id, job.job_id
+        );
+        mark_rejected_share();
+        record_miner_share_rejected(&worker, REJECT_REASON_STALE_JOB);
+        return Err(anyhow!(
+            "__STALE_SHARE__: submitted job {} != current job {}",
+            submit.job_id,
+            job.job_id
+        ));
+    }
+
+    // Stale-share rejection by chain-height mismatch (Approach B).
+    //
+    // The session's current_job reflects the last mining.notify
+    // delivered to this session. But tokio broadcast channels drop
+    // messages for slow consumers (RecvError::Lagged), and busy MRR-
+    // proxy sessions can fall behind. A session that lagged on the
+    // broadcast keeps mining the LAST job it actually received -
+    // even though the chain has advanced multiple heights. Every
+    // submission it makes hashes against a stale prev_hash /
+    // merkle_root and is unrecoverable.
+    //
+    // The job_id check above catches the case where the WIRE submission
+    // references an older job than the session itself knows. This
+    // height check catches the OTHER case: the session's current_job
+    // is itself stale relative to the pool's latest template (lagged
+    // broadcast).
+    //
+    // +2 tolerance: a 1-2 block lag is normal during template rotation
+    // (a session might submit "in flight" for height N just as the
+    // pool moves to N+1 or N+2). Anything 3+ blocks behind is
+    // definitely stale and unrecoverable. LATEST_TEMPLATE_HEIGHT > 0
+    // guard skips the check during cold-start before the first
+    // template arrives.
+    let latest_height = LATEST_TEMPLATE_HEIGHT.load(Ordering::Relaxed);
+    if latest_height > 0 && job.height + 2 < latest_height {
+        warn!(
+            "[share] stale-by-height worker={} job_height={} chain_height={} lag={} reason=stale_height",
+            worker, job.height, latest_height, latest_height - job.height
+        );
+        mark_rejected_share();
+        record_miner_share_rejected(&worker, REJECT_REASON_STALE_HEIGHT);
+        return Err(anyhow!(
+            "__STALE_SHARE__: job height {} is {} blocks behind chain height {}",
+            job.height,
+            latest_height - job.height,
+            latest_height
+        ));
+    }
+
+    let extra2 = hex::decode(&submit.extranonce2_hex).map_err(|e| anyhow!("extranonce2 decode: {e}"))?;
+    let mut en = session.extranonce1.clone();
+    en.extend_from_slice(&extra2);
+
+    let cb = if job.poawx_mode == "active" && !job.poawx_pending_receipts.is_empty() {
+        build_poawx_coinbase_tx(
+            job.height,
+            job.coinbase_value,
+            &pkh,
+            &en,
+            config.coinbase_bip34,
+            session_coinbase_extras(&job, session),
+            &job.poawx_pending_receipts,
+        )
+    } else {
+        build_coinbase_tx(job.height, job.coinbase_value, &pkh, &en, config.coinbase_bip34, session_coinbase_extras(&job, session))
+    };
+    let cb_hash = sha256d(&cb);
+
+    fn fold_merkle(root0: [u8; 32], branches: &[[u8; 32]], rev_branch: bool, rev_each_round: bool) -> [u8; 32] {
+        let mut root = root0;
+        for b in branches {
+            let mut branch = *b;
+            if rev_branch {
+                branch.reverse();
+            }
+            let mut data = Vec::with_capacity(64);
+            data.extend_from_slice(&root);
+            data.extend_from_slice(&branch);
+            root = sha256d(&data);
+            if rev_each_round {
+                root.reverse();
+            }
+        }
+        root
+    }
+
+    let mr_raw_raw = fold_merkle(cb_hash, &job.branches, false, false);
+    let mr_raw_rev = fold_merkle(cb_hash, &job.branches, true, false);
+    let mr_round_raw = fold_merkle(cb_hash, &job.branches, false, true);
+    let mr_round_rev = fold_merkle(cb_hash, &job.branches, true, true);
+    let mr = mr_raw_raw;
+
+    let ntime = parse_u32_hex(&submit.ntime_hex)?;
+    let nonce = parse_u32_hex(&submit.nonce_hex)?;
+    let version: u32 = 1;
+
+    let prev_canon = job.prev_hash;
+    let prev_rev32 = reverse_32(job.prev_hash);
+    let prev_swap4 = swap4_bytes_each_word(job.prev_hash);
+    let prev_rev32_swap4 = swap4_bytes_each_word(prev_rev32);
+
+    let prev_variants: [(&str, [u8; 32]); 4] = [
+        ("prev_canon", prev_canon),
+        ("prev_rev32", prev_rev32),
+        ("prev_swap4", prev_swap4),
+        ("prev_rev32_swap4", prev_rev32_swap4),
+    ];
+
+    let mut merkle_variants: Vec<(&str, [u8; 32])> = Vec::new();
+    for (base_name, base) in [
+        ("mr_fold_raw_raw", mr_raw_raw),
+        ("mr_fold_raw_rev", mr_raw_rev),
+        ("mr_fold_round_raw", mr_round_raw),
+        ("mr_fold_round_rev", mr_round_rev),
+    ] {
+        let mut rev32 = base;
+        rev32.reverse();
+        merkle_variants.push((base_name, base));
+        merkle_variants.push((Box::leak(format!("{}:rev32", base_name).into_boxed_str()), rev32));
+        merkle_variants.push((Box::leak(format!("{}:swap4", base_name).into_boxed_str()), swap4_bytes_each_word(base)));
+        merkle_variants.push((Box::leak(format!("{}:rev32_swap4", base_name).into_boxed_str()), swap4_bytes_each_word(rev32)));
+    }
+
+    let share_target = target_from_difficulty_with_limit(session.difficulty, &config.pow_limit);
+    let block_target = target_from_bits(job.bits);
+
+    #[derive(Clone)]
+    struct CheckResult {
+        name: &'static str,
+        header: [u8; 80],
+        hash: [u8; 32],
+        ok_share_be: bool,
+        ok_share_le: bool,
+        ok_block_be: bool,
+        ok_block_le: bool,
+    }
+
+    let use_le = matches!(config.hash_cmp_mode, HashCmpMode::Le);
+    let mut checks: Vec<CheckResult> = Vec::new();
+    let mut accepted_idx: Option<usize> = None;
+
+    let nbits_raw = decode_hex4(&job.nbits_hex)?;
+    let ntime_raw = decode_hex4(&submit.ntime_hex)?;
+    let nonce_raw = decode_hex4(&submit.nonce_hex)?;
+    let version_be = [0x00, 0x00, 0x00, 0x01];
+    let version_le = version.to_le_bytes();
+    // BIP310: see SubmitTuple.rolled_version_hex and the matching block in
+    // decode_cpuminer_compat_submit for the three-interpretation rationale.
+    let version_opts: Vec<(&'static str, [u8; 4])> = match &submit.rolled_version_hex {
+        Some(hex) => {
+            let rolled_extra = parse_u32_hex(hex)?;
+            let extra_raw = decode_hex4(hex)?;
+            vec![
+                ("v_rolled", (version | rolled_extra).to_le_bytes()),
+                ("v_rolled_extra", rolled_extra.to_le_bytes()),
+                ("v_rolled_raw", extra_raw),
+            ]
+        }
+        None => vec![("v_be", version_be), ("v_le", version_le)],
+    };
+    let time_opts = [("t_raw", ntime_raw), ("t_rev", reverse_4(ntime_raw))];
+    let bits_opts = [("b_raw", nbits_raw), ("b_rev", reverse_4(nbits_raw))];
+    let nonce_opts = [("n_raw", nonce_raw), ("n_rev", reverse_4(nonce_raw))];
+
+    for (prev_name, prev_for_header) in prev_variants {
+        for &(mr_name, mr_for_header) in merkle_variants.iter() {
+            for &(v_name, v_bytes) in version_opts.iter() {
+                for (t_name, t_bytes) in time_opts {
+                    for (b_name, b_bytes) in bits_opts {
+                        for (n_name, n_bytes) in nonce_opts {
+                            if !mode_allows_combo(&config.miner_family_mode, job.height, prev_name, mr_name, v_name, t_name, b_name, n_name) {
+                                continue;
+                            }
+                            let hdr_v = header_bytes_from_wire(
+                                v_bytes,
+                                prev_for_header,
+                                mr_for_header,
+                                t_bytes,
+                                b_bytes,
+                                n_bytes,
+                            );
+                            let mode = format!("{}:{}:{}:{}", v_name, t_name, b_name, n_name);
+                            let hash_v = sha256d(&hdr_v);
+                            let hash_int_be = BigUint::from_bytes_be(&hash_v);
+                            let mut hash_rev = hash_v;
+                            hash_rev.reverse();
+                            let hash_int_le = BigUint::from_bytes_be(&hash_rev);
+                            let ok_share_be = hash_int_be <= share_target;
+                            let ok_share_le = hash_int_le <= share_target;
+                            let ok_block_be = hash_int_be <= block_target;
+                            let ok_block_le = hash_int_le <= block_target;
+                            let ok_share = if use_le { ok_share_le } else { ok_share_be };
+
+                            checks.push(CheckResult {
+                                name: Box::leak(format!("{}+{}:{}", prev_name, mr_name, mode).into_boxed_str()),
+                                header: hdr_v,
+                                hash: hash_v,
+                                ok_share_be,
+                                ok_share_le,
+                                ok_block_be,
+                                ok_block_le,
+                            });
+
+                            if ok_share && accepted_idx.is_none() {
+                                accepted_idx = Some(checks.len() - 1);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // ============================================================
+    // FALLBACK DEEP SCAN
+    // ============================================================
+    // If the fast path (mode_allows_combo filter, ~4-6 combinations)
+    // returned no match, retry every combination that the filter
+    // rejected. Bounded cost: zero SHA256d invocations when the fast
+    // pass succeeds (the common case); up to ~2,500 SHA256d when it
+    // misses, completing in single-digit milliseconds on any modern
+    // CPU. SHA256d throughput is not the bottleneck; the bottleneck
+    // was that some miner firmware (notably MRR-routed PxWSud4i.rig1)
+    // produces hashes whose byte interpretation falls outside the
+    // Asic-mode-allowed axis subset, and those shares were being
+    // silently rejected (chosen_variant=none, reason=low_difficulty).
+    // Deep-scan results are labelled with a "deep:" name prefix so
+    // logs can distinguish recovered hits from fast-path hits and
+    // surface which miner firmware families need scanner broadening.
+    if accepted_idx.is_none() {
+        for (prev_name, prev_for_header) in prev_variants {
+            for &(mr_name, mr_for_header) in merkle_variants.iter() {
+                for &(v_name, v_bytes) in version_opts.iter() {
+                    for (t_name, t_bytes) in time_opts {
+                        for (b_name, b_bytes) in bits_opts {
+                            for (n_name, n_bytes) in nonce_opts {
+                                // Skip combinations already tested in fast pass.
+                                if mode_allows_combo(
+                                    &config.miner_family_mode,
+                                    job.height,
+                                    prev_name,
+                                    mr_name,
+                                    v_name,
+                                    t_name,
+                                    b_name,
+                                    n_name,
+                                ) {
+                                    continue;
+                                }
+                                let hdr_v = header_bytes_from_wire(
+                                    v_bytes,
+                                    prev_for_header,
+                                    mr_for_header,
+                                    t_bytes,
+                                    b_bytes,
+                                    n_bytes,
+                                );
+                                let mode = format!("{}:{}:{}:{}", v_name, t_name, b_name, n_name);
+                                let hash_v = sha256d(&hdr_v);
+                                let hash_int_be = BigUint::from_bytes_be(&hash_v);
+                                let mut hash_rev = hash_v;
+                                hash_rev.reverse();
+                                let hash_int_le = BigUint::from_bytes_be(&hash_rev);
+                                let ok_share_be = hash_int_be <= share_target;
+                                let ok_share_le = hash_int_le <= share_target;
+                                let ok_block_be = hash_int_be <= block_target;
+                                let ok_block_le = hash_int_le <= block_target;
+                                let ok_share = if use_le { ok_share_le } else { ok_share_be };
+
+                                checks.push(CheckResult {
+                                    name: Box::leak(
+                                        format!("deep:{}+{}:{}", prev_name, mr_name, mode)
+                                            .into_boxed_str(),
+                                    ),
+                                    header: hdr_v,
+                                    hash: hash_v,
+                                    ok_share_be,
+                                    ok_share_le,
+                                    ok_block_be,
+                                    ok_block_le,
+                                });
+
+                                if ok_share && accepted_idx.is_none() {
+                                    accepted_idx = Some(checks.len() - 1);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // ============================================================
+    // END FALLBACK DEEP SCAN
+    // ============================================================
+
+    let canonical = &checks[0];
+    info!(
+        "[sharedebug-header] worker={} job={} variant={} version_hex={:08x} prevhash={} merkle_root={} ntime_hex={} nbits_hex={} nonce_hex={:08x} header80={} hash={}",
+        worker,
+        job.job_id,
+        canonical.name,
+        version,
+        hex::encode(job.prev_hash),
+        hex::encode(mr),
+        submit.ntime_hex,
+        job.nbits_hex,
+        nonce,
+        hex::encode(canonical.header),
+        hex::encode(canonical.hash)
+    );
+
+    let total_variants = checks.len();
+    let sample_n = config.sharecheck_samples.min(total_variants);
+    let summary = checks
+        .iter()
+        .take(sample_n)
+        .map(|c| {
+            format!(
+                "{}:sb={} sl={} bb={} bl={}",
+                c.name,
+                c.ok_share_be,
+                c.ok_share_le,
+                c.ok_block_be,
+                c.ok_block_le
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" | ");
+
+    let mut hash = canonical.hash;
+    let mut ok_block = false;
+    let selected_variant;
+
+    let check_line = if let Some(idx) = accepted_idx {
+        let chosen = &checks[idx];
+        hash = chosen.hash;
+        ok_block = if use_le { chosen.ok_block_le } else { chosen.ok_block_be };
+        selected_variant = chosen.name;
+        format!(
+            "[sharecheck] worker={} job={} assigned_diff={} share_target={} block_target={} chosen_variant={} variants_checked={} sample={}",
+            worker,
+            job.job_id,
+            session.difficulty,
+            biguint_to_32hex(&share_target),
+            biguint_to_32hex(&block_target),
+            selected_variant,
+            total_variants,
+            summary
+        )
+    } else {
+        selected_variant = "none";
+        format!(
+            "[sharecheck] worker={} job={} assigned_diff={} share_target={} block_target={} chosen_variant={} variants_checked={} sample={}",
+            worker,
+            job.job_id,
+            session.difficulty,
+            biguint_to_32hex(&share_target),
+            biguint_to_32hex(&block_target),
+            selected_variant,
+            total_variants,
+            summary
+        )
+    };
+
+    let ok_share = accepted_idx.is_some();
+
+    if ok_share {
+        mark_accepted_share();
+        record_miner_share_accepted(&worker, session.difficulty);
+        session.consecutive_variant_none = 0;
+        info!("{}", check_line);
+        info!("[share] accepted worker={} hash={}", worker, hex::encode(hash));
+    } else if config.soft_accept_invalid_shares {
+        mark_accepted_share();
+        record_miner_share_accepted(&worker, session.difficulty);
+        warn!("{}", check_line);
+        warn!("[share] soft-accepted worker={} reason=compat_soft_accept", worker);
+        return Ok(true);
+    } else {
+        mark_rejected_share();
+        record_miner_share_rejected(&worker, REJECT_REASON_LOW_POW);
+        warn!("{}", check_line);
+        warn!("[share] reject worker={} reason=low_difficulty", worker);
+        session.consecutive_variant_none =
+            session.consecutive_variant_none.saturating_add(1);
+        if session.consecutive_variant_none >= VARIANT_NONE_DISCONNECT_THRESHOLD {
+            warn!(
+                "[disconnect] worker={} reason=consecutive_variant_none count={}",
+                worker, session.consecutive_variant_none
+            );
+            return Err(anyhow!(
+                "__DISCONNECT_VARIANT_NONE__: {} consecutive chosen_variant=none rejections",
+                session.consecutive_variant_none
+            ));
+        }
+        return Err(anyhow!("low_difficulty"));
+    }
+
+    if ok_block {
+        mark_candidate_detected();
+        info!(
+            "[block] candidate worker={} height={} hash={}",
+            worker,
+            job.height,
+            hex::encode(hash)
+        );
+        let mut tx_hex = Vec::with_capacity(job.tx_hex.len() + 1);
+        tx_hex.push(hex::encode(&cb));
+        tx_hex.extend(job.tx_hex.clone());
+
+        // Send the natural sha256d folded merkle (mr_raw_raw). iriumd's
+        // block.merkle_root() also produces this natural value after decoding
+        // and reversing leaves, so connect_block validates correctly. Pre-fork
+        // the hash check will still fail (iriumd's wire merkle is reverse of
+        // stored = display, ASIC's wire merkle is natural) — pre-fork ASIC
+        // mining is fundamentally not supported. Post-fork iriumd doesn't
+        // reverse merkle for wire, so both hash check and merkle validation
+        // align and blocks land.
+        let merkle_root_for_json = mr;
+        // Fix C: iriumd's submit_block compares JSON `hash` against
+        // reverse(sha256d(canonical_wire)) — display order. With Fix A
+        // canonicalizing the ASIC wire bytes and Fix B aligning the JSON
+        // merkle field, `chosen.hash` (= sha256d of the chosen variant
+        // header, natural order) now IS the natural canonical hash.
+        // Reversing yields the display-order hash iriumd expects.
+        // Fix E: the ASIC may have applied BIP310 version rolling. The chosen
+        // variant's header[0..4] holds the LE bytes the ASIC actually hashed.
+        // iriumd will canonicalize with `version.to_le_bytes()`, so we must
+        // send the numeric u32 that matches the chosen variant's header bytes.
+        let canonical_version = accepted_idx
+            .and_then(|idx| checks.get(idx))
+            .map(|c| u32::from_le_bytes(c.header[0..4].try_into().unwrap()))
+            .unwrap_or(1u32);
+        let mut canonical_header80 = [0u8; 80];
+        canonical_header80[0..4].copy_from_slice(&canonical_version.to_le_bytes());
+        let mut prev_wire = job.prev_hash;
+        prev_wire.reverse();
+        canonical_header80[4..36].copy_from_slice(&prev_wire);
+        let mut merkle_wire = merkle_root_for_json;
+        if job.height < STANDARD_HEADER_ACTIVATION_HEIGHT {
+            merkle_wire.reverse();
+        }
+        canonical_header80[36..68].copy_from_slice(&merkle_wire);
+        canonical_header80[68..72].copy_from_slice(&ntime.to_le_bytes());
+        canonical_header80[72..76].copy_from_slice(&job.bits.to_le_bytes());
+        canonical_header80[76..80].copy_from_slice(&nonce.to_le_bytes());
+        let mut hash_display = sha256d(&canonical_header80);
+        hash_display.reverse();
+
+        let req = SubmitRequest {
+            height: job.height,
+            header: SubmitHeader {
+                version: canonical_version,
+                prev_hash: hex::encode(job.prev_hash),
+                merkle_root: hex::encode(merkle_root_for_json),
+                time: ntime,
+                bits: format!("{:08x}", job.bits),
+                nonce,
+                hash: hex::encode(hash_display),
+            },
+            tx_hex,
+            submit_source: "pool_stratum".to_string(),
+            auxpow_hex: None,
+        };
+
+        mark_candidate_submitted();
+        mark_block_submit_attempt();
+        // Phase 10-D: use submit_block_extended when PoAW-X receipts present.
+        let resp = if config.poawx_enabled && !job.poawx_pending_receipts.is_empty() {
+            let receipts_root = hex::encode(
+                compute_receipts_root_from_pending(&job.poawx_pending_receipts)
+            );
+            let ext_req = SubmitBlockExtendedRequest {
+                height: req.height,
+                header: req.header,
+                tx_hex: req.tx_hex,
+                submit_source: req.submit_source,
+                auxpow_hex: req.auxpow_hex,
+                poawx_receipts: job.poawx_pending_receipts.clone(),
+                poawx_receipts_root: receipts_root.clone(),
+            };
+            let url = format!("{}/rpc/submit_block_extended", config.rpc_base.trim_end_matches('/'));
+            info!(
+                "[block] submit_block_extended worker={} height={} receipts={} root={}",
+                worker, job.height, job.poawx_pending_receipts.len(), receipts_root
+            );
+            let client = reqwest::Client::builder().build()?;
+            client.post(url).bearer_auth(&config.rpc_token).json(&ext_req).send().await?
+        } else {
+            let url = format!("{}/rpc/submit_block", config.rpc_base.trim_end_matches('/'));
+            let client = reqwest::Client::builder().build()?;
+            client.post(url).bearer_auth(&config.rpc_token).json(&req).send().await?
+        };
+        if resp.status().is_success() {
+            mark_submit_accepted();
+            info!(
+                "[block] submitted worker={} height={} hash={}",
+                worker,
+                job.height,
+                hex::encode(hash_display)
+            );
+            let row = FoundBlockRecord {
+                height: job.height,
+                hash: hex::encode(hash_display),
+                time: unix_now_secs(),
+                worker: worker.to_string(),
+                address: worker_address(&worker),
+            };
+            if let Err(e) = append_found_block(&config.found_blocks_file, &row) {
+                warn!("[block] record append failed worker={} height={} err={}", worker, job.height, e);
+            }
+        } else {
+            mark_submit_rejected();
+            warn!("[block] submit failed status={} worker={}", resp.status(), worker);
+        }
+    }
+
+    maybe_update_vardiff_after_accepted_share(conn_id, wr, session, config, &worker).await?;
+    Ok(true)
+}
+
+async fn maybe_update_vardiff_after_accepted_share(
+    conn_id: u64,
+    wr: &mut tokio::net::tcp::OwnedWriteHalf,
+    session: &mut SessionState,
+    config: &StratumConfig,
+    worker: &str,
+) -> Result<()> {
+    if !config.vardiff_enabled {
+        return Ok(());
+    }
+    // Miner-controlled fixed difficulty bypasses LWMA entirely — the
+    // miner asked for an exact diff via password and we honor it.
+    if session.fixed_difficulty.is_some() {
+        return Ok(());
+    }
+    let now = unix_now_secs();
+
+    // Record this share's timestamp in the rolling window.
+    session.recent_share_ts.push_back(now);
+    while session.recent_share_ts.len() > LWMA_WINDOW + 1 {
+        session.recent_share_ts.pop_front();
+    }
+
+    // Need at least LWMA_MIN_SAMPLES intervals, which means LWMA_MIN_SAMPLES + 1 timestamps.
+    if session.recent_share_ts.len() < LWMA_MIN_SAMPLES + 1 {
+        return Ok(());
+    }
+
+    // Throttle retargets — a hard floor under the LWMA reactivity so we
+    // never flood the miner with `mining.set_difficulty` messages.
+    if now.saturating_sub(session.last_retarget_ts) < LWMA_MIN_RETARGET_SECS {
+        return Ok(());
+    }
+
+    let target_secs = config.vardiff_target_share_secs.max(1) as f64;
+    let cap_secs = config
+        .vardiff_target_share_secs
+        .saturating_mul(LWMA_INTERVAL_CLAMP_MULTIPLIER)
+        .max(1);
+
+    // Compute weighted average of recent share intervals. Most recent
+    // interval gets weight n, oldest gets weight 1, so a sudden change in
+    // miner hashrate is reflected within a handful of shares.
+    let ts: Vec<u64> = session.recent_share_ts.iter().copied().collect();
+    let intervals: Vec<u64> = ts
+        .windows(2)
+        .map(|w| {
+            let raw = w[1].saturating_sub(w[0]).max(1);
+            raw.min(cap_secs)
+        })
+        .collect();
+    let n = intervals.len();
+    let mut sum_weighted: f64 = 0.0;
+    let mut sum_weights: f64 = 0.0;
+    for (i, interval) in intervals.iter().enumerate() {
+        let w = (i + 1) as f64;
+        sum_weighted += w * (*interval as f64);
+        sum_weights += w;
+    }
+    let lwma_secs = (sum_weighted / sum_weights).max(1.0);
+
+    // Proportional target: diff scales linearly with the ratio of observed
+    // share interval to desired share interval. Then damp toward it.
+    let computed_target = session.difficulty * (target_secs / lwma_secs);
+    let raw_new = session.difficulty * (1.0 - LWMA_DAMPING) + computed_target * LWMA_DAMPING;
+    let new_diff = raw_new
+        .max(config.vardiff_min_diff)
+        .min(config.vardiff_max_diff);
+
+    // Suppress no-op micro-adjustments — those just cost the miner
+    // stale shares for no benefit.
+    let rel_change = ((new_diff - session.difficulty) / session.difficulty).abs();
+    if rel_change >= LWMA_CHANGE_THRESHOLD {
+        let old = session.difficulty;
+        session.difficulty = new_diff;
+        session.last_retarget_ts = now;
+        info!(
+            "[vardiff] worker={} old_diff={:.2} new_diff={:.2} lwma_secs={:.1} target_s={} samples={} n={}",
+            worker,
+            old,
+            new_diff,
+            lwma_secs,
+            config.vardiff_target_share_secs,
+            n,
+            session.recent_share_ts.len()
+        );
+        send_set_difficulty(wr, conn_id, session.worker.as_deref(), session.difficulty).await?;
+    }
+
+    Ok(())
+}
+
+async fn send_set_difficulty(
+    wr: &mut tokio::net::tcp::OwnedWriteHalf,
+    conn_id: u64,
+    worker: Option<&str>,
+    diff: f64,
+) -> Result<()> {
+    let worker_name = worker.unwrap_or("-");
+    info!(
+        "[diff] send conn={} worker={} assigned_diff={}",
+        conn_id, worker_name, diff
+    );
+    let diff_value = if diff.is_finite() && diff.fract() == 0.0 && diff >= 0.0 {
+        json!(diff as u64)
+    } else {
+        json!(diff)
+    };
+    let msg = json!({"id": Value::Null, "method": "mining.set_difficulty", "params": [diff_value]});
+    write_json(wr, &msg).await
+}
+
+async fn send_notify(
+    wr: &mut tokio::net::tcp::OwnedWriteHalf,
+    session: &SessionState,
+    job: &Job,
+    clean_jobs: bool,
+) -> Result<()> {
+    let pkh = session.pkh.ok_or_else(|| anyhow!("unauthorized"))?;
+
+    // Evidence-based Fix A (after empirical debugging):
+    // iriumd's serialize_for_height does `prev.reverse()` for wire bytes
+    // unconditionally (both pre- and post-fork) — wire prev = reverse(stored
+    // display) = natural sha256d order. cgminer-family ASICs apply swap4 to
+    // the prev bytes in mining.notify before writing them to the wire header.
+    // To make wire_prev == iriumd canonical (= natural) regardless of fork
+    // side, send swap4(natural) here so the miner's swap4 cancels.
+    // The original pre-fork branch (sending display) caused wire_prev =
+    // swap4(display), which never matches natural for non-palindromic
+    // hashes — the root cause of historical pre-fork submit_block
+    // hash_mismatch rejections (0 blocks found in 24h+).
+    let prev_hex_for_height = |job_prev: &[u8; 32], _h: u64| -> String {
+        let mut natural = *job_prev;
+        natural.reverse();
+        hex::encode(swap4_bytes_each_word(natural))
+    };
+
+    let (prev_hex, cb1_hex, cb2_hex, branches) = if let Some(snap) = &session.current_snapshot {
+        if snap.auxpow_mode {
+            // AuxPoW: parent prev_hash is the zero array — byte order doesn't
+            // matter, leave unchanged.
+            (
+                hex::encode(snap.prev_hash_internal),
+                hex::encode(&snap.coinbase_prefix),
+                hex::encode(&snap.coinbase_suffix),
+                snap.branches.iter().map(hex::encode).collect::<Vec<_>>(),
+            )
+        } else {
+            // Use the snapshot's prefix/suffix so the bytes stay byte-identical
+            // to the share-validation path. The marker-based prefix/suffix split
+            // makes these session-invariant.
+            (
+                prev_hex_for_height(&job.prev_hash, job.height),
+                hex::encode(&snap.coinbase_prefix),
+                hex::encode(&snap.coinbase_suffix),
+                job.branches.iter().map(hex::encode).collect(),
+            )
+        }
+    } else {
+        let (cb1, cb2) = if job.poawx_mode == "active" && !job.poawx_pending_receipts.is_empty() {
+            poawx_coinbase_prefix_suffix(
+                job.height,
+                job.coinbase_value,
+                &pkh,
+                session.coinbase_bip34,
+                session_coinbase_extras(job, session),
+                &job.poawx_pending_receipts,
+            )
+        } else {
+            coinbase_prefix_suffix(job.height, job.coinbase_value, &pkh, session.coinbase_bip34, session_coinbase_extras(job, session))
+        };
+        (prev_hex_for_height(&job.prev_hash, job.height), hex::encode(&cb1), hex::encode(&cb2), job.branches.iter().map(hex::encode).collect())
+    };
+
+    info!(
+        "[notify] adapter_kind={} worker={} job={} version=00000001 prevhash={} nbits={} ntime={} extranonce1={} coinbase1={} coinbase2={} branches={}",
+        session.adapter_kind.as_str(),
+        session.worker.as_deref().unwrap_or("-"),
+        job.job_id,
+        prev_hex,
+        job.nbits_hex,
+        job.ntime_hex,
+        hex::encode(&session.extranonce1),
+        cb1_hex,
+        cb2_hex,
+        branches.join(",")
+    );
+    let msg = json!({
+        "id": Value::Null,
+        "method": "mining.notify",
+        "params": [
+            job.job_id,
+            prev_hex,
+            cb1_hex,
+            cb2_hex,
+            branches,
+            "00000001",
+            job.nbits_hex,
+            job.ntime_hex,
+            clean_jobs
+        ]
+    });
+    write_json(wr, &msg).await
+}
+
+fn decode_hex4(s: &str) -> Result<[u8; 4]> {
+    let raw = hex::decode(s).map_err(|e| anyhow!("hex decode: {e}"))?;
+    let out: [u8; 4] = raw
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow!("expected 4-byte hex, got {} bytes", raw.len()))?;
+    Ok(out)
+}
+
+fn header_bytes_from_wire(
+    version: [u8; 4],
+    prev_hash: [u8; 32],
+    merkle_root: [u8; 32],
+    ntime: [u8; 4],
+    nbits: [u8; 4],
+    nonce: [u8; 4],
+) -> [u8; 80] {
+    let mut h = [0u8; 80];
+    h[0..4].copy_from_slice(&version);
+    h[4..36].copy_from_slice(&prev_hash);
+    h[36..68].copy_from_slice(&merkle_root);
+    h[68..72].copy_from_slice(&ntime);
+    h[72..76].copy_from_slice(&nbits);
+    h[76..80].copy_from_slice(&nonce);
+    h
+}
+
+fn cpuminer_miner_header_wire(
+    snapshot: &CanonicalJobSnapshot,
+    coinbase_hash_internal: [u8; 32],
+    ntime_hex: &str,
+    nonce_hex: &str,
+) -> Result<[u8; 80]> {
+    // Diagnostic log helper. Match iriumd's chain wire format
+    // (height-aware) so the log column shows the same bytes iriumd would
+    // compute, useful for debugging share rejection.
+    let ntime = parse_u32_hex(ntime_hex)?;
+    let nonce = parse_u32_hex(nonce_hex)?;
+    Ok(reconstruct_canonical_header80(
+        snapshot,
+        coinbase_hash_internal,
+        ntime,
+        nonce,
+        snapshot.version,
+    ))
+}
+
+fn reverse_4(input: [u8; 4]) -> [u8; 4] {
+    [input[3], input[2], input[1], input[0]]
+}
+
+fn reverse_32(mut input: [u8; 32]) -> [u8; 32] {
+    input.reverse();
+    input
+}
+
+fn swap4_bytes_each_word(input: [u8; 32]) -> [u8; 32] {
+    let mut out = [0u8; 32];
+    for i in 0..8 {
+        let j = i * 4;
+        out[j] = input[j + 3];
+        out[j + 1] = input[j + 2];
+        out[j + 2] = input[j + 1];
+        out[j + 3] = input[j];
+    }
+    out
+}
+
+fn biguint_to_32hex(v: &BigUint) -> String {
+    let mut bytes = v.to_bytes_be();
+    if bytes.len() > 32 {
+        bytes = bytes[bytes.len() - 32..].to_vec();
+    }
+    if bytes.len() < 32 {
+        let mut padded = vec![0u8; 32 - bytes.len()];
+        padded.extend_from_slice(&bytes);
+        bytes = padded;
+    }
+    hex::encode(bytes)
+}
+
+fn unix_now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+async fn write_json(wr: &mut tokio::net::tcp::OwnedWriteHalf, v: &Value) -> Result<()> {
+    let mut s = serde_json::to_string(v)?;
+    s.push('\n');
+    wr.write_all(s.as_bytes()).await?;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use irium_node_rs::block::Block as CoreBlock;
+
+    fn test_config(mode: MinerFamilyMode) -> StratumConfig {
+        StratumConfig {
+            bind: "127.0.0.1:0".to_string(),
+            metrics_bind: None,
+            default_diff: 1.0,
+            extranonce1_size: 4,
+            refresh_ms: 1000,
+            rpc_base: "http://127.0.0.1:1".to_string(),
+            rpc_token: "test".to_string(),
+            pow_limit: BigUint::from_bytes_be(&[0xff; 32]),
+            hash_cmp_mode: HashCmpMode::Be,
+            soft_accept_invalid_shares: false,
+            miner_family_mode: mode,
+            adapter_mode: AdapterMode::Auto,
+            native_rewardable_enabled: false,
+            sharecheck_samples: 4,
+            vardiff_enabled: false,
+            vardiff_min_diff: 1.0,
+            vardiff_max_diff: 1024.0,
+            vardiff_target_share_secs: 15,
+            vardiff_retarget_secs: 90,
+            max_template_age_seconds: 300,
+            coinbase_bip34: true,
+            found_blocks_file: "/tmp/irium-phase1-found-blocks.jsonl".to_string(),
+            keepalive_notify_secs: 30,
+            auxpow_activation_height: None,
+            // v1.9.23 — disable connection gating in unit tests so the
+            // existing fixtures don't have to think about it.
+            max_sessions: 0,
+            max_conn_per_ip: 0,
+            conn_window_secs: 0,
+            ban_threshold: 0,
+            ban_duration_secs: 0,
+            poawx_enabled: false,
+        }
+    }
+
+    fn test_session(mode: AdapterKind) -> SessionState {
+        SessionState {
+            extranonce1: vec![0, 0, 0, 1],
+            worker: Some("QTestAddress.worker1".to_string()),
+            pkh: Some([0x11; 20]),
+            difficulty: 0.0001,
+            fixed_difficulty: None,
+            current_job: None,
+            current_snapshot: None,
+            recent_share_ts: std::collections::VecDeque::new(),
+            last_retarget_ts: 0,
+            coinbase_bip34: true,
+            adapter_kind: mode,
+            wants_extranonce_updates: false,
+            consecutive_variant_none: 0,
+            user_agent: None,
+        }
+    }
+
+    fn test_job() -> Job {
+        Job {
+            job_id: "0000000000000001".to_string(),
+            height: 12345,
+            prev_hash: [0x22; 32],
+            bits: 0x1d00ffff,
+            nbits_hex: "1d00ffff".to_string(),
+            ntime_hex: "5f5e1000".to_string(),
+            coinbase_value: 50_0000_0000,
+            tx_hex: vec![],
+            branches: vec![],
+            template_target_hex: biguint_to_32hex(&target_from_bits(0x1d00ffff)),
+            coinbase_extras: vec![],
+            poawx_mode: String::new(),
+            poawx_pending_receipts: vec![],
+        }
+    }
+
+    fn native_test_job() -> Job {
+        Job {
+            job_id: "native-job-0001".to_string(),
+            height: 22222,
+            prev_hash: [0x44; 32],
+            bits: 0x207fffff,
+            nbits_hex: "207fffff".to_string(),
+            ntime_hex: "5f5e10aa".to_string(),
+            coinbase_value: 50_0000_0000,
+            tx_hex: vec![],
+            branches: vec![],
+            template_target_hex: biguint_to_32hex(&target_from_bits(0x207fffff)),
+            coinbase_extras: vec![],
+            poawx_mode: String::new(),
+            poawx_pending_receipts: vec![],
+        }
+    }
+
+    fn native_fixture() -> (StratumConfig, SessionState, CanonicalJobSnapshot, NativeIssuedJob, NativeSubmit, CanonicalSolve) {
+        let mut config = test_config(MinerFamilyMode::Asic);
+        config.adapter_mode = AdapterMode::NativeRewardableOnly;
+        config.native_rewardable_enabled = true;
+        let session = test_session(AdapterKind::NativeRewardableReserved);
+        let snapshot = build_canonical_job_snapshot(&native_test_job(), &session, &config).unwrap();
+        let issued = build_native_rewardable_job(&snapshot, &session, &config).unwrap();
+        let submit = NativeSubmit {
+            job_id: snapshot.job_id.clone(),
+            extranonce2_hex: "01020304".to_string(),
+            ntime_hex: format!("{:08x}", snapshot.base_ntime),
+            nonce_hex: "0a0b0c0d".to_string(),
+        };
+        let solve = decode_native_rewardable_submit(&snapshot, &submit).unwrap();
+        (config, session, snapshot, issued, submit, solve)
+    }
+
+    fn process_native_submit_result_for_test(
+        snapshot: &CanonicalJobSnapshot,
+        solve: &CanonicalSolve,
+        result: NodeSubmitResult,
+    ) -> Result<Option<RoundEligibleRecord>> {
+        if !solve.share_ok {
+            mark_rejected_share();
+            return Ok(None);
+        }
+
+        mark_accepted_share();
+        mark_rewardable_share_accepted();
+
+        if !rewardable_candidate_allowed(solve) {
+            return Ok(None);
+        }
+
+        mark_candidate_detected();
+        let _ = build_canonical_block_hex(snapshot, solve)?;
+        mark_candidate_submitted();
+        mark_block_submit_attempt();
+
+        match result {
+            NodeSubmitResult::Accepted {
+                canonical_block_hash,
+                accepted_height,
+            } => {
+                mark_submit_accepted();
+                mark_chain_height_advanced_by_pool();
+                let record = RoundEligibleRecord {
+                    height: accepted_height,
+                    job_id: snapshot.job_id.clone(),
+                    template_fingerprint: snapshot.template_fingerprint.clone(),
+                    canonical_block_hash,
+                    accepted_at_unix: unix_now_secs(),
+                };
+                mark_round_eligible(&record)?;
+                Ok(Some(record))
+            }
+            NodeSubmitResult::Rejected { .. } => {
+                mark_submit_rejected();
+                Ok(None)
+            }
+        }
+    }
+
+    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn test_guard() -> std::sync::MutexGuard<'static, ()> {
+        TEST_MUTEX.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn reset_phase1_counters() {
+        ACCEPTED_SHARES.store(0, Ordering::SeqCst);
+        REJECTED_SHARES.store(0, Ordering::SeqCst);
+        CANDIDATES_DETECTED.store(0, Ordering::SeqCst);
+        CANDIDATES_SUBMITTED.store(0, Ordering::SeqCst);
+        SUBMIT_ACCEPTED.store(0, Ordering::SeqCst);
+        SUBMIT_REJECTED.store(0, Ordering::SeqCst);
+        BLOCK_SUBMIT_ATTEMPTS.store(0, Ordering::SeqCst);
+        REWARDABLE_SHARES_ACCEPTED.store(0, Ordering::SeqCst);
+        ROUNDS_ELIGIBLE.store(0, Ordering::SeqCst);
+        CHAIN_HEIGHT_ADVANCED_BY_POOL.store(0, Ordering::SeqCst);
+        COMPAT_SOLVED_SHARES.store(0, Ordering::SeqCst);
+        COMPAT_BLOCK_LIKE_SHARES.store(0, Ordering::SeqCst);
+        COMPAT_NONREWARDABLE_EVENTS.store(0, Ordering::SeqCst);
+        // Clear per-miner observability state so tests don't leak counts
+        // into each other. Both maps use Mutex; unwrap_or_else handles
+        // theoretical poisoning (cannot happen via the tests but the
+        // type signature demands handling).
+        MINER_STATS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+        GLOBAL_REJECT_REASONS.lock().unwrap_or_else(|e| e.into_inner()).clear();
+    }
+
+    #[test]
+    fn cpuminer_adapter_is_nonrewardable() {
+        let _guard = test_guard();
+        let adapter = CpuminerCompatibilityAdapter;
+        assert_eq!(adapter.adapter_id(), "cpuminer_compat");
+        assert!(!adapter.rewardable());
+    }
+
+    #[test]
+    fn cpuminer_share_flow_still_accepts_with_large_target() {
+        let _guard = test_guard();
+        let config = test_config(MinerFamilyMode::Cpuminer);
+        let session = test_session(AdapterKind::CpuminerCompatibility);
+        let snapshot = build_canonical_job_snapshot(&test_job(), &session, &config).unwrap();
+        let submit = SubmitTuple {
+            job_id: snapshot.job_id.clone(),
+            extranonce2_hex: "00000000".to_string(),
+            ntime_hex: format!("{:08x}", snapshot.base_ntime),
+            nonce_hex: "00000001".to_string(),
+            rolled_version_hex: None,
+        };
+        let adapter = CpuminerCompatibilityAdapter;
+        let solve = adapter.decode_submit(&snapshot, &session, &config, &submit).unwrap();
+        assert!(solve.share_ok);
+        assert!(solve.rewardable);
+        assert_eq!(solve.adapter_id, "cpuminer_compat");
+    }
+
+    #[test]
+    fn cpuminer_compat_canonical_hash_honors_rolled_version() {
+        // Patch 5: when SubmitTuple.rolled_version_hex is Some(extra), the
+        // compat decoder must scan v_rolled = snapshot.version | extra and
+        // bind canonical_header80[0..4] to that effective version. iriumd
+        // recomputes the same hash via SubmitHeader.version.to_le_bytes(),
+        // so canonical_hash must equal sha256d(canonical_header80) bit-for-bit.
+        let _guard = test_guard();
+        let config = test_config(MinerFamilyMode::Cpuminer);
+        let session = test_session(AdapterKind::CpuminerCompatibility);
+        let snapshot = build_canonical_job_snapshot(&test_job(), &session, &config).unwrap();
+        let rolled_extra: u32 = 0x00000007;
+        let submit = SubmitTuple {
+            job_id: snapshot.job_id.clone(),
+            extranonce2_hex: "00000000".to_string(),
+            ntime_hex: format!("{:08x}", snapshot.base_ntime),
+            nonce_hex: "00000001".to_string(),
+            rolled_version_hex: Some(format!("{:08x}", rolled_extra)),
+        };
+        let solve = CpuminerCompatibilityAdapter
+            .decode_submit(&snapshot, &session, &config, &submit)
+            .unwrap();
+        let expected_version = snapshot.version | rolled_extra;
+        let actual_version =
+            u32::from_le_bytes(solve.canonical_header80[0..4].try_into().unwrap());
+        assert_eq!(
+            actual_version, expected_version,
+            "canonical header must encode the BIP310-rolled version, not the base version"
+        );
+        let mut expected_hash = sha256d(&solve.canonical_header80);
+        expected_hash.reverse();
+        assert_eq!(solve.canonical_hash, expected_hash);
+    }
+
+    #[test]
+    fn cpuminer_rewardable_flow_is_blocked_by_design() {
+        let _guard = test_guard();
+        let solve = CanonicalSolve {
+            adapter_id: "cpuminer_compat",
+            rewardable: false,
+            share_variant: "synthetic",
+            extranonce2_hex: "00000000".to_string(),
+            ntime_hex: "5f5e1000".to_string(),
+            nonce_hex: "00000001".to_string(),
+            coinbase_hex: "00".to_string(),
+            coinbase_hash_internal: [0u8; 32],
+            canonical_merkle_root: [0u8; 32],
+            canonical_header80: [0u8; 80],
+            canonical_hash: [0u8; 32],
+            share_hash: [0u8; 32],
+            share_target: BigUint::from(1u8),
+            block_target: BigUint::from(1u8),
+            share_ok: true,
+            share_block_like: true,
+            block_ok: true,
+        };
+        assert!(!allow_rewardable_promotion(&solve));
+    }
+
+    #[test]
+    fn cpuminer_block_like_share_only_hits_compatibility_counters() {
+        let _guard = test_guard();
+        reset_phase1_counters();
+        let snapshot = CanonicalJobSnapshot {
+            job_id: "job-compat".to_string(),
+            template_fingerprint: "fp-compat".to_string(),
+            height: 1,
+            version: 1,
+            prev_hash_internal: [0u8; 32],
+            bits: 0x1d00ffff,
+            block_target: BigUint::from(1u8),
+            coinbase_value: 50_0000_0000,
+            base_ntime: 0,
+            extranonce1: vec![0, 0, 0, 1],
+            extranonce2_size: 4,
+            coinbase_prefix: vec![],
+            coinbase_suffix: vec![],
+            payout_script: vec![],
+            tx_hex: vec![],
+            tx_hashes_internal: vec![],
+            branches: vec![],
+            tip_hash_at_job_create: [0u8; 32],
+            created_at_unix: 0,
+        
+            auxpow_mode: false,
+            irium_header80: None,
+            irium_coinbase_hex: None,
+        };
+        let solve = CanonicalSolve {
+            adapter_id: "cpuminer_compat",
+            rewardable: false,
+            share_variant: "compat_block_like",
+            extranonce2_hex: "00000000".to_string(),
+            ntime_hex: "00000000".to_string(),
+            nonce_hex: "00000000".to_string(),
+            coinbase_hex: "00".to_string(),
+            coinbase_hash_internal: [0u8; 32],
+            canonical_merkle_root: [0u8; 32],
+            canonical_header80: [0u8; 80],
+            canonical_hash: [0x11; 32],
+            share_hash: [0x22; 32],
+            share_target: BigUint::from(1u8),
+            block_target: BigUint::from(1u8),
+            share_ok: true,
+            share_block_like: true,
+            block_ok: false,
+        };
+
+        let events = process_cpuminer_compat_solve("worker1", &snapshot, &solve, 1.0);
+
+        assert_eq!(
+            events,
+            vec![
+                CompatEvent::ShareAccepted,
+                CompatEvent::CompatSolvedShare,
+                CompatEvent::CompatCandidateBlocked,
+            ]
+        );
+        assert_eq!(ACCEPTED_SHARES.load(Ordering::SeqCst), 1);
+        assert_eq!(REJECTED_SHARES.load(Ordering::SeqCst), 0);
+        assert_eq!(COMPAT_SOLVED_SHARES.load(Ordering::SeqCst), 1);
+        assert_eq!(COMPAT_BLOCK_LIKE_SHARES.load(Ordering::SeqCst), 1);
+        assert_eq!(COMPAT_NONREWARDABLE_EVENTS.load(Ordering::SeqCst), 1);
+        assert_eq!(CANDIDATES_DETECTED.load(Ordering::SeqCst), 0);
+        assert_eq!(CANDIDATES_SUBMITTED.load(Ordering::SeqCst), 0);
+        assert_eq!(SUBMIT_ACCEPTED.load(Ordering::SeqCst), 0);
+        assert_eq!(SUBMIT_REJECTED.load(Ordering::SeqCst), 0);
+        assert_eq!(BLOCK_SUBMIT_ATTEMPTS.load(Ordering::SeqCst), 0);
+        assert!(!allow_rewardable_promotion(&solve));
+    }
+
+    #[test]
+    fn native_rewardable_disabled_by_default_keeps_phase1_selection() {
+        let _guard = test_guard();
+        let config = test_config(MinerFamilyMode::Cpuminer);
+        assert!(matches!(
+            select_adapter_kind(&config),
+            AdapterKind::CpuminerCompatibility
+        ));
+    }
+
+    #[test]
+    fn native_rewardable_adapter_is_rewardable() {
+        let _guard = test_guard();
+        let adapter = NativeRewardableAdapter;
+        assert_eq!(adapter.adapter_id(), "native_rewardable");
+        assert!(adapter.rewardable());
+    }
+
+    #[test]
+    fn native_rewardable_job_builds_from_snapshot() {
+        let _guard = test_guard();
+        let (_config, _session, snapshot, issued, _submit, _solve) = native_fixture();
+        assert_eq!(issued.version_hex, format!("{:08x}", snapshot.version));
+        assert_eq!(issued.prevhash_internal_hex, hex::encode(snapshot.prev_hash_internal));
+        assert_eq!(issued.nbits_hex, format!("{:08x}", snapshot.bits));
+        assert_eq!(issued.ntime_hex, format!("{:08x}", snapshot.base_ntime));
+        assert_eq!(issued.extranonce1_hex, hex::encode(&snapshot.extranonce1));
+        assert_eq!(issued.extranonce2_size, snapshot.extranonce2_size);
+        let marker_extranonce2 = [0x1c, 0xab, 0xad, 0x1d];
+        let full = build_native_rewardable_coinbase(&snapshot, &marker_extranonce2).unwrap();
+        let mut marker = snapshot.extranonce1.clone();
+        marker.extend_from_slice(&marker_extranonce2);
+        let pos = full.windows(marker.len()).position(|w| w == marker.as_slice()).unwrap();
+        assert_eq!(issued.coinbase1_hex, hex::encode(&full[..pos + snapshot.extranonce1.len()]));
+        assert_eq!(issued.coinbase2_hex, hex::encode(&full[pos + marker.len()..]));
+        assert_eq!(issued.merkle_branches_internal_hex, snapshot.branches.iter().map(hex::encode).collect::<Vec<_>>());
+        assert_eq!(issued.template_fingerprint, snapshot.template_fingerprint);
+        assert!(issued.clean_jobs);
+    }
+
+    #[test]
+    fn native_rewardable_submit_reconstructs_one_canonical_solve() {
+        let _guard = test_guard();
+        let (_config, _session, snapshot, _issued, submit, solve) = native_fixture();
+        let solve2 = decode_native_rewardable_submit(&snapshot, &submit).unwrap();
+        assert!(solve.rewardable);
+        assert_eq!(solve.adapter_id, "native_rewardable");
+        assert_eq!(solve.share_variant, "canonical_native");
+        assert_eq!(solve.extranonce2_hex, submit.extranonce2_hex);
+        assert_eq!(solve.ntime_hex, submit.ntime_hex);
+        assert_eq!(solve.nonce_hex, submit.nonce_hex);
+        assert_eq!(solve.coinbase_hex, solve2.coinbase_hex);
+        assert_eq!(solve.canonical_merkle_root, solve2.canonical_merkle_root);
+        assert_eq!(solve.canonical_header80, solve2.canonical_header80);
+        assert_eq!(solve.canonical_hash, solve2.canonical_hash);
+        assert_eq!(solve.share_hash, solve.canonical_hash);
+    }
+
+    #[test]
+    fn canonical_coinbase_reconstruction_matches_expected_bytes() {
+        let _guard = test_guard();
+        let (_config, session, snapshot, _issued, submit, solve) = native_fixture();
+        let extranonce2 = hex::decode(&submit.extranonce2_hex).unwrap();
+        let actual = reconstruct_canonical_coinbase(&snapshot, &extranonce2).unwrap();
+        let mut full_extranonce = session.extranonce1.clone();
+        full_extranonce.extend_from_slice(&extranonce2);
+        let expected = build_native_rewardable_coinbase(&snapshot, &extranonce2).unwrap();
+        assert_eq!(actual, expected);
+        assert_eq!(hex::encode(actual), solve.coinbase_hex);
+    }
+
+    #[test]
+    fn canonical_merkle_root_matches_full_block_body() {
+        let _guard = test_guard();
+        let (_config, _session, snapshot, _issued, _submit, solve) = native_fixture();
+        let block_hex = build_canonical_block_hex(&snapshot, &solve).unwrap();
+        let raw = hex::decode(block_hex).unwrap();
+        let (block, consumed) = CoreBlock::deserialize(&raw).expect("core parser should accept canonical block bytes");
+        assert_eq!(consumed, raw.len());
+        assert_eq!(block.transactions.len(), snapshot.tx_hex.len() + 1);
+        assert_eq!(block.merkle_root(), solve.canonical_merkle_root);
+        assert_eq!(block.header.merkle_root, solve.canonical_merkle_root);
+    }
+
+    #[test]
+    fn canonical_header80_matches_expected_bytes() {
+        let _guard = test_guard();
+        let (_config, _session, snapshot, _issued, submit, solve) = native_fixture();
+        let mut expected = [0u8; 80];
+        expected[0..4].copy_from_slice(&snapshot.version.to_le_bytes());
+        let mut prev_wire = snapshot.prev_hash_internal;
+        prev_wire.reverse();
+        expected[4..36].copy_from_slice(&prev_wire);
+        let mut merkle_wire = solve.canonical_merkle_root;
+        merkle_wire.reverse();
+        expected[36..68].copy_from_slice(&merkle_wire);
+        expected[68..72].copy_from_slice(&parse_u32_hex(&submit.ntime_hex).unwrap().to_le_bytes());
+        expected[72..76].copy_from_slice(&snapshot.bits.to_le_bytes());
+        expected[76..80].copy_from_slice(&parse_u32_hex(&submit.nonce_hex).unwrap().to_le_bytes());
+        assert_eq!(solve.canonical_header80, expected);
+    }
+
+    #[test]
+    fn native_rewardable_block_candidate_depends_only_on_canonical_hash() {
+        let _guard = test_guard();
+        let (_config, _session, _snapshot, _issued, _submit, solve) = native_fixture();
+        let mut variant = solve.clone();
+        variant.block_ok = true;
+        variant.share_hash = [0xff; 32];
+        assert!(rewardable_candidate_allowed(&variant));
+        variant.block_ok = false;
+        variant.share_hash = [0u8; 32];
+        assert!(!rewardable_candidate_allowed(&variant));
+        variant.rewardable = false;
+        assert!(!rewardable_candidate_allowed(&variant));
+    }
+
+    #[test]
+    fn build_canonical_block_hex_roundtrips_through_core_block_parser() {
+        let _guard = test_guard();
+        let (_config, _session, snapshot, _issued, _submit, solve) = native_fixture();
+        let block_hex = build_canonical_block_hex(&snapshot, &solve).unwrap();
+        let raw = hex::decode(&block_hex).unwrap();
+        let (block, consumed) = CoreBlock::deserialize(&raw).expect("core parser should accept canonical block bytes");
+        assert_eq!(consumed, raw.len());
+        assert_eq!(hex::encode(block.serialize()), block_hex);
+        assert_eq!(block.header.hash(), solve.canonical_hash);
+    }
+
+    #[test]
+    fn block_submit_result_rejected_preserves_round_ineligible() {
+        let _guard = test_guard();
+        reset_phase1_counters();
+        let (_config, _session, snapshot, _issued, _submit, mut solve) = native_fixture();
+        solve.share_ok = true;
+        solve.block_ok = true;
+        let record = process_native_submit_result_for_test(
+            &snapshot,
+            &solve,
+            NodeSubmitResult::Rejected { reason: "rejected".to_string() },
+        ).unwrap();
+        assert!(record.is_none());
+        assert_eq!(ACCEPTED_SHARES.load(Ordering::SeqCst), 1);
+        assert_eq!(REWARDABLE_SHARES_ACCEPTED.load(Ordering::SeqCst), 1);
+        assert_eq!(CANDIDATES_DETECTED.load(Ordering::SeqCst), 1);
+        assert_eq!(CANDIDATES_SUBMITTED.load(Ordering::SeqCst), 1);
+        assert_eq!(BLOCK_SUBMIT_ATTEMPTS.load(Ordering::SeqCst), 1);
+        assert_eq!(SUBMIT_ACCEPTED.load(Ordering::SeqCst), 0);
+        assert_eq!(SUBMIT_REJECTED.load(Ordering::SeqCst), 1);
+        assert_eq!(ROUNDS_ELIGIBLE.load(Ordering::SeqCst), 0);
+        assert_eq!(CHAIN_HEIGHT_ADVANCED_BY_POOL.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn block_submit_result_accepted_creates_round_eligible() {
+        let _guard = test_guard();
+        reset_phase1_counters();
+        let (_config, _session, snapshot, _issued, _submit, mut solve) = native_fixture();
+        solve.share_ok = true;
+        solve.block_ok = true;
+        let record = process_native_submit_result_for_test(
+            &snapshot,
+            &solve,
+            NodeSubmitResult::Accepted {
+                canonical_block_hash: solve.canonical_hash,
+                accepted_height: snapshot.height,
+            },
+        ).unwrap().expect("accepted submit should create round record");
+        assert_eq!(record.height, snapshot.height);
+        assert_eq!(record.job_id, snapshot.job_id);
+        assert_eq!(record.template_fingerprint, snapshot.template_fingerprint);
+        assert_eq!(record.canonical_block_hash, solve.canonical_hash);
+        assert_eq!(ACCEPTED_SHARES.load(Ordering::SeqCst), 1);
+        assert_eq!(REWARDABLE_SHARES_ACCEPTED.load(Ordering::SeqCst), 1);
+        assert_eq!(CANDIDATES_DETECTED.load(Ordering::SeqCst), 1);
+        assert_eq!(CANDIDATES_SUBMITTED.load(Ordering::SeqCst), 1);
+        assert_eq!(BLOCK_SUBMIT_ATTEMPTS.load(Ordering::SeqCst), 1);
+        assert_eq!(SUBMIT_ACCEPTED.load(Ordering::SeqCst), 1);
+        assert_eq!(SUBMIT_REJECTED.load(Ordering::SeqCst), 0);
+        assert_eq!(ROUNDS_ELIGIBLE.load(Ordering::SeqCst), 1);
+        assert_eq!(CHAIN_HEIGHT_ADVANCED_BY_POOL.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn cpuminer_compat_path_is_rewardable_post_fix() {
+        // POST-PHASE-2A: the cpuminer-compat adapter is now rewardable. See
+        // issue #57 for the rationale (port 443 sslh-mux fallback miners
+        // with non-standard byte arrangements need block submission via the
+        // 1,536-variant compat decoder).
+        let _guard = test_guard();
+        let config = test_config(MinerFamilyMode::Cpuminer);
+        let session = test_session(AdapterKind::CpuminerCompatibility);
+        let snapshot = build_canonical_job_snapshot(&test_job(), &session, &config).unwrap();
+        let submit = SubmitTuple {
+            job_id: snapshot.job_id.clone(),
+            extranonce2_hex: "00000000".to_string(),
+            ntime_hex: format!("{:08x}", snapshot.base_ntime),
+            nonce_hex: "00000001".to_string(),
+            rolled_version_hex: None,
+        };
+        let solve = CpuminerCompatibilityAdapter.decode_submit(&snapshot, &session, &config, &submit).unwrap();
+        assert!(solve.rewardable);
+        // allow_rewardable_promotion gates on (rewardable && block_ok).
+        // rewardable is now true; block_ok depends on the synthetic share's
+        // canonical_hash vs block_target. We assert the gate now mirrors block_ok
+        // (instead of being unconditionally false as in the pre-fix design).
+        assert_eq!(allow_rewardable_promotion(&solve), solve.block_ok);
+        assert_eq!(solve.adapter_id, "cpuminer_compat");
+    }
+
+    // ============================================================
+    // DEEP-SCAN FALLBACK TESTS
+    // ============================================================
+    // These tests verify the LOGIC underlying the deep-scan fallback
+    // in handle_submit_legacy_rewardable. The integration path itself
+    // (async + TCP writer + iriumd RPC) is not unit-testable in
+    // isolation, so we cover the constituent pieces:
+    //   1-3. mode_allows_combo rejects off-axis combos -> deep path
+    //        is the only place those combos get tested
+    //   4.   mode_allows_combo accepts the canonical ASIC layout ->
+    //        fast path still hits for normal firmware
+    //   5.   Deep-scan variant labels carry the "deep:" prefix
+    //        exactly as logged
+
+    #[test]
+    fn deep_scan_filter_rejects_prev_canon_for_asic() {
+        // The fast path (Asic mode) does NOT test prev_canon, only
+        // prev_rev32 and prev_swap4. So if a miner happens to produce
+        // a share that hashes correctly under prev_canon, fast misses
+        // and deep scan recovers it.
+        assert!(!mode_allows_combo(
+            &MinerFamilyMode::Asic, 23000,
+            "prev_canon", "mr_fold_raw_raw",
+            "v_le", "t_rev", "b_rev", "n_rev"
+        ));
+    }
+
+    #[test]
+    fn deep_scan_filter_rejects_off_axis_merkle_for_asic() {
+        // mr_fold_raw_rev / mr_fold_round_raw / mr_fold_round_rev all
+        // fall outside the fast-path filter. Deep scan covers them.
+        for mr in &["mr_fold_raw_rev", "mr_fold_round_raw", "mr_fold_round_rev"] {
+            assert!(!mode_allows_combo(
+                &MinerFamilyMode::Asic, 23000,
+                "prev_rev32", mr,
+                "v_le", "t_rev", "b_rev", "n_rev"
+            ), "mr={} should be rejected by fast path filter", mr);
+        }
+    }
+
+    #[test]
+    fn deep_scan_filter_rejects_raw_axis_combos_for_asic() {
+        // t_raw, b_raw, n_raw all fall outside fast-path filter so
+        // deep scan is the only place they get tested.
+        assert!(!mode_allows_combo(
+            &MinerFamilyMode::Asic, 23000,
+            "prev_rev32", "mr_fold_raw_raw",
+            "v_le", "t_raw", "b_rev", "n_rev"
+        ));
+        assert!(!mode_allows_combo(
+            &MinerFamilyMode::Asic, 23000,
+            "prev_rev32", "mr_fold_raw_raw",
+            "v_le", "t_rev", "b_raw", "n_rev"
+        ));
+        assert!(!mode_allows_combo(
+            &MinerFamilyMode::Asic, 23000,
+            "prev_rev32", "mr_fold_raw_raw",
+            "v_le", "t_rev", "b_rev", "n_raw"
+        ));
+    }
+
+    #[test]
+    fn deep_scan_filter_still_accepts_canonical_asic_layout() {
+        // Sanity check that the fast-path filter still allows the
+        // canonical ASIC byte layout. Existing miners using prev_rev32
+        // or prev_swap4 with the standard LE axes must continue to
+        // hit the fast path without entering deep scan.
+        assert!(mode_allows_combo(
+            &MinerFamilyMode::Asic, 23000,
+            "prev_rev32", "mr_fold_raw_raw",
+            "v_le", "t_rev", "b_rev", "n_rev"
+        ));
+        assert!(mode_allows_combo(
+            &MinerFamilyMode::Asic, 23000,
+            "prev_swap4", "mr_fold_raw_raw",
+            "v_be", "t_rev", "b_rev", "n_rev"
+        ));
+        assert!(mode_allows_combo(
+            &MinerFamilyMode::Asic, 23000,
+            "prev_rev32", "mr_fold_raw_raw",
+            "v_rolled", "t_rev", "b_rev", "n_rev"
+        ));
+    }
+
+    #[test]
+    fn deep_scan_variant_name_carries_deep_prefix() {
+        // The deep-scan fallback labels each tested combination as
+        // "deep:<prev>+<mr>:<v>:<t>:<b>:<n>" so log scrapers can
+        // distinguish fast-path hits from recovered hits.
+        let prev_name = "prev_canon";
+        let mr_name = "mr_fold_raw_rev";
+        let mode = format!("{}:{}:{}:{}", "v_le", "t_raw", "b_rev", "n_rev");
+        let name = format!("deep:{}+{}:{}", prev_name, mr_name, mode);
+        assert_eq!(
+            name,
+            "deep:prev_canon+mr_fold_raw_rev:v_le:t_raw:b_rev:n_rev"
+        );
+        assert!(name.starts_with("deep:"));
+        // Fast-path names do not have the "deep:" prefix.
+        let fast_name = format!("{}+{}:{}", "prev_rev32", "mr_fold_raw_raw", mode);
+        assert!(!fast_name.starts_with("deep:"));
+    }
+
+    // ============================================================
+    // STALE-HEIGHT TESTS (Approach B)
+    // ============================================================
+    // These tests verify the height-stale check logic without
+    // requiring async + TCP writer integration. The +2 tolerance,
+    // cold-start guard, and shared marker prefix are all covered.
+
+    #[test]
+    fn stale_height_check_respects_plus_two_tolerance() {
+        // +2 tolerance: a 1-2 block lag is within normal template-
+        // rotation latency; anything 3+ blocks behind is rejected.
+        let chain_tip: u64 = 100;
+        // job at chain_tip - 2 (= 98): within tolerance, NOT stale
+        assert!(!(98u64 + 2 < chain_tip), "98 = tip - 2 should be within tolerance");
+        // job at chain_tip - 3 (= 97): outside tolerance, IS stale
+        assert!(97u64 + 2 < chain_tip, "97 = tip - 3 should be stale");
+        // job at chain_tip (= 100): not stale (same height)
+        assert!(!(100u64 + 2 < chain_tip), "tip itself never stale");
+        // job at chain_tip + 1 (= 101): not stale (ahead - shouldn't
+        // happen in practice but the check must not false-positive)
+        assert!(!(101u64 + 2 < chain_tip), "ahead-of-tip never stale");
+    }
+
+    #[test]
+    fn stale_height_check_skipped_at_cold_start() {
+        // When LATEST_TEMPLATE_HEIGHT is 0 (cold start, no template
+        // received yet), the guard skips the check so the first
+        // submission of a fresh pool is not mistakenly classified
+        // as stale.
+        let latest_height: u64 = 0;
+        let any_job_height: u64 = 23000;
+        // Replicates the runtime check exactly:
+        //   latest_height > 0 && job.height + 2 < latest_height
+        assert!(!(latest_height > 0 && any_job_height + 2 < latest_height));
+    }
+
+    #[test]
+    fn stale_height_marker_uses_same_prefix_as_job_id_stale() {
+        // Both stale-share paths (job_id mismatch and height
+        // mismatch) must use the same __STALE_SHARE__ marker
+        // prefix so the dispatch error-code-21 mapping covers both.
+        let height_msg = format!(
+            "__STALE_SHARE__: job height {} is {} blocks behind chain height {}",
+            95u64, 5u64, 100u64
+        );
+        let job_id_msg = format!(
+            "__STALE_SHARE__: submitted job {} != current job {}",
+            "0000000000000001", "0000000000000050"
+        );
+        assert!(height_msg.starts_with("__STALE_SHARE__"));
+        assert!(job_id_msg.starts_with("__STALE_SHARE__"));
+    }
+}

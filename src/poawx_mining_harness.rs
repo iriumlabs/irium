@@ -138,6 +138,21 @@ fn poawx_mine_pow_max_iters() -> u64 {
         .max(1)
 }
 
+/// Stage G0: the default CPU nonce solver. Grinds the header nonce with Irium's
+/// REAL PoW (`mine_pow`) up to the standard harness iteration cap. This is the
+/// EXACT nonce-solving behavior used before the solver became pluggable; every
+/// `build_*` wrapper and the CPU miner (`irium-miner --poawx`) pass this. A GPU
+/// solver (Stage G1) is simply an alternative implementation of the same
+/// `Fn(&mut BlockHeader, u64, Target) -> Result<u32, String>` signature. Does NOT
+/// touch any LWMA/difficulty/target state.
+pub fn default_cpu_nonce_solver(
+    header: &mut BlockHeader,
+    height: u64,
+    target: Target,
+) -> Result<u32, String> {
+    mine_pow(header, height, target, poawx_mine_pow_max_iters())
+}
+
 fn hash160(data: &[u8]) -> [u8; 20] {
     let mut o = [0u8; 20];
     o.copy_from_slice(&Ripemd160::digest(Sha256::digest(data)));
@@ -295,6 +310,7 @@ pub fn build_devnet_all_gates_block(
         None,
         None,
         None,
+        &default_cpu_nonce_solver,
     )
 }
 
@@ -325,6 +341,7 @@ pub fn build_solo_poawx_block(
         None,
         None,
         None,
+        &default_cpu_nonce_solver,
     )
 }
 
@@ -358,6 +375,7 @@ pub fn build_solo_poawx_block_with_parent(
         None,
         None,
         None,
+        &default_cpu_nonce_solver,
     )
 }
 
@@ -392,6 +410,7 @@ pub fn build_solo_poawx_block_with_parent_and_dominance(
         node_gates,
         None,
         None,
+        &default_cpu_nonce_solver,
     )
 }
 
@@ -416,6 +435,47 @@ pub fn build_solo_poawx_block_with_proposer(
     proposer_ctx: Option<&ProposerCtx>,
     registration_section: Option<&crate::poawx::ProposerRegistrationSection>,
 ) -> Result<AllGatesProof, String> {
+    build_solo_poawx_block_with_proposer_and_solver(
+        miner_secret,
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+        parent_seed_components,
+        dominance,
+        node_gates,
+        proposer_ctx,
+        registration_section,
+        &default_cpu_nonce_solver,
+    )
+}
+
+/// Stage G0: like [`build_solo_poawx_block_with_proposer`] but with a PLUGGABLE
+/// nonce solver for the enclosing block header. The CPU miner passes
+/// [`default_cpu_nonce_solver`] (byte-identical to prior behavior); the GPU miner
+/// (Stage G1) passes a GPU-backed solver. The PoAW-X body (receipts / admissions /
+/// candidate set / VRF assignment / registration section) is assembled identically
+/// regardless of which solver grinds the header nonce.
+#[allow(clippy::too_many_arguments)]
+pub fn build_solo_poawx_block_with_proposer_and_solver(
+    miner_secret: &[u8; 32],
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+    parent_seed_components: ([u8; 32], [u8; 32]),
+    dominance: &PersistentDominance,
+    node_gates: Option<&NodeGateFlags>,
+    proposer_ctx: Option<&ProposerCtx>,
+    registration_section: Option<&crate::poawx::ProposerRegistrationSection>,
+    solver: &dyn Fn(&mut BlockHeader, u64, Target) -> Result<u32, String>,
+) -> Result<AllGatesProof, String> {
     build_all_gates_block_with(
         &AllGatesIdentities::solo(miner_secret)?,
         network_id,
@@ -430,6 +490,7 @@ pub fn build_solo_poawx_block_with_proposer(
         node_gates,
         proposer_ctx,
         registration_section,
+        solver,
     )
 }
 
@@ -473,6 +534,7 @@ fn build_all_gates_block_with(
     node_gates: Option<&NodeGateFlags>,
     proposer_ctx: Option<&ProposerCtx>,
     registration_section: Option<&crate::poawx::ProposerRegistrationSection>,
+    solver: &dyn Fn(&mut BlockHeader, u64, Target) -> Result<u32, String>,
 ) -> Result<AllGatesProof, String> {
     guard_network(network_id)?;
     // Resolve the standard-header activation height into the process global the
@@ -942,7 +1004,7 @@ fn build_all_gates_block_with(
         // Receipt export mode: build/validate the PoAW-X receipt material without
         // spending mainnet-scale work on the enclosing block header.
     } else {
-        mine_pow(&mut block.header, height, Target { bits }, poawx_mine_pow_max_iters())?;
+        solver(&mut block.header, height, Target { bits })?;
     }
     let block_hash = block.header.hash_for_height(height);
 

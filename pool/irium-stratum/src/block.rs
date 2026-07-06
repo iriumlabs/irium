@@ -279,7 +279,19 @@ pub fn parse_u32_hex(s: &str) -> Result<u32> {
 /// Phase 11-B: sort canonically by (height, lane, worker_pkh, commitment_nonce)
 /// so the root is deterministic regardless of receipt insertion order.
 pub fn compute_receipts_root_from_pending(receipts: &[PoawxPendingReceipt]) -> [u8; 32] {
-    compute_receipts_root_from_pending_gated(receipts, false)
+    // CANONICAL root. Derive phase20 from the node gate exactly like the audit flag
+    // is derived (from the receipt height) inside the gated fn, so the coinbase-irx1
+    // commitment a miner actually mines equals the submit-request root AND the root
+    // the node recomputes at submit_block_extended. Previously this hardcoded
+    // phase20=false, which diverged from the node's expected root on mainnet from
+    // block 50,000 (coinbase committed the p20=false root; node expected p20=true ->
+    // "no irx1 commitment in coinbase"). All non-gated production callers route
+    // through here, so no coinbase/submit root pair can silently diverge.
+    let phase20 = receipts
+        .first()
+        .map(|r| crate::delegation::node_phase20_production_active(r.height))
+        .unwrap_or(false);
+    compute_receipts_root_from_pending_gated(receipts, phase20)
 }
 
 /// Phase 20: gated variant mirroring `irium_node_rs::poawx::irx1_root_from_block_receipts_gated`
@@ -481,6 +493,75 @@ mod tests {
         }
         // gate mirrors: mainnet branch = height >= 50000.
         println!("PARITY OK: pool root == node root for all 4 gate combos at h{height}");
+    }
+
+
+    // Divergence guard (the exact class that caused the second live stall): at a
+    // mainnet production height the COINBASE-irx1 root (wrapper), the SUBMIT root
+    // (gated), and the NODE-expected root must all be identical. This is computed
+    // from the receipt height on all three sides, so it holds regardless of env.
+    #[test]
+    fn stage3a_coinbase_root_equals_submit_root_equals_node() {
+        use irium_node_rs::poawx::{irx1_root_from_block_receipts_audit, PoawxBlockReceipt};
+        let height = 50_123u64; // >= mainnet activation
+        let ext = irium_node_rs::poawx::Phase20ReceiptExt {
+            role_reward: irium_node_rs::poawx::RoleReward {
+                compute_contributor_pkh: [0xC1u8; 20],
+                verify_contributor_pkh: [0xC2u8; 20],
+                support_contributor_pkh: [0xC3u8; 20],
+            },
+            compute_claim: node_claim(1),
+            verify_claim: node_claim(2),
+            support_claim: node_claim(3),
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            precommit_root: None,
+            role_ticket_proofs: None,
+            role_dominance_weights: None,
+            candidate_set: None,
+            role_puzzle_proofs: None,
+            finality_proof: None,
+            committed_admission: None,
+            role_assignment_v2: None,
+            fraud_proofs: None,
+            proposer_assignment: None,
+            proposer_registrations: None,
+        };
+        let (pkh, pubkey, sig, sol, nonce) =
+            ([0xABu8; 20], [0x02u8; 33], [0x5Au8; 64], [0x11u8; 8], [0x22u8; 32]);
+        let pending = PoawxPendingReceipt {
+            height,
+            lane: "A".to_string(),
+            worker_pkh: hex::encode(pkh),
+            worker_pubkey: hex::encode(pubkey),
+            worker_sig: hex::encode(sig),
+            solution: hex::encode(sol),
+            commitment_nonce: hex::encode(nonce),
+            delegation: String::new(),
+            phase20_ext: hex::encode(ext.serialize()),
+        };
+        let node_r = PoawxBlockReceipt {
+            height,
+            lane: b'A',
+            worker_pkh: pkh,
+            worker_pubkey: pubkey,
+            worker_sig: sig,
+            solution: sol,
+            commitment_nonce: nonce,
+            delegation: None,
+            phase20_ext: Some(ext),
+        };
+        // The three roots the deploy pipeline must keep identical:
+        let p20 = crate::delegation::node_phase20_production_active(height);
+        let audit = crate::delegation::node_audit_hardening_active(height);
+        let coinbase_root = compute_receipts_root_from_pending(&[pending.clone()]);
+        let submit_root = compute_receipts_root_from_pending_gated(&[pending.clone()], p20);
+        let node_root = irx1_root_from_block_receipts_audit(&[node_r], p20, audit);
+        assert_eq!(coinbase_root, submit_root, "coinbase-irx1 root == submit-request root");
+        assert_eq!(coinbase_root, node_root, "coinbase-irx1 root == node-expected root");
+        // and phase20/audit are actually ON at this height (net-id 0 default in tests).
+        assert!(p20 && audit, "mainnet production gates active at height {height}");
+        println!("UNIFIED: coinbase == submit == node root at h{height} (p20={p20} audit={audit})");
     }
 
     fn node_claim(role: u8) -> irium_node_rs::poawx::PoawxRoleClaim {

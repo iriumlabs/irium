@@ -1445,6 +1445,17 @@ fn build_session_poawx_receipts(
             fallback!("assignment_ctx_reject");
         }
     };
+    // Stage 3a: accumulate a pool-generated candidate admission attributing a role
+    // to this active miner (gated by IRIUM_POAWX_POOL_SUBMIT_ADMISSIONS, deduped to
+    // one per miner per height). Fire-and-forget; never affects receipts/production.
+    crate::delegation::maybe_submit_pool_admission(
+        producer.network_id,
+        *producer.key.secret(),
+        config.rpc_base.clone(),
+        ctx.block_height,
+        ctx.seed,
+        *pkh,
+    );
     match crate::delegation::build_mode1_pending_receipt(
         producer.store.as_ref(),
         producer.key.as_ref(),

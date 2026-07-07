@@ -45,12 +45,24 @@ pub struct Delegation {
     pub fee_bps: u16,
     pub fee_pkh: [u8; 20],
     pub deleg_nonce: [u8; 32],
+    /// v2 only: mirror of the consensus proposer key (see node `Delegation`).
+    pub proposer_pubkey: [u8; 33],
     pub delegation_sig: [u8; 64],
 }
 
 impl Delegation {
-    pub const VERSION: u8 = 1;
-    pub const WIRE_SIZE: usize = 1 + 1 + 33 + 33 + 32 + 8 + 2 + 20 + 32 + 64; // 226
+    pub const VERSION: u8 = 2;
+    pub const WIRE_SIZE_V1: usize = 1 + 1 + 33 + 33 + 32 + 8 + 2 + 20 + 32 + 64; // 226
+    pub const WIRE_SIZE_V2: usize = Self::WIRE_SIZE_V1 + 33; // 259
+    pub const WIRE_SIZE: usize = Self::WIRE_SIZE_V2; // "current" = v2
+
+    pub fn wire_len(&self) -> usize {
+        if self.deleg_version >= 2 {
+            Self::WIRE_SIZE_V2
+        } else {
+            Self::WIRE_SIZE_V1
+        }
+    }
 
     pub fn serialize(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(Self::WIRE_SIZE);
@@ -63,21 +75,37 @@ impl Delegation {
         out.extend_from_slice(&self.fee_bps.to_le_bytes());
         out.extend_from_slice(&self.fee_pkh);
         out.extend_from_slice(&self.deleg_nonce);
+        if self.deleg_version >= 2 {
+            out.extend_from_slice(&self.proposer_pubkey);
+        }
         out.extend_from_slice(&self.delegation_sig);
         out
     }
 
     pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
-        if raw.len() < Self::WIRE_SIZE {
+        if raw.len() < Self::WIRE_SIZE_V1 {
             return Err(format!(
                 "delegation too short: {} < {}",
                 raw.len(),
-                Self::WIRE_SIZE
+                Self::WIRE_SIZE_V1
             ));
         }
         let mut off = 0usize;
         let deleg_version = raw[off];
         off += 1;
+        let expected = if deleg_version >= 2 {
+            Self::WIRE_SIZE_V2
+        } else {
+            Self::WIRE_SIZE_V1
+        };
+        if raw.len() < expected {
+            return Err(format!(
+                "delegation too short: {} < {} (v{})",
+                raw.len(),
+                expected,
+                deleg_version
+            ));
+        }
         let network_id = raw[off];
         off += 1;
         let mut miner_pubkey = [0u8; 33];
@@ -100,6 +128,11 @@ impl Delegation {
         let mut deleg_nonce = [0u8; 32];
         deleg_nonce.copy_from_slice(&raw[off..off + 32]);
         off += 32;
+        let mut proposer_pubkey = [0u8; 33];
+        if deleg_version >= 2 {
+            proposer_pubkey.copy_from_slice(&raw[off..off + 33]);
+            off += 33;
+        }
         let mut delegation_sig = [0u8; 64];
         delegation_sig.copy_from_slice(&raw[off..off + 64]);
         Ok(Self {
@@ -112,6 +145,7 @@ impl Delegation {
             fee_bps,
             fee_pkh,
             deleg_nonce,
+            proposer_pubkey,
             delegation_sig,
         })
     }
@@ -129,6 +163,9 @@ impl Delegation {
         h.update(self.fee_bps.to_le_bytes());
         h.update(self.fee_pkh);
         h.update(self.deleg_nonce);
+        if self.deleg_version >= 2 {
+            h.update(self.proposer_pubkey);
+        }
         h.finalize().into()
     }
 
@@ -4413,6 +4450,7 @@ mod tests {
             fee_bps,
             fee_pkh: [0u8; 20],
             deleg_nonce: [7u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let sig: Signature = miner.sign_prehash(&d.message_hash()).unwrap();
@@ -4440,6 +4478,7 @@ mod tests {
             fee_bps,
             fee_pkh,
             deleg_nonce: [7u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let sig: Signature = miner.sign_prehash(&d.message_hash()).unwrap();
@@ -4473,6 +4512,7 @@ mod tests {
             fee_bps: fields.6,
             fee_pkh: fields.7,
             deleg_nonce: fields.8,
+            proposer_pubkey: [0u8; 33],
             delegation_sig: fields.9,
         };
         let mir = Delegation {
@@ -4485,10 +4525,13 @@ mod tests {
             fee_bps: fields.6,
             fee_pkh: fields.7,
             deleg_nonce: fields.8,
+            proposer_pubkey: [0u8; 33],
             delegation_sig: fields.9,
         };
-        assert_eq!(Delegation::WIRE_SIZE, 226);
-        assert_eq!(irium_node_rs::poawx::Delegation::WIRE_SIZE, 226);
+        assert_eq!(Delegation::WIRE_SIZE_V1, 226);
+        assert_eq!(irium_node_rs::poawx::Delegation::WIRE_SIZE_V1, 226);
+        assert_eq!(Delegation::WIRE_SIZE, 259);
+        assert_eq!(irium_node_rs::poawx::Delegation::WIRE_SIZE, 259);
         assert_eq!(canon.serialize(), mir.serialize(), "serialize parity");
         assert_eq!(canon.serialize().len(), 226);
         assert_eq!(
@@ -4518,6 +4561,7 @@ mod tests {
             fee_bps: 0,
             fee_pkh: [0u8; 20],
             deleg_nonce: [4u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let sig: Signature = miner.sign_prehash(&canon.message_hash()).unwrap();
@@ -4555,6 +4599,7 @@ mod tests {
             fee_bps: 0,
             fee_pkh: [0u8; 20],
             deleg_nonce: [0u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let expected = {

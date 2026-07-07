@@ -8205,6 +8205,7 @@ mod tests {
             fee_bps,
             fee_pkh: [0u8; 20],
             deleg_nonce: [0x33u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let dsig: k256::ecdsa::Signature = miner_sk.sign_prehash(&d.message_hash()).unwrap();

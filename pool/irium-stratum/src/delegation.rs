@@ -1153,6 +1153,7 @@ pub const TICKET_SECTION_MAGIC: &[u8; 4] = b"TPK1";
 
 pub fn mirror_compute_sybil_digest(
     network_id: u8,
+    prev_hash: &[u8; 32],
     miner_pkh: &[u8; 20],
     epoch: u64,
     apk: &[u8; 33],
@@ -1161,6 +1162,8 @@ pub fn mirror_compute_sybil_digest(
     let mut h = Sha256::new();
     h.update(SYBIL_WORK_DOMAIN);
     h.update([network_id]);
+    // Fix B/C parity with the node: bind sybil work to the target block prev_hash.
+    h.update(prev_hash);
     h.update(miner_pkh);
     h.update(epoch.to_le_bytes());
     h.update(apk);
@@ -1188,6 +1191,7 @@ impl TicketProofMirror {
     pub fn new(
         network_id: u8,
         target_height: u64,
+        prev_hash: [u8; 32],
         role_id: u8,
         miner_pkh: [u8; 20],
         epoch: u64,
@@ -1198,6 +1202,7 @@ impl TicketProofMirror {
     ) -> Self {
         let sybil_work_digest = mirror_compute_sybil_digest(
             network_id,
+            &prev_hash,
             &miner_pkh,
             epoch,
             &assignment_public_key,
@@ -1519,6 +1524,7 @@ pub fn pool_tickets_enforced(height: u64) -> bool {
 pub fn build_role_ticket_proofs(
     network_id: u8,
     height: u64,
+    prev_hash: &[u8; 32],
     rr: &RoleRewardMirror,
 ) -> [TicketProofMirror; 3] {
     let epoch = height; // simple per-height epoch (testnet/devnet)
@@ -1530,7 +1536,7 @@ pub fn build_role_ticket_proofs(
         nonce[1] = role_id;
         nonce[2..10].copy_from_slice(&height.to_le_bytes());
         TicketProofMirror::new(
-            network_id, height, role_id, pkh, epoch, expiry, apk, nonce, 0,
+            network_id, height, *prev_hash, role_id, pkh, epoch, expiry, apk, nonce, 0,
         )
     };
     [
@@ -1994,7 +2000,7 @@ pub fn build_pool_candidate_set(
     prev_hash: &[u8; 32],
     rr: &RoleRewardMirror,
 ) -> CandidateSetMirror {
-    let tickets = build_role_ticket_proofs(network_id, height, rr);
+    let tickets = build_role_ticket_proofs(network_id, height, prev_hash, rr);
     let view = pool_dominance_view()
         .lock()
         .unwrap_or_else(|e| e.into_inner());
@@ -3000,7 +3006,7 @@ pub fn build_synthetic_phase20_ext(
     // Phase 21B: attach per-role ticket proofs when the pool ticket gate is on
     // (else the node fails closed). Off => None (byte-identical to pre-21B).
     let role_ticket_proofs = if pool_tickets_enforced(height) {
-        Some(build_role_ticket_proofs(network_id, height, &role_reward))
+        Some(build_role_ticket_proofs(network_id, height, prev_hash, &role_reward))
     } else {
         None
     };
@@ -3472,7 +3478,7 @@ pub fn build_collected_phase20_ext(
     };
     // Phase 21B: attach per-role ticket proofs when the pool ticket gate is on.
     let role_ticket_proofs = if pool_tickets_enforced(height) {
-        Some(build_role_ticket_proofs(network_id, height, &role_reward))
+        Some(build_role_ticket_proofs(network_id, height, prev_hash, &role_reward))
     } else {
         None
     };
@@ -5200,6 +5206,9 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            fraud_proofs: None,
+            proposer_assignment: None,
+            proposer_registrations: None,
         };
         assert_eq!(
             ext.serialize(),
@@ -5621,6 +5630,9 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: Some([np[0].clone(), np[1].clone(), np[2].clone()]),
+            fraud_proofs: None,
+            proposer_assignment: None,
+            proposer_registrations: None,
         };
         assert_eq!(pe.serialize(), ne.serialize(), "ext AVR2 wire parity");
         assert_eq!(pe.digest(), ne.digest(), "ext AVR2 digest parity");
@@ -7652,6 +7664,7 @@ mod tests {
     #[test]
     fn phase21b_pool_ticket_mirror_and_ext_parity() {
         let net = 1u8;
+        let prev = [0x55u8; 32];
         let solver = [0xC7u8; 20];
         let apk = [0x02u8; 33];
         let nonce = [0x44u8; 32];
@@ -7659,6 +7672,7 @@ mod tests {
         let pm = TicketProofMirror::new(
             net,
             5,
+            prev,
             ROLE_VERIFY_CONTRIBUTOR,
             solver,
             2,
@@ -7670,6 +7684,7 @@ mod tests {
         let nb = irium_node_rs::poawx_ticket::TicketProof::new(
             net,
             5,
+            prev,
             irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR,
             solver,
             2,
@@ -7689,6 +7704,7 @@ mod tests {
             .validate(
                 net,
                 5,
+                &prev,
                 irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR,
                 &solver,
                 0,
@@ -7732,7 +7748,7 @@ mod tests {
             fee_bps: 0,
             fee_pkh: [0u8; 20],
             precommit_root: None,
-            role_ticket_proofs: Some(build_role_ticket_proofs(net, h, &rr)),
+            role_ticket_proofs: Some(build_role_ticket_proofs(net, h, &prev, &rr)),
             role_dominance_weights: None,
             candidate_set: None,
             role_puzzle_proofs: None,
@@ -7752,7 +7768,7 @@ mod tests {
         ];
         for (j, (role_id, pkh)) in roles.iter().enumerate() {
             assert!(
-                proofs[j].validate(net, h, *role_id, pkh, 0, false).is_ok(),
+                proofs[j].validate(net, h, &prev, *role_id, pkh, 0, false).is_ok(),
                 "node validates pool-built ticket proof for role {role_id}"
             );
         }

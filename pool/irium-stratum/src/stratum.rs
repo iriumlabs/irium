@@ -242,6 +242,10 @@ struct Job {
     /// coinbase tx. Empty when the chain is pre-coinbase-activation or the
     /// iriumd sync cycle has no fresh cached headers.
     coinbase_extras: Vec<(u64, Vec<u8>)>,
+    /// Option B: raw template coinbase_extra_outputs (WITHOUT the irx1 that
+    /// `coinbase_extras` appends), carried to the snapshot for the native
+    /// multi-role coinbase.
+    template_coinbase_extra_outputs: Vec<(u64, Vec<u8>)>,
     /// Phase 10-D: PoAW-X mode from template ("active" or "").
     poawx_mode: String,
     /// Phase 10-D: pending receipts from template for irx1 coinbase injection.
@@ -278,6 +282,10 @@ struct CanonicalJobSnapshot {
     auxpow_mode: bool,
     irium_header80: Option<[u8; 80]>,
     irium_coinbase_hex: Option<String>,
+    /// Option B: raw template coinbase_extra_outputs (no irx1). The native
+    /// multi-role coinbase places these AFTER the role payouts and BEFORE its
+    /// own irx1 OP_RETURN, to match the real accepted caa085a4 coinbase.
+    coinbase_extra_outputs: Vec<(u64, Vec<u8>)>,
     /// PoAW-X pending receipts (incl. worker_pubkey/worker_sig) carried to the
     /// cpuminer-compat submit path so it can use /rpc/submit_block_extended.
     poawx_pending_receipts: Vec<PoawxPendingReceipt>,
@@ -1656,6 +1664,7 @@ fn build_canonical_job_snapshot(
         auxpow_mode,
         irium_header80,
         irium_coinbase_hex,
+        coinbase_extra_outputs: job.template_coinbase_extra_outputs.clone(),
         poawx_pending_receipts: build_session_poawx_receipts(job, session, config, &pkh),
         poawx_reg_activations: job.poawx_reg_activations.clone(),
         poawx_reg_announces: job.poawx_reg_announces.clone(),
@@ -1790,16 +1799,26 @@ fn build_native_rewardable_coinbase(
         if fee_bps > 0 {
             role_outs.push((fee_amt, payout_script_from_pkh(&fee_pkh)));
         }
-        tx.push((1 + role_outs.len()) as u8); // irx1 + role/fee outputs
-                                              // irx1 OP_RETURN (zero value) first.
-        tx.extend_from_slice(&0u64.to_le_bytes());
-        tx.push(irx1_script.len() as u8);
-        tx.extend_from_slice(&irx1_script);
+        // Option B: caa085a4 canonical order (matches the real accepted mainnet
+        // coinbase byte-for-byte, fixture h51085): PRIMARY, COMPUTE, VERIFY,
+        // SUPPORT [, FEE] role payouts FIRST, then the template coinbase_extra_
+        // outputs (in original order), then the irx1 OP_RETURN LAST. Script
+        // lengths use a proper CompactSize varint (the phase20 blobs exceed 252B).
+        let extra = &snapshot.coinbase_extra_outputs;
+        encode_varint(role_outs.len() + extra.len() + 1, &mut tx);
         for (value, script) in role_outs.iter() {
             tx.extend_from_slice(&value.to_le_bytes());
-            tx.push(script.len() as u8);
+            encode_varint(script.len(), &mut tx);
             tx.extend_from_slice(script);
         }
+        for (value, script) in extra.iter() {
+            tx.extend_from_slice(&value.to_le_bytes());
+            encode_varint(script.len(), &mut tx);
+            tx.extend_from_slice(script);
+        }
+        tx.extend_from_slice(&0u64.to_le_bytes());
+        encode_varint(irx1_script.len(), &mut tx);
+        tx.extend_from_slice(&irx1_script);
         tx.extend_from_slice(&0u32.to_le_bytes());
         return Ok(tx);
     }
@@ -2156,6 +2175,10 @@ fn to_job(seq: u64, tpl: &GetBlockTemplate) -> Result<Job> {
                 })
                 .collect()
         };
+    // Option B: snapshot the RAW template extras before the irx1 OP_RETURN is
+    // appended below, so the native multi-role coinbase can place them (in
+    // original order) between the role payouts and its own irx1 output.
+    let template_coinbase_extra_outputs = coinbase_extras.clone();
     // Phase 10-D: inject irx1 OP_RETURN coinbase output when PoAW-X is active.
     let poawx_enabled = std::env::var("IRIUM_STRATUM_POAWX")
         .map(|v| v.trim() == "1")
@@ -2193,6 +2216,7 @@ fn to_job(seq: u64, tpl: &GetBlockTemplate) -> Result<Job> {
         branches,
         template_target_hex: tpl.target.clone(),
         coinbase_extras,
+        template_coinbase_extra_outputs,
         poawx_mode,
         poawx_pending_receipts,
         poawx_reg_activations,
@@ -4735,6 +4759,7 @@ mod tests {
 
     fn test_job() -> Job {
         Job {
+            template_coinbase_extra_outputs: vec![],
             job_id: "0000000000000001".to_string(),
             height: 12345,
             prev_hash: [0x22; 32],
@@ -4756,6 +4781,7 @@ mod tests {
 
     fn native_test_job() -> Job {
         Job {
+            template_coinbase_extra_outputs: vec![],
             job_id: "native-job-0001".to_string(),
             height: 22222,
             prev_hash: [0x44; 32],
@@ -4985,36 +5011,36 @@ mod tests {
         let cb = build_native_rewardable_coinbase(&snapshot, &en2).unwrap();
         let outs = parse_coinbase_outputs(&cb);
 
-        // 5 outputs: irx1 OP_RETURN + PRIMARY/COMPUTE/VERIFY/SUPPORT (no fee, no delegate).
-        assert_eq!(outs.len(), 5, "irx1 + 4 role outputs");
-        // irx1 first, zero value, gated root.
-        assert_eq!(outs[0].0, 0);
-        let expected_root = compute_receipts_root_from_pending_gated(&[receipt], true);
-        assert_eq!(
-            outs[0].1,
-            build_irx1_commitment_script(&expected_root),
-            "gated irx1 root"
-        );
+        // Option B / caa085a4 order: PRIMARY/COMPUTE/VERIFY/SUPPORT then irx1 OP_RETURN LAST.
+        assert_eq!(outs.len(), 5, "4 role outputs + irx1");
         // canonical 55/22/13/10 amounts (remainder -> primary), exact sum.
         let amts = crate::delegation::multi_role_amounts(snapshot.coinbase_value);
         let p2pkh = |pkh: &[u8; 20]| payout_script_from_pkh(pkh);
-        assert_eq!(outs[1], (amts[0], p2pkh(&primary)), "PRIMARY 55%");
+        assert_eq!(outs[0], (amts[0], p2pkh(&primary)), "PRIMARY 55%");
         assert_eq!(
-            outs[2],
+            outs[1],
             (amts[1], p2pkh(&ext.role_reward.compute_contributor_pkh)),
             "COMPUTE 22%"
         );
         assert_eq!(
-            outs[3],
+            outs[2],
             (amts[2], p2pkh(&ext.role_reward.verify_contributor_pkh)),
             "VERIFY 13%"
         );
         assert_eq!(
-            outs[4],
+            outs[3],
             (amts[3], p2pkh(&ext.role_reward.support_contributor_pkh)),
             "SUPPORT 10%"
         );
-        let paid: u64 = outs.iter().skip(1).map(|(v, _)| *v).sum();
+        // irx1 OP_RETURN LAST, zero value, gated root.
+        assert_eq!(outs[4].0, 0);
+        let expected_root = compute_receipts_root_from_pending_gated(&[receipt], true);
+        assert_eq!(
+            outs[4].1,
+            build_irx1_commitment_script(&expected_root),
+            "gated irx1 root"
+        );
+        let paid: u64 = outs.iter().map(|(v, _)| *v).sum();
         assert_eq!(
             paid, snapshot.coinbase_value,
             "split sums to coinbase value"
@@ -5086,27 +5112,27 @@ mod tests {
         let cb = build_native_rewardable_coinbase(&snapshot, &en2).unwrap();
         let outs = parse_coinbase_outputs(&cb);
 
-        // 6 outputs: irx1 + PRIMARY(net) + COMPUTE + VERIFY + SUPPORT + FEE.
-        assert_eq!(outs.len(), 6, "irx1 + 4 role + 1 fee output");
+        // Option B / caa085a4 order: PRIMARY(net) + COMPUTE + VERIFY + SUPPORT + FEE then irx1 LAST.
+        assert_eq!(outs.len(), 6, "4 role + 1 fee output + irx1");
         let amts = crate::delegation::multi_role_amounts(snapshot.coinbase_value);
         let (pnet, pfee) = crate::delegation::apply_fee(amts[0], 200);
         let p2pkh = |pkh: &[u8; 20]| payout_script_from_pkh(pkh);
         assert_eq!(
-            outs[1],
+            outs[0],
             (pnet, p2pkh(&primary)),
             "PRIMARY net (gross - fee)"
         );
-        assert_eq!(outs[2].0, amts[1], "COMPUTE untaxed");
-        assert_eq!(outs[3].0, amts[2], "VERIFY untaxed");
-        assert_eq!(outs[4].0, amts[3], "SUPPORT untaxed");
+        assert_eq!(outs[1].0, amts[1], "COMPUTE untaxed");
+        assert_eq!(outs[2].0, amts[2], "VERIFY untaxed");
+        assert_eq!(outs[3].0, amts[3], "SUPPORT untaxed");
         assert_eq!(
-            outs[5],
+            outs[4],
             (pfee, p2pkh(&fee_pkh)),
-            "fee output to fee_pkh at position 6"
+            "fee output to fee_pkh at position 5"
         );
         // Total across the payout outputs is exactly the coinbase value (fee comes
         // out of PRIMARY, so net+fee == primary gross).
-        let paid: u64 = outs.iter().skip(1).map(|(v, _)| *v).sum();
+        let paid: u64 = outs.iter().map(|(v, _)| *v).sum();
         assert_eq!(paid, snapshot.coinbase_value);
         assert_eq!(pnet + pfee, amts[0], "fee taken only from PRIMARY");
 
@@ -5230,6 +5256,7 @@ mod tests {
 
     fn snapshot_with_receipts(receipts: Vec<PoawxPendingReceipt>) -> CanonicalJobSnapshot {
         CanonicalJobSnapshot {
+            coinbase_extra_outputs: vec![],
             job_id: "j".to_string(),
             template_fingerprint: "fp".to_string(),
             height: 1,
@@ -5676,6 +5703,7 @@ mod tests {
         let _guard = test_guard();
         reset_phase1_counters();
         let snapshot = CanonicalJobSnapshot {
+            coinbase_extra_outputs: vec![],
             job_id: "job-compat".to_string(),
             template_fingerprint: "fp-compat".to_string(),
             height: 1,
@@ -6292,6 +6320,7 @@ mod tests {
             tx_hashes_internal.push(crate::pow::sha256d(&hex::decode(t).expect("tx hex")));
         }
         let snapshot = CanonicalJobSnapshot {
+            coinbase_extra_outputs: vec![],
             job_id: job.job_id.clone(),
             template_fingerprint: "e2e".to_string(),
             height: job.height,
@@ -6762,6 +6791,7 @@ mod tests {
             tx_hashes_internal.push(crate::pow::sha256d(&hex::decode(t).unwrap()));
         }
         let snapshot = CanonicalJobSnapshot {
+            coinbase_extra_outputs: vec![],
             job_id: job.job_id.clone(),
             template_fingerprint: "stageA".to_string(),
             height: job.height,
@@ -7014,6 +7044,7 @@ mod tests {
                 tx_hashes_internal.push(crate::pow::sha256d(&hex::decode(t).unwrap()));
             }
             let snapshot = CanonicalJobSnapshot {
+                coinbase_extra_outputs: vec![],
                 job_id: job.job_id.clone(),
                 template_fingerprint: "stageB".to_string(),
                 height: job.height,
@@ -7417,6 +7448,7 @@ mod tests {
         let mut tx_hashes_internal = Vec::new();
         for t in &tx_hex { tx_hashes_internal.push(crate::pow::sha256d(&hex::decode(t).unwrap())); }
         let snapshot = CanonicalJobSnapshot {
+            coinbase_extra_outputs: vec![],
             job_id: "fixtest".to_string(),
             template_fingerprint: "fixtest".to_string(),
             height,
@@ -7508,6 +7540,7 @@ mod tests {
         };
 
         let job = Job {
+            template_coinbase_extra_outputs: vec![],
             job_id: "reroute".to_string(),
             height,
             prev_hash: [0x22u8; 32],
@@ -7587,4 +7620,126 @@ mod tests {
             "REROUTE-UNIT ok: adapter=native, snapshot keeps W, coinbase pays W (4 outputs), notify==submit; M never paid"
         );
     }
+
+    // RIG GATE (Option B): feed a REAL captured node receipt into the actual
+    // build_native_rewardable_coinbase and require it reproduce the REAL on-chain
+    // caa085a4 coinbase byte-for-byte. Skips unless IRIUM_RIG_FIXTURE points at a
+    // captured fixture.json. This gates the receipt-aware fix: if the builder does
+    // not reproduce real bytes, do NOT implement on an unproven assumption.
+    #[test]
+    fn rig_reproduce_real_onchain_coinbase() {
+        let path = match std::env::var("IRIUM_RIG_FIXTURE") {
+            Ok(p) => p,
+            Err(_) => return,
+        };
+        let _g = crate::delegation::p20_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1");
+        // Mainnet at h51085 has audit hardening active (template poawx_audit_hardening_active=true),
+        // which selects the Fix #5 audit layout for the irx1 receipts-root.
+        std::env::set_var("IRIUM_POAWX_AUDIT_HARDENING_ACTIVATION_HEIGHT", "1");
+
+        let raw = std::fs::read_to_string(&path).expect("read fixture");
+        let f: serde_json::Value = serde_json::from_str(&raw).expect("parse fixture");
+        let height = f["height"].as_u64().unwrap();
+        let coinbase_value = f["coinbase_value"].as_u64().unwrap();
+        let onchain = f["onchain_coinbase_hex"].as_str().unwrap().to_string();
+        let r0 = &f["poawx_pending_receipts"][0];
+        let worker_pkh = r0["worker_pkh"].as_str().unwrap().to_string();
+        let phase20_ext = r0["phase20_ext"].as_str().unwrap().to_string();
+
+        let ocb = hex::decode(&onchain).unwrap();
+        let idx = ocb
+            .windows(4)
+            .position(|w| w == [0xff, 0xff, 0xff, 0xff])
+            .unwrap();
+        let sl = ocb[idx + 4] as usize;
+        let scriptsig = &ocb[idx + 5..idx + 5 + sl];
+        let en = &scriptsig[scriptsig.len() - 8..];
+        let en1 = en[0..4].to_vec();
+        let en2 = en[4..8].to_vec();
+
+        let config = test_config(MinerFamilyMode::Asic);
+        let session = test_session(AdapterKind::LegacyRewardable);
+        let mut snapshot =
+            build_canonical_job_snapshot(&native_test_job(), &session, &config).unwrap();
+        snapshot.height = height;
+        snapshot.coinbase_value = coinbase_value;
+        snapshot.extranonce1 = en1;
+        snapshot.extranonce2_size = 4;
+        let mut wpkh = [0u8; 20];
+        wpkh.copy_from_slice(&hex::decode(&worker_pkh).unwrap());
+        snapshot.payout_script = payout_script_from_pkh(&wpkh);
+        snapshot.poawx_pending_receipts = vec![PoawxPendingReceipt {
+            height,
+            lane: "A".to_string(),
+            worker_pkh: worker_pkh.clone(),
+            solution: r0["solution"].as_str().unwrap_or("").to_string(),
+            commitment_nonce: r0["commitment_nonce"].as_str().unwrap_or("").to_string(),
+            worker_pubkey: r0["worker_pubkey"].as_str().unwrap_or("").to_string(),
+            worker_sig: r0["worker_sig"].as_str().unwrap_or("").to_string(),
+            delegation: String::new(),
+            phase20_ext: phase20_ext.clone(),
+        }];
+        // Real template coinbase_extra_outputs (the phase20 blobs), in order.
+        snapshot.coinbase_extra_outputs = f["coinbase_extra_outputs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|e| {
+                let v = e["value"].as_u64().unwrap();
+                let s = hex::decode(e["script_pubkey_hex"].as_str().unwrap()).unwrap();
+                (v, s)
+            })
+            .collect();
+
+        let built = build_native_rewardable_coinbase(&snapshot, &en2).unwrap();
+        let built_hex = hex::encode(&built);
+        let full_match = built_hex == onchain;
+        eprintln!(
+            "RIG: height={} built_len={} onchain_len={} FULL_BYTE_MATCH={}",
+            height,
+            built.len(),
+            ocb.len(),
+            full_match
+        );
+        let bo = parse_coinbase_outputs(&built);
+        eprintln!("RIG: built nout={}", bo.len());
+        for (i, (v, s)) in bo.iter().enumerate() {
+            eprintln!("  built out[{}] val={} scriptlen={}", i, v, s.len());
+        }
+        let oo = parse_coinbase_outputs(&ocb);
+        eprintln!("RIG: onchain nout={}", oo.len());
+        for (i, (v, s)) in oo.iter().enumerate() {
+            eprintln!("  onchain out[{}] val={} scriptlen={}", i, v, s.len());
+        }
+        if !full_match {
+            let mut i = 0usize;
+            while i < ocb.len().min(built.len()) && ocb[i] == built[i] {
+                i += 1;
+            }
+            let s = i.saturating_sub(6);
+            let e = (i + 16).min(ocb.len());
+            let eb = (i + 16).min(built.len());
+            eprintln!("RIG DIFF: first differing byte at offset {} of {}", i, ocb.len());
+            eprintln!("  onchain[{}..{}] = {}", s, e, hex::encode(&ocb[s..e]));
+            eprintln!("  built  [{}..{}] = {}", s, eb, hex::encode(&built[s..eb]));
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_AUDIT_HARDENING_ACTIVATION_HEIGHT");
+        assert!(
+            full_match,
+            "build_native_rewardable_coinbase did NOT reproduce the real on-chain caa085a4 coinbase byte-for-byte (built {} bytes / {} outputs vs on-chain {} bytes / {} outputs)",
+            built.len(),
+            bo.len(),
+            ocb.len(),
+            oo.len()
+        );
+    }
+
 }

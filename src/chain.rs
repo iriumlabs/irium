@@ -1379,8 +1379,46 @@ impl ChainState {
             if pa.proof.solver_pkh != hash160(&pa.proof.assignment_public_key) {
                 return Err("proposer: solver pkh not derived from vrf key".to_string());
             }
-            if pa.proof.solver_pkh != r.worker_pkh {
-                return Err("proposer: proposer is not the block worker".to_string());
+            // Proposer identity. Mode-0 (solo): the proposer key IS the payee, so
+            // solver_pkh (== hash160(assignment_public_key), checked just above) must
+            // equal worker_pkh. Mode-1 (delegated): the block is PROPOSED by the
+            // miner's separate, sybil-registered custodial proposer key and PAID to
+            // the miner's payout pkh. By the time this runs, validate_poawx_block_receipts
+            // (called earlier in connect_block) has already verified, for the delegated
+            // receipt: d.verify_signature() [the miner signed this delegation; for v2 the
+            // signed preimage covers proposer_pubkey, so the miner authorised THIS proposer
+            // key], d.miner_pkh() == r.worker_pkh [the coinbase pays the miner payout],
+            // r.worker_pubkey == d.pool_pubkey [the signer is the delegated pool], plus
+            // network / expiry (height <= d.expiry_height) / delegation-active. Here we
+            // only bind the PROPOSER PROOF to the proposer key the miner cryptographically
+            // authorised. Sortition (priority < threshold), seed, role, ticket-digest,
+            // round-timing and is_eligible(assignment_public_key) below are UNCHANGED and
+            // still bind to that proposer key -- the sybil bound is identical to a solo
+            // proposer's (one sybil-work registration per distinct proposer key).
+            match &r.delegation {
+                Some(d) => {
+                    // v1 delegations carry a placeholder (all-zero) proposer_pubkey and
+                    // predate proposer-VRF; they must not authorise a delegated proposer.
+                    if d.deleg_version < 2 {
+                        return Err(
+                            "proposer: delegated proposer requires delegation v2".to_string(),
+                        );
+                    }
+                    // The VRF proof key MUST be the exact proposer key the miner signed
+                    // into the delegation, closing the triangle proposer-key <-> payout
+                    // <-> pool (all bound by the one miner signature checked above).
+                    if d.proposer_pubkey != pa.proof.assignment_public_key {
+                        return Err(
+                            "proposer: assignment key != delegated proposer_pubkey".to_string(),
+                        );
+                    }
+                }
+                None => {
+                    // Mode-0 (solo): the proposer is the block worker. UNCHANGED.
+                    if pa.proof.solver_pkh != r.worker_pkh {
+                        return Err("proposer: proposer is not the block worker".to_string());
+                    }
+                }
             }
             // eligibility against the frozen registry; permissive while the registry is
             // empty (bootstrap) since the threshold then admits everyone.
@@ -15362,6 +15400,273 @@ mod proposer_consensus_tests {
         );
         std::env::remove_var("IRIUM_POAWX_MAX_REORG_DEPTH");
         clear_sib_env();
+    }
+
+    // ---- Stage D Step 3: delegation-aware proposer-VRF (validate_block_proposer) ----
+
+    /// Compressed secp256k1 signing key for a raw scalar produced by `secret_n`.
+    fn signing_key(secret: &[u8; 32]) -> k256::ecdsa::SigningKey {
+        k256::ecdsa::SigningKey::from_bytes(secret.into()).expect("valid scalar")
+    }
+
+    /// Compressed secp256k1 pubkey for a raw scalar (the ECDSA identity that signs
+    /// delegations / receipts). hash160 of it is the on-chain pkh.
+    fn ec_pubkey(secret: &[u8; 32]) -> [u8; 33] {
+        use k256::ecdsa::VerifyingKey;
+        let vk = VerifyingKey::from(&signing_key(secret));
+        let enc = vk.to_encoded_point(true);
+        let mut pk = [0u8; 33];
+        pk.copy_from_slice(enc.as_bytes());
+        pk
+    }
+
+    /// Hand-build a mode-1 (delegated) block: PROPOSED by `proof`'s custodial
+    /// proposer key, PAID to the miner payout pkh, signed over by the pool delegate.
+    /// The miner really signs the (v2) delegation over `message_hash()`. Negative
+    /// tests vary `deleg_version` and `override_proposer_pubkey` -- the two fields
+    /// validate_block_proposer's delegated branch reads.
+    #[allow(clippy::too_many_arguments)]
+    fn delegated_block(
+        prev_hash: [u8; 32],
+        height: u64,
+        proof: AssignmentProofV2,
+        round: u32,
+        time: u32,
+        miner_secret: &[u8; 32],
+        pool_secret: &[u8; 32],
+        net: u8,
+        expiry_height: u64,
+        deleg_version: u8,
+        override_proposer_pubkey: Option<[u8; 33]>,
+    ) -> Block {
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        let miner_pubkey = ec_pubkey(miner_secret);
+        let pool_pubkey = ec_pubkey(pool_secret);
+        let proposer_pubkey = override_proposer_pubkey.unwrap_or(proof.assignment_public_key);
+        let mut d = crate::poawx::Delegation {
+            deleg_version,
+            network_id: net,
+            miner_pubkey,
+            pool_pubkey,
+            worker_tag: [0u8; 32],
+            expiry_height,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [0x33u8; 32],
+            proposer_pubkey,
+            delegation_sig: [0u8; 64],
+        };
+        let dsig: k256::ecdsa::Signature =
+            signing_key(miner_secret).sign_prehash(&d.message_hash()).unwrap();
+        d.delegation_sig.copy_from_slice(&dsig.to_bytes());
+
+        let mut r = ext_skeleton(net);
+        r.height = height;
+        r.worker_pkh = hash160(&miner_pubkey); // PAYOUT identity = the miner
+        r.worker_pubkey = pool_pubkey; // receipt signer = the delegated pool
+        r.delegation = Some(d);
+        let mut ext = r.phase20_ext.clone().expect("ext");
+        ext.proposer_assignment = Some(ProposerAssignmentV1 { round, proof });
+        r.phase20_ext = Some(ext);
+        Block {
+            header: BlockHeader {
+                version: 0,
+                prev_hash,
+                merkle_root: [0u8; 32],
+                time,
+                bits: 0x207fffff,
+                nonce: 0,
+            },
+            transactions: vec![],
+            auxpow: None,
+            poawx_receipts: Some(vec![r]),
+        }
+    }
+
+    #[test]
+    fn stage_d_delegated_proposer_accepts_registered_pays_miner() {
+        // Step 3 (a): a valid v2 delegation whose registered, frozen-eligible custodial
+        // proposer key made the proposer VRF proof is ACCEPTED, and the block pays the
+        // MINER's payout pkh directly -- never the proposer key or the pool delegate.
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+
+        // three DISTINCT keys: custodial proposer, miner payout, pool delegate.
+        let (proposer, miner, pool) = (secret_n(1), secret_n(2), secret_n(3));
+        let proof = prove(&proposer, net, height, seed);
+        let proposer_pubkey = proof.assignment_public_key; // == ec_pubkey(&proposer)
+        let proposer_pkh = proof.solver_pkh; // == hash160(proposer_pubkey)
+        let miner_pkh = hash160(&ec_pubkey(&miner));
+        let pool_pkh = hash160(&ec_pubkey(&pool));
+
+        let block =
+            delegated_block(prev_hash, height, proof, 0, 5_000, &miner, &pool, net, height + 100, 2, None);
+
+        // register the custodial proposer key => frozen-eligible at target height 2.
+        let mut cs = base_chain();
+        cs.proposer_registry.register(proposer_pubkey, proposer_pkh, 0);
+        assert_eq!(cs.proposer_registry.eligible_count(height), 1);
+
+        cs.validate_block_proposer(&block, height, None)
+            .expect("valid delegated proposer with a registered eligible key must be accepted");
+
+        // Payout goes to the MINER, not the delegate or the proposer identity.
+        let r = &block.poawx_receipts.as_ref().unwrap()[0];
+        assert_eq!(r.worker_pkh, miner_pkh, "coinbase must pay the miner payout pkh");
+        assert_ne!(r.worker_pkh, proposer_pkh, "must NOT pay the proposer key");
+        assert_ne!(r.worker_pkh, pool_pkh, "must NOT pay the pool / delegate");
+        // And the delegation carried by the block is genuinely miner-signed.
+        assert!(r.delegation.as_ref().unwrap().verify_signature().is_ok());
+
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn stage_d_delegated_proposer_rejects_unregistered_mismatch_and_v1() {
+        // Step 3 (b): the delegated branch rejects (b1) an unregistered / ineligible
+        // proposer key, (b2) a proof key that differs from the miner-signed
+        // proposer_pubkey, and (b3) a v1 delegation (which cannot authorise a proposer).
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let (proposer, miner, pool) = (secret_n(1), secret_n(2), secret_n(3));
+        let proposer_pubkey = prove(&proposer, net, height, seed).assignment_public_key;
+        let proposer_pkh = hash160(&proposer_pubkey);
+
+        // (b1) proposer key NOT registered (a different key is) => eligibility rejects.
+        let proof1 = prove(&proposer, net, height, seed);
+        let block1 =
+            delegated_block(prev_hash, height, proof1, 0, 5_000, &miner, &pool, net, height + 100, 2, None);
+        let mut cs1 = base_chain();
+        let mut other = [0u8; 33];
+        other[0] = 0x02;
+        other[1] = 0xEE;
+        cs1.proposer_registry.register(other, [0x7Au8; 20], 0);
+        assert_eq!(cs1.proposer_registry.eligible_count(height), 1);
+        let e1 = cs1
+            .validate_block_proposer(&block1, height, None)
+            .expect_err("unregistered proposer key must be rejected");
+        assert!(e1.contains("not eligible"), "b1 got: {e1}");
+
+        // (b2) delegation authorises a DIFFERENT key than the proof's assignment key
+        // (attacker pairs a genuine proof with a mismatched delegation) => bound-check
+        // rejects before eligibility, even though the real proposer key is registered.
+        let proof2 = prove(&proposer, net, height, seed);
+        let mut wrong = proof2.assignment_public_key;
+        wrong[1] ^= 0xFF;
+        let block2 = delegated_block(
+            prev_hash, height, proof2, 0, 5_000, &miner, &pool, net, height + 100, 2, Some(wrong),
+        );
+        let mut cs2 = base_chain();
+        cs2.proposer_registry.register(proposer_pubkey, proposer_pkh, 0);
+        let e2 = cs2
+            .validate_block_proposer(&block2, height, None)
+            .expect_err("proposer key mismatch must be rejected");
+        assert!(e2.contains("assignment key != delegated proposer_pubkey"), "b2 got: {e2}");
+
+        // (b3) v1 delegation cannot authorise a delegated proposer.
+        let proof3 = prove(&proposer, net, height, seed);
+        let block3 =
+            delegated_block(prev_hash, height, proof3, 0, 5_000, &miner, &pool, net, height + 100, 1, None);
+        let mut cs3 = base_chain();
+        cs3.proposer_registry.register(proposer_pubkey, proposer_pkh, 0);
+        let e3 = cs3
+            .validate_block_proposer(&block3, height, None)
+            .expect_err("v1 delegation must be rejected in the delegated proposer branch");
+        assert!(e3.contains("requires delegation v2"), "b3 got: {e3}");
+
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn stage_d_mode0_proposer_unchanged() {
+        // Step 3 (c): the mode-0 (delegation == None) path is byte-identical -- a matching
+        // worker is accepted, a mismatched worker is rejected with the ORIGINAL error.
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let secret = secret_n(1);
+        let proof = prove(&secret, net, height, seed);
+        let key = proof.assignment_public_key;
+        let pkh = proof.solver_pkh;
+        let tmpl = ext_skeleton(net);
+
+        // matching worker_pkh (block_with_proof sets worker_pkh = solver_pkh) => accepted.
+        let block = block_with_proof(&tmpl, prev_hash, height, proof, 0, 5_000);
+        assert!(block.poawx_receipts.as_ref().unwrap()[0].delegation.is_none());
+        let mut cs = base_chain();
+        cs.proposer_registry.register(key, pkh, 0);
+        cs.validate_block_proposer(&block, height, None)
+            .expect("mode-0 matching worker accepted");
+
+        // mismatched worker_pkh => the ORIGINAL "not the block worker" error is preserved.
+        let proof2 = prove(&secret, net, height, seed);
+        let mut block2 = block_with_proof(&tmpl, prev_hash, height, proof2, 0, 5_000);
+        block2.poawx_receipts.as_mut().unwrap()[0].worker_pkh = [0x99u8; 20];
+        let mut cs2 = base_chain();
+        cs2.proposer_registry.register(key, pkh, 0);
+        let err = cs2
+            .validate_block_proposer(&block2, height, None)
+            .expect_err("mode-0 mismatched worker must be rejected");
+        assert!(err.contains("proposer is not the block worker"), "got: {err}");
+
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn stage_d_delegated_tampered_proposer_pubkey_breaks_signature() {
+        // Forgery leg (Attack 1 / 2c): the miner's v2 signature covers proposer_pubkey,
+        // so swapping the proposer key after signing invalidates the delegation. A pool
+        // cannot bind a proposer key the miner never authorised. This is enforced by
+        // d.verify_signature() in validate_poawx_block_receipts, which runs BEFORE
+        // validate_block_proposer in connect_block.
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let miner = secret_n(2);
+        let mut d = crate::poawx::Delegation {
+            deleg_version: 2,
+            network_id: net,
+            miner_pubkey: ec_pubkey(&miner),
+            pool_pubkey: ec_pubkey(&secret_n(3)),
+            worker_tag: [0u8; 32],
+            expiry_height: 1_000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [0x33u8; 32],
+            proposer_pubkey: ec_pubkey(&secret_n(1)), // the key the miner signs
+            delegation_sig: [0u8; 64],
+        };
+        let sig: k256::ecdsa::Signature =
+            signing_key(&miner).sign_prehash(&d.message_hash()).unwrap();
+        d.delegation_sig.copy_from_slice(&sig.to_bytes());
+        d.verify_signature().expect("genuine v2 delegation verifies");
+
+        // swap in a proposer key the miner never signed => signature no longer verifies.
+        let mut forged = d.clone();
+        forged.proposer_pubkey = ec_pubkey(&secret_n(9));
+        assert!(
+            forged.verify_signature().is_err(),
+            "a tampered proposer_pubkey must break the miner signature"
+        );
+        std::env::remove_var("IRIUM_NETWORK");
     }
 }
 

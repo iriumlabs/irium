@@ -1,0 +1,24 @@
+[Unit]
+Description=Irium Share Sidecar (external read-only durable share persistence; does NOT touch the pool binary)
+Documentation=https://github.com/iriumlabs/irium
+After=network.target
+# Intentionally NOT BindsTo/PartOf/Requires the pool unit: fully decoupled so it
+# can never restart, block, or otherwise perturb the pool.
+
+[Service]
+Type=simple
+User=irium
+Group=irium
+SupplementaryGroups=systemd-journal
+Environment=SIDECAR_DB=/opt/irium-pool/data/sidecar_shares.sqlite3
+Environment=SIDECAR_CURSOR=/opt/irium-pool/data/sidecar.cursor
+Environment=SIDECAR_UNIT=irium-stratum.service
+Environment=SIDECAR_METRICS_HOST=127.0.0.1
+Environment=SIDECAR_METRICS_PORT=3334
+ExecStart=/opt/irium-pool/irium-share-sidecar/irium-share-sidecar
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+
+[Install]
+WantedBy=multi-user.target

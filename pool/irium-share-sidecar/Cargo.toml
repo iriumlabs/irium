@@ -1,0 +1,14 @@
+[package]
+name = "irium-share-sidecar"
+version = "0.1.0"
+edition = "2021"
+description = "External, read-only durable share persistence for the Irium stratum pool. Follows journald and writes diff-weighted share records to its own SQLite. Never links, signals, or shares writable state with the pool binary; cannot affect coinbase, block submission, or consensus."
+
+[[bin]]
+name = "irium-share-sidecar"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+serde_json = "1"
+rusqlite = { version = "0.31", features = ["bundled"] }

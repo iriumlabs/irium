@@ -2517,6 +2517,217 @@ mod tests {
     }
 
     #[test]
+    fn stage_d_delegated_proposer_key_registration_eligibility() {
+        // Stage D Step 2 (verification, not a new subsystem): a miner's SEPARATE custodial
+        // proposer key -- held by the pool on the miner's behalf because an ASIC miner cannot
+        // run proving software -- is registered through the EXISTING self-signed sybil path
+        // (Phase 31R ProposerRegistrationV1) and becomes eligible in the frozen registry that
+        // is keyed by the 33-byte proposer_pubkey a Delegation v2 authorizes. Also asserts the
+        // negatives (unregistered / forged-signature / unpaid-sybil) are rejected in this
+        // delegated context. No new registration code exists or is needed; this proves the
+        // existing mechanism is exactly what the delegated Stage D path requires.
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        let net = 2u8; // devnet, matching the isolated rig
+        let bits = 8u32; // the rig's effective_sybil_bits()
+        let anchor_height = 10u64;
+        let anchor_hash = [0x5au8; 32];
+
+        // (1) The pool builds + self-signs the custodial proposer registration exactly as a
+        //     solo miner would: build_signed grinds the sybil PoW and signs with the proposer
+        //     secret it actually holds. This is the "the delegate cannot register a key it
+        //     lacks" property -- registration proves possession of the proposer key.
+        let proposer_secret = [0x77u8; 32];
+        let reg = ProposerRegistrationV1::build_signed(
+            &proposer_secret,
+            net,
+            anchor_height,
+            &anchor_hash,
+            bits,
+        )
+        .expect("build custodial proposer registration");
+        // Full connect_block-style self-validation passes against the same anchor + bits.
+        reg.validate(net, &anchor_hash, bits)
+            .expect("custodial proposer registration validates");
+        let proposer_pubkey = reg.vrf_pubkey;
+
+        // (2) Tie it to Delegation v2 (Step 1): the miner -- a DISTINCT payout/identity key --
+        //     signs a v2 delegation authorizing exactly this proposer key. proposer_pubkey is
+        //     separate from miner_pubkey: the C1 custodial-proposer / private-payout split.
+        let miner_sk = k256::ecdsa::SigningKey::from_slice(&[0x24u8; 32]).unwrap();
+        let miner_pubkey = {
+            let vk = k256::ecdsa::VerifyingKey::from(&miner_sk);
+            let enc = vk.to_encoded_point(true);
+            let mut pk = [0u8; 33];
+            pk.copy_from_slice(enc.as_bytes());
+            pk
+        };
+        let mut d = Delegation {
+            deleg_version: Delegation::VERSION, // v2
+            network_id: net,
+            miner_pubkey,
+            pool_pubkey: [0x02u8; 33],
+            worker_tag: [0xaau8; 32],
+            expiry_height: 1000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [0xcdu8; 32],
+            proposer_pubkey, // authorizes the registered custodial proposer key
+            delegation_sig: [0u8; 64],
+        };
+        let sig: k256::ecdsa::Signature = miner_sk.sign_prehash(&d.message_hash()).unwrap();
+        d.delegation_sig.copy_from_slice(&sig.to_bytes());
+        assert_eq!(d.deleg_version, 2, "delegation must be v2 to carry proposer_pubkey");
+        d.verify_signature().expect("miner-signed v2 delegation verifies");
+        assert_eq!(
+            d.proposer_pubkey, proposer_pubkey,
+            "delegation must authorize exactly the registered proposer key"
+        );
+        assert_ne!(
+            d.miner_pubkey, proposer_pubkey,
+            "proposer key must be separate from the miner payout/identity key"
+        );
+
+        // (3) Registry eligibility respects FREEZE_DEPTH: a key registered on-chain at
+        //     H_reg is eligible only from H_reg + fd onward (frozen), never before -- so the
+        //     seed revealed at H-1 cannot be used to register a winning key after the fact.
+        let (fd, ew) = (16u64, 100u64);
+        let mut registry = crate::poawx_proposer::ProposerEligibilityRegistry::default();
+        // before registration: not registered, not eligible.
+        assert!(!registry.is_registered(&proposer_pubkey));
+        assert!(!registry.is_eligible_with(&proposer_pubkey, anchor_height + fd, fd, ew));
+        // on-chain registration (what apply_block_proposer_registrations does at activation).
+        registry.register(proposer_pubkey, reg.pkh(), anchor_height);
+        assert!(registry.is_registered(&proposer_pubkey));
+        // one block too early (frozen-window hi = H - fd = anchor_height - 1) => not eligible.
+        assert!(
+            !registry.is_eligible_with(&proposer_pubkey, anchor_height + fd - 1, fd, ew),
+            "must NOT be eligible before FREEZE_DEPTH blocks have passed"
+        );
+        // exactly FREEZE_DEPTH later (hi = anchor_height) => eligible.
+        assert!(
+            registry.is_eligible_with(&proposer_pubkey, anchor_height + fd, fd, ew),
+            "delegated custodial proposer key must be eligible at H_reg + FREEZE_DEPTH"
+        );
+        // the key the Delegation v2 authorizes is exactly the eligible key.
+        assert!(registry.is_eligible_with(&d.proposer_pubkey, anchor_height + fd, fd, ew));
+
+        // (4) Negatives, in the delegated context.
+        // (4a) UNREGISTERED custodial proposer key (built + valid, but never put on-chain).
+        let other = ProposerRegistrationV1::build_signed(
+            &[0x99u8; 32],
+            net,
+            anchor_height,
+            &anchor_hash,
+            bits,
+        )
+        .unwrap();
+        assert_ne!(other.vrf_pubkey, proposer_pubkey);
+        assert!(!registry.is_registered(&other.vrf_pubkey));
+        assert!(
+            !registry.is_eligible_with(&other.vrf_pubkey, anchor_height + fd, fd, ew),
+            "an unregistered proposer key must never be eligible"
+        );
+        // (4b) FORGED signature: tampering the self-signature fails validate, so the pool
+        //      cannot register a proposer key whose secret it does not actually hold.
+        let mut forged = reg.clone();
+        forged.signature[0] ^= 0xff;
+        assert!(
+            forged.validate(net, &anchor_hash, bits).is_err(),
+            "a forged-signature registration must be rejected"
+        );
+        // (4c) INSUFFICIENT sybil work: requiring far more work than was ground fails (the
+        //      registration did not pay the sybil cost for that bar).
+        assert!(
+            reg.validate(net, &anchor_hash, bits + 20).is_err(),
+            "an insufficient-sybil-work registration must be rejected"
+        );
+    }
+
+    // Live confirmation on the isolated all-gates rig (:38500). Ignored by default; run with
+    //   E2E_NODE=http://127.0.0.1:38500 E2E_TOKEN=$(cat /home/irium/stage-d-rig/.rigtok) \
+    //   cargo test --release stage_d_delegated_proposer_registration_rig_e2e -- --ignored --exact --nocapture
+    // Proves the REAL running node accepts a delegated custodial proposer-key registration
+    // built + self-signed through ProposerRegistrationV1 and bound to the rig's real tip.
+    #[test]
+    #[ignore]
+    fn stage_d_delegated_proposer_registration_rig_e2e() {
+        let base =
+            std::env::var("E2E_NODE").unwrap_or_else(|_| "http://127.0.0.1:38500".to_string());
+        let token = std::env::var("E2E_TOKEN").unwrap_or_default();
+        let net = 2u8; // devnet
+        let bits = 8u32; // the rig's effective_sybil_bits()
+        let client = reqwest::blocking::Client::new();
+
+        // real current tip => the sybil anchor (strictly in the past).
+        let status: serde_json::Value = client
+            .get(format!("{base}/status"))
+            .bearer_auth(&token)
+            .send()
+            .expect("GET /status")
+            .json()
+            .expect("status json");
+        let tip_height = status["height"].as_u64().expect("tip height");
+        assert!(tip_height >= 1, "rig has no blocks yet");
+        let anchor_height = tip_height - 1;
+        let blk: serde_json::Value = client
+            .get(format!("{base}/rpc/block?height={anchor_height}"))
+            .bearer_auth(&token)
+            .send()
+            .expect("GET /rpc/block")
+            .json()
+            .expect("block json");
+        let anchor_hash_hex = blk["header"]["hash"].as_str().expect("anchor hash hex");
+        let hb = hex::decode(anchor_hash_hex).expect("hash hex decode");
+        assert_eq!(hb.len(), 32, "anchor hash must be 32 bytes");
+        let mut anchor_hash = [0u8; 32];
+        anchor_hash.copy_from_slice(&hb);
+
+        // pool builds the delegated custodial proposer registration bound to the real tip.
+        let proposer_secret = [0x7du8; 32];
+        let reg = ProposerRegistrationV1::build_signed(
+            &proposer_secret,
+            net,
+            anchor_height,
+            &anchor_hash,
+            bits,
+        )
+        .expect("build_signed against real rig anchor");
+        reg.validate(net, &anchor_hash, bits)
+            .expect("registration validates against the real rig anchor");
+
+        // submit to the real node endpoint; the node light-validates (sybil + signature) + pools.
+        let resp = client
+            .post(format!("{base}/poawx/registration"))
+            .bearer_auth(&token)
+            .body(reg.serialize())
+            .send()
+            .expect("POST /poawx/registration");
+        assert!(
+            resp.status().is_success(),
+            "rig rejected the delegated proposer registration: HTTP {}",
+            resp.status()
+        );
+        let body: serde_json::Value = resp.json().expect("registration response json");
+        assert!(
+            matches!(body["status"].as_str(), Some("accepted") | Some("duplicate")),
+            "unexpected rig registration response: {body}"
+        );
+
+        // live registry state is observable from the running node.
+        let status2: serde_json::Value = client
+            .get(format!("{base}/status"))
+            .bearer_auth(&token)
+            .send()
+            .expect("GET /status (2)")
+            .json()
+            .expect("status2 json");
+        eprintln!(
+            "[rig e2e] tip={tip_height} anchor={anchor_height} registration={} eligible_count={}",
+            body["status"], status2["poawx_proposer_eligible_count"]
+        );
+    }
+
+    #[test]
     fn proposer_assignment_section_roundtrip() {
         let prev = [0x44u8; 32];
         let proof = crate::poawx_candidate::AssignmentProofV2::prove(

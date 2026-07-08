@@ -79,8 +79,10 @@ pub const MAINNET_BTC_ANCHOR_HASH: [u8; 32] = [
     // (display hex 000000000000000000010b17283c3c400507969a9c2afd1dcf2082ec5cca2880
     // reversed - chain-linkage checks compare to header.prev_hash which is also
     // stored in natural order).
-    0x80, 0x28, 0xca, 0x5c, 0xec, 0x82, 0x20, 0xcf, 0x1d, 0xfd, 0x2a, 0x9c, 0x9a, 0x96, 0x07, 0x05,
-    0x40, 0x3c, 0x3c, 0x28, 0x17, 0x0b, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x80, 0x28, 0xca, 0x5c, 0xec, 0x82, 0x20, 0xcf,
+    0x1d, 0xfd, 0x2a, 0x9c, 0x9a, 0x96, 0x07, 0x05,
+    0x40, 0x3c, 0x3c, 0x28, 0x17, 0x0b, 0x01, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ];
 #[allow(dead_code)] // anchor placeholder; populated by the Phase 1 activation commit
 pub const MAINNET_BTC_ANCHOR_BITS: u32 = 0x17028c61;
@@ -110,8 +112,10 @@ pub const MAINNET_LTC_SPV_RELAY_ACTIVATION_HEIGHT: Option<u64> = Some(24_800);
 pub const MAINNET_LTC_ANCHOR_HEIGHT: u64 = 3_106_656;
 #[allow(dead_code)]
 pub const MAINNET_LTC_ANCHOR_HASH_DISPLAY: [u8; 32] = [
-    0x8a, 0x89, 0xd2, 0xe5, 0x23, 0x29, 0xaa, 0xbe, 0x63, 0xfa, 0xbe, 0xb9, 0xd4, 0xcf, 0x73, 0x4d,
-    0x8a, 0x44, 0xde, 0x15, 0x85, 0x98, 0xaf, 0xb6, 0x56, 0x0f, 0x20, 0xf8, 0xc9, 0x47, 0xbe, 0x64,
+    0x8a, 0x89, 0xd2, 0xe5, 0x23, 0x29, 0xaa, 0xbe,
+    0x63, 0xfa, 0xbe, 0xb9, 0xd4, 0xcf, 0x73, 0x4d,
+    0x8a, 0x44, 0xde, 0x15, 0x85, 0x98, 0xaf, 0xb6,
+    0x56, 0x0f, 0x20, 0xf8, 0xc9, 0x47, 0xbe, 0x64,
 ];
 #[allow(dead_code)]
 pub const MAINNET_LTC_ANCHOR_BITS: u32 = 0x1929_b619;
@@ -217,159 +221,12 @@ impl NetworkKind {
             _ => Self::Mainnet,
         }
     }
-
-    /// Phase 18B: stable one-byte network identifier bound into PoAW-X
-    /// delegations so a delegation signed for one network cannot be replayed on
-    /// another. Mainnet=0, Testnet=1, Devnet=2.
-    pub fn id_byte(self) -> u8 {
-        match self {
-            Self::Mainnet => 0,
-            Self::Testnet => 1,
-            Self::Devnet => 2,
-        }
-    }
-}
-
-/// Phase 18B: `network_id` byte for the current network (see `NetworkKind::id_byte`).
-pub fn network_id_byte() -> u8 {
-    network_kind_from_env().id_byte()
 }
 
 pub fn network_kind_from_env() -> NetworkKind {
     env::var("IRIUM_NETWORK")
         .map(|v| NetworkKind::from_env_value(&v))
         .unwrap_or(NetworkKind::Mainnet)
-}
-
-/// Phase 18B: activation height for mode-1 (delegated) PoAW-X receipts.
-/// `None` => delegated receipts are not yet active (mode-1 rejected). Read from
-/// `IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT`. Testnet/devnet only — mainnet
-/// hard-rejects mode-1 regardless of this value.
-/// Mainnet PoAW-X consensus activation height. Fixed in consensus code (NOT env /
-/// operator configurable). At and after this height, mainnet enforces the full
-/// PoAW-X gate set; before it, mainnet is byte-identical to pre-activation.
-pub const MAINNET_POAWX_ACTIVATION_HEIGHT: Option<u64> = Some(50_000);
-
-/// True when mainnet PoAW-X is active at `height` (mainnet network AND height past
-/// the fixed activation height). Always false on testnet/devnet.
-pub fn poawx_mainnet_active(height: u64) -> bool {
-    network_id_byte() == 0 && matches!(MAINNET_POAWX_ACTIVATION_HEIGHT, Some(h) if height >= h)
-}
-
-/// Effective per-gate activation height for `network_id`: the fixed mainnet height
-/// on mainnet (env ignored), else the supplied testnet/devnet env activation.
-/// Every PoAW-X gate routes its activation through this so 50_000 lives in ONE
-/// place. Param-driven (takes `network_id`) to preserve race-free gate unit tests.
-pub fn poawx_effective_activation(network_id: u8, env_activation: Option<u64>) -> Option<u64> {
-    if network_id == 0 {
-        MAINNET_POAWX_ACTIVATION_HEIGHT
-    } else {
-        env_activation
-    }
-}
-
-/// Whether PoAW-X consensus is active at `height`. Mainnet: the fixed code height,
-/// no env. Testnet/devnet: the env master-switch (`IRIUM_POAWX_MODE=active` AND
-/// `IRIUM_POAWX_ACTIVATION_HEIGHT` reached). Replaces the per-callsite env + "==
-/// Mainnet -> off" cascade in the validator and producer entry points.
-pub fn poawx_consensus_active(height: u64) -> bool {
-    if network_id_byte() == 0 {
-        return matches!(MAINNET_POAWX_ACTIVATION_HEIGHT, Some(h) if height >= h);
-    }
-    let mode_active = env::var("IRIUM_POAWX_MODE")
-        .map(|v| v.trim() == "active")
-        .unwrap_or(false);
-    if !mode_active {
-        return false;
-    }
-    match env::var("IRIUM_POAWX_ACTIVATION_HEIGHT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-    {
-        Some(h) => height >= h,
-        None => false,
-    }
-}
-
-/// Whether the PoAW-X producer/RPC layer should serve (assignment / receipt / template /
-/// submit) at `height`. Mainnet: gated by the fixed code activation height. Testnet/devnet:
-/// gated only by the `IRIUM_POAWX_MODE` master switch (height-independent), matching the
-/// pre-mainnet serving behavior. Distinct from `poawx_consensus_active`, which additionally
-/// height-gates devnet *validation* by the env activation height.
-pub fn poawx_serving_active(height: u64) -> bool {
-    if network_id_byte() == 0 {
-        return matches!(MAINNET_POAWX_ACTIVATION_HEIGHT, Some(h) if height >= h);
-    }
-    env::var("IRIUM_POAWX_MODE")
-        .map(|v| v.trim() == "active")
-        .unwrap_or(false)
-}
-
-/// Mainnet PoAW-X liveness-recovery activation height. Fixed in consensus code.
-/// At/after this height, if the chain is GENUINELY stalled (parent older than
-/// `proposer_stall_recovery_secs()`, a threshold above MAX_FUTURE_BLOCK_TIME so the
-/// gap cannot be forged), the proposer frozen-WINDOW eligibility test is relaxed to
-/// any prior on-chain registration. Dormant until a real multi-hour stall.
-pub const MAINNET_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT: Option<u64> = Some(50_000);
-
-/// True when mainnet PoAW-X liveness recovery is active at `height`. Testnet/devnet
-/// gate on `IRIUM_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT`.
-pub fn poawx_liveness_recovery_active(height: u64) -> bool {
-    if network_id_byte() == 0 {
-        return matches!(MAINNET_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT, Some(h) if height >= h);
-    }
-    env::var("IRIUM_POAWX_LIVENESS_RECOVERY_ACTIVATION_HEIGHT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .map_or(false, |h| height >= h)
-}
-
-pub fn poawx_delegation_activation_height() -> Option<u64> {
-    env::var("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-}
-
-/// Phase 20: activation height for the multi-role reward split. `None` => not
-/// active (existing reward behavior unchanged). Read from
-/// `IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT`. Testnet/devnet only —
-/// mainnet hard-rejects the multi-role split regardless of this value (the
-/// activation gate in `chain` returns false on mainnet) until an explicit
-/// future governance activation path exists.
-pub fn poawx_multi_role_reward_activation_height() -> Option<u64> {
-    env::var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-}
-
-/// Phase 20: activation height for the CPU/GPU/ASIC fairness matrix primitives.
-/// `None` => not active. Read from `IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT`.
-/// Testnet/devnet only — mainnet is hard-off (the `chain` gate returns false on
-/// mainnet) until an explicit future governance activation.
-pub fn poawx_fairness_matrix_activation_height() -> Option<u64> {
-    env::var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-}
-
-/// Phase 20: activation height for the third-party pool fee. `None` => not active
-/// (official 0% only). Read from `IRIUM_POAWX_THIRD_PARTY_FEE_ACTIVATION_HEIGHT`.
-/// Testnet/devnet only — mainnet is hard-off (the `chain` gate returns false on
-/// mainnet) until an explicit future governance activation.
-pub fn poawx_third_party_fee_activation_height() -> Option<u64> {
-    env::var("IRIUM_POAWX_THIRD_PARTY_FEE_ACTIVATION_HEIGHT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-}
-
-/// Phase 20 Step 6A: activation height for the hidden role-precommit commitment
-/// root. `None` => not active. Read from `IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT`.
-/// Testnet/devnet only — mainnet is hard-off (the `chain` gate returns false on
-/// mainnet) until an explicit future governance activation.
-pub fn poawx_hidden_precommit_activation_height() -> Option<u64> {
-    env::var("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
 }
 
 pub fn runtime_htlcv1_env_override() -> Option<u64> {
@@ -414,41 +271,6 @@ pub fn resolved_lwma_v2_activation_height(network: NetworkKind) -> Option<u64> {
     match network {
         NetworkKind::Mainnet => MAINNET_LWMA_V2_ACTIVATION_HEIGHT,
         NetworkKind::Testnet | NetworkKind::Devnet => runtime_lwma_v2_env_override(),
-    }
-}
-
-/// Non-mainnet-only env override for the standard-header (Fix 2a) activation
-/// height. Parsed from IRIUM_STANDARD_HEADER_ACTIVATION_HEIGHT.
-pub fn runtime_standard_header_activation_env_override() -> Option<u64> {
-    env::var("IRIUM_STANDARD_HEADER_ACTIVATION_HEIGHT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-}
-
-/// Resolve the standard-header (Fix 2a) activation height for `network`.
-/// MAINNET is ALWAYS the historical constant and IGNORES any env override, so
-/// mainnet header serialization/hashing is permanently byte-stable. Testnet/
-/// devnet default to 1 (genesis-preserving: height 0 keeps the legacy header so
-/// the fixed devnet/testnet genesis stays valid; every MINED block height >= 1
-/// uses Bitcoin-standard natural-merkle headers so standard miners validate) —
-/// with an optional env override for tests.
-pub fn resolved_standard_header_activation_height(network: NetworkKind) -> u64 {
-    resolve_standard_header_activation(network, runtime_standard_header_activation_env_override())
-}
-
-/// Pure resolver (no env read) for testability. Mainnet ALWAYS returns the
-/// historical constant and ignores `env_override`; testnet/devnet use the
-/// override or default to 1 (genesis-preserving).
-pub(crate) fn resolve_standard_header_activation(
-    network: NetworkKind,
-    env_override: Option<u64>,
-) -> u64 {
-    match network {
-        NetworkKind::Mainnet => crate::constants::STANDARD_HEADER_ACTIVATION_HEIGHT,
-        // 1 (not 0): genesis (height 0) keeps the legacy header format so the
-        // fixed devnet/testnet genesis stays valid; every MINED block (height >= 1)
-        // uses the Bitcoin-standard header so standard miners (cpuminer) validate.
-        NetworkKind::Testnet | NetworkKind::Devnet => env_override.unwrap_or(1),
     }
 }
 
@@ -597,9 +419,7 @@ pub fn runtime_btc_swap_bech32_payment_env_override() -> Option<u64> {
 pub fn resolved_btc_swap_bech32_payment_activation_height(network: NetworkKind) -> Option<u64> {
     match network {
         NetworkKind::Mainnet => MAINNET_BTC_SWAP_BECH32_PAYMENT_ACTIVATION_HEIGHT,
-        NetworkKind::Testnet | NetworkKind::Devnet => {
-            runtime_btc_swap_bech32_payment_env_override()
-        }
+        NetworkKind::Testnet | NetworkKind::Devnet => runtime_btc_swap_bech32_payment_env_override(),
     }
 }
 
@@ -620,13 +440,13 @@ pub fn runtime_mpsov1_env_override() -> Option<u64> {
 pub fn resolved_coinbase_header_batch_activation_height(network: NetworkKind) -> Option<u64> {
     match network {
         NetworkKind::Mainnet => MAINNET_COINBASE_HEADER_BATCH_ACTIVATION_HEIGHT,
-        NetworkKind::Devnet | NetworkKind::Testnet => {
-            env::var("IRIUM_COINBASE_HEADER_BATCH_ACTIVATION_HEIGHT")
-                .ok()
-                .and_then(|v| v.parse::<u64>().ok())
-                .map(Some)
-                .unwrap_or(None)
-        }
+        NetworkKind::Devnet | NetworkKind::Testnet => env::var(
+            "IRIUM_COINBASE_HEADER_BATCH_ACTIVATION_HEIGHT",
+        )
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Some)
+        .unwrap_or(None),
     }
 }
 
@@ -645,53 +465,6 @@ mod tests {
     fn env_lock() -> &'static Mutex<()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
         LOCK.get_or_init(|| Mutex::new(()))
-    }
-
-    #[test]
-    fn standard_header_resolver_mainnet_ignores_override() {
-        assert_eq!(
-            resolve_standard_header_activation(NetworkKind::Mainnet, Some(5)),
-            crate::constants::STANDARD_HEADER_ACTIVATION_HEIGHT
-        );
-        assert_eq!(
-            resolve_standard_header_activation(NetworkKind::Mainnet, None),
-            crate::constants::STANDARD_HEADER_ACTIVATION_HEIGHT
-        );
-    }
-
-    #[test]
-    fn standard_header_resolver_non_mainnet_default_one_or_override() {
-        assert_eq!(
-            resolve_standard_header_activation(NetworkKind::Devnet, None),
-            1
-        );
-        assert_eq!(
-            resolve_standard_header_activation(NetworkKind::Testnet, None),
-            1
-        );
-        assert_eq!(
-            resolve_standard_header_activation(NetworkKind::Devnet, Some(123)),
-            123
-        );
-        assert_eq!(
-            resolve_standard_header_activation(NetworkKind::Testnet, Some(7)),
-            7
-        );
-    }
-
-    #[test]
-    fn standard_header_mainnet_ignores_env_var() {
-        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_STANDARD_HEADER_ACTIVATION_HEIGHT", "9");
-        assert_eq!(
-            resolved_standard_header_activation_height(NetworkKind::Mainnet),
-            crate::constants::STANDARD_HEADER_ACTIVATION_HEIGHT
-        );
-        assert_eq!(
-            resolved_standard_header_activation_height(NetworkKind::Devnet),
-            9
-        );
-        std::env::remove_var("IRIUM_STANDARD_HEADER_ACTIVATION_HEIGHT");
     }
 
     #[test]
@@ -867,8 +640,7 @@ mod tests {
     #[test]
     fn mainnet_btc_spv_relay_height_is_23850() {
         assert_eq!(
-            MAINNET_BTC_SPV_RELAY_ACTIVATION_HEIGHT,
-            Some(23_850),
+            MAINNET_BTC_SPV_RELAY_ACTIVATION_HEIGHT, Some(23_850),
             "Phase 1 activated on mainnet at height 23850"
         );
         assert_eq!(
@@ -905,8 +677,7 @@ mod tests {
     #[test]
     fn mainnet_htlc_btc_swap_v1_height_is_23850() {
         assert_eq!(
-            MAINNET_HTLC_BTC_SWAP_V1_ACTIVATION_HEIGHT,
-            Some(23_850),
+            MAINNET_HTLC_BTC_SWAP_V1_ACTIVATION_HEIGHT, Some(23_850),
             "Phase 2 activated on mainnet at height 23850"
         );
         assert_eq!(
@@ -943,8 +714,7 @@ mod tests {
     #[test]
     fn mainnet_swap_order_v1_height_is_23850() {
         assert_eq!(
-            MAINNET_SWAP_ORDER_V1_ACTIVATION_HEIGHT,
-            Some(23_850),
+            MAINNET_SWAP_ORDER_V1_ACTIVATION_HEIGHT, Some(23_850),
             "Phase 3 activated on mainnet at height 23850"
         );
         assert_eq!(
@@ -1136,4 +906,5 @@ mod tests {
         );
         std::env::remove_var("IRIUM_BTC_SWAP_BECH32_PAYMENT_ACTIVATION_HEIGHT");
     }
+
 }

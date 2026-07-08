@@ -46,31 +46,22 @@ async fn main() {
         lwma: LwmaParams::new(resolved_lwma_activation_height(network), pow_limit),
         lwma_v2: resolved_lwma_v2_activation_height(network)
             .map(|h| LwmaParams::new_v2(Some(h), pow_limit)),
-        auxpow_activation_height: irium_node_rs::activation::resolved_auxpow_activation_height(
-            network,
-        ),
-        btc_spv: None,
-        ltc_spv: None,
-        htlc_btc_swap_v1_activation_height: None,
-        btc_swap_bech32_payment_activation_height: None,
-        htlc_ltc_swap_v1_activation_height: None,
-        swap_order_v1_activation_height: None,
-        ltc_swap_order_v1_activation_height: None,
-        coinbase_header_batch_activation_height: None,
+        auxpow_activation_height: irium_node_rs::activation::resolved_auxpow_activation_height(network),
+            btc_spv: None,
+            ltc_spv: None,
+            htlc_btc_swap_v1_activation_height: None,
+            btc_swap_bech32_payment_activation_height: None,
+            htlc_ltc_swap_v1_activation_height: None,
+            swap_order_v1_activation_height: None,
+            ltc_swap_order_v1_activation_height: None,
+            coinbase_header_batch_activation_height: None,
     };
     let chain = Arc::new(Mutex::new(ChainState::new(params)));
-    let mempool = Arc::new(Mutex::new(MempoolManager::new(
-        mempool_file(),
-        1000,
-        100.0,
-        10_000,
-    )));
+    let mempool = Arc::new(Mutex::new(MempoolManager::new(mempool_file(), 1000, 100.0, 10_000)));
 
     let bind: SocketAddr = std::env::var("IRIUM_P2P_BIND")
         .unwrap_or_else(|_| {
-            eprintln!(
-                "Error: IRIUM_P2P_BIND must be set (e.g. export IRIUM_P2P_BIND=0.0.0.0:38291)"
-            );
+            eprintln!("Error: IRIUM_P2P_BIND must be set (e.g. export IRIUM_P2P_BIND=0.0.0.0:38291)");
             std::process::exit(1);
         })
         .parse()

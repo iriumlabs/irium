@@ -13,7 +13,10 @@ use super::common::{PER_HEADER_RETRIES, POLITE_SLEEP_MS, RETRY_SLEEP_MS};
 /// API endpoints we try, in order. mempool.space is primary; if it
 /// returns non-2xx or times out on the tip-height probe we fail over
 /// to blockstream.info for the rest of the cycle.
-const APIS: &[&str] = &["https://mempool.space/api", "https://blockstream.info/api"];
+const APIS: &[&str] = &[
+    "https://mempool.space/api",
+    "https://blockstream.info/api",
+];
 
 /// Queries each API in turn for the current BTC mainnet tip height.
 /// Returns the first successful response.
@@ -42,7 +45,11 @@ pub async fn fetch_btc_net_tip(client: &Client) -> Result<u64, String> {
 /// `[start, end]`. Picks an API once (whichever succeeds at the
 /// tip-height probe) and stays on it for the whole batch so per-call
 /// error attribution is unambiguous.
-pub async fn fetch_btc_headers(client: &Client, start: u64, end: u64) -> Result<String, String> {
+pub async fn fetch_btc_headers(
+    client: &Client,
+    start: u64,
+    end: u64,
+) -> Result<String, String> {
     let api = pick_working_api(client).await?;
     let mut hex_out = String::with_capacity(((end - start + 1) * 160) as usize);
 
@@ -76,7 +83,11 @@ async fn pick_working_api(client: &Client) -> Result<&'static str, String> {
     ))
 }
 
-async fn fetch_height_to_hash(client: &Client, api: &str, height: u64) -> Result<String, String> {
+async fn fetch_height_to_hash(
+    client: &Client,
+    api: &str,
+    height: u64,
+) -> Result<String, String> {
     let url = format!("{api}/block-height/{height}");
     let mut last_err = String::new();
     for attempt in 0..PER_HEADER_RETRIES {
@@ -120,7 +131,11 @@ async fn fetch_height_to_hash(client: &Client, api: &str, height: u64) -> Result
     ))
 }
 
-async fn fetch_block_header(client: &Client, api: &str, hash: &str) -> Result<String, String> {
+async fn fetch_block_header(
+    client: &Client,
+    api: &str,
+    hash: &str,
+) -> Result<String, String> {
     let url = format!("{api}/block/{hash}/header");
     let mut last_err = String::new();
     for attempt in 0..PER_HEADER_RETRIES {

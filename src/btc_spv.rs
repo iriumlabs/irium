@@ -549,14 +549,17 @@ pub fn apply_btc_header_batch(
         });
     }
     if known_prefix > 0 && prefix_prev_height < *btc_tip_height {
-        return Err("apply_btc_header_batch: known prefix followed by non-tip fork".to_string());
+        return Err(
+            "apply_btc_header_batch: known prefix followed by non-tip fork".to_string(),
+        );
     }
 
     let mut prev_hash = prefix_prev_hash;
     let mut prev_height = prefix_prev_height;
     let mut prev_work = prefix_prev_work;
     let headers_to_apply = &headers[known_prefix..];
-    let mut staged: Vec<([u8; 32], BtcHeaderEntry)> = Vec::with_capacity(headers_to_apply.len());
+    let mut staged: Vec<([u8; 32], BtcHeaderEntry)> =
+        Vec::with_capacity(headers_to_apply.len());
 
     for (offset, header) in headers_to_apply.iter().enumerate() {
         let i = known_prefix + offset;
@@ -605,10 +608,7 @@ pub fn apply_btc_header_batch(
             (bits, mtp)
         };
         if let Some(expected_bits) = expected_bits_opt {
-            let expected_target = Target {
-                bits: expected_bits,
-            }
-            .to_target();
+            let expected_target = Target { bits: expected_bits }.to_target();
             if header_target.to_target() != expected_target {
                 return Err(format!(
                     "apply_btc_header_batch: header {} bits mismatch (expected {:#010x}, got {:#010x})",
@@ -752,9 +752,10 @@ mod tests {
         assert_eq!(params.anchor.time, 1730000000);
         // Display-order input should be reversed to natural-order in storage.
         let mut expected_natural = [0u8; 32];
-        let display_bytes =
-            hex::decode("00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054")
-                .unwrap();
+        let display_bytes = hex::decode(
+            "00000000000000000002a7c4c1e48d76c5a37902165a270156b7a8d72728a054",
+        )
+        .unwrap();
         expected_natural.copy_from_slice(&display_bytes);
         expected_natural.reverse();
         assert_eq!(params.anchor.hash, expected_natural);
@@ -1036,10 +1037,7 @@ mod tests {
         assert_eq!(tip, Some(h1.block_hash()));
         assert_eq!(tip_height, anchor.height + 1);
         assert!(headers_db.contains_key(&h1.block_hash()));
-        assert_eq!(
-            *heights_db.get(&h1.block_hash()).unwrap(),
-            anchor.height + 1
-        );
+        assert_eq!(*heights_db.get(&h1.block_hash()).unwrap(), anchor.height + 1);
     }
 
     #[test]

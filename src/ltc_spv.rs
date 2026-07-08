@@ -45,12 +45,12 @@ use crate::scrypt_pow::meets_target_ltc;
 // inline forms before Phase B moved the source-of-truth into
 // `activation.rs` (mirroring how the BTC SPV anchor constants are
 // declared there and reused across the codebase).
-#[cfg(test)]
-use crate::activation::MAINNET_LTC_SPV_RELAY_ACTIVATION_HEIGHT;
 pub use crate::activation::{
     MAINNET_LTC_ANCHOR_BITS, MAINNET_LTC_ANCHOR_HASH_DISPLAY, MAINNET_LTC_ANCHOR_HEIGHT,
     MAINNET_LTC_ANCHOR_TIME,
 };
+#[cfg(test)]
+use crate::activation::MAINNET_LTC_SPV_RELAY_ACTIVATION_HEIGHT;
 
 /// Output script tag reserved for a Litecoin header batch. Consensus
 /// dispatch is wired in a later phase once governance assigns an
@@ -477,7 +477,9 @@ fn find_ancestor_time_at_height_v(
     let mut cur = *parent_hash;
     loop {
         if cur == anchor.hash {
-            return Err("retarget walk: reached anchor without finding target height".to_string());
+            return Err(
+                "retarget walk: reached anchor without finding target height".to_string(),
+            );
         }
         let entry = view
             .get(&cur)
@@ -681,14 +683,17 @@ pub fn apply_ltc_header_batch(
         });
     }
     if known_prefix > 0 && prefix_prev_height < *ltc_tip_height {
-        return Err("apply_ltc_header_batch: known prefix followed by non-tip fork".to_string());
+        return Err(
+            "apply_ltc_header_batch: known prefix followed by non-tip fork".to_string(),
+        );
     }
 
     let mut prev_hash = prefix_prev_hash;
     let mut prev_height = prefix_prev_height;
     let mut prev_work = prefix_prev_work;
     let headers_to_apply = &headers[known_prefix..];
-    let mut staged: Vec<([u8; 32], LtcHeaderEntry)> = Vec::with_capacity(headers_to_apply.len());
+    let mut staged: Vec<([u8; 32], LtcHeaderEntry)> =
+        Vec::with_capacity(headers_to_apply.len());
 
     for (offset, header) in headers_to_apply.iter().enumerate() {
         let i = known_prefix + offset;
@@ -732,10 +737,7 @@ pub fn apply_ltc_header_batch(
             (bits, mtp)
         };
         if let Some(expected_bits) = expected_bits_opt {
-            let expected_target = Target {
-                bits: expected_bits,
-            }
-            .to_target();
+            let expected_target = Target { bits: expected_bits }.to_target();
             let header_target = Target { bits: header.bits }.to_target();
             if header_target != expected_target {
                 return Err(format!(
@@ -938,8 +940,7 @@ mod tests {
         .to_target();
         let bits = target_to_compact_bits(&target);
         assert_eq!(
-            bits,
-            RetargetParams::LITECOIN.max_target_bits,
+            bits, RetargetParams::LITECOIN.max_target_bits,
             "round-trip must preserve canonical LTC mainnet-min bits"
         );
     }
@@ -1058,10 +1059,7 @@ mod tests {
         assert_eq!(tip, Some(h1.block_hash()));
         assert_eq!(tip_height, anchor.height + 1);
         assert!(headers_db.contains_key(&h1.block_hash()));
-        assert_eq!(
-            *heights_db.get(&h1.block_hash()).unwrap(),
-            anchor.height + 1
-        );
+        assert_eq!(*heights_db.get(&h1.block_hash()).unwrap(), anchor.height + 1);
     }
 
     #[test]
@@ -1218,11 +1216,7 @@ mod tests {
             &anchor,
             &test_params,
         );
-        assert!(
-            res.is_ok(),
-            "expected batch accepted at affected retarget, got: {:?}",
-            res
-        );
+        assert!(res.is_ok(), "expected batch accepted at affected retarget, got: {:?}", res);
         assert_eq!(tip_height, 13);
     }
 
@@ -1278,11 +1272,7 @@ mod tests {
             &anchor,
             &test_params,
         );
-        assert!(
-            res.is_ok(),
-            "expected batch accepted (h=16 normal retarget), got: {:?}",
-            res
-        );
+        assert!(res.is_ok(), "expected batch accepted (h=16 normal retarget), got: {:?}", res);
         assert_eq!(tip_height, 16);
     }
 
@@ -1320,9 +1310,9 @@ mod tests {
         // formula no longer matches Litecoin Core's, and the IRM chain
         // will stall on the next LTC coinbase batch that crosses a
         // retarget boundary.
-        let parent_bits: u32 = 0x1929b619; // bits at LTC 3,108,671
-        let parent_time: u32 = 1_778_988_019; // time at LTC 3,108,671
-        let first_time: u32 = 1_778_676_063; // time at LTC 3,106,655 (= anchor - 1)
+        let parent_bits: u32 = 0x1929b619;       // bits at LTC 3,108,671
+        let parent_time: u32 = 1_778_988_019;    // time at LTC 3,108,671
+        let first_time:  u32 = 1_778_676_063;    // time at LTC 3,106,655 (= anchor - 1)
         let expected_new_bits: u32 = 0x192b0787; // bits at LTC 3,108,672 (real mainnet)
 
         let parent_target = Target { bits: parent_bits }.to_target();

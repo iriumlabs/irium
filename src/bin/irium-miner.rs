@@ -26,8 +26,7 @@ use sha2::{Digest, Sha256};
 
 use irium_node_rs::activation::{
     network_kind_from_env, resolved_htlcv1_activation_height, resolved_lwma_activation_height,
-    resolved_lwma_v2_activation_height, resolved_mpsov1_activation_height,
-    runtime_lwma_env_override,
+    resolved_lwma_v2_activation_height, resolved_mpsov1_activation_height, runtime_lwma_env_override,
 };
 use irium_node_rs::anchors::AnchorManager;
 use irium_node_rs::block::{Block, BlockHeader};
@@ -40,16 +39,6 @@ use irium_node_rs::mempool::MempoolManager;
 use irium_node_rs::pow::{meets_target, sha256d, Target};
 use irium_node_rs::relay::RelayCommitment;
 use irium_node_rs::tx::{Transaction, TxInput, TxOutput};
-// Stage G0: shared PoAW-X miner RPC-client helpers, moved verbatim out of this
-// binary into the node crate so the GPU miner (Stage G1) can reuse them.
-use irium_node_rs::poawx_miner_client::{
-    build_poawx_submit_request, fetch_block_template, fetch_block_template_with_base,
-    gbt_query_params, is_https_scheme_mismatch, is_loopback_host, is_tls_mismatch, node_rpc_base,
-    poawx_decode_hash32, poawx_fetch_dominance, poawx_fetch_parent_info, poawx_miner_interval_secs,
-    poawx_miner_secret, poawx_post_admission, poawx_receipt_difficulty_bits, poawx_submit_extended,
-    poawx_submit_registration, rpc_client, rpc_status_error, rpc_token, with_rpc_base, BlockTemplate,
-    PoawxParentInfo, TemplateTx,
-};
 
 fn load_env_file(path: &str) -> bool {
     let contents = match fs::read_to_string(path) {
@@ -77,6 +66,21 @@ fn load_env_file(path: &str) -> bool {
         env::set_var(key, val);
     }
     true
+}
+
+fn rpc_token() -> Option<String> {
+    env::var("IRIUM_RPC_TOKEN")
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+}
+
+fn rpc_status_error(prefix: &str, status: StatusCode) -> String {
+    if status == StatusCode::UNAUTHORIZED || status == StatusCode::FORBIDDEN {
+        format!("{}: HTTP {} (check IRIUM_RPC_TOKEN)", prefix, status)
+    } else {
+        format!("{}: HTTP {}", prefix, status)
+    }
 }
 
 fn json_log_enabled() -> bool {
@@ -244,10 +248,7 @@ fn advertise_peer_output() -> Option<TxOutput> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        build_coinbase, build_coinbase_with_pkh, extract_height_from_coinbase1_hex,
-        script_from_relay_address,
-    };
+    use super::{build_coinbase, build_coinbase_with_pkh, extract_height_from_coinbase1_hex, script_from_relay_address};
     use irium_node_rs::activation::{resolved_htlcv1_activation_height, NetworkKind};
     use irium_node_rs::activation::{
         resolved_lwma_v2_activation_height, MAINNET_LWMA_V2_ACTIVATION_HEIGHT,
@@ -370,61 +371,48 @@ mod tests {
 
     #[test]
     fn build_coinbase_returns_error_when_address_unset() {
-        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+            std::sync::OnceLock::new();
         let _guard = ENV_LOCK
             .get_or_init(|| std::sync::Mutex::new(()))
             .lock()
             .unwrap();
-        let saved_addr = std::env::var("IRIUM_MINER_ADDRESS").ok();
+        let saved_addr  = std::env::var("IRIUM_MINER_ADDRESS").ok();
         let saved_relay = std::env::var("IRIUM_RELAY_ADDRESS").ok();
-        let saved_pkh = std::env::var("IRIUM_MINER_PKH").ok();
+        let saved_pkh   = std::env::var("IRIUM_MINER_PKH").ok();
         std::env::remove_var("IRIUM_MINER_ADDRESS");
         std::env::remove_var("IRIUM_RELAY_ADDRESS");
         std::env::remove_var("IRIUM_MINER_PKH");
         let result = build_coinbase(1, 5_000_000_000);
-        if let Some(v) = saved_addr {
-            std::env::set_var("IRIUM_MINER_ADDRESS", v);
-        }
-        if let Some(v) = saved_relay {
-            std::env::set_var("IRIUM_RELAY_ADDRESS", v);
-        }
-        if let Some(v) = saved_pkh {
-            std::env::set_var("IRIUM_MINER_PKH", v);
-        }
+        if let Some(v) = saved_addr  { std::env::set_var("IRIUM_MINER_ADDRESS", v); }
+        if let Some(v) = saved_relay { std::env::set_var("IRIUM_RELAY_ADDRESS", v); }
+        if let Some(v) = saved_pkh   { std::env::set_var("IRIUM_MINER_PKH", v); }
         assert!(result.is_err());
         assert!(
-            result
-                .unwrap_err()
-                .contains("missing or invalid miner payout address"),
+            result.unwrap_err().contains("missing or invalid miner payout address"),
             "error message must name the problem"
         );
     }
 
     #[test]
     fn build_coinbase_returns_error_for_invalid_base58_address() {
-        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+        static ENV_LOCK: std::sync::OnceLock<std::sync::Mutex<()>> =
+            std::sync::OnceLock::new();
         let _guard = ENV_LOCK
             .get_or_init(|| std::sync::Mutex::new(()))
             .lock()
             .unwrap();
-        let saved_addr = std::env::var("IRIUM_MINER_ADDRESS").ok();
+        let saved_addr  = std::env::var("IRIUM_MINER_ADDRESS").ok();
         let saved_relay = std::env::var("IRIUM_RELAY_ADDRESS").ok();
-        let saved_pkh = std::env::var("IRIUM_MINER_PKH").ok();
+        let saved_pkh   = std::env::var("IRIUM_MINER_PKH").ok();
         std::env::set_var("IRIUM_MINER_ADDRESS", "not_a_valid_address_!!!");
         std::env::remove_var("IRIUM_RELAY_ADDRESS");
         std::env::remove_var("IRIUM_MINER_PKH");
         let result = build_coinbase(1, 5_000_000_000);
-        if let Some(v) = saved_addr {
-            std::env::set_var("IRIUM_MINER_ADDRESS", v);
-        } else {
-            std::env::remove_var("IRIUM_MINER_ADDRESS");
-        }
-        if let Some(v) = saved_relay {
-            std::env::set_var("IRIUM_RELAY_ADDRESS", v);
-        }
-        if let Some(v) = saved_pkh {
-            std::env::set_var("IRIUM_MINER_PKH", v);
-        }
+        if let Some(v) = saved_addr  { std::env::set_var("IRIUM_MINER_ADDRESS", v); }
+            else { std::env::remove_var("IRIUM_MINER_ADDRESS"); }
+        if let Some(v) = saved_relay { std::env::set_var("IRIUM_RELAY_ADDRESS", v); }
+        if let Some(v) = saved_pkh   { std::env::set_var("IRIUM_MINER_PKH", v); }
         assert!(result.is_err(), "invalid address must be rejected");
     }
 
@@ -432,16 +420,16 @@ mod tests {
     fn extract_height_from_coinbase1_bip34() {
         // BIP34 mode: height 22656 = 0x5880 -> 2 LE bytes [0x80, 0x58]
         let mut tx: Vec<u8> = Vec::new();
-        tx.extend_from_slice(&1u32.to_le_bytes()); // version
-        tx.push(0x01); // tx_in count varint
-        tx.extend_from_slice(&[0u8; 32]); // prev_txid
-        tx.extend_from_slice(&0xffff_ffffu32.to_le_bytes()); // prev_index
+        tx.extend_from_slice(&1u32.to_le_bytes());            // version
+        tx.push(0x01);                                        // tx_in count varint
+        tx.extend_from_slice(&[0u8; 32]);                     // prev_txid
+        tx.extend_from_slice(&0xffff_ffffu32.to_le_bytes());  // prev_index
         let script_sig: Vec<u8> = {
             let mut s = vec![0x02u8, 0x80, 0x58]; // BIP34 push: len=2, height LE
             s.extend_from_slice(b"Irium");
             s
         };
-        tx.push(script_sig.len() as u8); // script_sig length varint
+        tx.push(script_sig.len() as u8);                      // script_sig length varint
         tx.extend_from_slice(&script_sig);
         let hex_str = hex::encode(&tx);
         assert_eq!(extract_height_from_coinbase1_hex(&hex_str), Some(22_656));
@@ -488,66 +476,6 @@ mod tests {
         assert_eq!(extract_height_from_coinbase1_hex("not-hex"), None);
         assert_eq!(extract_height_from_coinbase1_hex("00"), None); // too short
     }
-
-    // PoAW-X: prove the miner's receipt parser round-trips receipts emitted in
-    // the node's block_json_for shape, byte-for-byte, including the canonical
-    // receipts-root. This is the miner half of the sync fix
-    // (connect_block_from_json / load_persisted_blocks call parse_poawx_receipts_json).
-    #[test]
-    fn parse_poawx_receipts_json_roundtrips_shape_and_root() {
-        use irium_node_rs::poawx::{irx1_root_from_block_receipts, PoawxBlockReceipt};
-        let receipts = vec![
-            PoawxBlockReceipt {
-                height: 5,
-                lane: b'A',
-                worker_pkh: [0x11u8; 20],
-                worker_pubkey: [0x22u8; 33],
-                worker_sig: [0x33u8; 64],
-                solution: [0x44u8; 8],
-                commitment_nonce: [0x55u8; 32],
-                delegation: None,
-                phase20_ext: None,
-            },
-            PoawxBlockReceipt {
-                height: 5,
-                lane: b'B',
-                worker_pkh: [0x66u8; 20],
-                worker_pubkey: [0x77u8; 33],
-                worker_sig: [0x88u8; 64],
-                solution: [0x99u8; 8],
-                commitment_nonce: [0xaau8; 32],
-                delegation: None,
-                phase20_ext: None,
-            },
-        ];
-        // Build JSON exactly as the node's block_json_for emits it.
-        let arr: Vec<serde_json::Value> = receipts
-            .iter()
-            .map(|r| {
-                serde_json::json!({
-                    "height": r.height,
-                    "lane": std::str::from_utf8(&[r.lane]).unwrap_or("?").to_string(),
-                    "worker_pkh": hex::encode(r.worker_pkh),
-                    "worker_pubkey": hex::encode(r.worker_pubkey),
-                    "worker_sig": hex::encode(r.worker_sig),
-                    "solution": hex::encode(r.solution),
-                    "commitment_nonce": hex::encode(r.commitment_nonce),
-                })
-            })
-            .collect();
-        let v = serde_json::json!({ "poawx_receipts": arr });
-
-        let parsed = super::parse_poawx_receipts_json(&v).expect("receipts parsed");
-        assert_eq!(parsed, receipts, "receipts round-trip byte-for-byte");
-        assert_eq!(
-            irx1_root_from_block_receipts(&parsed),
-            irx1_root_from_block_receipts(&receipts),
-            "receipts-root matches byte-for-byte"
-        );
-
-        // A JSON without the field yields None (pre-activation blocks).
-        assert!(super::parse_poawx_receipts_json(&serde_json::json!({})).is_none());
-    }
 }
 
 fn miner_address_info() -> Option<(String, Vec<u8>)> {
@@ -578,7 +506,11 @@ fn miner_pubkey_hash() -> Option<Vec<u8>> {
     miner_address_info().map(|(_, pkh)| pkh)
 }
 
-fn build_coinbase_with_pkh(reward: u64, payout_pkh: &[u8], script_sig: Vec<u8>) -> Transaction {
+fn build_coinbase_with_pkh(
+    reward: u64,
+    payout_pkh: &[u8],
+    script_sig: Vec<u8>,
+) -> Transaction {
     let coinbase_input = TxInput {
         prev_txid: [0u8; 32],
         prev_index: 0xffff_ffff,
@@ -648,11 +580,7 @@ fn extract_height_from_coinbase1_hex(coinbase1_hex: &str) -> Option<u64> {
             o += 1;
             saw_digit = true;
         }
-        if saw_digit {
-            Some(h)
-        } else {
-            None
-        }
+        if saw_digit { Some(h) } else { None }
     } else {
         let push_n = bytes[o] as usize;
         o += 1;
@@ -676,11 +604,7 @@ fn coinbase_tag() -> Option<&'static str> {
             eprintln!("[warn] IRIUM_COINBASE_TAG must be non-empty ASCII; ignoring");
             return None;
         }
-        Some(if tag.len() > 20 {
-            tag[..20].to_string()
-        } else {
-            tag
-        })
+        Some(if tag.len() > 20 { tag[..20].to_string() } else { tag })
     })
     .as_deref()
 }
@@ -700,6 +624,22 @@ fn build_coinbase(height: u64, reward: u64) -> Result<Transaction, String> {
 #[derive(Deserialize)]
 struct LegacyMempoolEntry {
     hex: String,
+}
+
+#[derive(Deserialize)]
+struct TemplateTx {
+    hex: String,
+    fee: Option<u64>,
+    relay_addresses: Option<Vec<String>>,
+}
+
+#[derive(Deserialize)]
+struct BlockTemplate {
+    height: u64,
+    prev_hash: String,
+    bits: String,
+    time: u32,
+    txs: Vec<TemplateTx>,
 }
 
 #[derive(Deserialize)]
@@ -877,6 +817,60 @@ struct SubmitBlockRequest {
     submit_source: Option<String>,
 }
 
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
+fn rpc_client() -> Result<Client, String> {
+    let mut builder = Client::builder().timeout(Duration::from_secs(5));
+    if let Ok(path) = env::var("IRIUM_RPC_CA") {
+        let pem = fs::read(&path).map_err(|e| format!("read CA {path}: {e}"))?;
+        let cert = Certificate::from_pem(&pem).map_err(|e| format!("invalid CA {path}: {e}"))?;
+        builder = builder.add_root_certificate(cert);
+    }
+    let insecure = env::var("IRIUM_RPC_INSECURE")
+        .ok()
+        .map(|v| {
+            let v = v.to_lowercase();
+            v == "1" || v == "true" || v == "yes"
+        })
+        .unwrap_or(false);
+    let strict = env::var("IRIUM_RPC_STRICT")
+        .ok()
+        .map(|v| {
+            let v = v.to_lowercase();
+            v == "1" || v == "true" || v == "yes"
+        })
+        .unwrap_or(false);
+    let base = node_rpc_base();
+    let mut allow_insecure = false;
+    if !strict && insecure {
+        let url = reqwest::Url::parse(&base).map_err(|e| format!("invalid RPC URL {base}: {e}"))?;
+        if url.scheme() != "https" {
+            eprintln!("[warn] IRIUM_RPC_INSECURE=1 has no effect on non-HTTPS RPC URL");
+        } else {
+            let host = url
+                .host_str()
+                .ok_or_else(|| "RPC URL missing host".to_string())?;
+            if !is_loopback_host(host) {
+                return Err(format!(
+                    "Refusing to disable TLS verification for non-local RPC host {host}; set IRIUM_RPC_CA instead"
+                ));
+            }
+            eprintln!("[warn] IRIUM_RPC_INSECURE=1: TLS verification disabled for https://{host}");
+            allow_insecure = true;
+        }
+    }
+    if allow_insecure {
+        builder = builder.danger_accept_invalid_certs(true);
+    }
+    builder.build().map_err(|e| format!("build client: {e}"))
+}
+
+fn node_rpc_base() -> String {
+    env::var("IRIUM_NODE_RPC").unwrap_or_else(|_| "https://127.0.0.1:38300".to_string())
+}
+
 static RPC_HINT_SHOWN: AtomicBool = AtomicBool::new(false);
 
 fn maybe_log_rpc_hint(err: &str) {
@@ -927,6 +921,70 @@ fn miner_thread_count() -> usize {
         1
     } else {
         n
+    }
+}
+
+fn is_tls_mismatch(err: &str) -> bool {
+    let lower = err.to_lowercase();
+    lower.contains("invalid http version")
+}
+
+fn is_https_scheme_mismatch(err: &str) -> bool {
+    let lower = err.to_lowercase();
+    lower.contains("wrong version number")
+        || lower.contains("first record does not look like a tls handshake")
+        || lower.contains("received http/0.9 when not allowed")
+        || lower.contains("invalid http version")
+        || lower.contains("tls handshake")
+        || lower.contains("unexpected eof while reading")
+}
+
+fn with_rpc_base<T, F>(f: F) -> Result<T, String>
+where
+    F: Fn(&str) -> Result<T, String>,
+{
+    fn should_log_https_fallback() -> bool {
+        static LAST_LOG: OnceLock<Mutex<Option<Instant>>> = OnceLock::new();
+        let lock = LAST_LOG.get_or_init(|| Mutex::new(None));
+        if let Ok(mut guard) = lock.lock() {
+            let now = Instant::now();
+            let allow = guard
+                .as_ref()
+                .map(|t| now.duration_since(*t) >= Duration::from_secs(60))
+                .unwrap_or(true);
+            if allow {
+                *guard = Some(now);
+            }
+            allow
+        } else {
+            true
+        }
+    }
+
+    let base = node_rpc_base();
+    match f(&base) {
+        Ok(v) => Ok(v),
+        Err(e) => {
+            if base.starts_with("https://") && is_https_scheme_mismatch(&e) {
+                let http = base.replacen("https://", "http://", 1);
+                if let Ok(v) = f(&http) {
+                    env::set_var("IRIUM_NODE_RPC", &http);
+                    if should_log_https_fallback() {
+                        eprintln!("[warn] RPC scheme mismatch; switching to {http}");
+                    }
+                    return Ok(v);
+                }
+            }
+            if base.starts_with("http://") && is_tls_mismatch(&e) {
+                let https = base.replacen("http://", "https://", 1);
+                if let Ok(v) = f(&https) {
+                    env::set_var("IRIUM_NODE_RPC", &https);
+                    eprintln!("[warn] RPC scheme mismatch; switching to {https}");
+                    return Ok(v);
+                }
+            }
+            Err(e)
+        }
     }
 }
 
@@ -1071,7 +1129,6 @@ fn load_persisted_blocks(state: &mut ChainState) {
                     },
                     transactions: txs,
                     auxpow: None,
-                    poawx_receipts: parse_poawx_receipts_json(&parsed),
                 };
                 // Recompute merkle to be safe.
                 block.header.merkle_root = block.merkle_root();
@@ -1132,6 +1189,44 @@ fn gbt_longpoll_enabled() -> bool {
             v == "1" || v == "true" || v == "yes"
         })
         .unwrap_or(false)
+}
+
+fn gbt_query_params(longpoll: bool) -> Vec<(String, String)> {
+    let mut params = Vec::new();
+    if longpoll {
+        params.push(("longpoll".to_string(), "1".to_string()));
+    }
+    if let Ok(v) = env::var("IRIUM_GBT_LONGPOLL_SECS") {
+        params.push(("poll_secs".to_string(), v));
+    }
+    if let Ok(v) = env::var("IRIUM_GBT_MAX_TXS") {
+        params.push(("max_txs".to_string(), v));
+    }
+    if let Ok(v) = env::var("IRIUM_GBT_MIN_FEE") {
+        params.push(("min_fee".to_string(), v));
+    }
+    params
+}
+
+fn fetch_block_template(client: &Client, longpoll: bool) -> Result<BlockTemplate, String> {
+    with_rpc_base(|base| fetch_block_template_with_base(client, base, longpoll))
+}
+
+fn fetch_block_template_with_base(
+    client: &Client,
+    base: &str,
+    longpoll: bool,
+) -> Result<BlockTemplate, String> {
+    let url = format!("{}/rpc/getblocktemplate", base.trim_end_matches("/"));
+    let mut req = client.get(url).query(&gbt_query_params(longpoll));
+    if let Some(token) = rpc_token() {
+        req = req.bearer_auth(token);
+    }
+    let resp = req.send().map_err(|e| format!("template failed: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(rpc_status_error("template failed", resp.status()));
+    }
+    resp.json().map_err(|e| format!("template parse: {e}"))
 }
 
 fn fetch_block_json(client: &Client, height: u64) -> Result<serde_json::Value, String> {
@@ -1323,98 +1418,6 @@ fn parse_bits(bits_str: &str) -> Result<u32, String> {
     u32::from_str_radix(trimmed, 16).map_err(|e| format!("invalid bits field: {e}"))
 }
 
-/// Parse the `poawx_receipts` array from a block JSON (as served by the node's
-/// `/rpc/block` / `/rpc/blocks` and written to persisted `block_<h>.json`) back
-/// into typed receipts. Without this, a synced block reconstructs with
-/// `poawx_receipts = None` and is rejected at/after PoAW-X activation, so the
-/// miner cannot cross the activation height. Verbatim mirror of the node's
-/// parser in iriumd.rs `parse_persisted_block_file`; a missing field yields
-/// `None` (pre-activation blocks carry no receipts).
-fn parse_poawx_receipts_json(
-    v: &serde_json::Value,
-) -> Option<Vec<irium_node_rs::poawx::PoawxBlockReceipt>> {
-    v.get("poawx_receipts")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|r| {
-                    fn to20(s: &str) -> Option<[u8; 20]> {
-                        let b = hex::decode(s).ok()?;
-                        if b.len() != 20 {
-                            return None;
-                        }
-                        let mut a = [0u8; 20];
-                        a.copy_from_slice(&b);
-                        Some(a)
-                    }
-                    fn to33(s: &str) -> Option<[u8; 33]> {
-                        let b = hex::decode(s).ok()?;
-                        if b.len() != 33 {
-                            return None;
-                        }
-                        let mut a = [0u8; 33];
-                        a.copy_from_slice(&b);
-                        Some(a)
-                    }
-                    fn to64(s: &str) -> Option<[u8; 64]> {
-                        let b = hex::decode(s).ok()?;
-                        if b.len() != 64 {
-                            return None;
-                        }
-                        let mut a = [0u8; 64];
-                        a.copy_from_slice(&b);
-                        Some(a)
-                    }
-                    fn to8(s: &str) -> Option<[u8; 8]> {
-                        let b = hex::decode(s).ok()?;
-                        if b.len() != 8 {
-                            return None;
-                        }
-                        let mut a = [0u8; 8];
-                        a.copy_from_slice(&b);
-                        Some(a)
-                    }
-                    fn to32(s: &str) -> Option<[u8; 32]> {
-                        let b = hex::decode(s).ok()?;
-                        if b.len() != 32 {
-                            return None;
-                        }
-                        let mut a = [0u8; 32];
-                        a.copy_from_slice(&b);
-                        Some(a)
-                    }
-                    Some(irium_node_rs::poawx::PoawxBlockReceipt {
-                        height: r.get("height")?.as_u64()?,
-                        lane: r.get("lane")?.as_str()?.bytes().next()?,
-                        worker_pkh: to20(r.get("worker_pkh")?.as_str()?)?,
-                        worker_pubkey: to33(r.get("worker_pubkey")?.as_str()?)?,
-                        worker_sig: to64(r.get("worker_sig")?.as_str()?)?,
-                        solution: to8(r.get("solution")?.as_str()?)?,
-                        commitment_nonce: to32(r.get("commitment_nonce")?.as_str()?)?,
-                        delegation: match r.get("delegation").and_then(|v| v.as_str()) {
-                            Some(s) if !s.is_empty() => Some(
-                                irium_node_rs::poawx::Delegation::deserialize(
-                                    &hex::decode(s).ok()?,
-                                )
-                                .ok()?,
-                            ),
-                            _ => None,
-                        },
-                        phase20_ext: match r.get("phase20_ext").and_then(|v| v.as_str()) {
-                            Some(s) if !s.is_empty() => Some(
-                                irium_node_rs::poawx::Phase20ReceiptExt::deserialize(
-                                    &hex::decode(s).ok()?,
-                                )
-                                .ok()?,
-                            ),
-                            _ => None,
-                        },
-                    })
-                })
-                .collect::<Vec<_>>()
-        })
-}
-
 fn connect_block_from_json(state: &mut ChainState, v: &serde_json::Value) -> Result<(), String> {
     let header_obj = v.get("header").ok_or("missing header")?;
     let get_hex32 = |key: &str| -> Result<[u8; 32], String> {
@@ -1474,7 +1477,6 @@ fn connect_block_from_json(state: &mut ChainState, v: &serde_json::Value) -> Res
         },
         transactions: txs,
         auxpow: None,
-        poawx_receipts: parse_poawx_receipts_json(v),
     };
     block.header.merkle_root = block.merkle_root();
     state.connect_block(block).map(|_| ())
@@ -1595,10 +1597,7 @@ fn reconcile_with_template(
                 }
             }
             Err(e) => {
-                eprintln!(
-                    "[warn] Miner failed to download blocks {}..+{}: {}",
-                    h, want, e
-                );
+                eprintln!("[warn] Miner failed to download blocks {}..+{}: {}", h, want, e);
                 break 'sync;
             }
         };
@@ -1847,7 +1846,6 @@ fn mine_once(
         header,
         transactions: txs.clone(),
         auxpow: None,
-        poawx_receipts: None,
     };
     let merkle = block.merkle_root();
     block.header.merkle_root = merkle;
@@ -2236,14 +2234,19 @@ fn stratum_reader(
             // count accepted vs rejected shares.
             _ => {
                 if msg.get("id").is_some() && method.is_none() {
-                    let accepted = msg.get("result").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let accepted = msg.get("result")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     if accepted {
                         println!("[stratum] share accepted");
                     } else {
                         // Stratum error is typically [code, "message", traceback].
-                        let reason = msg
-                            .get("error")
-                            .and_then(|e| e.get(1).and_then(|v| v.as_str()).or_else(|| e.as_str()))
+                        let reason = msg.get("error")
+                            .and_then(|e| {
+                                e.get(1)
+                                    .and_then(|v| v.as_str())
+                                    .or_else(|| e.as_str())
+                            })
                             .unwrap_or("unknown reason");
                         eprintln!("[stratum] share rejected: {}", reason);
                     }
@@ -2520,9 +2523,7 @@ fn solo_stratum_listen_addr() -> Option<String> {
 
     if enabled {
         if listen.is_none() {
-            eprintln!(
-                "Error: IRIUM_SOLO_STRATUM_LISTEN must be set when --solo-stratum is enabled"
-            );
+            eprintln!("Error: IRIUM_SOLO_STRATUM_LISTEN must be set when --solo-stratum is enabled");
             std::process::exit(1);
         }
         listen
@@ -2929,7 +2930,6 @@ fn submit_solo_share(
             header,
             transactions: txs,
             auxpow: None,
-            poawx_receipts: None,
         };
         if block.merkle_root() != merkle_root {
             return Err("submitted share merkle mismatch".to_string());
@@ -3182,386 +3182,7 @@ fn run_solo_stratum_server(addr: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Solo PoAW-X mining loop: fetch template -> build all-gates block with the
-/// miner key -> ingest admissions -> submit extended. Devnet/testnet only.
-fn run_poawx_solo() -> Result<(), String> {
-    let net = irium_node_rs::activation::network_id_byte();
-    // PoAW-X mining is permitted on mainnet from the consensus activation height
-    // (50_000); before then the node assignment/submit RPCs return 503 and this loop
-    // idles until activation. Non-mainnet is gated by the node env as before.
-    let secret = poawx_miner_secret()?;
-    let client = rpc_client()?;
-    let diff = poawx_receipt_difficulty_bits();
-    let interval = poawx_miner_interval_secs();
-    println!("[poawx] solo PoAW-X mining started (net={net}, interval={interval}s); building all-gates blocks with the miner key");
-    let mut last_reg_submit: u64 = 0;
-    loop {
-        let tmpl = match fetch_block_template(&client, false) {
-            Ok(t) => t,
-            Err(e) => {
-                eprintln!("[poawx] template fetch failed: {e}; retrying");
-                thread::sleep(Duration::from_secs(3));
-                continue;
-            }
-        };
-        let height = tmpl.height;
-        let prev_hash = poawx_decode_hash32(&tmpl.prev_hash)?;
-        let bits = u32::from_str_radix(tmpl.bits.trim_start_matches("0x"), 16)
-            .map_err(|e| format!("bad template bits {}: {e}", tmpl.bits))?;
-        let (parent_prev_hash, parent_seed_components) =
-            poawx_fetch_parent_info(&client, height)?;
-        let dominance = match poawx_fetch_dominance(&client) {
-            Ok(d) => d,
-            Err(e) => {
-                eprintln!("[poawx] dominance fetch failed: {e}; retrying");
-                thread::sleep(Duration::from_secs(3));
-                continue;
-            }
-        };
-
-        // Gate flags from the node template (authoritative). When the node provides
-        // them, build per the node; otherwise (older node) fall back to env.
-        let node_gates = match (
-            tmpl.poawx_hidden_precommit_active,
-            tmpl.poawx_tickets_active,
-            tmpl.poawx_multisource_seed_active,
-            tmpl.poawx_penalty_state_active,
-            tmpl.poawx_puzzle_anchor_bits,
-            tmpl.poawx_effective_sybil_bits,
-        ) {
-            (Some(hp), Some(tk), Some(ms), Some(pn), Some(pb), Some(sb)) => {
-                Some(irium_node_rs::poawx_mining_harness::NodeGateFlags {
-                    hidden_precommit_active: hp,
-                    tickets_active: tk,
-                    multisource_seed_active: ms,
-                    penalty_state_active: pn,
-                    puzzle_anchor_bits: pb,
-                    effective_sybil_bits: sb,
-                    // Node-authoritative audit flag; fall back to env if an older node
-                    // does not advertise it in the template.
-                    audit_hardening_active: tmpl.poawx_audit_hardening_active.unwrap_or_else(
-                        || irium_node_rs::poawx_proposer::audit_hardening_active(height),
-                    ),
-                })
-            }
-            _ => None,
-        };
-
-        // Phase 31: private proposer-VRF sortition. When the node advertises the
-        // proposer gate as active, prove our VRF over the committee seed and only
-        // build if we are selected at some cascade round the elapsed time allows;
-        // otherwise wait (a later round, or accrued registrations, may admit us).
-        // Phase 31R: keep our proposer VRF key registered on-chain so we can become
-        // eligible (fixes the onboarding chicken-and-egg). Submit (throttled) to our node,
-        // which gossips it; a producer announces it, and we are eligible FREEZE_DEPTH
-        // blocks later. Harmless if already known (deduped by the pool / connect_block).
-        if tmpl.poawx_reg_active.unwrap_or(false)
-            && (last_reg_submit == 0 || height.saturating_sub(last_reg_submit) >= 20)
-        {
-            if let Some(a_hash_hex) = tmpl.poawx_reg_anchor_hash.clone() {
-                if let Ok(a_hash) = poawx_decode_hash32(&a_hash_hex) {
-                    let a_h = tmpl.poawx_reg_anchor_height.unwrap_or(0);
-                    let bits = tmpl.poawx_reg_required_sybil_bits.unwrap_or(0);
-                    match irium_node_rs::poawx::ProposerRegistrationV1::build_signed(
-                        &secret, net, a_h, &a_hash, bits,
-                    ) {
-                        Ok(reg) => match poawx_submit_registration(&client, &reg.serialize()) {
-                            Ok(()) => {
-                                println!("[poawx] submitted proposer registration (anchor={a_h})");
-                                last_reg_submit = height;
-                            }
-                            Err(e) => eprintln!("[poawx] registration submit failed: {e}"),
-                        },
-                        Err(e) => eprintln!("[poawx] registration build failed: {e}"),
-                    }
-                }
-            }
-        }
-
-        let proposer_ctx = if tmpl.poawx_proposer_vrf_active.unwrap_or(false) {
-            let seed = match tmpl.poawx_proposer_seed.as_deref() {
-                Some(s) => match poawx_decode_hash32(s) {
-                    Ok(b) => b,
-                    Err(e) => {
-                        eprintln!("[poawx] bad proposer seed: {e}; retrying");
-                        thread::sleep(Duration::from_secs(3));
-                        continue;
-                    }
-                },
-                None => {
-                    eprintln!("[poawx] proposer active but template carried no seed; retrying");
-                    thread::sleep(Duration::from_secs(3));
-                    continue;
-                }
-            };
-            let eligible = tmpl.poawx_proposer_eligible_count.unwrap_or(0);
-            let max_round = tmpl.poawx_proposer_max_allowed_round.unwrap_or(0);
-            let proof = match irium_node_rs::poawx_candidate::AssignmentProofV2::prove_self_solver(
-                &secret,
-                net,
-                height,
-                irium_node_rs::poawx_proposer::ROLE_PROPOSER,
-                [0u8; 32],
-                seed,
-            ) {
-                Ok(p) => p,
-                Err(e) => {
-                    eprintln!("[poawx] proposer proof failed: {e}; retrying");
-                    thread::sleep(Duration::from_secs(3));
-                    continue;
-                }
-            };
-            let priority = irium_node_rs::poawx_proposer::proposer_priority(&proof.vrf_output);
-            let round = (0..=max_round)
-                .find(|r| irium_node_rs::poawx_proposer::is_selected(priority, eligible, *r));
-            match round {
-                Some(r) => {
-                    println!(
-                        "[poawx] proposer SELECTED height={height} round={r} priority={priority} eligible={eligible}"
-                    );
-                    Some(irium_node_rs::poawx_mining_harness::ProposerCtx {
-                        assignment: irium_node_rs::poawx::ProposerAssignmentV1 {
-                            round: r,
-                            proof,
-                        },
-                    })
-                }
-                None => {
-                    println!(
-                        "[poawx] not proposer this slot height={height} (priority={priority} eligible={eligible} max_round={max_round}); waiting"
-                    );
-                    thread::sleep(Duration::from_secs(3));
-                    continue;
-                }
-            }
-        } else {
-            None
-        };
-
-        // Phase 31R: the producer must force-drain the node's queue head (activations)
-        // and may announce pool candidates; assemble the section from the template.
-        let registration_section = {
-            let parse = |v: &Option<Vec<String>>| -> Vec<irium_node_rs::poawx::ProposerRegistrationV1> {
-                v.as_ref()
-                    .map(|l| {
-                        l.iter()
-                            .filter_map(|h| hex::decode(h).ok())
-                            .filter_map(|b| {
-                                irium_node_rs::poawx::ProposerRegistrationV1::deserialize(&b).ok()
-                            })
-                            .collect()
-                    })
-                    .unwrap_or_default()
-            };
-            let activations = parse(&tmpl.poawx_reg_activations);
-            let announces = parse(&tmpl.poawx_reg_announces);
-            if tmpl.poawx_reg_active.unwrap_or(false)
-                && (!activations.is_empty() || !announces.is_empty())
-            {
-                Some(irium_node_rs::poawx::ProposerRegistrationSection {
-                    announces,
-                    activations,
-                })
-            } else {
-                None
-            }
-        };
-
-        // Stage G0: pass the default CPU nonce solver explicitly (grinds the header
-        // nonce with mine_pow, exactly as before). Stage G1's GPU miner calls the
-        // same entry point with a GPU-backed solver instead.
-        let proof = match irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver(
-            &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,
-            parent_seed_components, &dominance, node_gates.as_ref(), proposer_ctx.as_ref(),
-            registration_section.as_ref(),
-            &irium_node_rs::poawx_mining_harness::default_cpu_nonce_solver,
-        ) {
-            Ok(p) => p,
-            Err(e) => {
-                eprintln!("[poawx] build failed at height {height}: {e}; retrying");
-                thread::sleep(Duration::from_secs(3));
-                continue;
-            }
-        };
-
-        if env::var("IRIUM_POAWX_EXPORT_RECEIPT_JSON")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-            .unwrap_or(false)
-        {
-            let receipt = proof
-                .block
-                .poawx_receipts
-                .as_ref()
-                .and_then(|r| r.first())
-                .ok_or("missing receipt in built block")?;
-            let ext_hex = receipt
-                .phase20_ext
-                .as_ref()
-                .map(|e: &irium_node_rs::poawx::Phase20ReceiptExt| hex::encode(e.serialize()))
-                .unwrap_or_default();
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&json!({
-                    "height": receipt.height,
-                    "lane": (receipt.lane as char).to_string(),
-                    "worker_pkh": hex::encode(receipt.worker_pkh),
-                    "solution": hex::encode(receipt.solution),
-                    "commitment_nonce": hex::encode(receipt.commitment_nonce),
-                    "worker_pubkey": hex::encode(receipt.worker_pubkey),
-                    "worker_sig": hex::encode(receipt.worker_sig),
-                    "delegation": "",
-                    "phase20_ext": ext_hex,
-                }))
-                .map_err(|e| format!("receipt json encode: {e}"))?
-            );
-            return Ok(());
-        }
-
-        // Candidate-admission gossip is best-effort: with committed-admission
-        // (phase22a) enforced the node skips the phase21e admission-cache check, so a
-        // rejected/failed gossip post must NOT block block submission.
-        for (i, adm) in proof.admissions.iter().enumerate() {
-            if let Err(e) = poawx_post_admission(&client, adm) {
-                eprintln!("[poawx] admission[{i}] gossip post failed (non-fatal): {e}");
-            }
-        }
-        let req = build_poawx_submit_request(&proof)?;
-        match poawx_submit_extended(&client, &req) {
-            Ok(()) => println!("[poawx] submitted all-gates block height={height}"),
-            Err(e) => eprintln!("[poawx] submit failed at height {height}: {e}"),
-        }
-        thread::sleep(Duration::from_secs(interval));
-    }
-}
-
-// -- Stage 3a: admission-emit mode ------------------------------------------
-// Reads a roster file (height + [{pkh, role}] entries recorded by the pool from
-// accepted shares), fetches the node template for the authoritative height/seed,
-// builds one candidate admission per roster miner via the node-crate helper
-// (build_pool_admission_bytes: pool VRF work under our secret, miner pkh as the
-// solver attribution tag), and POSTs each to the node loopback
-// /poawx/candidate-admission ingest. Gated by IRIUM_POAWX_GENERATE_ADMISSIONS=1
-// (off => exits without emitting). Submission-only: block production untouched.
-fn run_poawx_emit_admissions() -> Result<(), String> {
-    if env::var("IRIUM_POAWX_GENERATE_ADMISSIONS").map(|v| v.trim() != "1").unwrap_or(true) {
-        println!("[emit-admissions] IRIUM_POAWX_GENERATE_ADMISSIONS not set to 1; nothing emitted");
-        return Ok(());
-    }
-    let roster_path = env::var("IRIUM_POAWX_ADMISSION_ROSTER")
-        .map_err(|_| "IRIUM_POAWX_ADMISSION_ROSTER not set".to_string())?;
-    let roster_raw = std::fs::read_to_string(&roster_path)
-        .map_err(|e| format!("roster read {roster_path}: {e}"))?;
-    let roster: serde_json::Value =
-        serde_json::from_str(&roster_raw).map_err(|e| format!("roster parse: {e}"))?;
-    let roster_height = roster
-        .get("height")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| "roster: missing height".to_string())?;
-    let miners = roster
-        .get("miners")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| "roster: missing miners".to_string())?;
-
-    let secret = poawx_miner_secret()?;
-    let net = irium_node_rs::activation::network_id_byte();
-    let client = rpc_client()?;
-
-    // authoritative height + seed from the node template (single source of truth).
-    let tpl: serde_json::Value = with_rpc_base(|base| {
-        let url = format!("{}/rpc/getblocktemplate", base.trim_end_matches('/'));
-        let mut req = client.get(url);
-        if let Some(token) = rpc_token() {
-            req = req.bearer_auth(token);
-        }
-        let resp = req.send().map_err(|e| format!("template fetch: {e}"))?;
-        if !resp.status().is_success() {
-            return Err(rpc_status_error("template fetch", resp.status()));
-        }
-        resp.json().map_err(|e| format!("template json: {e}"))
-    })?;
-    let tpl_height = tpl.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
-    if tpl_height != roster_height {
-        println!(
-            "[emit-admissions] roster height {roster_height} != template height {tpl_height}; skipping (stale roster)"
-        );
-        return Ok(());
-    }
-    let seed_hex = tpl
-        .get("poawx_proposer_seed")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "template: missing poawx_proposer_seed".to_string())?;
-    let seed_vec = hex::decode(seed_hex).map_err(|e| format!("seed hex: {e}"))?;
-    let seed: [u8; 32] = seed_vec
-        .as_slice()
-        .try_into()
-        .map_err(|_| "seed not 32 bytes".to_string())?;
-
-    let mut emitted = 0usize;
-    for m in miners {
-        let pkh_hex = m.get("pkh").and_then(|v| v.as_str()).unwrap_or("");
-        let role = m.get("role").and_then(|v| v.as_u64()).unwrap_or(255) as u8;
-        let pkh_vec = match hex::decode(pkh_hex) {
-            Ok(v) if v.len() == 20 => v,
-            _ => {
-                eprintln!("[emit-admissions] bad pkh {pkh_hex}; skipping entry");
-                continue;
-            }
-        };
-        let mut pkh = [0u8; 20];
-        pkh.copy_from_slice(&pkh_vec);
-        let bytes = match irium_node_rs::poawx_admission::build_pool_admission_bytes(
-            net, &secret, roster_height, &seed, pkh, role,
-        ) {
-            Some(b) => b,
-            None => {
-                eprintln!("[emit-admissions] admission build failed for {pkh_hex}");
-                continue;
-            }
-        };
-        let status = with_rpc_base(|base| {
-            let url = format!("{}/poawx/candidate-admission", base.trim_end_matches('/'));
-            let mut req = client.post(url).body(bytes.clone());
-            if let Some(token) = rpc_token() {
-                req = req.bearer_auth(token);
-            }
-            let resp = req.send().map_err(|e| format!("admission post: {e}"))?;
-            let code = resp.status();
-            let body: serde_json::Value = resp.json().unwrap_or(serde_json::Value::Null);
-            Ok(format!(
-                "{} {}",
-                code.as_u16(),
-                body.get("status").and_then(|s| s.as_str()).unwrap_or("-")
-            ))
-        })?;
-        println!(
-            "[emit-admissions] height={roster_height} miner={} role={role} -> {status}",
-            &pkh_hex[..8.min(pkh_hex.len())]
-        );
-        emitted += 1;
-        // stay well under the node per-source-IP admission rate limit.
-        std::thread::sleep(std::time::Duration::from_millis(200));
-    }
-    println!("[emit-admissions] done: {emitted} admissions emitted for height {roster_height}");
-    Ok(())
-}
-
 fn main() {
-    if env::args().any(|a| a == "--poawx-emit-admissions") {
-        load_env_file("/etc/irium/miner.env");
-        if let Err(e) = run_poawx_emit_admissions() {
-            eprintln!("[emit-admissions] error: {e}");
-            std::process::exit(1);
-        }
-        return;
-    }
-    if env::args().any(|a| a == "--poawx") {
-        load_env_file("/etc/irium/miner.env");
-        if let Err(e) = run_poawx_solo() {
-            eprintln!("[poawx] solo mining error: {e}");
-            std::process::exit(1);
-        }
-        return;
-    }
     let loaded_env = load_env_file("/etc/irium/miner.env");
     if loaded_env {
         if json_log_enabled() {
@@ -3613,23 +3234,21 @@ fn main() {
         mpsov1_activation_height: resolved_mpsov1_activation_height(network),
         lwma: LwmaParams::new(lwma_activation, pow_limit),
         lwma_v2: lwma_v2_activation.map(|h| LwmaParams::new_v2(Some(h), pow_limit)),
-        auxpow_activation_height: irium_node_rs::activation::resolved_auxpow_activation_height(
-            network,
-        ),
-        btc_spv: irium_node_rs::btc_spv::resolve_btc_spv_params(network),
-        ltc_spv: irium_node_rs::ltc_spv::resolve_ltc_spv_params(network),
-        htlc_btc_swap_v1_activation_height:
-            irium_node_rs::activation::resolved_htlc_btc_swap_v1_activation_height(network),
-        btc_swap_bech32_payment_activation_height:
-            irium_node_rs::activation::resolved_btc_swap_bech32_payment_activation_height(network),
-        htlc_ltc_swap_v1_activation_height:
-            irium_node_rs::activation::resolved_htlc_ltc_swap_v1_activation_height(network),
-        swap_order_v1_activation_height:
-            irium_node_rs::activation::resolved_swap_order_v1_activation_height(network),
-        ltc_swap_order_v1_activation_height:
-            irium_node_rs::activation::resolved_ltc_swap_order_v1_activation_height(network),
-        coinbase_header_batch_activation_height:
-            irium_node_rs::activation::resolved_coinbase_header_batch_activation_height(network),
+        auxpow_activation_height: irium_node_rs::activation::resolved_auxpow_activation_height(network),
+            btc_spv: irium_node_rs::btc_spv::resolve_btc_spv_params(network),
+            ltc_spv: irium_node_rs::ltc_spv::resolve_ltc_spv_params(network),
+            htlc_btc_swap_v1_activation_height:
+                irium_node_rs::activation::resolved_htlc_btc_swap_v1_activation_height(network),
+            btc_swap_bech32_payment_activation_height:
+                irium_node_rs::activation::resolved_btc_swap_bech32_payment_activation_height(network),
+            htlc_ltc_swap_v1_activation_height:
+                irium_node_rs::activation::resolved_htlc_ltc_swap_v1_activation_height(network),
+            swap_order_v1_activation_height:
+                irium_node_rs::activation::resolved_swap_order_v1_activation_height(network),
+            ltc_swap_order_v1_activation_height:
+                irium_node_rs::activation::resolved_ltc_swap_order_v1_activation_height(network),
+            coinbase_header_batch_activation_height:
+                irium_node_rs::activation::resolved_coinbase_header_batch_activation_height(network),
     };
 
     let mut state = ChainState::new(params.clone());
@@ -3660,17 +3279,16 @@ fn main() {
     }
 
     match std::env::var("IRIUM_ADVERTISE_ADDR") {
-        Ok(ref v) if !v.trim().is_empty() => match v.trim().parse::<std::net::SocketAddr>() {
-            Ok(sa) if sa.port() != 0 => {
-                eprintln!(
-                    "[advertise] embedding peer address {} in coinbase outputs",
-                    sa
-                );
+        Ok(ref v) if !v.trim().is_empty() => {
+            match v.trim().parse::<std::net::SocketAddr>() {
+                Ok(sa) if sa.port() != 0 => {
+                    eprintln!("[advertise] embedding peer address {} in coinbase outputs", sa);
+                }
+                _ => {
+                    eprintln!("[advertise] IRIUM_ADVERTISE_ADDR={} is not a valid ip:port — peer embedding disabled", v.trim());
+                }
             }
-            _ => {
-                eprintln!("[advertise] IRIUM_ADVERTISE_ADDR={} is not a valid ip:port — peer embedding disabled", v.trim());
-            }
-        },
+        }
         _ => {
             eprintln!("[advertise] IRIUM_ADVERTISE_ADDR not set — peer embedding disabled");
         }
@@ -3758,35 +3376,6 @@ fn main() {
                 continue;
             }
         };
-
-        // PoAW-X activation guard (node-authoritative via the template): once
-        // poawx_mode is "active", legacy plain-PoW blocks are rejected by
-        // consensus (/rpc/submit_block returns 405), so grinding one would only
-        // waste hashrate. Auto-switch to PoAW-X solo mining when the miner
-        // secret is available; otherwise refuse with a clear error. Checked on
-        // every template so a long-running miner also switches when the chain
-        // crosses the activation height mid-run.
-        if template.poawx_mode.as_deref() == Some("active") {
-            let have_secret = env::var("IRIUM_POAWX_MINER_SECRET_HEX")
-                .map(|v| !v.trim().is_empty())
-                .unwrap_or(false);
-            if have_secret {
-                println!(
-                    "[poawx] template reports PoAW-X active at height {}; plain-PoW blocks are rejected by consensus - switching to PoAW-X solo mining",
-                    template.height
-                );
-                if let Err(e) = run_poawx_solo() {
-                    eprintln!("[poawx] solo mining error: {e}");
-                    std::process::exit(1);
-                }
-                return;
-            }
-            eprintln!(
-                "error: PoAW-X is active at this height ({}); plain-PoW blocks are rejected by consensus. Set IRIUM_POAWX_MINER_SECRET_HEX and use --poawx (or mine via a pool).",
-                template.height
-            );
-            std::process::exit(1);
-        }
 
         reconcile_with_template(&mut state, &params, &template, &client);
 

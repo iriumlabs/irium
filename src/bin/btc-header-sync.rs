@@ -92,7 +92,8 @@ fn run() -> Result<(), String> {
     if token.trim().is_empty() {
         return Err("IRIUMD_RPC_TOKEN is empty".into());
     }
-    let rpc_url = env::var("IRIUMD_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC_URL.to_string());
+    let rpc_url =
+        env::var("IRIUMD_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC_URL.to_string());
 
     let client = Client::builder()
         .user_agent(USER_AGENT)
@@ -121,7 +122,9 @@ fn run() -> Result<(), String> {
     if relay_tip >= target {
         log_line(
             "INFO",
-            &format!("up to date — relay tip={relay_tip}, btc net={btc_net_tip}, target={target}"),
+            &format!(
+                "up to date — relay tip={relay_tip}, btc net={btc_net_tip}, target={target}"
+            ),
         );
         return Ok(());
     }
@@ -174,7 +177,9 @@ fn get_relay_tip(client: &Client, rpc_url: &str, token: &str) -> Result<RelayTip
     let status = resp.status();
     if !status.is_success() {
         let body = resp.text().unwrap_or_default();
-        return Err(format!("btcrelaytip returned HTTP {status}; body: {body}"));
+        return Err(format!(
+            "btcrelaytip returned HTTP {status}; body: {body}"
+        ));
     }
     resp.json::<RelayTip>()
         .map_err(|e| format!("btcrelaytip decode failed: {e}"))
@@ -240,7 +245,10 @@ fn submit_headers(
 /// API endpoints we try, in order. mempool.space is primary; if it
 /// returns non-2xx or times out on the tip-height probe we fail over
 /// to blockstream.info for the rest of the cycle.
-const APIS: &[&str] = &["https://mempool.space/api", "https://blockstream.info/api"];
+const APIS: &[&str] = &[
+    "https://mempool.space/api",
+    "https://blockstream.info/api",
+];
 
 fn get_btc_net_tip(client: &Client) -> Result<u64, String> {
     let mut last_err = String::new();

@@ -1,38 +1,44 @@
-
-import type { FormEvent } from 'react'
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Search, Loader2 } from 'lucide-react'
 import { api } from '../api'
 
 export default function SearchBar() {
   const [q, setQ] = useState('')
+  const [loading, setLoading] = useState(false)
   const nav = useNavigate()
 
-  async function handleSubmit(e: FormEvent) {
+  const handle = async (e: React.FormEvent) => {
     e.preventDefault()
-    const trimmed = q.trim()
-    if (!trimmed) return
+    const query = q.trim()
+    if (!query) return
+    setLoading(true)
     try {
-      const result = await api.search(trimmed)
-      if (!result) return
-      if (result.result_type === 'block') nav(`/block/height/${result.value}`)
-      else if (result.result_type === 'tx') nav(`/tx/${result.value}`)
-      else if (result.result_type === 'address') nav(`/address/${result.value}`)
-    } catch { /* ignore */ }
+      const r = await api.search(query)
+      if (r) {
+        if (r.result_type === 'block_height') nav(`/block/height/${r.value}`)
+        else if (r.result_type === 'block_hash') nav(`/block/hash/${r.value}`)
+        else if (r.result_type === 'tx') nav(`/tx/${r.value}`)
+        else if (r.result_type === 'address') nav(`/address/${r.value}`)
+      }
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex gap-2">
+    <form onSubmit={handle} className="relative w-full">
+      <span className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+        {loading
+          ? <Loader2 size={14} className="text-zinc-500 animate-spin" />
+          : <Search size={14} className="text-zinc-500" />}
+      </span>
       <input
         value={q}
         onChange={e => setQ(e.target.value)}
-        placeholder="Block height, hash, txid, or address..."
-        className="flex-1 bg-zinc-900 border border-zinc-700 rounded-md px-3 py-1.5 text-sm
-                   text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-500 mono"
+        placeholder="Search block, txid, or address..."
+        className="w-full bg-zinc-800/80 border border-zinc-700/60 rounded-lg pl-8 pr-3 py-2 text-sm text-zinc-200 placeholder:text-zinc-600 focus:outline-none focus:border-violet-600/60 focus:bg-zinc-800 transition-colors"
       />
-      <button type="submit" className="px-3 py-1.5 bg-zinc-800 hover:bg-zinc-700 rounded-md text-sm transition-colors">
-        Search
-      </button>
     </form>
   )
 }

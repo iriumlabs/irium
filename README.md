@@ -26,31 +26,6 @@ The desktop app's auto-update prompt will surface the same warning. Server / poo
 
 ---
 
-## Important — block 50,000 PoAW-X activation
-
-At **block height 50,000**, Irium mainnet activates **PoAW-X**, its block-proposer consensus layer
-(VRF-selected proposers, a multi-role reward split, and anti-domination). Blocks before 50,000 are
-unaffected. **All node operators and miners must upgrade to iriumd v1.9.119 (or later) before block
-50,000**, or they will reject post-activation blocks and fall off the canonical chain. From block
-50,000, **mining requires a full iriumd node**, not just a pool/stratum connection. Full guide:
-[docs/POAWX.md](docs/POAWX.md).
-
-## PoAW-X Consensus
-
-From block 50,000, Irium layers **PoAW-X** on top of its SHA-256d proof of work (the PoW and
-LWMA-144 difficulty are unchanged):
-
-- **VRF proposer selection** — each block's proposer is verifiably chosen by a VRF (ECVRF /
-  RFC-9381), not just first-to-find-PoW.
-- **Multi-role reward split** — the block reward is split 55% proposer / 22% compute / 13% verify /
-  10% support, paid as coinbase outputs to each role.
-- **Anti-domination** — per-identity weighting over a rolling 2016-block window discourages
-  single-identity dominance.
-- **Distributed finality** — a registered committee provides 2/3-threshold finality.
-
-See [docs/POAWX.md](docs/POAWX.md) for the complete guide and [docs/WHITEPAPER.md](docs/WHITEPAPER.md)
-Section 4 for the specification.
-
 ## What is Irium
 
 Irium is a proof-of-work blockchain built for trustless escrow and proof-based commerce. Instead of smart contracts, it uses a deterministic settlement layer: buyer and seller lock funds on-chain, an attestor submits a cryptographic proof of delivery, and the chain enforces release or refund automatically. No lawyers, no chargebacks, no intermediaries.

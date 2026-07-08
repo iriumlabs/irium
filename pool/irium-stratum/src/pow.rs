@@ -29,10 +29,7 @@ pub fn default_pow_limit() -> BigUint {
 }
 
 pub fn parse_pow_limit_hex(value: &str) -> Option<BigUint> {
-    let v = value
-        .trim()
-        .trim_start_matches("0x")
-        .trim_start_matches("0X");
+    let v = value.trim().trim_start_matches("0x").trim_start_matches("0X");
     if v.is_empty() {
         return None;
     }

@@ -146,7 +146,10 @@ pub async fn write_message(
 /// Read one full P2P message off the stream, with per-read timeout.
 /// Validates magic + checksum; errors fast on anything malformed so
 /// the caller can rotate to a new peer instead of hanging.
-pub async fn read_message(stream: &mut TcpStream, expected_magic: u32) -> io::Result<P2PMessage> {
+pub async fn read_message(
+    stream: &mut TcpStream,
+    expected_magic: u32,
+) -> io::Result<P2PMessage> {
     let mut header = [0u8; 24];
     timeout(READ_TIMEOUT, stream.read_exact(&mut header))
         .await
@@ -292,7 +295,9 @@ pub fn build_getheaders_payload(locator: &[[u8; 32]], hash_stop: [u8; 32]) -> Ve
 /// Parse a headers payload into raw 80-byte headers. The wire format
 /// for each entry is the 80-byte header followed by a varint tx_count
 /// that is always 0 in a getheaders response — we read and discard it.
-pub fn parse_headers_payload(payload: &[u8]) -> Result<Vec<[u8; 80]>, String> {
+pub fn parse_headers_payload(
+    payload: &[u8],
+) -> Result<Vec<[u8; 80]>, String> {
     let (count, used) = read_varint_slice(payload)?;
     let mut cur = used;
     let mut out: Vec<[u8; 80]> = Vec::with_capacity(count as usize);

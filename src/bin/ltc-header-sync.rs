@@ -98,8 +98,8 @@ enum Source {
 
 impl Source {
     fn from_env() -> Result<Self, String> {
-        let raw =
-            env::var("IRIUM_LTC_HEADER_SYNC_SOURCE").unwrap_or_else(|_| "mainnet".to_string());
+        let raw = env::var("IRIUM_LTC_HEADER_SYNC_SOURCE")
+            .unwrap_or_else(|_| "mainnet".to_string());
         match raw.trim().to_lowercase().as_str() {
             "regtest" => Ok(Source::Regtest),
             "mainnet" => Ok(Source::Mainnet),
@@ -126,7 +126,8 @@ fn run() -> Result<(), String> {
     if token.trim().is_empty() {
         return Err("IRIUMD_RPC_TOKEN is empty".into());
     }
-    let rpc_url = env::var("IRIUMD_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC_URL.to_string());
+    let rpc_url =
+        env::var("IRIUMD_RPC_URL").unwrap_or_else(|_| DEFAULT_RPC_URL.to_string());
 
     let source = Source::from_env()?;
 
@@ -163,7 +164,9 @@ fn run() -> Result<(), String> {
     if relay_tip >= target {
         log_line(
             "INFO",
-            &format!("up to date — relay tip={relay_tip}, ltc net={ltc_net_tip}, target={target}"),
+            &format!(
+                "up to date — relay tip={relay_tip}, ltc net={ltc_net_tip}, target={target}"
+            ),
         );
         return Ok(());
     }
@@ -285,7 +288,12 @@ fn get_ltc_net_tip(client: &Client, source: Source) -> Result<u64, String> {
     }
 }
 
-fn fetch_headers(client: &Client, source: Source, start: u64, end: u64) -> Result<String, String> {
+fn fetch_headers(
+    client: &Client,
+    source: Source,
+    start: u64,
+    end: u64,
+) -> Result<String, String> {
     match source {
         Source::Regtest => regtest_fetch_headers(client, start, end),
         Source::Mainnet => mainnet_fetch_headers(client, start, end),
@@ -305,10 +313,12 @@ fn litecoind_rpc<T: for<'de> serde::Deserialize<'de>>(
     method: &str,
     params: serde_json::Value,
 ) -> Result<T, String> {
-    let url = env::var("LTC_RPC_URL").unwrap_or_else(|_| DEFAULT_LTC_RPC_URL.to_string());
-    let user = env::var("LTC_RPC_USER").unwrap_or_else(|_| DEFAULT_LTC_RPC_USER.to_string());
-    let password =
-        env::var("LTC_RPC_PASSWORD").unwrap_or_else(|_| DEFAULT_LTC_RPC_PASSWORD.to_string());
+    let url =
+        env::var("LTC_RPC_URL").unwrap_or_else(|_| DEFAULT_LTC_RPC_URL.to_string());
+    let user =
+        env::var("LTC_RPC_USER").unwrap_or_else(|_| DEFAULT_LTC_RPC_USER.to_string());
+    let password = env::var("LTC_RPC_PASSWORD")
+        .unwrap_or_else(|_| DEFAULT_LTC_RPC_PASSWORD.to_string());
 
     let body = json!({
         "jsonrpc": "1.0",
@@ -353,7 +363,8 @@ fn regtest_fetch_headers(client: &Client, start: u64, end: u64) -> Result<String
         let hash = litecoind_rpc::<String>(client, "getblockhash", json!([height]))?;
         // getblockheader with verbose=false returns the 160-char hex
         // serialized 80-byte header.
-        let header_hex = litecoind_rpc::<String>(client, "getblockheader", json!([hash, false]))?;
+        let header_hex =
+            litecoind_rpc::<String>(client, "getblockheader", json!([hash, false]))?;
         if header_hex.len() != 160 {
             return Err(format!(
                 "litecoind getblockheader at h={height} returned hex length {} (expected 160)",
@@ -396,7 +407,11 @@ fn mainnet_get_tip_height(client: &Client) -> Result<u64, String> {
     ))
 }
 
-fn mainnet_fetch_headers(client: &Client, start: u64, end: u64) -> Result<String, String> {
+fn mainnet_fetch_headers(
+    client: &Client,
+    start: u64,
+    end: u64,
+) -> Result<String, String> {
     let api = mainnet_pick_api(client)?;
     let mut hex_out = String::with_capacity(((end - start + 1) * 160) as usize);
 
@@ -430,7 +445,11 @@ fn mainnet_pick_api(client: &Client) -> Result<&'static str, String> {
     ))
 }
 
-fn mainnet_fetch_height_to_hash(client: &Client, api: &str, height: u64) -> Result<String, String> {
+fn mainnet_fetch_height_to_hash(
+    client: &Client,
+    api: &str,
+    height: u64,
+) -> Result<String, String> {
     let url = format!("{api}/block-height/{height}");
     retry(PER_HEADER_RETRIES, || {
         let resp = client
@@ -456,7 +475,11 @@ fn mainnet_fetch_height_to_hash(client: &Client, api: &str, height: u64) -> Resu
     })
 }
 
-fn mainnet_fetch_block_header(client: &Client, api: &str, hash: &str) -> Result<String, String> {
+fn mainnet_fetch_block_header(
+    client: &Client,
+    api: &str,
+    hash: &str,
+) -> Result<String, String> {
     let url = format!("{api}/block/{hash}/header");
     retry(PER_HEADER_RETRIES, || {
         let resp = client
@@ -502,7 +525,8 @@ fn log_line(level: &str, message: &str) {
     let ts = Utc::now().format("%Y-%m-%dT%H:%M:%SZ").to_string();
     let line = format!("{ts} [{level}] {message}");
     eprintln!("{line}");
-    let path = env::var("LTC_HEADER_SYNC_LOG").unwrap_or_else(|_| DEFAULT_LOG_PATH.to_string());
+    let path =
+        env::var("LTC_HEADER_SYNC_LOG").unwrap_or_else(|_| DEFAULT_LOG_PATH.to_string());
     if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
         let _ = writeln!(f, "{line}");
     }

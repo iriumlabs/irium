@@ -8,7 +8,9 @@ use reqwest::Client;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
-use super::common::{Source, PER_HEADER_RETRIES, POLITE_SLEEP_MS, RETRY_SLEEP_MS};
+use super::common::{
+    Source, PER_HEADER_RETRIES, POLITE_SLEEP_MS, RETRY_SLEEP_MS,
+};
 
 const DEFAULT_LTC_RPC_URL: &str = "http://127.0.0.1:19443";
 const DEFAULT_LTC_RPC_USER: &str = "iriumtest";
@@ -92,10 +94,15 @@ async fn regtest_get_block_count(client: &Client) -> Result<u64, String> {
     litecoind_rpc::<u64>(client, "getblockcount", json!([])).await
 }
 
-async fn regtest_fetch_headers(client: &Client, start: u64, end: u64) -> Result<String, String> {
+async fn regtest_fetch_headers(
+    client: &Client,
+    start: u64,
+    end: u64,
+) -> Result<String, String> {
     let mut hex_out = String::with_capacity(((end - start + 1) * 160) as usize);
     for height in start..=end {
-        let hash = litecoind_rpc::<String>(client, "getblockhash", json!([height])).await?;
+        let hash =
+            litecoind_rpc::<String>(client, "getblockhash", json!([height])).await?;
         let header_hex =
             litecoind_rpc::<String>(client, "getblockheader", json!([hash, false])).await?;
         if header_hex.len() != 160 {
@@ -132,7 +139,11 @@ async fn mainnet_get_tip_height(client: &Client) -> Result<u64, String> {
     ))
 }
 
-async fn mainnet_fetch_headers(client: &Client, start: u64, end: u64) -> Result<String, String> {
+async fn mainnet_fetch_headers(
+    client: &Client,
+    start: u64,
+    end: u64,
+) -> Result<String, String> {
     let api = mainnet_pick_api(client).await?;
     let mut hex_out = String::with_capacity(((end - start + 1) * 160) as usize);
     for height in start..=end {

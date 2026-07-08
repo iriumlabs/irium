@@ -1,14 +1,22 @@
+import React from 'react'
 
-import type { ReactNode } from 'react'
-import { clsx } from 'clsx'
+interface Props {
+  title?: string
+  children: React.ReactNode
+  className?: string
+  action?: React.ReactNode
+}
 
-interface Props { title?: string; children: ReactNode; className?: string }
-
-export default function Card({ title, children, className }: Props) {
+export default function Card({ title, children, className = '', action }: Props) {
   return (
-    <div className={clsx('bg-zinc-900 border border-zinc-800 rounded-xl p-5', className)}>
-      {title && <h2 className="text-sm font-medium text-zinc-400 mb-4 uppercase tracking-wider">{title}</h2>}
-      {children}
+    <div className={`bg-zinc-900 rounded-xl ring-1 ring-zinc-800 overflow-hidden ${className}`}>
+      {title && (
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-zinc-800">
+          <h2 className="text-xs font-semibold text-zinc-500 uppercase tracking-widest">{title}</h2>
+          {action && <div>{action}</div>}
+        </div>
+      )}
+      <div className="p-5">{children}</div>
     </div>
   )
 }

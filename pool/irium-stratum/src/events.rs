@@ -20,7 +20,11 @@ use tracing::{info, warn};
 /// every `block.new` event into a one-shot wake on `notify`. Returns only
 /// if the client cannot be built; otherwise loops forever, reconnecting
 /// on any error.
-pub async fn subscribe_block_new(rpc_base: String, rpc_token: String, notify: Arc<Notify>) {
+pub async fn subscribe_block_new(
+    rpc_base: String,
+    rpc_token: String,
+    notify: Arc<Notify>,
+) {
     let client = match Client::builder()
         .http1_only()
         .connect_timeout(Duration::from_secs(5))

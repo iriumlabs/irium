@@ -33,20 +33,12 @@ pub enum GenesisError {
 #[allow(dead_code)] // dev/test utility for locating repo root at runtime; kept for tooling
 pub fn repo_root() -> PathBuf {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    if manifest_dir
-        .join("configs")
-        .join("genesis-locked.json")
-        .exists()
-    {
+    if manifest_dir.join("configs").join("genesis-locked.json").exists() {
         return manifest_dir;
     }
     if let Ok(exe) = std::env::current_exe() {
         for candidate in exe.ancestors().skip(1).take(3) {
-            if candidate
-                .join("configs")
-                .join("genesis-locked.json")
-                .exists()
-            {
+            if candidate.join("configs").join("genesis-locked.json").exists() {
                 return candidate.to_path_buf();
             }
         }

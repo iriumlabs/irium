@@ -15,12 +15,6 @@ before block 23,500 is mined to avoid forking off the canonical chain.
 
 ---
 
-## What's new in v1.9.119 (mainnet block 50,000)
-
-**PoAW-X proposer consensus** activates at mainnet block height 50,000: VRF-selected block proposers,
-a 55/22/13/10 multi-role reward split, anti-domination over a rolling 2016-block window, and 2/3
-distributed finality, layered on the existing SHA-256d proof of work. See Section 4.
-
 ## What's new in v1.9.28 (May 2026)
 
 The release adds a complete second-generation settlement stack (Groups
@@ -323,40 +317,6 @@ type used to fund settlement agreements. It enforces two mutually exclusive spen
 paths: release via secret preimage, or refund via block height timeout.
 
 ---
-
-### PoAW-X Proposer Consensus (activates mainnet block 50,000)
-
-From mainnet block height 50,000, Irium activates **PoAW-X** (Proof-of-Adaptive-Work, eXtended), a
-block-proposer layer on top of the SHA-256d proof of work described above. The PoW function and LWMA
-difficulty are unchanged; PoAW-X adds verifiable proposer selection, a multi-role reward split,
-anti-domination, and distributed finality. The activation height is fixed in consensus code and is
-not operator-configurable.
-
-**Proposer selection.** For each height an eligible proposer is selected by a Verifiable Random
-Function (ECVRF, RFC-9381). The selection proof (`AssignmentProofV2`) is bound to a per-height seed
-derived from prior block data and finality signatures, and verifies against the proposer's
-on-chain-registered VRF key, so the selected proposer cannot be forged or predicted before the
-parent block.
-
-**Proposer registration.** Eligibility requires an on-chain VRF-key registration carrying a
-sybil-resistant proof of work. Registrations are frozen at a depth below the tip, so the per-height
-seed cannot be used to register a winning key after the fact.
-
-**Multi-role reward split.** Each block reward is divided across four contribution roles — proposer
-55%, compute 22%, verify 13%, support 10% — paid as four P2PKH coinbase outputs plus an `irx1`
-`OP_RETURN` commitment binding the block's role receipts.
-
-**Anti-domination.** Per-identity proposal weighting over a rolling 2016-block window reduces the
-influence of any identity approaching a dominance threshold.
-
-**Distributed finality.** A committee of distinct registered keys casts finality votes; 2/3
-agreement finalizes a block and bounds reorg depth.
-
-**Consensus security gates.** Every block at or after activation must satisfy the full PoAW-X gate
-set: proposer VRF proof, hidden role-precommit, sybil tickets, committed admission root, multi-role
-reward split, anti-domination weights, finality (2/3), and audit-hardening checks (deterministic
-receipts root, equivocation and parent-hash validation, signature coverage, lane-byte validation).
-These gates were validated in a 2016-block adversarial soak before activation.
 
 ## 5. Supply Economics
 

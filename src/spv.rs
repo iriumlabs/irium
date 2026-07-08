@@ -133,9 +133,10 @@ pub fn nipopow_compare_counts(a: &[usize], b: &[usize], m: usize) -> std::cmp::O
     for mu in (0..=max).rev() {
         let ac = a.get(mu).copied().unwrap_or(0);
         let bc = b.get(mu).copied().unwrap_or(0);
-        if (ac >= m || bc >= m) && ac != bc {
-            return ac.cmp(&bc);
-        }
+        if (ac >= m || bc >= m)
+            && ac != bc {
+                return ac.cmp(&bc);
+            }
     }
     std::cmp::Ordering::Equal
 }

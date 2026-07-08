@@ -552,18 +552,23 @@ pub fn build_escrow_receipt_unsigned(
 /// Canonical receipt bytes for signing/verification. Clears the
 /// exporter_signature.signature and .payload_hash fields, serializes
 /// with sorted keys, and returns the deterministic byte vector.
-pub fn escrow_receipt_canonical_bytes(receipt: &AgreementEscrowReceipt) -> Result<Vec<u8>, String> {
+pub fn escrow_receipt_canonical_bytes(
+    receipt: &AgreementEscrowReceipt,
+) -> Result<Vec<u8>, String> {
     let mut canon = receipt.clone();
     canon.exporter_signature.signature.clear();
     canon.exporter_signature.payload_hash.clear();
-    let value = serde_json::to_value(&canon).map_err(|e| format!("escrow receipt to json: {e}"))?;
+    let value =
+        serde_json::to_value(&canon).map_err(|e| format!("escrow receipt to json: {e}"))?;
     let sorted = sort_json(value);
     serde_json::to_vec(&sorted).map_err(|e| format!("escrow receipt canonical serialize: {e}"))
 }
 
 /// SHA-256 of the canonical receipt bytes. The 32-byte digest is the
 /// secp256k1 signing input.
-pub fn escrow_receipt_signing_digest(receipt: &AgreementEscrowReceipt) -> Result<[u8; 32], String> {
+pub fn escrow_receipt_signing_digest(
+    receipt: &AgreementEscrowReceipt,
+) -> Result<[u8; 32], String> {
     let bytes = escrow_receipt_canonical_bytes(receipt)?;
     let digest = Sha256::digest(&bytes);
     let mut out = [0u8; 32];
@@ -576,7 +581,9 @@ pub fn escrow_receipt_signing_digest(receipt: &AgreementEscrowReceipt) -> Result
 /// is malformed, or the secp256k1 verification fails. Does NOT
 /// re-validate chain claims - the receipt is a signed snapshot, not a
 /// substitute for chain access.
-pub fn verify_escrow_receipt_signature(receipt: &AgreementEscrowReceipt) -> Result<(), String> {
+pub fn verify_escrow_receipt_signature(
+    receipt: &AgreementEscrowReceipt,
+) -> Result<(), String> {
     if receipt.schema_id != ESCROW_RECEIPT_SCHEMA_ID {
         return Err(format!(
             "unsupported escrow_receipt schema_id {}",
@@ -2473,10 +2480,9 @@ impl AgreementObject {
             return Err("primary_resolver_fee set without primary_resolver".to_string());
         }
         if let Some(addr) = &self.fallback_resolver {
-            let primary = self
-                .primary_resolver
-                .as_ref()
-                .ok_or_else(|| "fallback_resolver requires primary_resolver".to_string())?;
+            let primary = self.primary_resolver.as_ref().ok_or_else(|| {
+                "fallback_resolver requires primary_resolver".to_string()
+            })?;
             let fee = self.fallback_resolver_fee.ok_or_else(|| {
                 "fallback_resolver_fee required when fallback_resolver is set".to_string()
             })?;
@@ -2491,7 +2497,9 @@ impl AgreementObject {
             }
             let prim_fee = self.primary_resolver_fee.unwrap_or(0);
             if prim_fee.saturating_add(fee) >= self.total_amount {
-                return Err("primary + fallback resolver fees must be < total_amount".to_string());
+                return Err(
+                    "primary + fallback resolver fees must be < total_amount".to_string(),
+                );
             }
         } else if self.fallback_resolver_fee.is_some() {
             return Err("fallback_resolver_fee set without fallback_resolver".to_string());
@@ -5442,7 +5450,8 @@ impl ProofStore {
         // GROUP D: proof schema registry — proof_types with a registered
         // schema must carry typed_payload.attributes with all required keys.
         // Unknown proof_types pass through (forward compatibility).
-        validate_proof_against_schema(&proof).map_err(|e| format!("schema validation: {e}"))?;
+        validate_proof_against_schema(&proof)
+            .map_err(|e| format!("schema validation: {e}"))?;
         verify_settlement_proof_signature_only(&proof)?;
         let agreement_hash = proof.agreement_hash.clone();
         let proof_id = proof.proof_id.clone();
@@ -10419,14 +10428,8 @@ mod tests {
             None,
         )
         .expect("build_otc_agreement");
-        assert_eq!(
-            agreement.payer, "seller",
-            "seller must be the payer (HTLC funder)"
-        );
-        assert_eq!(
-            agreement.payee, "buyer",
-            "buyer must be the payee (release recipient)"
-        );
+        assert_eq!(agreement.payer, "seller", "seller must be the payer (HTLC funder)");
+        assert_eq!(agreement.payee, "buyer", "buyer must be the payee (release recipient)");
         assert_eq!(agreement.refund_conditions.len(), 1);
         assert_eq!(
             agreement.refund_conditions[0].refund_address, "Qseller",
@@ -10434,9 +10437,7 @@ mod tests {
         );
         assert_eq!(agreement.release_conditions.len(), 1);
         assert_eq!(
-            agreement.release_conditions[0]
-                .release_authorizer
-                .as_deref(),
+            agreement.release_conditions[0].release_authorizer.as_deref(),
             Some("seller"),
             "release authorizer must be seller after fix"
         );
@@ -10852,18 +10853,10 @@ fn validate_hex_hash(field: &str, value: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn default_dispute_raise_version() -> u32 {
-    DISPUTE_RAISE_VERSION
-}
-fn default_dispute_evidence_version() -> u32 {
-    DISPUTE_EVIDENCE_VERSION
-}
-fn default_dispute_resolution_version() -> u32 {
-    DISPUTE_RESOLUTION_VERSION
-}
-fn default_resolver_registration_version() -> u32 {
-    RESOLVER_REGISTRATION_VERSION
-}
+fn default_dispute_raise_version() -> u32 { DISPUTE_RAISE_VERSION }
+fn default_dispute_evidence_version() -> u32 { DISPUTE_EVIDENCE_VERSION }
+fn default_dispute_resolution_version() -> u32 { DISPUTE_RESOLUTION_VERSION }
+fn default_resolver_registration_version() -> u32 { RESOLVER_REGISTRATION_VERSION }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DisputeRaise {
@@ -10883,10 +10876,7 @@ pub struct DisputeRaise {
 impl DisputeRaise {
     pub fn validate(&self) -> Result<(), String> {
         if self.version != DISPUTE_RAISE_VERSION {
-            return Err(format!(
-                "unsupported dispute_raise version {}",
-                self.version
-            ));
+            return Err(format!("unsupported dispute_raise version {}", self.version));
         }
         if let Some(sid) = &self.schema_id {
             if sid != DISPUTE_RAISE_SCHEMA_ID {
@@ -10947,9 +10937,9 @@ impl DisputeEvidence {
             "payment_proof" | "delivery_proof" | "communication_proof" => {}
             other => {
                 return Err(format!(
-                "evidence_type must be payment_proof|delivery_proof|communication_proof (got {})",
-                other
-            ))
+                    "evidence_type must be payment_proof|delivery_proof|communication_proof (got {})",
+                    other
+                ))
             }
         }
         if self.evidence_payload.is_empty() {
@@ -10989,7 +10979,10 @@ impl DisputeResolution {
         }
         if let Some(sid) = &self.schema_id {
             if sid != DISPUTE_RESOLUTION_SCHEMA_ID {
-                return Err(format!("unsupported dispute_resolution schema_id {}", sid));
+                return Err(format!(
+                    "unsupported dispute_resolution schema_id {}",
+                    sid
+                ));
             }
         }
         validate_hex_hash("agreement_hash", &self.agreement_hash)?;
@@ -10998,12 +10991,7 @@ impl DisputeResolution {
         }
         match self.resolver_role.as_str() {
             "primary" | "fallback" => {}
-            other => {
-                return Err(format!(
-                    "resolver_role must be primary|fallback (got {})",
-                    other
-                ))
-            }
+            other => return Err(format!("resolver_role must be primary|fallback (got {})", other)),
         }
         match self.outcome.as_str() {
             "release" | "refund" => {}
@@ -11096,8 +11084,7 @@ pub fn dispute_resolution_canonical_bytes(d: &DisputeResolution) -> Result<Vec<u
         .map_err(|e| format!("dispute_resolution serialize: {e}"))
 }
 pub fn resolver_registration_canonical_value(r: &ResolverRegistration) -> Result<Value, String> {
-    let value =
-        serde_json::to_value(r).map_err(|e| format!("resolver_registration to json: {e}"))?;
+    let value = serde_json::to_value(r).map_err(|e| format!("resolver_registration to json: {e}"))?;
     Ok(sort_json(value))
 }
 pub fn resolver_registration_canonical_bytes(r: &ResolverRegistration) -> Result<Vec<u8>, String> {
@@ -11105,9 +11092,7 @@ pub fn resolver_registration_canonical_bytes(r: &ResolverRegistration) -> Result
         .map_err(|e| format!("resolver_registration serialize: {e}"))
 }
 
-fn default_dispute_reresolve_version() -> u32 {
-    DISPUTE_RERESOLVE_VERSION
-}
+fn default_dispute_reresolve_version() -> u32 { DISPUTE_RERESOLVE_VERSION }
 
 /// Co-signed nomination of new primary and (optional) fallback resolvers
 /// when both originally-named resolvers have failed to respond. Both
@@ -11139,7 +11124,10 @@ impl DisputeReResolverNomination {
         }
         if let Some(sid) = &self.schema_id {
             if sid != DISPUTE_RERESOLVE_SCHEMA_ID {
-                return Err(format!("unsupported dispute_reresolve schema_id {}", sid));
+                return Err(format!(
+                    "unsupported dispute_reresolve schema_id {}",
+                    sid
+                ));
             }
         }
         if self.agreement_hash.len() != 64 || hex::decode(&self.agreement_hash).is_err() {
@@ -11160,7 +11148,8 @@ impl DisputeReResolverNomination {
 }
 
 pub fn dispute_reresolve_canonical_value(d: &DisputeReResolverNomination) -> Result<Value, String> {
-    let value = serde_json::to_value(d).map_err(|e| format!("dispute_reresolve to json: {e}"))?;
+    let value =
+        serde_json::to_value(d).map_err(|e| format!("dispute_reresolve to json: {e}"))?;
     Ok(sort_json(value))
 }
 
@@ -11215,22 +11204,10 @@ mod stage_3_1_tests {
         let agreement = build_test_otc();
         let canonical = agreement_canonical_value(&agreement).expect("canonical_value");
         let json = serde_json::to_string(&canonical).expect("serialize");
-        assert!(
-            !json.contains("primary_resolver"),
-            "primary_resolver must be omitted when None"
-        );
-        assert!(
-            !json.contains("fallback_resolver"),
-            "fallback_resolver must be omitted when None"
-        );
-        assert!(
-            !json.contains("primary_resolver_fee"),
-            "primary_resolver_fee must be omitted when None"
-        );
-        assert!(
-            !json.contains("fallback_resolver_fee"),
-            "fallback_resolver_fee must be omitted when None"
-        );
+        assert!(!json.contains("primary_resolver"), "primary_resolver must be omitted when None");
+        assert!(!json.contains("fallback_resolver"), "fallback_resolver must be omitted when None");
+        assert!(!json.contains("primary_resolver_fee"), "primary_resolver_fee must be omitted when None");
+        assert!(!json.contains("fallback_resolver_fee"), "fallback_resolver_fee must be omitted when None");
     }
 
     #[test]
@@ -11266,10 +11243,7 @@ mod stage_3_1_tests {
         a.primary_resolver = Some("Qresolver".to_string());
         a.primary_resolver_fee = Some(1_000_000);
         let err = a.validate().expect_err("should reject");
-        assert!(
-            err.contains("resolver fields are only allowed"),
-            "got: {err}"
-        );
+        assert!(err.contains("resolver fields are only allowed"), "got: {err}");
     }
 
     #[test]
@@ -11286,10 +11260,7 @@ mod stage_3_1_tests {
         a.fallback_resolver = Some("Qresolver2".to_string());
         a.fallback_resolver_fee = Some(500_000);
         let err = a.validate().expect_err("should reject");
-        assert!(
-            err.contains("fallback_resolver requires primary_resolver"),
-            "got: {err}"
-        );
+        assert!(err.contains("fallback_resolver requires primary_resolver"), "got: {err}");
     }
 
     #[test]
@@ -11298,10 +11269,7 @@ mod stage_3_1_tests {
         a.primary_resolver = Some("Qresolver".to_string());
         a.primary_resolver_fee = Some(0);
         let err = a.validate().expect_err("should reject");
-        assert!(
-            err.contains("primary_resolver_fee must be > 0"),
-            "got: {err}"
-        );
+        assert!(err.contains("primary_resolver_fee must be > 0"), "got: {err}");
     }
 
     #[test]
@@ -11310,10 +11278,7 @@ mod stage_3_1_tests {
         a.primary_resolver = Some("Qresolver".to_string());
         a.primary_resolver_fee = Some(a.total_amount);
         let err = a.validate().expect_err("should reject");
-        assert!(
-            err.contains("primary_resolver_fee must be < total_amount"),
-            "got: {err}"
-        );
+        assert!(err.contains("primary_resolver_fee must be < total_amount"), "got: {err}");
     }
 
     #[test]
@@ -11336,10 +11301,7 @@ mod stage_3_1_tests {
         a.fallback_resolver = Some("Qfall".to_string());
         a.fallback_resolver_fee = Some(half);
         let err = a.validate().expect_err("should reject");
-        assert!(
-            err.contains("primary + fallback resolver fees must be < total_amount"),
-            "got: {err}"
-        );
+        assert!(err.contains("primary + fallback resolver fees must be < total_amount"), "got: {err}");
     }
 
     fn sample_signature_envelope() -> AgreementSignatureEnvelope {
@@ -11454,11 +11416,7 @@ mod stage_3_1_tests {
             milestone_id: None,
         };
         let payload = build_agreement_anchor_payload(&anchor).expect("payload");
-        assert!(
-            payload.len() <= 75,
-            "OP_RETURN cap exceeded: {}",
-            payload.len()
-        );
+        assert!(payload.len() <= 75, "OP_RETURN cap exceeded: {}", payload.len());
         let txout = build_agreement_anchor_output(&anchor).expect("output");
         assert_eq!(txout.value, 0);
     }
@@ -11522,7 +11480,10 @@ mod stage_3_1_tests {
             "currency": "USD",
             "timestamp": 1_700_000_000_u64,
         });
-        let proof = group_d_proof("payment_received", Some(typed_payload_with_attrs(attrs)));
+        let proof = group_d_proof(
+            "payment_received",
+            Some(typed_payload_with_attrs(attrs)),
+        );
         validate_proof_against_schema(&proof).expect("full payload must pass");
     }
 
@@ -11534,7 +11495,10 @@ mod stage_3_1_tests {
             "currency": "USD",
             "timestamp": 1_700_000_000_u64,
         });
-        let proof = group_d_proof("payment_received", Some(typed_payload_with_attrs(attrs)));
+        let proof = group_d_proof(
+            "payment_received",
+            Some(typed_payload_with_attrs(attrs)),
+        );
         let err = validate_proof_against_schema(&proof).unwrap_err();
         assert!(
             err.contains("amount"),
@@ -11547,10 +11511,7 @@ mod stage_3_1_tests {
         let proof = group_d_proof("payment_received", None);
         let err = validate_proof_against_schema(&proof).unwrap_err();
         assert!(err.contains("typed_payload"));
-        assert!(
-            err.contains("payment_method"),
-            "error must list required fields, got: {err}"
-        );
+        assert!(err.contains("payment_method"), "error must list required fields, got: {err}");
     }
 
     #[test]
@@ -11560,7 +11521,10 @@ mod stage_3_1_tests {
             "completion_notes": "shipped",
             "timestamp": 1_700_000_000_u64,
         });
-        let proof = group_d_proof("milestone_delivered", Some(typed_payload_with_attrs(attrs)));
+        let proof = group_d_proof(
+            "milestone_delivered",
+            Some(typed_payload_with_attrs(attrs)),
+        );
         let err = validate_proof_against_schema(&proof).unwrap_err();
         assert!(
             err.contains("milestone_id"),
@@ -11591,7 +11555,10 @@ mod stage_3_1_tests {
             "completion_notes": "draft v2",
             "timestamp": 1_700_000_000_u64,
         });
-        let proof = group_d_proof("work_completed", Some(typed_payload_with_attrs(attrs)));
+        let proof = group_d_proof(
+            "work_completed",
+            Some(typed_payload_with_attrs(attrs)),
+        );
         validate_proof_against_schema(&proof)
             .expect("work_completed without milestone_id must pass");
     }
@@ -11605,7 +11572,10 @@ mod stage_3_1_tests {
             "currency": "USD",
             "timestamp": 1_700_000_000_u64,
         });
-        let proof = group_d_proof("payment_received", Some(typed_payload_with_attrs(attrs)));
+        let proof = group_d_proof(
+            "payment_received",
+            Some(typed_payload_with_attrs(attrs)),
+        );
         let err = validate_proof_against_schema(&proof).unwrap_err();
         assert!(
             err.contains("amount"),
@@ -11692,7 +11662,8 @@ mod stage_3_1_tests {
         let agreement = build_test_otc();
         let hash = compute_agreement_hash_hex(&agreement).unwrap();
         let lifecycle = group_f_synthetic_lifecycle(&hash);
-        let secret_msg = "RESOLVER PRIVATE NOTE — do not leak in exported receipts.";
+        let secret_msg =
+            "RESOLVER PRIVATE NOTE — do not leak in exported receipts.";
         let dispute = DisputeResolution {
             version: DISPUTE_RESOLUTION_VERSION,
             schema_id: None,
@@ -11724,14 +11695,11 @@ mod stage_3_1_tests {
             "03aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
             1_700_000_001,
         );
-        let dref = receipt
-            .dispute
-            .as_ref()
-            .expect("dispute ref must be present");
+        let dref = receipt.dispute.as_ref().expect("dispute ref must be present");
         let expected_hash = hex::encode(Sha256::digest(secret_msg.as_bytes()));
         assert_eq!(dref.message_hash, expected_hash);
-        let canonical =
-            String::from_utf8(escrow_receipt_canonical_bytes(&receipt).unwrap()).unwrap();
+        let canonical = String::from_utf8(escrow_receipt_canonical_bytes(&receipt).unwrap())
+            .unwrap();
         assert!(
             !canonical.contains("PRIVATE NOTE"),
             "raw dispute message must NOT appear in canonical receipt bytes"
@@ -11872,30 +11840,24 @@ mod stage_3_1_tests {
             lifecycle.state
         );
         assert_eq!(lifecycle.released_amount, 200_000);
-        assert!(
-            lifecycle
-                .milestones
-                .iter()
-                .find(|m| m.milestone_id == "m1")
-                .unwrap()
-                .released
-        );
-        assert!(
-            lifecycle
-                .milestones
-                .iter()
-                .find(|m| m.milestone_id == "m2")
-                .unwrap()
-                .released
-        );
-        assert!(
-            !lifecycle
-                .milestones
-                .iter()
-                .find(|m| m.milestone_id == "m3")
-                .unwrap()
-                .released
-        );
+        assert!(lifecycle
+            .milestones
+            .iter()
+            .find(|m| m.milestone_id == "m1")
+            .unwrap()
+            .released);
+        assert!(lifecycle
+            .milestones
+            .iter()
+            .find(|m| m.milestone_id == "m2")
+            .unwrap()
+            .released);
+        assert!(!lifecycle
+            .milestones
+            .iter()
+            .find(|m| m.milestone_id == "m3")
+            .unwrap()
+            .released);
     }
 
     #[test]
@@ -11903,7 +11865,10 @@ mod stage_3_1_tests {
         let agreement = group_g_three_milestone_agreement();
         let hash = compute_agreement_hash_hex(&agreement).unwrap();
         // Only m1 and m3 funded; m2 not funded.
-        let linked = vec![group_g_funding_tx("m1", 200), group_g_funding_tx("m3", 202)];
+        let linked = vec![
+            group_g_funding_tx("m1", 200),
+            group_g_funding_tx("m3", 202),
+        ];
         let lifecycle = derive_lifecycle(&agreement, &hash, linked, 500);
         let m1 = lifecycle
             .milestones
@@ -12002,10 +11967,7 @@ mod stage_3_1_tests {
         let output = build_reputation_event_output(&event).unwrap();
         let parsed = parse_reputation_event(&output.script_pubkey).expect("parse round-trip");
         assert_eq!(parsed, event);
-        assert_eq!(
-            parsed.agreement_short_hash.as_deref(),
-            Some("abababababababab")
-        );
+        assert_eq!(parsed.agreement_short_hash.as_deref(), Some("abababababababab"));
     }
 
     #[test]

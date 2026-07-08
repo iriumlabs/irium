@@ -379,12 +379,15 @@ impl MempoolManager {
         incoming_priority: MempoolPriority,
         incoming_fpb: f64,
     ) -> Option<[u8; 32]> {
-        let (lowest_txid, lowest_entry) = self.entries.iter().min_by(|(_, a), (_, b)| {
-            a.priority
-                .rank()
-                .cmp(&b.priority.rank())
-                .then(a.fee_per_byte.total_cmp(&b.fee_per_byte))
-        })?;
+        let (lowest_txid, lowest_entry) = self
+            .entries
+            .iter()
+            .min_by(|(_, a), (_, b)| {
+                a.priority
+                    .rank()
+                    .cmp(&b.priority.rank())
+                    .then(a.fee_per_byte.total_cmp(&b.fee_per_byte))
+            })?;
         let incoming_rank = incoming_priority.rank();
         let lowest_rank = lowest_entry.priority.rank();
         if incoming_rank > lowest_rank
@@ -399,9 +402,7 @@ impl MempoolManager {
     fn gc_header_relay_rate_table(&mut self, now: SystemTime) {
         let interval = Duration::from_secs(HEADER_RELAY_PER_IP_INTERVAL_SECS);
         self.header_relay_last_seen.retain(|_, t| {
-            now.duration_since(*t)
-                .map(|d| d < interval)
-                .unwrap_or(false)
+            now.duration_since(*t).map(|d| d < interval).unwrap_or(false)
         });
     }
 
@@ -544,7 +545,10 @@ fn now_secs() -> u64 {
 /// The caller must already hold the chain lock so the validation result
 /// reflects the post-block UTXO set. Mempool eviction is recorded to
 /// `pending.json` via `remove`'s persist hook.
-pub fn evict_invalid_mempool_entries(chain: &ChainState, mempool: &mut MempoolManager) -> usize {
+pub fn evict_invalid_mempool_entries(
+    chain: &ChainState,
+    mempool: &mut MempoolManager,
+) -> usize {
     let candidates = mempool.ordered_transactions();
     let mut evicted = 0;
     for tx in &candidates {
@@ -788,10 +792,7 @@ mod tests {
             MempoolPriority::ZeroFeeAllowed,
             Some(peer_a),
         );
-        assert!(
-            res2.is_err(),
-            "second zfa from same IP must be rate-limited"
-        );
+        assert!(res2.is_err(), "second zfa from same IP must be rate-limited");
         assert!(res2
             .as_ref()
             .err()
@@ -830,11 +831,7 @@ mod tests {
             MempoolPriority::ZeroFeeAllowed,
             Some(loopback),
         );
-        assert!(
-            res5.is_ok(),
-            "loopback must not be rate-limited: {:?}",
-            res5
-        );
+        assert!(res5.is_ok(), "loopback must not be rate-limited: {:?}", res5);
 
         let _ = std::fs::remove_file(path);
     }

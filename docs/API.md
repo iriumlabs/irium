@@ -1332,46 +1332,6 @@ Reference implementation in `src/p2p.rs::dialable_multiaddr_from_advertised`.
 
 ---
 
-## PoAW-X Endpoints
-
-These endpoints support the PoAW-X proposer consensus (active on mainnet from block 50,000). The
-`assignment` and `receipt` endpoints serve the local miner harness and require the same bearer-token
-authentication as other node RPCs (see [Authentication](#authentication)); the gossip endpoints
-(`registration`, `finality-vote`, `finality-votes`) are restricted to the local/operator bridge.
-
-### GET `/poawx/assignment`
-
-Returns the current proposer/role assignment for the chain tip (height, tip hash, difficulty bits,
-and the per-height seed inputs) used by the miner to perform role work. Requires PoAW-X to be active.
-Auth: bearer token.
-
-### POST `/poawx/receipt`
-
-Submit a solved role receipt from the miner. Body: a `PoawxReceiptRequest` JSON object. Requires
-PoAW-X active and the puzzle difficulty at or above the minimum. Auth: bearer token. Returns the
-receipt acceptance status.
-
-### POST `/poawx/registration`
-
-Submit (and gossip) a proposer VRF-key registration. Body: the binary-serialized registration.
-Restricted to the local/operator bridge. Returns `{"status":"accepted"}` or `{"status":"duplicate"}`,
-or `400` on a rejected payload.
-
-### POST `/poawx/finality-vote`
-
-Submit (and gossip) a finality-committee vote. Body: the binary-serialized vote. Restricted to the
-local/operator bridge. Returns `{"status":"accepted"}` or `{"status":"duplicate"}`, or `400`.
-
-### GET `/poawx/finality-votes?target_height=N`
-
-Returns the cached finality votes for `target_height` (within the finality gossip window of the tip)
-as hex-encoded serialized votes: `{"votes":[...]}`. Restricted to the local/operator bridge.
-
-### GET `/rpc/poawx_dominance`
-
-Returns a snapshot of the anti-domination weighting state as hex-encoded bytes: `{"hex":"..."}`.
-Auth: bearer token.
-
 ## Notes
 
 - All amounts throughout the API are in satoshis. To convert: `satoshis / 100_000_000 = IRM`.

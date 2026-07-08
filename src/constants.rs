@@ -236,10 +236,11 @@ mod tests {
         // that don't expect that shortcut.
         std::env::set_var("IRIUM_NETWORK", "testnet");
 
-        for fork in [
-            1u64, 100, 30_000, 210_000, 210_001, 250_000, 419_999, 420_000,
-        ] {
-            std::env::set_var("IRIUM_BLOCK_TIME_V2_ACTIVATION_HEIGHT", fork.to_string());
+        for fork in [1u64, 100, 30_000, 210_000, 210_001, 250_000, 419_999, 420_000] {
+            std::env::set_var(
+                "IRIUM_BLOCK_TIME_V2_ACTIVATION_HEIGHT",
+                fork.to_string(),
+            );
             assert_eq!(
                 halving_count(fork),
                 halving_count(fork + 1),
@@ -267,7 +268,10 @@ mod tests {
         std::env::set_var("IRIUM_NETWORK", "testnet");
 
         for fork in [1u64, 100, 30_000, 210_000, 210_001, 250_000] {
-            std::env::set_var("IRIUM_BLOCK_TIME_V2_ACTIVATION_HEIGHT", fork.to_string());
+            std::env::set_var(
+                "IRIUM_BLOCK_TIME_V2_ACTIVATION_HEIGHT",
+                fork.to_string(),
+            );
             assert_eq!(
                 block_reward(fork),
                 block_reward(fork + 1),
@@ -293,7 +297,10 @@ mod tests {
         // that don't expect that shortcut.
         std::env::set_var("IRIUM_NETWORK", "testnet");
         let fork = 30_000u64;
-        std::env::set_var("IRIUM_BLOCK_TIME_V2_ACTIVATION_HEIGHT", fork.to_string());
+        std::env::set_var(
+            "IRIUM_BLOCK_TIME_V2_ACTIVATION_HEIGHT",
+            fork.to_string(),
+        );
 
         // No halvings yet at the fork (we are well before V1's first
         // halving at 210_000, and V2 hasn't accrued any blocks yet).

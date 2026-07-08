@@ -101,8 +101,11 @@ where
         if ap.blockchain_branch_index >= chain_count {
             return Err("blockchain branch index exceeds chain count".to_string());
         }
-        let mut computed_root =
-            compute_merkle_root(&aux_hash, &ap.blockchain_branch, ap.blockchain_branch_index);
+        let mut computed_root = compute_merkle_root(
+            &aux_hash,
+            &ap.blockchain_branch,
+            ap.blockchain_branch_index,
+        );
         // AuxPoW spec: see comment above. Reverse computed_root to match
         // the little-endian uint256 stored in the coinbase commitment.
         computed_root.reverse();
@@ -115,11 +118,8 @@ where
     let mut parent_merkle_root = [0u8; 32];
     parent_merkle_root.copy_from_slice(&ap.parent_header[36..68]);
 
-    let computed_tx_root = compute_merkle_root(
-        &coinbase_txid,
-        &ap.coinbase_branch,
-        ap.coinbase_branch_index,
-    );
+    let computed_tx_root =
+        compute_merkle_root(&coinbase_txid, &ap.coinbase_branch, ap.coinbase_branch_index);
     if computed_tx_root != parent_merkle_root {
         return Err("coinbase Merkle branch does not match parent block merkle root".to_string());
     }
@@ -310,7 +310,8 @@ pub fn deserialize(data: &[u8], offset: &mut usize) -> Result<AuxPoW, String> {
     if *offset + 4 > data.len() {
         return Err("unexpected EOF reading coinbase_branch_index".to_string());
     }
-    let coinbase_branch_index = u32::from_le_bytes(data[*offset..*offset + 4].try_into().unwrap());
+    let coinbase_branch_index =
+        u32::from_le_bytes(data[*offset..*offset + 4].try_into().unwrap());
     *offset += 4;
 
     let bc_count = read_varint(data, offset)?;
@@ -565,10 +566,7 @@ mod tests {
                 break;
             }
         }
-        assert!(
-            found,
-            "could not find a valid parent_header nonce in 10_000 tries"
-        );
+        assert!(found, "could not find a valid parent_header nonce in 10_000 tries");
 
         let ap = AuxPoW {
             coinbase_txn,
@@ -614,12 +612,15 @@ mod tests {
         };
 
         // Closure returns true → Ok
-        let ok = validate_with_parent_hash(&ap, &aux_header, Target { bits: 0x207fffff }, |_| true);
+        let ok = validate_with_parent_hash(
+            &ap, &aux_header, Target { bits: 0x207fffff }, |_| true,
+        );
         assert!(ok.is_ok(), "closure-true path rejected: {:?}", ok);
 
         // Closure returns false → Err on parent PoW with bits in message
-        let err =
-            validate_with_parent_hash(&ap, &aux_header, Target { bits: 0x207fffff }, |_| false);
+        let err = validate_with_parent_hash(
+            &ap, &aux_header, Target { bits: 0x207fffff }, |_| false,
+        );
         assert!(err.is_err(), "closure-false path accepted");
         let msg = err.unwrap_err();
         assert!(

@@ -51,10 +51,9 @@ struct Iriumd {
 
 impl Iriumd {
     fn from_env() -> Result<Self, String> {
-        let url =
-            env::var("IRIUMD_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:38400".to_string());
-        let token =
-            env::var("IRIUMD_RPC_TOKEN").map_err(|_| "IRIUMD_RPC_TOKEN required".to_string())?;
+        let url = env::var("IRIUMD_RPC_URL").unwrap_or_else(|_| "http://127.0.0.1:38400".to_string());
+        let token = env::var("IRIUMD_RPC_TOKEN")
+            .map_err(|_| "IRIUMD_RPC_TOKEN required".to_string())?;
         if token.trim().is_empty() {
             return Err("IRIUMD_RPC_TOKEN is empty".into());
         }
@@ -77,7 +76,8 @@ impl Iriumd {
         if !status.is_success() {
             return Err(format!("GET {path} HTTP {status}: {body}"));
         }
-        serde_json::from_str(&body).map_err(|e| format!("GET {path} json parse: {e}; body: {body}"))
+        serde_json::from_str(&body)
+            .map_err(|e| format!("GET {path} json parse: {e}; body: {body}"))
     }
 
     fn post(&self, path: &str, body: Value) -> Result<Value, String> {
@@ -93,7 +93,8 @@ impl Iriumd {
         if !status.is_success() {
             return Err(format!("POST {path} HTTP {status}: {txt}"));
         }
-        serde_json::from_str(&txt).map_err(|e| format!("POST {path} json parse: {e}; body: {txt}"))
+        serde_json::from_str(&txt)
+            .map_err(|e| format!("POST {path} json parse: {e}; body: {txt}"))
     }
 
     fn current_tip_height(&self) -> Result<u64, String> {
@@ -189,11 +190,7 @@ fn compute_merkle_branch_natural(leaves: &[[u8; 32]], target_index: usize) -> Ve
     let mut level: Vec<[u8; 32]> = leaves.to_vec();
     let mut idx = target_index;
     while level.len() > 1 {
-        let sibling_idx = if idx.is_multiple_of(2) {
-            idx + 1
-        } else {
-            idx - 1
-        };
+        let sibling_idx = if idx.is_multiple_of(2) { idx + 1 } else { idx - 1 };
         let sibling = if sibling_idx >= level.len() {
             level[idx]
         } else {
@@ -204,11 +201,7 @@ fn compute_merkle_branch_natural(leaves: &[[u8; 32]], target_index: usize) -> Ve
         let mut i = 0;
         while i < level.len() {
             let left = level[i];
-            let right = if i + 1 < level.len() {
-                level[i + 1]
-            } else {
-                left
-            };
+            let right = if i + 1 < level.len() { level[i + 1] } else { left };
             let mut combined = [0u8; 64];
             combined[..32].copy_from_slice(&left);
             combined[32..].copy_from_slice(&right);
@@ -253,35 +246,23 @@ fn step_0_probe(iriumd: &Iriumd) -> Result<u64, String> {
     }
     // tip_height=0 (anchor only) is acceptable; step 9's catch-up loop
     // will push headers up to litecoind's current tip before claim.
-    log(
-        "0",
-        "ok",
-        &format!("ltcrelaytip active=true height={height} hash={hash}"),
-    );
+    log("0", "ok", &format!("ltcrelaytip active=true height={height} hash={hash}"));
     Ok(height)
 }
 
 fn step_1_ltc_address(litecoind: &Litecoind) -> Result<String, String> {
-    log(
-        "1",
-        "start",
-        "litecoind getnewaddress legacy P2PKH for swap payee",
-    );
-    let v = litecoind.wallet_rpc("getnewaddress", json!(["swap-payee", "legacy"]))?;
-    let addr = v
-        .as_str()
-        .ok_or("getnewaddress did not return a string")?
-        .to_string();
+    log("1", "start", "litecoind getnewaddress legacy P2PKH for swap payee");
+    let v = litecoind.wallet_rpc(
+        "getnewaddress",
+        json!(["swap-payee", "legacy"]),
+    )?;
+    let addr = v.as_str().ok_or("getnewaddress did not return a string")?.to_string();
     log("1", "ok", &format!("ltc payee address={addr}"));
     Ok(addr)
 }
 
 fn step_2_wallet_info(iriumd: &Iriumd) -> Result<(String, u64), String> {
-    log(
-        "2",
-        "start",
-        "/wallet/info and /rpc/getblocktemplate for height",
-    );
+    log("2", "start", "/wallet/info and /rpc/getblocktemplate for height");
     let info = iriumd.get("/wallet/info")?;
     let unlocked = info["is_unlocked"].as_bool().unwrap_or(false);
     if !unlocked {
@@ -298,11 +279,7 @@ fn step_2_wallet_info(iriumd: &Iriumd) -> Result<(String, u64), String> {
 
     let irm_height = iriumd.current_tip_height()?;
 
-    log(
-        "2",
-        "ok",
-        &format!("wallet_unlocked=true path={path} addr={addr} irm_height={irm_height}"),
-    );
+    log("2", "ok", &format!("wallet_unlocked=true path={path} addr={addr} irm_height={irm_height}"));
     Ok((addr, irm_height))
 }
 
@@ -359,35 +336,23 @@ fn step_3_create_swap(
     let handle = SwapHandle {
         funding_txid: resp["txid"].as_str().ok_or("missing txid")?.to_string(),
         swap_vout: resp["swap_vout"].as_u64().ok_or("missing swap_vout")? as u32,
-        funding_binding_hex: resp["funding_binding_hex"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
-        expected_ltc_amount_sats: resp["expected_ltc_amount_sats"]
-            .as_u64()
-            .unwrap_or(ltc_sats),
+        funding_binding_hex: resp["funding_binding_hex"].as_str().unwrap_or("").to_string(),
+        expected_ltc_amount_sats: resp["expected_ltc_amount_sats"].as_u64().unwrap_or(ltc_sats),
         expected_ltc_payment_address: resp["expected_ltc_payment_address"]
             .as_str()
             .unwrap_or(ltc_payee_addr)
             .to_string(),
-        op_return_payload_hex: resp["ltc_op_return_payload_hex"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
+        op_return_payload_hex: resp["ltc_op_return_payload_hex"].as_str().unwrap_or("").to_string(),
         timeout_height,
         confirmations_required: confirmations,
     };
-    log(
-        "3",
-        "ok",
-        &format!(
-            "swap funded txid={} vout={} op_return={} binding={}",
-            handle.funding_txid,
-            handle.swap_vout,
-            handle.op_return_payload_hex,
-            handle.funding_binding_hex,
-        ),
-    );
+    log("3", "ok", &format!(
+        "swap funded txid={} vout={} op_return={} binding={}",
+        handle.funding_txid,
+        handle.swap_vout,
+        handle.op_return_payload_hex,
+        handle.funding_binding_hex,
+    ));
     Ok(handle)
 }
 
@@ -409,9 +374,7 @@ fn mine_iriumd_to(iriumd: &Iriumd, expected_min_height: u64, ctx: &str) -> Resul
         if Instant::now() > deadline {
             let _ = child.kill();
             let _ = child.wait();
-            return Err(format!(
-                "mine timeout ({ctx}) — tip stuck at {expected_min_height}"
-            ));
+            return Err(format!("mine timeout ({ctx}) — tip stuck at {expected_min_height}"));
         }
         thread::sleep(Duration::from_millis(300));
         let h = match iriumd.current_tip_height() {
@@ -431,27 +394,19 @@ fn mine_iriumd_to(iriumd: &Iriumd, expected_min_height: u64, ctx: &str) -> Resul
 }
 
 fn step_4_confirm_swap(iriumd: &Iriumd, start_height: u64) -> Result<u64, String> {
-    log(
-        "4",
-        "start",
-        &format!("mine 1 iriumd block to confirm swap funding (start_h={start_height})"),
-    );
+    log("4", "start", &format!("mine 1 iriumd block to confirm swap funding (start_h={start_height})"));
     let h = mine_iriumd_to(iriumd, start_height, "confirm swap funding")?;
     log("4", "ok", &format!("iriumd tip h={h}"));
     Ok(h)
 }
 
 fn step_5_build_ltc_tx(litecoind: &Litecoind, handle: &SwapHandle) -> Result<String, String> {
-    log(
-        "5",
-        "start",
-        &format!(
-            "createrawtransaction pay={} sats to={} op_return={}",
-            handle.expected_ltc_amount_sats,
-            handle.expected_ltc_payment_address,
-            handle.op_return_payload_hex,
-        ),
-    );
+    log("5", "start", &format!(
+        "createrawtransaction pay={} sats to={} op_return={}",
+        handle.expected_ltc_amount_sats,
+        handle.expected_ltc_payment_address,
+        handle.op_return_payload_hex,
+    ));
 
     let sats = handle.expected_ltc_amount_sats;
     let ltc_amount_str = format!("{}.{:08}", sats / 100_000_000, sats % 100_000_000);
@@ -470,16 +425,10 @@ fn step_5_build_ltc_tx(litecoind: &Litecoind, handle: &SwapHandle) -> Result<Str
             ]
         ]),
     )?;
-    let raw_hex = raw
-        .as_str()
-        .ok_or("createrawtransaction not a string")?
-        .to_string();
+    let raw_hex = raw.as_str().ok_or("createrawtransaction not a string")?.to_string();
 
     let funded = litecoind.wallet_rpc("fundrawtransaction", json!([raw_hex]))?;
-    let funded_hex = funded["hex"]
-        .as_str()
-        .ok_or("fundrawtransaction missing hex")?
-        .to_string();
+    let funded_hex = funded["hex"].as_str().ok_or("fundrawtransaction missing hex")?.to_string();
     let fee_ltc = funded["fee"].as_f64().unwrap_or(0.0);
 
     let signed = litecoind.wallet_rpc("signrawtransactionwithwallet", json!([funded_hex]))?;
@@ -487,33 +436,19 @@ fn step_5_build_ltc_tx(litecoind: &Litecoind, handle: &SwapHandle) -> Result<Str
     if !complete {
         return Err(format!("signrawtransactionwithwallet incomplete: {signed}"));
     }
-    let signed_hex = signed["hex"]
-        .as_str()
-        .ok_or("signed missing hex")?
-        .to_string();
-    log(
-        "5",
-        "ok",
-        &format!(
-            "signed_tx_len={}B fee={:.8} LTC",
-            signed_hex.len() / 2,
-            fee_ltc
-        ),
-    );
+    let signed_hex = signed["hex"].as_str().ok_or("signed missing hex")?.to_string();
+    log("5", "ok", &format!(
+        "signed_tx_len={}B fee={:.8} LTC",
+        signed_hex.len() / 2,
+        fee_ltc
+    ));
     Ok(signed_hex)
 }
 
 fn step_6_send_ltc_tx(litecoind: &Litecoind, signed_hex: &str) -> Result<String, String> {
-    log(
-        "6",
-        "start",
-        "sendrawtransaction -> litecoind regtest mempool",
-    );
+    log("6", "start", "sendrawtransaction -> litecoind regtest mempool");
     let v = litecoind.rpc("sendrawtransaction", json!([signed_hex]))?;
-    let txid = v
-        .as_str()
-        .ok_or("sendrawtransaction not a string")?
-        .to_string();
+    let txid = v.as_str().ok_or("sendrawtransaction not a string")?.to_string();
     log("6", "ok", &format!("ltc_txid={txid}"));
     Ok(txid)
 }
@@ -535,11 +470,7 @@ fn step_7_mine_ltc(litecoind: &Litecoind, confirmations: u8) -> Result<u64, Stri
         .rpc("getblockcount", json!([]))?
         .as_u64()
         .unwrap_or(0);
-    log(
-        "7",
-        "ok",
-        &format!("mined {mined} blocks, ltc tip h={height}"),
-    );
+    log("7", "ok", &format!("mined {mined} blocks, ltc tip h={height}"));
     Ok(height)
 }
 
@@ -547,11 +478,7 @@ fn step_8_merkle_proof(
     litecoind: &Litecoind,
     ltc_txid: &str,
 ) -> Result<(String, Vec<String>, u32), String> {
-    log(
-        "8",
-        "start",
-        &format!("gettransaction + getblock for merkle proof of {ltc_txid}"),
-    );
+    log("8", "start", &format!("gettransaction + getblock for merkle proof of {ltc_txid}"));
 
     let tx_info = litecoind.wallet_rpc("gettransaction", json!([ltc_txid]))?;
     let block_hash = tx_info["blockhash"]
@@ -600,26 +527,18 @@ fn step_8_merkle_proof(
         })
         .collect();
 
-    log(
-        "8",
-        "ok",
-        &format!(
-            "block={} index={} branch_len={} confs={}",
-            &block_hash[..16.min(block_hash.len())],
-            tx_index,
-            branch_display.len(),
-            confirmations,
-        ),
-    );
+    log("8", "ok", &format!(
+        "block={} index={} branch_len={} confs={}",
+        &block_hash[..16.min(block_hash.len())],
+        tx_index,
+        branch_display.len(),
+        confirmations,
+    ));
     Ok((block_hash, branch_display, tx_index))
 }
 
 fn step_9_relay_ltc_headers(iriumd: &Iriumd, target_height: u64) -> Result<(), String> {
-    log(
-        "9",
-        "start",
-        &format!("ltc-header-sync loop until iriumd LTC SPV tip >= {target_height}"),
-    );
+    log("9", "start", &format!("ltc-header-sync loop until iriumd LTC SPV tip >= {target_height}"));
     let script = env::var("LTC_E2E_SYNC_SCRIPT")
         .unwrap_or_else(|_| "/home/irium/.irium-devnet/ltc-sync.sh".to_string());
 
@@ -631,20 +550,14 @@ fn step_9_relay_ltc_headers(iriumd: &Iriumd, target_height: u64) -> Result<(), S
     loop {
         cycles += 1;
         if cycles > 16 {
-            return Err(format!(
-                "ltc-header-sync did not converge after {cycles} cycles"
-            ));
+            return Err(format!("ltc-header-sync did not converge after {cycles} cycles"));
         }
         let current = iriumd
             .get("/rpc/ltcrelaytip")
             .map(|v| v["tip_height"].as_u64().unwrap_or(0))
             .unwrap_or(0);
         if current >= target_height {
-            log(
-                "9",
-                "ok",
-                &format!("LTC SPV caught up to h={current} in {cycles} probe(s)"),
-            );
+            log("9", "ok", &format!("LTC SPV caught up to h={current} in {cycles} probe(s)"));
             return Ok(());
         }
         let status = Command::new(&script)
@@ -654,10 +567,7 @@ fn step_9_relay_ltc_headers(iriumd: &Iriumd, target_height: u64) -> Result<(), S
             .status()
             .map_err(|e| format!("spawn ltc-header-sync: {e}"))?;
         if !status.success() {
-            return Err(format!(
-                "ltc-header-sync cycle {cycles} exited code={:?}",
-                status.code()
-            ));
+            return Err(format!("ltc-header-sync cycle {cycles} exited code={:?}", status.code()));
         }
         // Mine one iriumd block so the just-submitted batch confirms and
         // the SPV tip advances. Use mine_iriumd_to with the current tip.
@@ -667,11 +577,7 @@ fn step_9_relay_ltc_headers(iriumd: &Iriumd, target_height: u64) -> Result<(), S
 }
 
 fn step_10_confirm_headers(iriumd: &Iriumd, start_height: u64) -> Result<u64, String> {
-    log(
-        "10",
-        "start",
-        &format!("mine 1 iriumd block to confirm LtcHeaderBatch (start_h={start_height})"),
-    );
+    log("10", "start", &format!("mine 1 iriumd block to confirm LtcHeaderBatch (start_h={start_height})"));
     let h = mine_iriumd_to(iriumd, start_height, "confirm LtcHeaderBatch")?;
     log("10", "ok", &format!("iriumd tip h={h}"));
     Ok(h)
@@ -722,11 +628,7 @@ fn step_12_verify(
     irm_amount_str: &str,
     start_height: u64,
 ) -> Result<(), String> {
-    log(
-        "12",
-        "start",
-        "mine claim block + verify balance + inspectltcswap",
-    );
+    log("12", "start", "mine claim block + verify balance + inspectltcswap");
     let _ = mine_iriumd_to(iriumd, start_height, "confirm claim")?;
 
     // /rpc/balance returns the wallet's balance for the address
@@ -786,13 +688,7 @@ fn run() -> Result<(), String> {
     )?;
 
     let irm_amount_str = env::var("LTC_E2E_IRM").unwrap_or_else(|_| "1.00000000".to_string());
-    step_12_verify(
-        &iriumd,
-        &handle,
-        &irm_addr,
-        &irm_amount_str,
-        irm_height_after_headers,
-    )?;
+    step_12_verify(&iriumd, &handle, &irm_addr, &irm_amount_str, irm_height_after_headers)?;
 
     Ok(())
 }

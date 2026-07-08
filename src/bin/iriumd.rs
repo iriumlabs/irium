@@ -70,31 +70,21 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tower_http::cors::{Any, CorsLayer};
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::response::sse::{Event, KeepAlive, Sse};
-use axum::response::IntoResponse;
 use get_if_addrs::get_if_addrs;
+use subtle::ConstantTimeEq;
 use irium_node_rs::activation::{
     network_kind_from_env, resolved_htlcv1_activation_height, resolved_lwma_activation_height,
     resolved_lwma_v2_activation_height, resolved_mpsov1_activation_height,
-    runtime_htlcv1_env_override, runtime_lwma_env_override, NetworkKind,
+    runtime_htlcv1_env_override, runtime_lwma_env_override,
+    NetworkKind,
 };
 use irium_node_rs::anchors::AnchorManager;
 use irium_node_rs::block::{Block, BlockHeader};
-use irium_node_rs::btc_spv::{
-    apply_btc_header_batch, encode_btc_header_batch, parse_btc_header_batch,
-    resolve_btc_spv_params, BtcAnchor, BtcHeader, BtcHeaderEntry, BTC_HEADER_BYTES,
-    MAX_BTC_HEADERS_PER_BATCH,
-};
 use irium_node_rs::chain::{
     block_from_locked, ChainParams, ChainState, HeaderWork, LwmaParams, OutPoint,
 };
 use irium_node_rs::constants::{block_reward, coinbase_maturity, MTP_ACTIVATION_HEIGHT};
 use irium_node_rs::genesis::load_locked_genesis;
-use irium_node_rs::ltc_spv::{
-    encode_ltc_header_batch, parse_ltc_header_batch, LtcAnchor, LtcHeader, LtcHeaderEntry,
-    LTC_HEADER_BYTES, MAX_LTC_HEADERS_PER_BATCH,
-};
 use irium_node_rs::mempool::{evict_invalid_mempool_entries, MempoolManager, MempoolPriority};
 use irium_node_rs::network::SeedlistManager;
 use irium_node_rs::network_era::network_era;
@@ -106,50 +96,65 @@ use irium_node_rs::settlement::{
     agreement_short_hash_from_full, basic_otc_escrow_template, build_agreement_activity_timeline,
     build_agreement_anchor_output, build_agreement_audit_record, build_funding_legs,
     build_reputation_event_output, compute_agreement_hash_hex, contractor_milestone_template,
-    derive_lifecycle, discover_agreement_funding_leg_candidates, dispute_evidence_canonical_bytes,
-    dispute_raise_canonical_bytes, dispute_reresolve_canonical_bytes,
-    dispute_resolution_canonical_bytes, evaluate_policy,
+    derive_lifecycle, discover_agreement_funding_leg_candidates, evaluate_policy,
     extract_agreement_funding_leg_refs_from_tx, parse_agreement_anchor, parse_reputation_event,
-    policy_template_to_json, preorder_deposit_template, resolver_registration_canonical_bytes,
-    verify_agreement_bundle, AgreementActivityEvent, AgreementAnchor, AgreementAnchorRole,
-    AgreementAuditFundingLegRecord, AgreementAuditRecord, AgreementBundle, AgreementFundingLegRef,
-    AgreementLifecycleView, AgreementLinkedTx, AgreementMilestoneStatus, AgreementObject,
-    AgreementSignatureEnvelope, AgreementSummary, AgreementTemplateType, DisputeEvidence,
-    DisputeRaise, DisputeReResolverNomination, DisputeResolution, EscrowReceiptDisputeRef,
-    EscrowReceiptProofRef, HoldbackEvaluationResult, MilestoneEvaluationResult, MilestoneSpec,
-    PolicyOutcome, PolicyStore, ProofPolicy, ProofStore, ReputationEvent, ReputationEventKind,
-    RequirementThresholdResult, ResolverRegistration, SettlementProof, TemplateAttestor,
-    TxidWithHeight, AGREEMENT_SIGNATURE_TYPE_SECP256K1,
+    policy_template_to_json, preorder_deposit_template, verify_agreement_bundle,
+    AgreementActivityEvent, AgreementAnchor, AgreementAnchorRole, AgreementAuditFundingLegRecord,
+    AgreementAuditRecord, AgreementBundle, AgreementFundingLegRef, AgreementLifecycleView,
+    AgreementLinkedTx, AgreementMilestoneStatus, AgreementObject, AgreementSignatureEnvelope,
+    AgreementSummary, AgreementTemplateType, DisputeEvidence, DisputeRaise, DisputeResolution,
+    EscrowReceiptDisputeRef, EscrowReceiptProofRef, HoldbackEvaluationResult,
+    MilestoneEvaluationResult, MilestoneSpec, PolicyOutcome, PolicyStore, ProofPolicy, ProofStore,
+    ReputationEvent, ReputationEventKind, RequirementThresholdResult, ResolverRegistration,
+    SettlementProof, TemplateAttestor, TxidWithHeight, AGREEMENT_SIGNATURE_TYPE_SECP256K1,
+    DisputeReResolverNomination,
+    dispute_evidence_canonical_bytes, dispute_raise_canonical_bytes,
+    dispute_reresolve_canonical_bytes, dispute_resolution_canonical_bytes,
+    resolver_registration_canonical_bytes,
 };
+use k256::ecdsa::VerifyingKey;
 use irium_node_rs::storage;
 use irium_node_rs::tx::{
     compute_funding_binding, decode_full_tx, encode_htlc_btc_swap_claim_witness,
     encode_htlc_btc_swap_refund_witness, encode_htlc_btc_swap_v1_script,
     encode_htlc_ltc_swap_claim_witness, encode_htlc_ltc_swap_refund_witness,
-    encode_htlc_ltc_swap_v1_script, encode_htlcv1_claim_witness, encode_htlcv1_refund_witness,
-    encode_htlcv1_script, encode_ltc_swap_order_cancel_witness,
-    encode_ltc_swap_order_expire_sweep_witness, encode_ltc_swap_order_fill_buy_witness,
-    encode_ltc_swap_order_fill_sell_witness, encode_ltc_swap_order_script,
+    encode_htlc_ltc_swap_v1_script, encode_ltc_swap_order_cancel_witness,
+    encode_ltc_swap_order_expire_sweep_witness,
+    encode_ltc_swap_order_fill_buy_witness, encode_ltc_swap_order_fill_sell_witness,
+    encode_ltc_swap_order_script, parse_htlc_ltc_swap_v1_script,
+    parse_ltc_swap_order_script,
+    HtlcLtcSwapV1Output, LtcSwapOrderOutput,
+    LTC_SWAP_ORDER_DIRECTION_BUY, LTC_SWAP_ORDER_DIRECTION_SELL,
+    LTC_SWAP_ORDER_MAX_SWEEP_FEE, LTC_SWAP_ORDER_MIN_LOCKED_VALUE,
+    MAX_HTLC_LTC_SWAP_CONFIRMATIONS, MIN_HTLC_LTC_SWAP_CONFIRMATIONS,
+    encode_htlcv1_claim_witness, encode_htlcv1_refund_witness, encode_htlcv1_script,
     encode_swap_order_cancel_witness, encode_swap_order_expire_sweep_witness,
     encode_swap_order_fill_buy_witness, encode_swap_order_fill_sell_witness,
-    encode_swap_order_script, parse_htlc_btc_swap_v1_script, parse_htlc_ltc_swap_v1_script,
-    parse_htlcv1_script, parse_ltc_swap_order_script, parse_output_encumbrance,
-    parse_swap_order_script, HtlcBtcSwapV1Output, HtlcLtcSwapV1Output, HtlcV1Output,
-    LtcSwapOrderOutput, OutputEncumbrance, SwapOrderOutput, Transaction, TxInput, TxOutput,
-    LTC_SWAP_ORDER_DIRECTION_BUY, LTC_SWAP_ORDER_DIRECTION_SELL, LTC_SWAP_ORDER_MAX_SWEEP_FEE,
-    LTC_SWAP_ORDER_MIN_LOCKED_VALUE, MAX_HTLC_BTC_SWAP_CONFIRMATIONS,
-    MAX_HTLC_LTC_SWAP_CONFIRMATIONS, MIN_HTLC_BTC_SWAP_CONFIRMATIONS,
-    MIN_HTLC_LTC_SWAP_CONFIRMATIONS, SWAP_ORDER_DIRECTION_BUY, SWAP_ORDER_DIRECTION_SELL,
-    SWAP_ORDER_MAX_SWEEP_FEE, SWAP_ORDER_MIN_LOCKED_VALUE,
+    encode_swap_order_script, parse_htlc_btc_swap_v1_script, parse_htlcv1_script,
+    parse_output_encumbrance, parse_swap_order_script, HtlcBtcSwapV1Output, HtlcV1Output,
+    OutputEncumbrance, SwapOrderOutput, Transaction, TxInput, TxOutput,
+    MAX_HTLC_BTC_SWAP_CONFIRMATIONS, MIN_HTLC_BTC_SWAP_CONFIRMATIONS,
+    SWAP_ORDER_DIRECTION_BUY, SWAP_ORDER_DIRECTION_SELL, SWAP_ORDER_MAX_SWEEP_FEE,
+    SWAP_ORDER_MIN_LOCKED_VALUE,
+};
+use irium_node_rs::btc_spv::{
+    apply_btc_header_batch, encode_btc_header_batch, parse_btc_header_batch,
+    resolve_btc_spv_params, BtcAnchor, BtcHeader, BtcHeaderEntry, BTC_HEADER_BYTES,
+    MAX_BTC_HEADERS_PER_BATCH,
+};
+use irium_node_rs::ltc_spv::{
+    encode_ltc_header_batch, parse_ltc_header_batch, LtcAnchor, LtcHeader, LtcHeaderEntry,
+    LTC_HEADER_BYTES, MAX_LTC_HEADERS_PER_BATCH,
 };
 use irium_node_rs::wallet_store::{WalletKey, WalletManager, WalletMode};
 use k256::ecdsa::signature::hazmat::{PrehashSigner, PrehashVerifier};
-use k256::ecdsa::VerifyingKey;
 use k256::ecdsa::{Signature, SigningKey};
-use subtle::ConstantTimeEq;
+use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::response::sse::{Event, KeepAlive, Sse};
+use axum::response::IntoResponse;
 // futures_util stream/sink imports removed (unused)
-use std::convert::Infallible;
 use tokio::sync::broadcast;
+use std::convert::Infallible;
 
 const WS_BROADCAST_CAPACITY: usize = 1024;
 type EventTx = broadcast::Sender<std::sync::Arc<String>>;
@@ -194,12 +199,10 @@ struct AppState {
     btc_template_headers_cache: Arc<Mutex<Option<CachedHeaderBatchForTemplate>>>,
     /// v1.9.61: same as above for LTC.
     ltc_template_headers_cache: Arc<Mutex<Option<CachedHeaderBatchForTemplate>>>,
-    /// Phase 10-D: pending PoAW-X puzzle receipts, cleared on block commit.
-    poawx_pending_receipts: Arc<Mutex<Vec<PoawxPendingReceipt>>>,
 }
 
 const DISPUTE_RESOLVER_RESPONSE_WINDOW: u64 = 288; // blocks
-const MINER_RECENCY_WINDOW: u64 = 2016; // blocks
+const MINER_RECENCY_WINDOW: u64 = 2016;            // blocks
 const DISPUTE_ANCHOR_FEE_PER_BYTE: u64 = 1;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -392,9 +395,10 @@ async fn ws_handler(
     let token_required = std::env::var("IRIUM_RPC_TOKEN")
         .map(|t| !t.trim().is_empty())
         .unwrap_or(false);
-    if token_required && !ws_public && require_rpc_auth(&headers).is_err() {
-        return (StatusCode::UNAUTHORIZED, "Bearer token required").into_response();
-    }
+    if token_required && !ws_public
+        && require_rpc_auth(&headers).is_err() {
+            return (StatusCode::UNAUTHORIZED, "Bearer token required").into_response();
+        }
     let is_public_conn = ws_public && require_rpc_auth(&headers).is_err();
     ws.on_upgrade(move |socket| ws_handle_socket(socket, state, is_public_conn))
 }
@@ -415,8 +419,9 @@ async fn sse_handler(
     }
     let is_public_conn = ws_public && require_rpc_auth(&headers).is_err();
     let rx = state.event_tx.subscribe();
-    let stream =
-        futures_util::stream::unfold((rx, is_public_conn), |(mut rx, is_pub)| async move {
+    let stream = futures_util::stream::unfold(
+        (rx, is_public_conn),
+        |(mut rx, is_pub)| async move {
             loop {
                 match rx.recv().await {
                     Ok(json_arc) => {
@@ -435,9 +440,11 @@ async fn sse_handler(
                     Err(_) => return None,
                 }
             }
-        });
+        },
+    );
     Ok(Sse::new(stream).keep_alive(KeepAlive::default()))
 }
+
 
 #[derive(Serialize)]
 struct PeerInfo {
@@ -502,10 +509,6 @@ struct StatusResponse {
     /// `fee_mode` is supplied. Wallets can read this directly without a
     /// second call to `/rpc/fee_estimate`.
     fee_rate_sat_per_byte: u64,
-    /// Gap 10: node-local PoAW-X adaptive security posture
-    /// ("normal"/"caution"/"defense"/"recovery"; "unknown" if the chain lock was
-    /// busy). Advisory; reflects this node's observed signals, not a consensus value.
-    poawx_adaptive_mode: String,
 }
 
 #[derive(Serialize)]
@@ -1520,62 +1523,6 @@ struct CoinbaseExtraOutput {
     script_pubkey_hex: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-struct PoawxPendingReceipt {
-    height: u64,
-    lane: String,
-    worker_pkh: String,
-    solution: String,
-    commitment_nonce: String,
-    #[serde(default)]
-    worker_pubkey: String,
-    #[serde(default)]
-    worker_sig: String,
-    /// Phase 18B: hex of the canonical 226-byte `Delegation` for a mode-1
-    /// (delegated) receipt. Empty => mode-0 (direct), byte-identical behaviour.
-    /// `skip_serializing_if` keeps mode-0 pending JSON byte-identical.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    delegation: String,
-    /// Phase 20: hex of the serialized `Phase20ReceiptExt` when present. Empty =>
-    /// no extension (byte-identical pre-Phase-20 behaviour). Carried so the
-    /// extension survives pending↔block mapping and reorg restore (Step 1: data
-    /// threading only; not enforced).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    phase20_ext: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct PoawxReceiptRequest {
-    height: u64,
-    lane: String,
-    worker_pkh: String,
-    solution: String,
-    commitment_nonce: String,
-    #[serde(default)]
-    worker_pubkey: String,
-    #[serde(default)]
-    worker_sig: String,
-    #[serde(default)]
-    delegation: String,
-    #[serde(default)]
-    phase20_ext: String,
-}
-
-#[derive(Debug, Deserialize)]
-struct SubmitBlockExtendedRequest {
-    height: u64,
-    header: SubmitBlockHeader,
-    tx_hex: Vec<String>,
-    #[serde(default)]
-    auxpow_hex: Option<String>,
-    #[serde(default)]
-    submit_source: Option<String>,
-    #[serde(default)]
-    poawx_receipts: Vec<PoawxPendingReceipt>,
-    #[serde(default)]
-    poawx_receipts_root: String,
-}
-
 #[derive(Serialize)]
 struct BlockTemplateResponse {
     height: u64,
@@ -1592,58 +1539,9 @@ struct BlockTemplateResponse {
     /// post-activation when the cycle has cached fresh headers.
     #[serde(default)]
     coinbase_extra_outputs: Vec<CoinbaseExtraOutput>,
-    #[serde(default)]
-    poawx_mode: String,
-    #[serde(default)]
-    poawx_pending_receipts: Vec<PoawxPendingReceipt>,
-    #[serde(default)]
-    receipts_root: String,
-    // PoAW-X gate-activation flags for `height` (authoritative for the miner so it
-    // builds exactly what this node validates; mainnet-hard-off => false/default).
-    #[serde(default)]
-    poawx_hidden_precommit_active: bool,
-    #[serde(default)]
-    poawx_audit_hardening_active: bool,
-    #[serde(default)]
-    poawx_tickets_active: bool,
-    #[serde(default)]
-    poawx_multisource_seed_active: bool,
-    #[serde(default)]
-    poawx_penalty_state_active: bool,
-    #[serde(default)]
-    poawx_puzzle_anchor_bits: u32,
-    #[serde(default)]
-    poawx_effective_sybil_bits: u32,
-    // Phase 31 proposer-VRF fields for `height` (gated; mainnet-hard-off => active
-    // false + zero/empty). The miner runs its private sortition from these.
-    #[serde(default)]
-    poawx_proposer_vrf_active: bool,
-    #[serde(default)]
-    poawx_proposer_seed: String,
-    #[serde(default)]
-    poawx_proposer_eligible_count: u64,
-    #[serde(default)]
-    poawx_proposer_round_interval: u64,
-    #[serde(default)]
-    poawx_proposer_freeze_height: u64,
-    #[serde(default)]
-    poawx_proposer_max_allowed_round: u32,
-    // Phase 31R proposer-registration fields (gated; empty/false when off).
-    #[serde(default)]
-    poawx_reg_active: bool,
-    #[serde(default)]
-    poawx_reg_anchor_height: u64,
-    #[serde(default)]
-    poawx_reg_anchor_hash: String,
-    #[serde(default)]
-    poawx_reg_required_sybil_bits: u32,
-    #[serde(default)]
-    poawx_reg_activations: Vec<String>,
-    #[serde(default)]
-    poawx_reg_announces: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct SubmitBlockHeader {
     version: u32,
     prev_hash: String,
@@ -2027,18 +1925,13 @@ fn load_persisted_startup_seeds(
             seeds.push(seed);
         }
     }
-    // Mainnet only: don't import mainnet runtime seeds into devnet/testnet nodes.
-    // storage::bootstrap_dir() may fall back to the mainnet .irium/ dir when
-    // IRIUM_DATA_DIR is not under $HOME, pulling in mainnet peers at port 38291.
-    if network_kind_from_env() == NetworkKind::Mainnet {
-        for seed in load_runtime_seeds() {
-            let normalized = match parse_seed_to_socketaddr(&seed, default_seed_port) {
-                Ok(addr) => addr.to_string(),
-                Err(_) => seed,
-            };
-            if !seeds.iter().any(|existing| existing == &normalized) {
-                seeds.push(normalized);
-            }
+    for seed in load_runtime_seeds() {
+        let normalized = match parse_seed_to_socketaddr(&seed, default_seed_port) {
+            Ok(addr) => addr.to_string(),
+            Err(_) => seed,
+        };
+        if !seeds.iter().any(|existing| existing == &normalized) {
+            seeds.push(normalized);
         }
     }
     seeds
@@ -2536,9 +2429,7 @@ fn extract_coinbase_tag(script_sig: &[u8]) -> Option<String> {
         let tag = &text[pos + 1..];
         if !tag.is_empty() && tag.len() <= 20 && tag.is_ascii() {
             let t = tag.replace('\0', "");
-            if !t.is_empty() {
-                return Some(t);
-            }
+            if !t.is_empty() { return Some(t); }
         }
     }
 
@@ -2547,9 +2438,7 @@ fn extract_coinbase_tag(script_sig: &[u8]) -> Option<String> {
         let after = text[pos + 6..].trim_end();
         if !after.is_empty() && after.len() <= 20 && after.is_ascii() {
             let t = after.replace('\0', "");
-            if !t.is_empty() {
-                return Some(t);
-            }
+            if !t.is_empty() { return Some(t); }
         }
     }
 
@@ -2726,8 +2615,7 @@ fn parse_persisted_block_file(
     };
 
     let auxpow = if version & irium_node_rs::auxpow::AUXPOW_VERSION_BIT != 0 {
-        parsed
-            .get("auxpow_hex")
+        parsed.get("auxpow_hex")
             .and_then(|v| v.as_str())
             .and_then(|s| hex::decode(s).ok())
             .and_then(|bytes| {
@@ -2738,94 +2626,6 @@ fn parse_persisted_block_file(
         None
     };
 
-    let poawx_receipts = parsed
-        .get("poawx_receipts")
-        .and_then(|v| v.as_array())
-        .map(|arr| {
-            arr.iter()
-                .filter_map(|r| {
-                    fn to20(s: &str) -> Option<[u8; 20]> {
-                        let b = hex::decode(s).ok()?;
-                        if b.len() != 20 {
-                            return None;
-                        }
-                        let mut a = [0u8; 20];
-                        a.copy_from_slice(&b);
-                        Some(a)
-                    }
-                    fn to33(s: &str) -> Option<[u8; 33]> {
-                        let b = hex::decode(s).ok()?;
-                        if b.len() != 33 {
-                            return None;
-                        }
-                        let mut a = [0u8; 33];
-                        a.copy_from_slice(&b);
-                        Some(a)
-                    }
-                    fn to64(s: &str) -> Option<[u8; 64]> {
-                        let b = hex::decode(s).ok()?;
-                        if b.len() != 64 {
-                            return None;
-                        }
-                        let mut a = [0u8; 64];
-                        a.copy_from_slice(&b);
-                        Some(a)
-                    }
-                    fn to8(s: &str) -> Option<[u8; 8]> {
-                        let b = hex::decode(s).ok()?;
-                        if b.len() != 8 {
-                            return None;
-                        }
-                        let mut a = [0u8; 8];
-                        a.copy_from_slice(&b);
-                        Some(a)
-                    }
-                    fn to32(s: &str) -> Option<[u8; 32]> {
-                        let b = hex::decode(s).ok()?;
-                        if b.len() != 32 {
-                            return None;
-                        }
-                        let mut a = [0u8; 32];
-                        a.copy_from_slice(&b);
-                        Some(a)
-                    }
-                    Some(irium_node_rs::poawx::PoawxBlockReceipt {
-                        height: r.get("height")?.as_u64()?,
-                        lane: r.get("lane")?.as_str()?.bytes().next()?,
-                        worker_pkh: to20(r.get("worker_pkh")?.as_str()?)?,
-                        worker_pubkey: to33(r.get("worker_pubkey")?.as_str()?)?,
-                        worker_sig: to64(r.get("worker_sig")?.as_str()?)?,
-                        solution: to8(r.get("solution")?.as_str()?)?,
-                        commitment_nonce: to32(r.get("commitment_nonce")?.as_str()?)?,
-                        // Phase 18B: restore the delegation for mode-1 receipts so a
-                        // persisted delegated block reloads byte-identically. Absent or
-                        // empty => mode-0. A malformed delegation drops the receipt
-                        // (via `?`), which then fails the irx1-root check on reload —
-                        // i.e. fail-closed, consistent with other malformed fields.
-                        delegation: match r.get("delegation").and_then(|v| v.as_str()) {
-                            Some(s) if !s.is_empty() => Some(
-                                irium_node_rs::poawx::Delegation::deserialize(
-                                    &hex::decode(s).ok()?,
-                                )
-                                .ok()?,
-                            ),
-                            _ => None,
-                        },
-                        // Phase 20: restore the production extension so a persisted
-                        // Phase 20 block reloads byte-identically. Absent/empty => none.
-                        phase20_ext: match r.get("phase20_ext").and_then(|v| v.as_str()) {
-                            Some(s) if !s.is_empty() => Some(
-                                irium_node_rs::poawx::Phase20ReceiptExt::deserialize(
-                                    &hex::decode(s).ok()?,
-                                )
-                                .ok()?,
-                            ),
-                            _ => None,
-                        },
-                    })
-                })
-                .collect::<Vec<_>>()
-        });
     let block = Block {
         header: BlockHeader {
             version,
@@ -2837,7 +2637,6 @@ fn parse_persisted_block_file(
         },
         transactions: txs,
         auxpow,
-        poawx_receipts,
     };
 
     if height == 0 {
@@ -2914,9 +2713,7 @@ fn discover_persist_mismatch_heights(
     for (height, expected_hash) in expected.iter().copied() {
         let path = blocks_dir.join(format!("block_{}.json", height));
         let valid_and_matching = match parse_persisted_block_file(&path, genesis_hash_lc) {
-            Ok((parsed_h, block)) => {
-                parsed_h == height && block.header.hash_for_height(parsed_h) == expected_hash
-            }
+            Ok((parsed_h, block)) => parsed_h == height && block.header.hash_for_height(parsed_h) == expected_hash,
             Err(_) => false,
         };
 
@@ -3004,9 +2801,7 @@ fn best_chain_hashes_in_window(
                     continue;
                 }
                 if let Some(block) = state.chain.get(h as usize) {
-                    by_height
-                        .entry(h)
-                        .or_insert(block.header.hash_for_height(h));
+                    by_height.entry(h).or_insert(block.header.hash_for_height(h));
                 }
                 if h == 0 {
                     break;
@@ -3161,20 +2956,6 @@ fn load_persisted_blocks(state: &mut ChainState, genesis_hash_lc: &str) {
     storage::set_expected_hash_coverage_in_window(0);
     storage::set_expected_hash_window_span(0);
     storage::set_persisted_window_tip(0);
-
-    // Phase 26D: wire the durable candidate-admission snapshot to the node's
-    // isolated data root and reload it BEFORE replaying persisted blocks, so
-    // `connect_block`'s UNCHANGED phase21e gate can match the admitted set for
-    // historical heights and reconnect the chain on a cold restart. Setting the
-    // path here (startup, before serving) also makes every later ingest durable.
-    {
-        let cache = irium_node_rs::poawx_admission::global_admission_cache();
-        cache.set_persist_path(storage::candidate_admissions_file());
-        let reloaded = cache.load_persisted();
-        if reloaded > 0 {
-            eprintln!("[i] reloaded {reloaded} persisted candidate admissions for cold replay");
-        }
-    }
 
     let node_dir = storage::blocks_dir();
     let miner_dir = miner_blocks_dir();
@@ -3704,9 +3485,7 @@ async fn network_status(
     } else {
         (None, None)
     };
-    let peer_count = state
-        .status_peer_count_cache
-        .load(std::sync::atomic::Ordering::Relaxed);
+    let peer_count = state.status_peer_count_cache.load(std::sync::atomic::Ordering::Relaxed);
     drop(guard);
 
     Ok(Json(NetworkStatusResponse {
@@ -3947,7 +3726,7 @@ async fn status(
         .as_ref()
         .map(|a| a.payload_digest().to_string());
 
-    let (height, best_header_tip, poawx_adaptive_mode) = match state.chain.try_lock() {
+    let (height, best_header_tip) = match state.chain.try_lock() {
         Ok(guard) => {
             let h = guard.tip_height();
             state.status_height_cache.store(h, Ordering::Relaxed);
@@ -3957,9 +3736,7 @@ async fn status(
                     *cached = best.hash.clone();
                 }
             }
-            // Gap 10: surface the node-local adaptive security posture.
-            let mode = guard.adaptive_mode().as_str().to_string();
-            (h, best, mode)
+            (h, best)
         }
         Err(_) => {
             let h = state.status_height_cache.load(Ordering::Relaxed);
@@ -3971,7 +3748,6 @@ async fn status(
             (
                 h,
                 cached_best_header_tip(h, &cached_hash, &state.genesis_hash),
-                "unknown".to_string(),
             )
         }
     };
@@ -4026,11 +3802,7 @@ async fn status(
     let fee_rate_sat_per_byte = {
         let mempool = state.mempool.lock().unwrap_or_else(|e| e.into_inner());
         let raw = mempool.min_fee_per_byte().ceil() as u64;
-        if raw == 0 {
-            1
-        } else {
-            raw
-        }
+        if raw == 0 { 1 } else { raw }
     };
 
     Ok(Json(StatusResponse {
@@ -4061,7 +3833,6 @@ async fn status(
         gap_healer_last_filled_height,
         gap_healer_pending_count,
         fee_rate_sat_per_byte,
-        poawx_adaptive_mode,
     }))
 }
 
@@ -4473,7 +4244,10 @@ fn scan_agreement_linked_txs(
 /// agreement.milestones[].amount and agreement.total_amount to populate
 /// values in the final receipt. Sort order matches the AgreementObject
 /// variant (height descending, then txid, then milestone_id).
-fn scan_linked_txs_by_hash(chain: &ChainState, agreement_hash: &str) -> Vec<AgreementLinkedTx> {
+fn scan_linked_txs_by_hash(
+    chain: &ChainState,
+    agreement_hash: &str,
+) -> Vec<AgreementLinkedTx> {
     let mut txs = Vec::new();
     for (height, block) in chain.chain.iter().enumerate() {
         for tx in &block.transactions {
@@ -4914,8 +4688,8 @@ fn spend_htlc_with_optional_payout(
             value: funding_out.output.value - fee - resolver_fee,
             script_pubkey: p2pkh_script(&dest_pkh),
         });
-        let resolver_pkh_vec =
-            base58_p2pkh_to_hash(resolver_addr).ok_or(StatusCode::BAD_REQUEST)?;
+        let resolver_pkh_vec = base58_p2pkh_to_hash(resolver_addr)
+            .ok_or(StatusCode::BAD_REQUEST)?;
         if resolver_pkh_vec.len() != 20 {
             return Err(StatusCode::BAD_REQUEST);
         }
@@ -5069,11 +4843,7 @@ async fn admin_add_seed(
     }
     {
         let runtime_path = storage::bootstrap_dir().join("seedlist.runtime");
-        if let Ok(mut file) = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&runtime_path)
-        {
+        if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&runtime_path) {
             use std::io::Write;
             let _ = writeln!(file, "{}", addr_str);
         }
@@ -5081,11 +4851,7 @@ async fn admin_add_seed(
     if let Some(ref node) = state.p2p {
         if let Ok(sa) = addr_str.parse::<SocketAddr>() {
             let node_c = node.clone();
-            let height = state
-                .chain
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .tip_height();
+            let height = state.chain.lock().unwrap_or_else(|e| e.into_inner()).tip_height();
             tokio::spawn(async move {
                 let _ = node_c.connect_and_handshake(sa, height, "Irium-Node").await;
             });
@@ -5284,18 +5050,12 @@ async fn agreement_status(
         let chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
         let tip = chain.tip_height();
         let linked = scan_agreement_linked_txs(&chain, &req.agreement, &agreement_hash);
-        (
-            derive_lifecycle(&req.agreement, &agreement_hash, linked, tip),
-            tip,
-        )
+        (derive_lifecycle(&req.agreement, &agreement_hash, linked, tip), tip)
     };
     // Compute proof finality depth for this agreement.
     let finality_depth = proof_finality_depth();
     let (proof_depth, proof_final) = {
-        let heights = state
-            .proof_heights
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let heights = state.proof_heights.lock().unwrap_or_else(|e| e.into_inner());
         let store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
         let proof_ids: Vec<String> = store
             .list_by_agreement(&agreement_hash)
@@ -5316,12 +5076,11 @@ async fn agreement_status(
             }
         }
     };
-    let release_eligible = proof_final
-        && matches!(
-            lifecycle.state,
-            irium_node_rs::settlement::AgreementLifecycleState::Funded
-                | irium_node_rs::settlement::AgreementLifecycleState::PartiallyReleased
-        );
+    let release_eligible = proof_final && matches!(
+        lifecycle.state,
+        irium_node_rs::settlement::AgreementLifecycleState::Funded
+            | irium_node_rs::settlement::AgreementLifecycleState::PartiallyReleased
+    );
     Ok(Json(AgreementStatusResponse {
         agreement_hash,
         lifecycle,
@@ -5425,10 +5184,7 @@ async fn agreement_receipt(
     };
     let proofs: Vec<EscrowReceiptProofRef> = {
         let store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
-        let heights = state
-            .proof_heights
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let heights = state.proof_heights.lock().unwrap_or_else(|e| e.into_inner());
         store
             .list_by_agreement(&agreement_hash)
             .into_iter()
@@ -5442,10 +5198,7 @@ async fn agreement_receipt(
             .collect()
     };
     let dispute = {
-        let guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
         guard.get(&agreement_hash).and_then(|d| {
             d.resolution.as_ref().map(|res| EscrowReceiptDisputeRef {
                 resolver_address: res.resolver_address.clone(),
@@ -5891,10 +5644,9 @@ async fn fund_agreement(
 
     let fee_checked = {
         let chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-        chain.calculate_fees(&tx).map_err(|e| {
-            eprintln!("[fund_agreement] calc_fees_err={}", e);
-            bad("chain_fee_calculation_failed")
-        })?
+        chain
+            .calculate_fees(&tx)
+            .map_err(|e| { eprintln!("[fund_agreement] calc_fees_err={}", e); bad("chain_fee_calculation_failed") })?
     };
 
     let raw = tx.serialize();
@@ -5911,14 +5663,10 @@ async fn fund_agreement(
     }
 
     if accepted {
-        emit_event(
-            &state.event_tx,
-            "agreement.funded",
-            serde_json::json!({
-                "agreement_hash": agreement_hash,
-                "txid": txid_hex,
-            }),
-        );
+        emit_event(&state.event_tx, "agreement.funded", serde_json::json!({
+            "agreement_hash": agreement_hash,
+            "txid": txid_hex,
+        }));
     }
 
     Ok(Json(FundAgreementResponse {
@@ -6192,7 +5940,11 @@ async fn wallet_recover_from_seed(
     require_rpc_auth(&headers)?;
 
     let mut wallet = state.wallet.lock().unwrap_or_else(|e| e.into_inner());
-    let key = match wallet.recover_from_seed(&req.seed_hex, &req.passphrase, req.allow_overwrite) {
+    let key = match wallet.recover_from_seed(
+        &req.seed_hex,
+        &req.passphrase,
+        req.allow_overwrite,
+    ) {
         Ok(k) => k,
         Err(e) => {
             if e == "wallet_exists" {
@@ -6333,9 +6085,7 @@ async fn wallet_export_mnemonic(
     require_rpc_auth(&headers)?;
 
     let mut wallet = state.wallet.lock().unwrap_or_else(|e| e.into_inner());
-    let mnemonic = wallet
-        .export_mnemonic()
-        .map_err(|_| StatusCode::BAD_REQUEST)?;
+    let mnemonic = wallet.export_mnemonic().map_err(|_| StatusCode::BAD_REQUEST)?;
     Ok(Json(WalletMnemonicResponse { mnemonic }))
 }
 
@@ -6371,16 +6121,10 @@ async fn wallet_send(
     // report and the v1.0.74-era src-tauri wallet_send change for the
     // call-site decode logic.
     let bad = |reason: &str| -> (StatusCode, Json<serde_json::Value>) {
-        (
-            StatusCode::BAD_REQUEST,
-            Json(serde_json::json!({ "error": reason })),
-        )
+        (StatusCode::BAD_REQUEST, Json(serde_json::json!({ "error": reason })))
     };
     let denied = |reason: &str| -> (StatusCode, Json<serde_json::Value>) {
-        (
-            StatusCode::FORBIDDEN,
-            Json(serde_json::json!({ "error": reason })),
-        )
+        (StatusCode::FORBIDDEN, Json(serde_json::json!({ "error": reason })))
     };
     let auth_err = |s: StatusCode| -> (StatusCode, Json<serde_json::Value>) {
         (s, Json(serde_json::json!({})))
@@ -6400,7 +6144,9 @@ async fn wallet_send(
         let change = if let Some(ref from) = req.from_address {
             from.clone()
         } else {
-            wallet.current_address().map_err(|_| bad("wallet_locked"))?
+            wallet
+                .current_address()
+                .map_err(|_| bad("wallet_locked"))?
         };
         (keys, change)
     };
@@ -6820,7 +6566,8 @@ async fn submit_btc_headers_core(
         }
     }
 
-    let raw = hex::decode(req.headers_hex.trim()).map_err(|_| bad("headers_hex_decode_failed"))?;
+    let raw = hex::decode(req.headers_hex.trim())
+        .map_err(|_| bad("headers_hex_decode_failed"))?;
     if raw.is_empty() || raw.len() % BTC_HEADER_BYTES != 0 {
         return Err(bad("headers_hex_length_not_multiple_of_80"));
     }
@@ -7233,7 +6980,8 @@ async fn submit_ltc_headers_core(
         }
     }
 
-    let raw = hex::decode(req.headers_hex.trim()).map_err(|_| bad("headers_hex_decode_failed"))?;
+    let raw = hex::decode(req.headers_hex.trim())
+        .map_err(|_| bad("headers_hex_decode_failed"))?;
     if raw.is_empty() || raw.len() % LTC_HEADER_BYTES != 0 {
         return Err(bad("headers_hex_length_not_multiple_of_80"));
     }
@@ -8019,7 +7767,8 @@ async fn claim_btc_swap(
 
     let btc_block_hash =
         parse_btc_display_hash(&req.btc_block_hash).map_err(|_| bad("btc_block_hash_invalid"))?;
-    let btc_tx_raw = hex::decode(req.btc_tx_hex.trim()).map_err(|_| bad("btc_tx_hex_invalid"))?;
+    let btc_tx_raw =
+        hex::decode(req.btc_tx_hex.trim()).map_err(|_| bad("btc_tx_hex_invalid"))?;
     if btc_tx_raw.is_empty() {
         return Err(bad("btc_tx_hex_empty"));
     }
@@ -8051,14 +7800,15 @@ async fn claim_btc_swap(
         locktime: 0,
     };
 
-    let priv_bytes = hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
+    let priv_bytes =
+        hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
     if priv_bytes.len() != 32 {
         return Err(bad("privkey_len_invalid"));
     }
     let mut sk_bytes = [0u8; 32];
     sk_bytes.copy_from_slice(&priv_bytes);
-    let signing_key =
-        SigningKey::from_bytes((&sk_bytes).into()).map_err(|_| bad("signing_key_init_failed"))?;
+    let signing_key = SigningKey::from_bytes((&sk_bytes).into())
+        .map_err(|_| bad("signing_key_init_failed"))?;
     let pubkey = signing_key
         .verifying_key()
         .to_encoded_point(true)
@@ -8258,14 +8008,15 @@ async fn refund_btc_swap(
         locktime: 0,
     };
 
-    let priv_bytes = hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
+    let priv_bytes =
+        hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
     if priv_bytes.len() != 32 {
         return Err(bad("privkey_len_invalid"));
     }
     let mut sk_bytes = [0u8; 32];
     sk_bytes.copy_from_slice(&priv_bytes);
-    let signing_key =
-        SigningKey::from_bytes((&sk_bytes).into()).map_err(|_| bad("signing_key_init_failed"))?;
+    let signing_key = SigningKey::from_bytes((&sk_bytes).into())
+        .map_err(|_| bad("signing_key_init_failed"))?;
     let pubkey = signing_key
         .verifying_key()
         .to_encoded_point(true)
@@ -8873,7 +8624,8 @@ async fn claim_ltc_swap(
 
     let ltc_block_hash =
         parse_btc_display_hash(&req.ltc_block_hash).map_err(|_| bad("ltc_block_hash_invalid"))?;
-    let ltc_tx_raw = hex::decode(req.ltc_tx_hex.trim()).map_err(|_| bad("ltc_tx_hex_invalid"))?;
+    let ltc_tx_raw =
+        hex::decode(req.ltc_tx_hex.trim()).map_err(|_| bad("ltc_tx_hex_invalid"))?;
     if ltc_tx_raw.is_empty() {
         return Err(bad("ltc_tx_hex_empty"));
     }
@@ -8905,14 +8657,15 @@ async fn claim_ltc_swap(
         locktime: 0,
     };
 
-    let priv_bytes = hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
+    let priv_bytes =
+        hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
     if priv_bytes.len() != 32 {
         return Err(bad("privkey_len_invalid"));
     }
     let mut sk_bytes = [0u8; 32];
     sk_bytes.copy_from_slice(&priv_bytes);
-    let signing_key =
-        SigningKey::from_bytes((&sk_bytes).into()).map_err(|_| bad("signing_key_init_failed"))?;
+    let signing_key = SigningKey::from_bytes((&sk_bytes).into())
+        .map_err(|_| bad("signing_key_init_failed"))?;
     let pubkey = signing_key
         .verifying_key()
         .to_encoded_point(true)
@@ -9104,14 +8857,15 @@ async fn refund_ltc_swap(
         locktime: 0,
     };
 
-    let priv_bytes = hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
+    let priv_bytes =
+        hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
     if priv_bytes.len() != 32 {
         return Err(bad("privkey_len_invalid"));
     }
     let mut sk_bytes = [0u8; 32];
     sk_bytes.copy_from_slice(&priv_bytes);
-    let signing_key =
-        SigningKey::from_bytes((&sk_bytes).into()).map_err(|_| bad("signing_key_init_failed"))?;
+    let signing_key = SigningKey::from_bytes((&sk_bytes).into())
+        .map_err(|_| bad("signing_key_init_failed"))?;
     let pubkey = signing_key
         .verifying_key()
         .to_encoded_point(true)
@@ -9275,6 +9029,7 @@ async fn inspect_ltc_swap(
         refundable_now: tip_height >= swap.timeout_height,
     }))
 }
+
 
 // Phase 4 Part 3 — SwapOrder RPC endpoints. Six endpoints behind the
 // `swap_order_v1_activation_height` gate. C5 sell-direction fills create
@@ -9504,7 +9259,8 @@ async fn post_swap_order(
         chain.tip_height()
     };
 
-    let direction = parse_swap_direction(&req.direction).ok_or_else(|| bad("direction_invalid"))?;
+    let direction =
+        parse_swap_direction(&req.direction).ok_or_else(|| bad("direction_invalid"))?;
     let irm_amount = parse_irm(&req.irm_amount).map_err(|_| bad("irm_amount_parse_failed"))?;
     if irm_amount == 0 {
         return Err(bad("irm_amount_zero"));
@@ -9943,7 +9699,8 @@ async fn cancel_swap_order(
         }
     }
 
-    let txid_arr = hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
+    let txid_arr =
+        hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
     let key = OutPoint {
         txid: txid_arr,
         index: req.order_vout,
@@ -10016,14 +9773,15 @@ async fn cancel_swap_order(
     };
 
     let scriptcode = encode_swap_order_script(&order);
-    let priv_bytes = hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
+    let priv_bytes =
+        hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
     if priv_bytes.len() != 32 {
         return Err(bad("privkey_len_invalid"));
     }
     let mut sk_bytes = [0u8; 32];
     sk_bytes.copy_from_slice(&priv_bytes);
-    let signing_key =
-        SigningKey::from_bytes((&sk_bytes).into()).map_err(|_| bad("signing_key_init_failed"))?;
+    let signing_key = SigningKey::from_bytes((&sk_bytes).into())
+        .map_err(|_| bad("signing_key_init_failed"))?;
     let pubkey = signing_key
         .verifying_key()
         .to_encoded_point(true)
@@ -10132,7 +9890,8 @@ async fn fill_swap_order(
 
     let _ = req.taker_btc_address;
 
-    let txid_arr = hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
+    let txid_arr =
+        hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
     let key = OutPoint {
         txid: txid_arr,
         index: req.order_vout,
@@ -10185,14 +9944,15 @@ async fn fill_swap_order(
         found.ok_or_else(|| bad("taker_iriumd_pkh_key_not_in_wallet"))?
     };
 
-    let priv_bytes = hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
+    let priv_bytes =
+        hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
     if priv_bytes.len() != 32 {
         return Err(bad("privkey_len_invalid"));
     }
     let mut sk_bytes = [0u8; 32];
     sk_bytes.copy_from_slice(&priv_bytes);
-    let signing_key =
-        SigningKey::from_bytes((&sk_bytes).into()).map_err(|_| bad("signing_key_init_failed"))?;
+    let signing_key = SigningKey::from_bytes((&sk_bytes).into())
+        .map_err(|_| bad("signing_key_init_failed"))?;
     let pubkey = signing_key
         .verifying_key()
         .to_encoded_point(true)
@@ -10247,10 +10007,7 @@ async fn fill_swap_order(
 
     let fee_per_byte = req.fee_per_byte.unwrap_or(1).max(1);
     let mut fee = estimate_tx_size(1, 1).saturating_mul(fee_per_byte);
-    if funding_out.output.value
-        <= fee
-            .saturating_add(order.irm_amount)
-            .saturating_sub(funding_out.output.value)
+    if funding_out.output.value <= fee.saturating_add(order.irm_amount).saturating_sub(funding_out.output.value)
         && order.direction == SWAP_ORDER_DIRECTION_SELL
         && funding_out.output.value < order.irm_amount
     {
@@ -10297,7 +10054,9 @@ async fn fill_swap_order(
         };
         wallet_utxos.sort_by(|a, b| b.output.value.cmp(&a.output.value));
         for u in wallet_utxos.iter() {
-            if u.is_coinbase && tip_height.saturating_sub(u.height) < coinbase_maturity() {
+            if u.is_coinbase
+                && tip_height.saturating_sub(u.height) < coinbase_maturity()
+            {
                 continue;
             }
             extra_inputs.push(u.clone());
@@ -10360,10 +10119,12 @@ async fn fill_swap_order(
                 timeout_height,
             )
             .ok_or_else(|| bad("encode_fill_sell_witness_failed"))?,
-            SWAP_ORDER_DIRECTION_BUY => {
-                encode_swap_order_fill_buy_witness(&order_sig_bytes, &pubkey, timeout_height)
-                    .ok_or_else(|| bad("encode_fill_buy_witness_failed"))?
-            }
+            SWAP_ORDER_DIRECTION_BUY => encode_swap_order_fill_buy_witness(
+                &order_sig_bytes,
+                &pubkey,
+                timeout_height,
+            )
+            .ok_or_else(|| bad("encode_fill_buy_witness_failed"))?,
             _ => return Err(bad("order_direction_unknown")),
         };
         tx.inputs[0].script_sig = witness;
@@ -10492,7 +10253,8 @@ async fn sweep_expired_order(
         }
     }
 
-    let txid_arr = hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
+    let txid_arr =
+        hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
     let key = OutPoint {
         txid: txid_arr,
         index: req.order_vout,
@@ -10630,7 +10392,8 @@ async fn sweep_ltc_expired_order(
         }
     }
 
-    let txid_arr = hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
+    let txid_arr =
+        hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
     let key = OutPoint {
         txid: txid_arr,
         index: req.order_vout,
@@ -11363,7 +11126,8 @@ async fn cancel_ltc_swap_order(
         }
     }
 
-    let txid_arr = hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
+    let txid_arr =
+        hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
     let key = OutPoint {
         txid: txid_arr,
         index: req.order_vout,
@@ -11436,14 +11200,15 @@ async fn cancel_ltc_swap_order(
     };
 
     let scriptcode = encode_ltc_swap_order_script(&order);
-    let priv_bytes = hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
+    let priv_bytes =
+        hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
     if priv_bytes.len() != 32 {
         return Err(bad("privkey_len_invalid"));
     }
     let mut sk_bytes = [0u8; 32];
     sk_bytes.copy_from_slice(&priv_bytes);
-    let signing_key =
-        SigningKey::from_bytes((&sk_bytes).into()).map_err(|_| bad("signing_key_init_failed"))?;
+    let signing_key = SigningKey::from_bytes((&sk_bytes).into())
+        .map_err(|_| bad("signing_key_init_failed"))?;
     let pubkey = signing_key
         .verifying_key()
         .to_encoded_point(true)
@@ -11552,7 +11317,8 @@ async fn fill_ltc_swap_order(
 
     let _ = req.taker_ltc_address;
 
-    let txid_arr = hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
+    let txid_arr =
+        hex_to_32(req.order_txid.trim()).map_err(|_| bad("order_txid_hex_invalid"))?;
     let key = OutPoint {
         txid: txid_arr,
         index: req.order_vout,
@@ -11605,14 +11371,15 @@ async fn fill_ltc_swap_order(
         found.ok_or_else(|| bad("taker_iriumd_pkh_key_not_in_wallet"))?
     };
 
-    let priv_bytes = hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
+    let priv_bytes =
+        hex::decode(&wallet_key.privkey).map_err(|_| bad("privkey_decode_failed"))?;
     if priv_bytes.len() != 32 {
         return Err(bad("privkey_len_invalid"));
     }
     let mut sk_bytes = [0u8; 32];
     sk_bytes.copy_from_slice(&priv_bytes);
-    let signing_key =
-        SigningKey::from_bytes((&sk_bytes).into()).map_err(|_| bad("signing_key_init_failed"))?;
+    let signing_key = SigningKey::from_bytes((&sk_bytes).into())
+        .map_err(|_| bad("signing_key_init_failed"))?;
     let pubkey = signing_key
         .verifying_key()
         .to_encoded_point(true)
@@ -11703,7 +11470,9 @@ async fn fill_ltc_swap_order(
         };
         wallet_utxos.sort_by(|a, b| b.output.value.cmp(&a.output.value));
         for u in wallet_utxos.iter() {
-            if u.is_coinbase && tip_height.saturating_sub(u.height) < coinbase_maturity() {
+            if u.is_coinbase
+                && tip_height.saturating_sub(u.height) < coinbase_maturity()
+            {
                 continue;
             }
             extra_inputs.push(u.clone());
@@ -11767,10 +11536,12 @@ async fn fill_ltc_swap_order(
                 timeout_height,
             )
             .ok_or_else(|| bad("encode_fill_sell_witness_failed"))?,
-            LTC_SWAP_ORDER_DIRECTION_BUY => {
-                encode_ltc_swap_order_fill_buy_witness(&order_sig_bytes, &pubkey, timeout_height)
-                    .ok_or_else(|| bad("encode_fill_buy_witness_failed"))?
-            }
+            LTC_SWAP_ORDER_DIRECTION_BUY => encode_ltc_swap_order_fill_buy_witness(
+                &order_sig_bytes,
+                &pubkey,
+                timeout_height,
+            )
+            .ok_or_else(|| bad("encode_fill_buy_witness_failed"))?,
             _ => return Err(bad("order_direction_unknown")),
         };
         tx.inputs[0].script_sig = witness;
@@ -11853,6 +11624,7 @@ async fn fill_ltc_swap_order(
         fee: fee_checked,
     }))
 }
+
 
 async fn create_htlc(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
@@ -12121,12 +11893,7 @@ async fn decode_htlc(
             recipient_address: None,
             refund_address: None,
         })),
-        OutputEncumbrance::MpsoV1(_)
-        | OutputEncumbrance::HtlcBtcSwapV1(_)
-        | OutputEncumbrance::HtlcLtcSwapV1(_)
-        | OutputEncumbrance::SwapOrder(_)
-        | OutputEncumbrance::LtcSwapOrder(_)
-        | OutputEncumbrance::Unknown => Ok(Json(DecodeHtlcResponse {
+        OutputEncumbrance::MpsoV1(_) | OutputEncumbrance::HtlcBtcSwapV1(_) | OutputEncumbrance::HtlcLtcSwapV1(_) | OutputEncumbrance::SwapOrder(_) | OutputEncumbrance::LtcSwapOrder(_) | OutputEncumbrance::Unknown => Ok(Json(DecodeHtlcResponse {
             found: false,
             vout: Some(idx as u32),
             output_type: "unknown".to_string(),
@@ -12287,13 +12054,9 @@ async fn agreement_release_eligibility(
     apply_dispute_status_to_eligibility(&state, &req.agreement, true, &mut resp);
     if resp.eligible {
         if let Ok(ah) = compute_agreement_hash_hex(&req.agreement) {
-            emit_event(
-                &state.event_tx,
-                "agreement.satisfied",
-                serde_json::json!({
-                    "agreement_hash": ah,
-                }),
-            );
+            emit_event(&state.event_tx, "agreement.satisfied", serde_json::json!({
+                "agreement_hash": ah,
+            }));
         }
     }
     Ok(Json(resp))
@@ -12315,13 +12078,9 @@ async fn agreement_refund_eligibility(
     apply_dispute_status_to_eligibility(&state, &req.agreement, false, &mut resp);
     if resp.eligible {
         if let Ok(ah) = compute_agreement_hash_hex(&req.agreement) {
-            emit_event(
-                &state.event_tx,
-                "agreement.timeout",
-                serde_json::json!({
-                    "agreement_hash": ah,
-                }),
-            );
+            emit_event(&state.event_tx, "agreement.timeout", serde_json::json!({
+                "agreement_hash": ah,
+            }));
         }
     }
     Ok(Json(resp))
@@ -12349,29 +12108,20 @@ async fn submit_proof_rpc(
     let proof_for_gossip = req.proof.clone();
     // Phase 7: record submission height for finality tracking before consuming req.proof.
     {
-        let mut heights = state
-            .proof_heights
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut heights = state.proof_heights.lock().unwrap_or_else(|e| e.into_inner());
         heights.insert(proof_for_gossip.proof_id.clone(), tip_height);
     }
     let mut store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
     let outcome = store.submit(req.proof).map_err(|e| bad(&e))?;
     if outcome.accepted {
-        emit_event(
-            &state.event_tx,
-            "agreement.proof_submitted",
-            serde_json::json!({
-                "agreement_hash": outcome.agreement_hash,
-                "proof_id": outcome.proof_id,
-            }),
-        );
+        emit_event(&state.event_tx, "agreement.proof_submitted", serde_json::json!({
+            "agreement_hash": outcome.agreement_hash,
+            "proof_id": outcome.proof_id,
+        }));
         if let Some(ref node) = state.p2p {
             if let Ok(json) = serde_json::to_string(&proof_for_gossip) {
                 let node = node.clone();
-                tokio::spawn(async move {
-                    node.broadcast_proof(&json).await;
-                });
+                tokio::spawn(async move { node.broadcast_proof(&json).await; });
             }
         }
     }
@@ -13236,8 +12986,8 @@ async fn build_agreement_spend_internal(
     // resolver out of the spend tx according to the agreement's resolver
     // fee fields.
     let resolver_payout: Option<(String, u64)> = {
-        let agreement_hash =
-            compute_agreement_hash_hex(&req.agreement).map_err(|_| bad("agreement_hash_failed"))?;
+        let agreement_hash = compute_agreement_hash_hex(&req.agreement)
+            .map_err(|_| bad("agreement_hash_failed"))?;
         let dispute_state = state
             .disputes_index
             .lock()
@@ -13326,9 +13076,7 @@ async fn build_agreement_spend_internal(
         }
         if !rep_outputs.is_empty() {
             let release_role = match eligibility.role {
-                Some(AgreementAnchorRole::MilestoneRelease) => {
-                    AgreementAnchorRole::MilestoneRelease
-                }
+                Some(AgreementAnchorRole::MilestoneRelease) => AgreementAnchorRole::MilestoneRelease,
                 _ => AgreementAnchorRole::Release,
             };
             if let Err(e) = build_and_broadcast_anchor_tx(
@@ -13511,25 +13259,7 @@ async fn get_block_template(
         }
     }
 
-    let (
-        height,
-        prev_hash,
-        bits,
-        target,
-        time,
-        proposer_vrf_active,
-        proposer_seed,
-        proposer_eligible_count,
-        proposer_round_interval,
-        proposer_freeze_height,
-        proposer_max_allowed_round,
-        reg_active,
-        reg_anchor_height,
-        reg_anchor_hash,
-        reg_required_sybil_bits,
-        reg_activations,
-        reg_announces,
-    ) = {
+    let (height, prev_hash, bits, target, time) = {
         let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
         let tip = guard.chain.last();
         let tip_h = guard.tip_height();
@@ -13547,110 +13277,7 @@ async fn get_block_template(
         } else {
             now.max(prev_time.saturating_add(1))
         };
-        // Phase 31: proposer-VRF template fields, computed atomically under the
-        // chain lock. Gated: when inactive the miner sees active=false and builds
-        // exactly as before (no proposer assignment).
-        let proposer_vrf_active = irium_node_rs::poawx_proposer::proposer_vrf_active(height);
-        let (
-            proposer_seed,
-            proposer_eligible_count,
-            proposer_round_interval,
-            proposer_freeze_height,
-            proposer_max_allowed_round,
-        ) = if proposer_vrf_active {
-            let parent_hash_bytes = tip
-                .map(|b| b.header.hash_for_height(tip_h))
-                .unwrap_or([0u8; 32]);
-            let seed = irium_node_rs::poawx_committed_admission::expected_epoch_seed(
-                height,
-                parent_hash_bytes,
-                tip,
-            );
-            let round_interval =
-                irium_node_rs::poawx_proposer::proposer_round_interval_secs();
-            let elapsed = (time as u64).saturating_sub(prev_time as u64);
-            let max_round =
-                irium_node_rs::poawx_proposer::max_round_for_elapsed(elapsed, round_interval);
-            let freeze_depth = irium_node_rs::poawx_proposer::proposer_freeze_depth();
-            (
-                hex::encode(seed),
-                guard.proposer_registry.eligible_count(height),
-                round_interval,
-                height.saturating_sub(freeze_depth),
-                max_round,
-            )
-        } else {
-            (String::new(), 0u64, 0u64, 0u64, 0u32)
-        };
-        // Phase 31R: proposer-registration template fields (the queue head the block
-        // MUST force-drain, pool announce candidates, anchor + required sybil bits),
-        // computed under the same chain lock.
-        let reg_active = irium_node_rs::poawx_proposer::proposer_registration_active(height);
-        let (
-            reg_anchor_height,
-            reg_anchor_hash,
-            reg_required_sybil_bits,
-            reg_activations,
-            reg_announces,
-        ) = if reg_active {
-            let a_hash = tip
-                .map(|b| hex::encode(b.header.hash_for_height(tip_h)))
-                .unwrap_or_else(|| "00".repeat(32));
-            let cap = irium_node_rs::poawx_proposer::PROPOSER_REG_CAP;
-            let k = cap.min(guard.proposer_reg_queue.len());
-            let acts: Vec<String> = guard
-                .proposer_reg_queue
-                .iter()
-                .take(k)
-                .map(|r| hex::encode(r.serialize()))
-                .collect();
-            let exclude: std::collections::BTreeSet<[u8; 33]> =
-                guard.proposer_reg_queue.iter().map(|r| r.vrf_pubkey).collect();
-            // Only offer registrations whose anchor is still within the recent window
-            // (so the produced block validates) and whose key is not already on-chain.
-            let window = irium_node_rs::poawx_proposer::PROPOSER_REG_ANCHOR_WINDOW;
-            let anns: Vec<String> = irium_node_rs::poawx_proposer::global_proposer_reg_pool()
-                .announce_candidates(64, &exclude)
-                .into_iter()
-                .filter(|r| {
-                    irium_node_rs::poawx_proposer::registration_anchor_valid(
-                        r.anchor_height,
-                        height,
-                        window,
-                    ) && !guard.proposer_registry.is_registered(&r.vrf_pubkey)
-                })
-                .take(irium_node_rs::poawx_proposer::PROPOSER_ANNOUNCE_CAP)
-                .map(|r| hex::encode(r.serialize()))
-                .collect();
-            (
-                tip_h,
-                a_hash,
-                irium_node_rs::poawx_ticket::effective_sybil_bits(),
-                acts,
-                anns,
-            )
-        } else {
-            (0u64, String::new(), 0u32, Vec::new(), Vec::new())
-        };
-        (
-            height,
-            prev_hash,
-            bits,
-            target_hex(bits),
-            time,
-            proposer_vrf_active,
-            proposer_seed,
-            proposer_eligible_count,
-            proposer_round_interval,
-            proposer_freeze_height,
-            proposer_max_allowed_round,
-            reg_active,
-            reg_anchor_height,
-            reg_anchor_hash,
-            reg_required_sybil_bits,
-            reg_activations,
-            reg_announces,
-        )
+        (height, prev_hash, bits, target_hex(bits), time)
     };
 
     let mut mempool_entries = state
@@ -13671,10 +13298,9 @@ async fn get_block_template(
     {
         let mut claimed: HashSet<([u8; 32], u32)> = HashSet::new();
         mempool_entries.retain(|e| {
-            let conflicts =
-                e.tx.inputs
-                    .iter()
-                    .any(|inp| claimed.contains(&(inp.prev_txid, inp.prev_index)));
+            let conflicts = e.tx.inputs.iter().any(|inp| {
+                claimed.contains(&(inp.prev_txid, inp.prev_index))
+            });
             if conflicts {
                 return false;
             }
@@ -13709,8 +13335,7 @@ async fn get_block_template(
             for out in &e.tx.outputs {
                 if let Ok(headers) = parse_btc_header_batch(&out.script_pubkey) {
                     is_btc_carrier = true;
-                    if headers
-                        .first()
+                    if headers.first()
                         .and_then(|h| btc_relay_tip.map(|t| t == h.prev_hash))
                         .unwrap_or(false)
                     {
@@ -13719,8 +13344,7 @@ async fn get_block_template(
                 }
                 if let Ok(headers) = parse_ltc_header_batch(&out.script_pubkey) {
                     is_ltc_carrier = true;
-                    if headers
-                        .first()
+                    if headers.first()
                         .and_then(|h| ltc_relay_tip.map(|t| t == h.prev_hash))
                         .unwrap_or(false)
                     {
@@ -13888,24 +13512,6 @@ async fn get_block_template(
         }
     };
 
-    let (poawx_mode_str, poawx_receipts_for_template, receipts_root_str) = {
-        if irium_node_rs::activation::poawx_serving_active(height) {
-            let receipts = state
-                .poawx_pending_receipts
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone();
-            let root = if receipts.is_empty() {
-                String::new()
-            } else {
-                hex::encode(compute_poawx_receipts_root(&receipts))
-            };
-            ("active".to_string(), receipts, root)
-        } else {
-            ("disabled".to_string(), Vec::new(), String::new())
-        }
-    };
-
     Ok(Json(BlockTemplateResponse {
         height,
         prev_hash,
@@ -13917,1389 +13523,11 @@ async fn get_block_template(
         coinbase_value,
         mempool_count,
         coinbase_extra_outputs,
-        poawx_mode: poawx_mode_str,
-        poawx_pending_receipts: poawx_receipts_for_template,
-        receipts_root: receipts_root_str,
-        poawx_hidden_precommit_active: irium_node_rs::chain::hidden_precommit_active(height),
-        poawx_audit_hardening_active: irium_node_rs::poawx_proposer::audit_hardening_active(height),
-        poawx_tickets_active: irium_node_rs::poawx_ticket::tickets_active(height),
-        poawx_multisource_seed_active:
-            irium_node_rs::poawx_committed_admission::multisource_seed_active(height),
-        poawx_penalty_state_active: irium_node_rs::poawx_penalty::penalty_state_active(height),
-        poawx_puzzle_anchor_bits: irium_node_rs::poawx_puzzle::default_profile().anchor_bits as u32,
-        poawx_effective_sybil_bits: irium_node_rs::poawx_ticket::effective_sybil_bits(),
-        poawx_proposer_vrf_active: proposer_vrf_active,
-        poawx_proposer_seed: proposer_seed,
-        poawx_proposer_eligible_count: proposer_eligible_count,
-        poawx_proposer_round_interval: proposer_round_interval,
-        poawx_proposer_freeze_height: proposer_freeze_height,
-        poawx_proposer_max_allowed_round: proposer_max_allowed_round,
-        poawx_reg_active: reg_active,
-        poawx_reg_anchor_height: reg_anchor_height,
-        poawx_reg_anchor_hash: reg_anchor_hash,
-        poawx_reg_required_sybil_bits: reg_required_sybil_bits,
-        poawx_reg_activations: reg_activations,
-        poawx_reg_announces: reg_announces,
     }))
-}
-
-// --- Phase 10-D: PoAW-X helpers and endpoints ---
-
-fn pending_receipt_to_block_receipt(
-    r: &PoawxPendingReceipt,
-) -> Option<irium_node_rs::poawx::PoawxBlockReceipt> {
-    let pkh = hex::decode(&r.worker_pkh).ok()?;
-    let pubk = hex::decode(&r.worker_pubkey).ok()?;
-    let sig = hex::decode(&r.worker_sig).ok()?;
-    let sol = hex::decode(&r.solution).ok()?;
-    let nonce = hex::decode(&r.commitment_nonce).ok()?;
-    if pkh.len() != 20 || pubk.len() != 33 || sig.len() != 64 || sol.len() != 8 || nonce.len() != 32
-    {
-        return None;
-    }
-    let mut worker_pkh = [0u8; 20];
-    worker_pkh.copy_from_slice(&pkh);
-    let mut worker_pubkey = [0u8; 33];
-    worker_pubkey.copy_from_slice(&pubk);
-    let mut worker_sig = [0u8; 64];
-    worker_sig.copy_from_slice(&sig);
-    let mut solution = [0u8; 8];
-    solution.copy_from_slice(&sol);
-    let mut commitment_nonce = [0u8; 32];
-    commitment_nonce.copy_from_slice(&nonce);
-    Some(irium_node_rs::poawx::PoawxBlockReceipt {
-        height: r.height,
-        lane: r.lane.bytes().next().unwrap_or(b'A'),
-        worker_pkh,
-        worker_pubkey,
-        worker_sig,
-        solution,
-        commitment_nonce,
-        // Phase 18B step-3: parse the embedded delegation (mode-1) back from the
-        // DTO. Empty => mode-0 (None). A malformed delegation drops the receipt
-        // (via `?`), which then fails the irx1-root check — i.e. fail-closed.
-        delegation: if r.delegation.is_empty() {
-            None
-        } else {
-            Some(
-                irium_node_rs::poawx::Delegation::deserialize(&hex::decode(&r.delegation).ok()?)
-                    .ok()?,
-            )
-        },
-        // Phase 20: carry the production extension (Step 1 threading). Empty => None.
-        // Malformed => drop the receipt (fail-closed), consistent with delegation.
-        phase20_ext: if r.phase20_ext.is_empty() {
-            None
-        } else {
-            Some(
-                irium_node_rs::poawx::Phase20ReceiptExt::deserialize(
-                    &hex::decode(&r.phase20_ext).ok()?,
-                )
-                .ok()?,
-            )
-        },
-    })
-}
-
-fn compute_poawx_receipts_root(receipts: &[PoawxPendingReceipt]) -> [u8; 32] {
-    compute_poawx_receipts_root_gated(receipts, false)
-}
-
-/// Phase 20: gated variant matching `irx1_root_from_block_receipts_gated` in the
-/// node lib. When `phase20_active`, binds `SHA256(phase20_ext bytes)` into the
-/// inner hash (after the optional mode-1 delegation digest). Because the pending
-/// `phase20_ext` hex is exactly `Phase20ReceiptExt::serialize()`, this digest
-/// equals `Phase20ReceiptExt::digest()` used on the block-receipt side, so the
-/// submit-path root and the connect_block root agree. Inactive/absent =>
-/// byte-identical to the legacy root.
-fn compute_poawx_receipts_root_gated(
-    receipts: &[PoawxPendingReceipt],
-    phase20_active: bool,
-) -> [u8; 32] {
-    // Fix #5/#1 (audit-gated): mirror irx1_root_from_block_receipts_audit so a pool-submitted
-    // block's root matches connect_block when the audit gate is active. Self-gated from the
-    // receipt height; gate off => the legacy path below (byte-identical). Field order MUST match
-    // poawx.rs: height,lane,worker_pkh,worker_pubkey,worker_sig,solution,commitment_nonce,[deleg],[ext].
-    let audit = receipts
-        .first()
-        .map(|r| irium_node_rs::poawx_proposer::audit_hardening_active(r.height))
-        .unwrap_or(false);
-    if audit {
-        let mut inners: Vec<[u8; 32]> = receipts
-            .iter()
-            .map(|r| {
-                let mut inner = Sha256::new();
-                let lane_byte = r.lane.bytes().next().unwrap_or(b'A');
-                inner.update(r.height.to_le_bytes());
-                inner.update([lane_byte]);
-                inner.update(hex::decode(&r.worker_pkh).unwrap_or_default());
-                inner.update(hex::decode(&r.worker_pubkey).unwrap_or_default());
-                inner.update(hex::decode(&r.worker_sig).unwrap_or_default());
-                inner.update(hex::decode(&r.solution).unwrap_or_default());
-                inner.update(hex::decode(&r.commitment_nonce).unwrap_or_default());
-                if !r.delegation.is_empty() {
-                    if let Ok(b) = hex::decode(&r.delegation) {
-                        let mut dh = Sha256::new();
-                        dh.update(&b);
-                        let dd: [u8; 32] = dh.finalize().into();
-                        inner.update(dd);
-                    }
-                }
-                if phase20_active && !r.phase20_ext.is_empty() {
-                    if let Ok(b) = hex::decode(&r.phase20_ext) {
-                        let mut eh = Sha256::new();
-                        eh.update(&b);
-                        let ed: [u8; 32] = eh.finalize().into();
-                        inner.update(ed);
-                    }
-                }
-                inner.finalize().into()
-            })
-            .collect();
-        inners.sort_unstable();
-        let mut outer = Sha256::new();
-        for h in &inners {
-            outer.update(h);
-        }
-        return outer.finalize().into();
-    }
-    let mut sorted: Vec<&PoawxPendingReceipt> = receipts.iter().collect();
-    sorted.sort_unstable_by(|a, b| {
-        a.height
-            .cmp(&b.height)
-            .then_with(|| {
-                let la = a.lane.bytes().next().unwrap_or(b'A');
-                let lb = b.lane.bytes().next().unwrap_or(b'A');
-                la.cmp(&lb)
-            })
-            .then_with(|| a.worker_pkh.as_bytes().cmp(b.worker_pkh.as_bytes()))
-            .then_with(|| {
-                a.commitment_nonce
-                    .as_bytes()
-                    .cmp(b.commitment_nonce.as_bytes())
-            })
-    });
-    let mut outer = Sha256::new();
-    for r in sorted {
-        let mut inner = Sha256::new();
-        let lane_byte = r.lane.bytes().next().unwrap_or(b'A');
-        inner.update(r.height.to_le_bytes());
-        inner.update([lane_byte]);
-        inner.update(hex::decode(&r.worker_pkh).unwrap_or_default());
-        inner.update(hex::decode(&r.solution).unwrap_or_default());
-        inner.update(hex::decode(&r.commitment_nonce).unwrap_or_default());
-        // Phase 18B: mode-1 mixes the delegation digest (SHA256 of the 226-byte
-        // delegation) so the root matches irx1_root_from_block_receipts. Mode-0
-        // (empty delegation) is byte-identical to Phase 10-D.
-        if !r.delegation.is_empty() {
-            if let Ok(deleg_bytes) = hex::decode(&r.delegation) {
-                let mut dh = Sha256::new();
-                dh.update(&deleg_bytes);
-                let digest: [u8; 32] = dh.finalize().into();
-                inner.update(digest);
-            }
-        }
-        // Phase 20: bind the production-extension digest (gated) to match
-        // irx1_root_from_block_receipts_gated. The hex IS the serialized ext, so
-        // SHA256(bytes) == Phase20ReceiptExt::digest(). Inactive/empty => no-op.
-        if phase20_active && !r.phase20_ext.is_empty() {
-            if let Ok(ext_bytes) = hex::decode(&r.phase20_ext) {
-                let mut eh = Sha256::new();
-                eh.update(&ext_bytes);
-                let digest: [u8; 32] = eh.finalize().into();
-                inner.update(digest);
-            }
-        }
-        outer.update(inner.finalize());
-    }
-    outer.finalize().into()
-}
-
-/// Converts a binary block receipt to the hex-string pending-receipt format.
-/// Reverse of `pending_receipt_to_block_receipt`. Used in Phase 13-C reorg restore.
-fn block_receipt_to_pending(r: &irium_node_rs::poawx::PoawxBlockReceipt) -> PoawxPendingReceipt {
-    PoawxPendingReceipt {
-        height: r.height,
-        lane: (r.lane as char).to_string(),
-        worker_pkh: hex::encode(r.worker_pkh),
-        solution: hex::encode(r.solution),
-        commitment_nonce: hex::encode(r.commitment_nonce),
-        worker_pubkey: hex::encode(r.worker_pubkey),
-        worker_sig: hex::encode(r.worker_sig),
-        // Phase 18B step-3: preserve the delegation across reorg restore so a
-        // mode-1 receipt is NOT down-converted to mode-0 (closes step-1 #9).
-        delegation: r
-            .delegation
-            .as_ref()
-            .map(|d| hex::encode(d.serialize()))
-            .unwrap_or_default(),
-        // Phase 20: preserve the production extension across reorg restore so a
-        // Phase 20 receipt is not stripped when an orphaned block is re-pended.
-        phase20_ext: r
-            .phase20_ext
-            .as_ref()
-            .map(|e| hex::encode(e.serialize()))
-            .unwrap_or_default(),
-    }
-}
-
-/// Restores PoAW-X receipts from reorg-orphaned blocks into `pending`.
-///
-/// Rules:
-/// * Skips receipts expired by more than POAWX_RECEIPT_MAX_AGE_BLOCKS below tip_height.
-/// * Skips duplicate (height, lane, worker_pkh) triplets already in pending.
-/// * Does not remove any existing entries in pending.
-fn restore_orphaned_poawx_receipts(
-    pending: &mut Vec<PoawxPendingReceipt>,
-    orphaned_blocks: &[irium_node_rs::block::Block],
-    tip_height: u64,
-) {
-    for block in orphaned_blocks {
-        let receipts = match &block.poawx_receipts {
-            Some(r) => r,
-            None => continue,
-        };
-        for r in receipts {
-            if r.height.saturating_add(POAWX_RECEIPT_MAX_AGE_BLOCKS) < tip_height {
-                continue;
-            }
-            let p = block_receipt_to_pending(r);
-            let dup = pending.iter().any(|existing| {
-                existing.height == p.height
-                    && existing.lane == p.lane
-                    && existing.worker_pkh == p.worker_pkh
-            });
-            if !dup {
-                pending.push(p);
-            }
-        }
-    }
-}
-
-const POAWX_DEFAULT_DIFFICULTY_BITS: u32 = 8;
-const POAWX_MIN_ACTIVE_DIFFICULTY_BITS: u32 = 4;
-const POAWX_MAX_DIFFICULTY_BITS: u32 = 24;
-
-/// Returns the configured PoAW-X puzzle difficulty in leading-zero bits.
-/// Reads IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS.
-///   Not set        -> POAWX_DEFAULT_DIFFICULTY_BITS (8)
-///   Invalid string -> 0  (fail-closed: active-mode callers will reject)
-///   > MAX          -> capped at POAWX_MAX_DIFFICULTY_BITS (24)
-fn poawx_puzzle_difficulty_bits() -> u32 {
-    match std::env::var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS")
-        .ok()
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        None => POAWX_DEFAULT_DIFFICULTY_BITS,
-        Some(v) => match v.parse::<u32>() {
-            Ok(n) => n.min(POAWX_MAX_DIFFICULTY_BITS),
-            Err(_) => {
-                eprintln!(
-                    "[poawx] IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS invalid: {:?}; failing closed",
-                    v
-                );
-                0
-            }
-        },
-    }
-}
-
-/// Counts leading zero bits in a 32-byte hash.
-fn count_leading_zero_bits(hash: &[u8; 32]) -> u32 {
-    let mut bits = 0u32;
-    for &b in hash.iter() {
-        let z = b.leading_zeros();
-        bits += z;
-        if z < 8 {
-            break;
-        }
-    }
-    bits
-}
-
-// Limited to 255: the block wire format encodes receipt count as u8.
-const POAWX_MAX_PENDING_RECEIPTS: usize = 255;
-
-fn poawx_receipts_file() -> std::path::PathBuf {
-    if let Ok(p) = std::env::var("IRIUM_POAWX_RECEIPTS_FILE") {
-        std::path::PathBuf::from(p)
-    } else {
-        storage::state_dir().join("poawx_pending_receipts.json")
-    }
-}
-
-/// Returns empty Vec on missing file or parse failure -- never panics.
-fn load_poawx_pending_receipts() -> Vec<PoawxPendingReceipt> {
-    let path = poawx_receipts_file();
-    let bytes = match std::fs::read(&path) {
-        Ok(b) => b,
-        Err(_) => return Vec::new(),
-    };
-    match serde_json::from_slice::<Vec<PoawxPendingReceipt>>(&bytes) {
-        Ok(receipts) => {
-            eprintln!(
-                "[poawx] loaded {} pending receipts from {}",
-                receipts.len(),
-                path.display()
-            );
-            receipts
-        }
-        Err(e) => {
-            eprintln!(
-                "[poawx] corrupt receipts file {}: {}; starting clean",
-                path.display(),
-                e
-            );
-            Vec::new()
-        }
-    }
-}
-
-/// Persists receipts to disk. Write failures are logged.
-fn save_poawx_pending_receipts(receipts: &[PoawxPendingReceipt]) {
-    let path = poawx_receipts_file();
-    if let Some(parent) = path.parent() {
-        let _ = std::fs::create_dir_all(parent);
-    }
-    match serde_json::to_string(receipts) {
-        Ok(json) => {
-            if let Err(e) = std::fs::write(&path, json) {
-                eprintln!(
-                    "[poawx] failed to save receipts to {}: {}",
-                    path.display(),
-                    e
-                );
-            }
-        }
-        Err(e) => eprintln!("[poawx] failed to serialize receipts: {}", e),
-    }
-}
-
-/// Receipts older than this many blocks behind the current tip are expired.
-const POAWX_RECEIPT_MAX_AGE_BLOCKS: u64 = 24;
-
-/// Removes receipts whose height is more than POAWX_RECEIPT_MAX_AGE_BLOCKS behind tip_height.
-/// Future-height receipts (height > tip_height) are always retained.
-/// Pure function: no I/O, no mainnet check required (callers ensure mainnet-safe data).
-fn prune_expired_poawx_receipts(receipts: &mut Vec<PoawxPendingReceipt>, tip_height: u64) {
-    let before = receipts.len();
-    receipts.retain(|r| r.height.saturating_add(POAWX_RECEIPT_MAX_AGE_BLOCKS) >= tip_height);
-    let pruned = before - receipts.len();
-    if pruned > 0 {
-        eprintln!(
-            "[poawx] pruned {} expired receipts (older than {} blocks) at tip_height={}",
-            pruned, POAWX_RECEIPT_MAX_AGE_BLOCKS, tip_height
-        );
-    }
-}
-
-fn poawx_worker_due(base_reward: u64) -> u64 {
-    base_reward * irium_node_rs::poawx::POAWX_WORKER_REWARD_PERMILLE / 1000
-}
-
-fn poawx_validate_reward_split(
-    coinbase: &Transaction,
-    receipts: &[PoawxPendingReceipt],
-    height: u64,
-) -> Result<(), String> {
-    if receipts.is_empty() {
-        return Ok(());
-    }
-    let base_reward = block_reward(height);
-    let worker_due = poawx_worker_due(base_reward);
-    let mut worker_counts: std::collections::HashMap<String, u64> = Default::default();
-    for r in receipts {
-        *worker_counts.entry(r.worker_pkh.clone()).or_insert(0) += 1;
-    }
-    for (pkh_hex, count) in &worker_counts {
-        let pkh_bytes =
-            hex::decode(pkh_hex).map_err(|_| format!("invalid worker_pkh hex: {}", pkh_hex))?;
-        if pkh_bytes.len() != 20 {
-            return Err(format!("worker_pkh wrong length for: {}", pkh_hex));
-        }
-        let mut pkh_arr = [0u8; 20];
-        pkh_arr.copy_from_slice(&pkh_bytes);
-        let expected_script = p2pkh_script(&pkh_arr);
-        let total_paid: u64 = coinbase
-            .outputs
-            .iter()
-            .filter(|out| out.script_pubkey == expected_script)
-            .map(|out| out.value)
-            .sum();
-        let required = worker_due.saturating_mul(*count);
-        if total_paid < required {
-            return Err(format!(
-                "worker {} payout {} < required {} ({} receipt(s) * {} each)",
-                pkh_hex, total_paid, required, count, worker_due
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn verify_worker_identity(
-    worker_pkh: &str,
-    worker_pubkey: &str,
-    worker_sig: &str,
-    solution_bytes: &[u8],
-    nonce_bytes: &[u8],
-    height: u64,
-) -> Result<(), &'static str> {
-    if worker_pubkey.is_empty() || worker_sig.is_empty() {
-        return Err("worker identity not bound: missing pubkey or sig");
-    }
-    let pubkey_bytes = hex::decode(worker_pubkey).map_err(|_| "worker_pubkey: invalid hex")?;
-    let verifying_key = VerifyingKey::from_sec1_bytes(&pubkey_bytes)
-        .map_err(|_| "worker_pubkey: invalid secp256k1 key")?;
-    let sha = Sha256::digest(&pubkey_bytes);
-    let rip = ripemd::Ripemd160::digest(sha);
-    let mut computed_pkh = [0u8; 20];
-    computed_pkh.copy_from_slice(&rip);
-    if hex::encode(computed_pkh) != worker_pkh {
-        return Err("worker_pkh does not match worker_pubkey");
-    }
-    let mut challenge_hasher = Sha256::new();
-    challenge_hasher.update(solution_bytes);
-    challenge_hasher.update(nonce_bytes);
-    challenge_hasher.update(&height.to_le_bytes());
-    let challenge: [u8; 32] = challenge_hasher.finalize().into();
-    let sig_bytes = hex::decode(worker_sig).map_err(|_| "worker_sig: invalid hex")?;
-    let parsed_sig =
-        Signature::from_slice(&sig_bytes).map_err(|_| "worker_sig: invalid signature bytes")?;
-    verifying_key
-        .verify_prehash(&challenge, &parsed_sig)
-        .map_err(|_| "worker identity signature verification failed")
-}
-
-/// Phase 18B step-3: true when mode-1 delegated receipts are active for `height`
-/// on the submit path. Mirrors chain.rs `poawx_delegation_active`. Mainnet false.
-fn poawx_delegation_active_submit(height: u64) -> bool {
-    if network_kind_from_env() == NetworkKind::Mainnet {
-        return false;
-    }
-    match irium_node_rs::activation::poawx_delegation_activation_height() {
-        Some(h) => height >= h,
-        None => false,
-    }
-}
-
-/// Phase 18B step-3: submit-path verification of a mode-1 (delegated) pending
-/// receipt. Mirrors the mode-1 checks in chain.rs `validate_poawx_block_receipts`
-/// so the pool gets a clear early rejection; `connect_block` remains the
-/// authoritative validator. `worker_pubkey`/`worker_sig` are the pool delegate's.
-fn verify_delegated_pending_receipt(
-    r: &PoawxPendingReceipt,
-    sol: &[u8],
-    nonce_bytes: &[u8; 32],
-    height: u64,
-) -> Result<(), String> {
-    if !poawx_delegation_active_submit(height) {
-        return Err("mode-1 delegated receipt before delegation activation".to_string());
-    }
-    let dbytes = hex::decode(&r.delegation).map_err(|_| "delegation: invalid hex".to_string())?;
-    let d = irium_node_rs::poawx::Delegation::deserialize(&dbytes)?;
-    if d.network_id != irium_node_rs::activation::network_id_byte() {
-        return Err("delegation network_id mismatch".to_string());
-    }
-    let worker_pkh =
-        hex::decode(&r.worker_pkh).map_err(|_| "worker_pkh: invalid hex".to_string())?;
-    if d.miner_pkh().as_slice() != worker_pkh.as_slice() {
-        return Err("delegation miner_pkh != worker_pkh".to_string());
-    }
-    if height > d.expiry_height {
-        return Err("delegation expired".to_string());
-    }
-    // Official pool is 0%. Phase 20 Step 4: a nonzero delegation fee is allowed
-    // only in explicit third-party mode + fee gate (both mainnet-hard-off), capped.
-    // connect_block remains the authoritative validator; this is an early reject.
-    if d.fee_bps != 0 {
-        let third_party = irium_node_rs::chain::third_party_fee_active(height)
-            && irium_node_rs::chain::third_party_pool_mode_enabled();
-        if !third_party {
-            return Err(
-                "nonzero delegation fee_bps rejected (third-party mode/fee gate not active)"
-                    .to_string(),
-            );
-        }
-        if d.fee_bps > irium_node_rs::poawx::THIRD_PARTY_FEE_CAP_BPS {
-            return Err(format!(
-                "delegation fee_bps {} exceeds cap {}",
-                d.fee_bps,
-                irium_node_rs::poawx::THIRD_PARTY_FEE_CAP_BPS
-            ));
-        }
-        if d.fee_pkh == [0u8; 20] {
-            return Err("nonzero delegation fee_bps with zero fee_pkh".to_string());
-        }
-    }
-    d.verify_signature().map_err(|e| e.to_string())?;
-    let signer_pub =
-        hex::decode(&r.worker_pubkey).map_err(|_| "worker_pubkey: invalid hex".to_string())?;
-    if signer_pub.as_slice() != d.pool_pubkey.as_slice() {
-        return Err("signer != delegated pool_pubkey".to_string());
-    }
-    let challenge: [u8; 32] = {
-        let mut h = Sha256::new();
-        h.update(sol);
-        h.update(nonce_bytes);
-        h.update(height.to_le_bytes());
-        h.finalize().into()
-    };
-    let vk = VerifyingKey::from_sec1_bytes(&signer_pub)
-        .map_err(|_| "signer pubkey: invalid secp256k1 key".to_string())?;
-    let sig_bytes =
-        hex::decode(&r.worker_sig).map_err(|_| "worker_sig: invalid hex".to_string())?;
-    let parsed_sig =
-        Signature::from_slice(&sig_bytes).map_err(|_| "worker_sig: invalid bytes".to_string())?;
-    vk.verify_prehash(&challenge, &parsed_sig)
-        .map_err(|_| "signer sig verification failed".to_string())
-}
-
-// ── Phase 20 Step 6D: loopback-only role-gossip bridge endpoints ─────────────
-// POST: pool submits a role-precommit/reveal gossip envelope; the node validates
-// /dedupes/stores it in the role-gossip cache and (best-effort) rebroadcasts to
-// P2P peers. GET: pool fetches the node-collected payloads for a target height.
-// All four are loopback-only + mainnet-hard-off + disabled unless role gossip is
-// enabled. No consensus effect (Step 6A enforcement stays block-driven).
-
-#[derive(Debug, serde::Deserialize)]
-struct RoleGossipHeightQuery {
-    target_height: u64,
-}
-
-fn role_gossip_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
-    if !addr.ip().is_loopback() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    if !irium_node_rs::poawx_gossip::role_gossip_enabled() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    Ok(())
-}
-
-/// Phase 21E: loopback-only guard for the candidate-admission bridge
-/// (testnet/devnet, mainnet hard-off, disabled unless the admission gate is set).
-fn candidate_admission_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
-    if !addr.ip().is_loopback() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    if !irium_node_rs::poawx_admission::candidate_admission_gossip_enabled() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    Ok(())
-}
-
-/// Phase 21I: loopback-only guard for the finality-vote bridge (testnet/devnet,
-/// mainnet hard-off, disabled unless the finality gossip gate is configured).
-fn finality_vote_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
-    if !addr.ip().is_loopback() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    if !irium_node_rs::poawx_finality::finality_gossip_enabled() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    Ok(())
-}
-
-fn proposer_registration_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
-    if !addr.ip().is_loopback() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    if !irium_node_rs::poawx_proposer::proposer_registration_gossip_enabled() {
-        return Err(StatusCode::FORBIDDEN);
-    }
-    Ok(())
-}
-
-/// POST /poawx/registration : a local miner submits a ProposerRegistrationV1 (wire
-/// bytes). The node light-validates, pools it, and gossips it so a producer can announce
-/// it on-chain. Loopback-only; mainnet hard-off.
-async fn poawx_post_registration(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    body: axum::body::Bytes,
-) -> Result<Json<Value>, StatusCode> {
-    proposer_registration_bridge_guard(&addr)?;
-    let pool = irium_node_rs::poawx_proposer::global_proposer_reg_pool();
-    match pool.ingest_bytes(body.as_ref()) {
-        irium_node_rs::poawx_gossip::GossipOutcome::AcceptedNew => {
-            if let Some(ref p2p) = state.p2p {
-                p2p.broadcast_proposer_registration(body.as_ref()).await;
-            }
-            Ok(Json(json!({"status":"accepted"})))
-        }
-        irium_node_rs::poawx_gossip::GossipOutcome::Duplicate => {
-            Ok(Json(json!({"status":"duplicate"})))
-        }
-        irium_node_rs::poawx_gossip::GossipOutcome::Rejected(_) => Err(StatusCode::BAD_REQUEST),
-    }
-}
-
-async fn poawx_role_gossip_precommit_post(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    body: axum::body::Bytes,
-) -> Result<Json<Value>, StatusCode> {
-    role_gossip_bridge_guard(&addr)?;
-    let cache = irium_node_rs::poawx_gossip::global_cache();
-    cache.prune(state.status_height_cache.load(Ordering::Relaxed));
-    match cache.ingest_precommit_bytes(body.as_ref()) {
-        irium_node_rs::poawx_gossip::GossipOutcome::AcceptedNew => {
-            if let Some(ref p2p) = state.p2p {
-                p2p.broadcast_role_precommit(body.as_ref()).await;
-            }
-            Ok(Json(json!({"status":"accepted"})))
-        }
-        irium_node_rs::poawx_gossip::GossipOutcome::Duplicate => {
-            Ok(Json(json!({"status":"duplicate"})))
-        }
-        irium_node_rs::poawx_gossip::GossipOutcome::Rejected(_) => Err(StatusCode::BAD_REQUEST),
-    }
-}
-
-async fn poawx_role_gossip_reveal_post(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    body: axum::body::Bytes,
-) -> Result<Json<Value>, StatusCode> {
-    role_gossip_bridge_guard(&addr)?;
-    let cache = irium_node_rs::poawx_gossip::global_cache();
-    cache.prune(state.status_height_cache.load(Ordering::Relaxed));
-    match cache.ingest_reveal_bytes(body.as_ref()) {
-        irium_node_rs::poawx_gossip::GossipOutcome::AcceptedNew => {
-            if let Some(ref p2p) = state.p2p {
-                p2p.broadcast_role_reveal(body.as_ref()).await;
-            }
-            Ok(Json(json!({"status":"accepted"})))
-        }
-        irium_node_rs::poawx_gossip::GossipOutcome::Duplicate => {
-            Ok(Json(json!({"status":"duplicate"})))
-        }
-        irium_node_rs::poawx_gossip::GossipOutcome::Rejected(_) => Err(StatusCode::BAD_REQUEST),
-    }
-}
-
-async fn poawx_role_gossip_precommits_get(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    Query(q): Query<RoleGossipHeightQuery>,
-) -> Result<Json<Value>, StatusCode> {
-    role_gossip_bridge_guard(&addr)?;
-    let cache = irium_node_rs::poawx_gossip::global_cache();
-    let tip = state.status_height_cache.load(Ordering::Relaxed);
-    cache.set_tip(tip);
-    let window = irium_node_rs::poawx_gossip::role_gossip_window();
-    if q.target_height < tip.saturating_sub(window) || q.target_height > tip.saturating_add(window)
-    {
-        return Ok(Json(json!({ "precommits": [] })));
-    }
-    let v = serde_json::to_value(cache.precommits_for(q.target_height)).unwrap_or(Value::Null);
-    Ok(Json(json!({ "precommits": v })))
-}
-
-async fn poawx_role_gossip_reveals_get(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    Query(q): Query<RoleGossipHeightQuery>,
-) -> Result<Json<Value>, StatusCode> {
-    role_gossip_bridge_guard(&addr)?;
-    let cache = irium_node_rs::poawx_gossip::global_cache();
-    let tip = state.status_height_cache.load(Ordering::Relaxed);
-    cache.set_tip(tip);
-    let window = irium_node_rs::poawx_gossip::role_gossip_window();
-    if q.target_height < tip.saturating_sub(window) || q.target_height > tip.saturating_add(window)
-    {
-        return Ok(Json(json!({ "reveals": [] })));
-    }
-    let v = serde_json::to_value(cache.reveals_for(q.target_height)).unwrap_or(Value::Null);
-    Ok(Json(json!({ "reveals": v })))
-}
-
-/// Phase 21E: loopback-only POST a candidate admission (canonical wire bytes);
-/// validate+store in the node cache and rebroadcast if newly accepted.
-async fn poawx_candidate_admission_post(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    body: axum::body::Bytes,
-) -> Result<Json<Value>, StatusCode> {
-    candidate_admission_bridge_guard(&addr)?;
-    // Fix 1: per-source flood protection (loopback miner included) so a misconfigured local
-    // miner cannot make this node gossip a candidate-admission flood. Honest miners (a few
-    // admissions per block) are far below the limit.
-    if !irium_node_rs::poawx_admission::admission_rate_allowed(addr.ip()) {
-        return Err(StatusCode::TOO_MANY_REQUESTS);
-    }
-    let cache = irium_node_rs::poawx_admission::global_admission_cache();
-    cache.prune(state.status_height_cache.load(Ordering::Relaxed));
-    match cache.ingest_bytes(body.as_ref()) {
-        irium_node_rs::poawx_gossip::GossipOutcome::AcceptedNew => {
-            if let Some(ref p2p) = state.p2p {
-                p2p.broadcast_candidate_admission(body.as_ref()).await;
-            }
-            Ok(Json(json!({"status":"accepted"})))
-        }
-        irium_node_rs::poawx_gossip::GossipOutcome::Duplicate => {
-            Ok(Json(json!({"status":"duplicate"})))
-        }
-        irium_node_rs::poawx_gossip::GossipOutcome::Rejected(_) => Err(StatusCode::BAD_REQUEST),
-    }
-}
-
-/// Phase 21E: loopback-only GET admitted candidate admissions for a height
-/// (hex-encoded canonical wire bytes). The pool filters by seed locally.
-async fn poawx_candidate_admissions_get(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    Query(q): Query<RoleGossipHeightQuery>,
-) -> Result<Json<Value>, StatusCode> {
-    candidate_admission_bridge_guard(&addr)?;
-    let cache = irium_node_rs::poawx_admission::global_admission_cache();
-    let tip = state.status_height_cache.load(Ordering::Relaxed);
-    cache.set_tip(tip);
-    let window = irium_node_rs::poawx_admission::candidate_admission_window();
-    if q.target_height < tip.saturating_sub(window) || q.target_height > tip.saturating_add(window)
-    {
-        return Ok(Json(json!({ "admissions": [] })));
-    }
-    let hexes: Vec<String> = cache
-        .admissions_for_height(q.target_height)
-        .iter()
-        .map(|a| hex::encode(a.serialize()))
-        .collect();
-    Ok(Json(json!({ "admissions": hexes })))
-}
-
-/// Phase 21I: loopback-only POST a member-signed finality vote; validate + store
-/// in the node cache and rebroadcast if newly accepted.
-async fn poawx_finality_vote_post(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    body: axum::body::Bytes,
-) -> Result<Json<Value>, StatusCode> {
-    finality_vote_bridge_guard(&addr)?;
-    let cache = irium_node_rs::poawx_finality::global_finality_vote_cache();
-    cache.prune(state.status_height_cache.load(Ordering::Relaxed));
-    match cache.ingest_bytes(body.as_ref()) {
-        irium_node_rs::poawx_gossip::GossipOutcome::AcceptedNew => {
-            if let Some(ref p2p) = state.p2p {
-                p2p.broadcast_finality_vote(body.as_ref()).await;
-            }
-            Ok(Json(json!({"status":"accepted"})))
-        }
-        irium_node_rs::poawx_gossip::GossipOutcome::Duplicate => {
-            Ok(Json(json!({"status":"duplicate"})))
-        }
-        irium_node_rs::poawx_gossip::GossipOutcome::Rejected(_) => Err(StatusCode::BAD_REQUEST),
-    }
-}
-
-/// Phase 21I: loopback-only GET finality votes for a height (hex-encoded canonical
-/// wire bytes, deterministic order). The pool filters by block_hash locally.
-async fn poawx_finality_votes_get(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    Query(q): Query<RoleGossipHeightQuery>,
-) -> Result<Json<Value>, StatusCode> {
-    finality_vote_bridge_guard(&addr)?;
-    let cache = irium_node_rs::poawx_finality::global_finality_vote_cache();
-    let tip = state.status_height_cache.load(Ordering::Relaxed);
-    cache.set_tip(tip);
-    let window = irium_node_rs::poawx_finality::finality_gossip_window();
-    if q.target_height < tip.saturating_sub(window) || q.target_height > tip.saturating_add(window)
-    {
-        return Ok(Json(json!({ "votes": [] })));
-    }
-    let hexes: Vec<String> = cache
-        .votes_for_height(q.target_height)
-        .iter()
-        .map(|v| hex::encode(v.serialize()))
-        .collect();
-    Ok(Json(json!({ "votes": hexes })))
-}
-
-async fn poawx_get_assignment(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Json<Value>, StatusCode> {
-    check_rate_with_auth(&state, &addr, &headers)?;
-    let poawx_h = state
-        .status_height_cache
-        .load(std::sync::atomic::Ordering::Relaxed)
-        .saturating_add(1);
-    if !irium_node_rs::activation::poawx_serving_active(poawx_h) {
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
-    }
-    let (height, tip_hash_bytes, bits) = {
-        let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-        let tip_h = guard.tip_height();
-        // Phase 24F: serve the assignment at the genesis tip (tip_h == 0) on test
-        // networks too, so a fresh devnet/testnet can produce its first PoAW-X block.
-        // Mainnet + inactive are already rejected above; the seed derives from the
-        // genesis tip hash via the same path used for tip_h >= 1.
-        let tip_hash = guard
-            .chain
-            .last()
-            .map(|b| b.header.hash_for_height(tip_h))
-            .unwrap_or([0u8; 32]);
-        let target = guard.target_for_height(tip_h);
-        (tip_h, tip_hash, target.bits)
-    };
-    let mut seed_hasher = Sha256::new();
-    seed_hasher.update(&tip_hash_bytes);
-    seed_hasher.update(height.to_le_bytes());
-    seed_hasher.update(b"poawx_assignment_seed_v1");
-    let seed: [u8; 32] = seed_hasher.finalize().into();
-    let mut nonce_hasher = Sha256::new();
-    nonce_hasher.update(&seed);
-    nonce_hasher.update(b"commitment_nonce");
-    let commitment_nonce: [u8; 32] = nonce_hasher.finalize().into();
-    eprintln!(
-        "[poawx] assignment height={} seed={} pow_bits={:08x}",
-        height,
-        hex::encode(seed),
-        bits
-    );
-    Ok(Json(serde_json::json!({
-        "height": height,
-        "seed": hex::encode(seed),
-        "commitment_nonce": hex::encode(commitment_nonce),
-        "puzzle_difficulty": poawx_puzzle_difficulty_bits() as u64,
-        "lane": "cpu",
-        "pow_bits": format!("{:08x}", bits),
-    })))
-}
-
-async fn poawx_post_receipt(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxumJson(req): AxumJson<PoawxReceiptRequest>,
-) -> Result<Json<Value>, StatusCode> {
-    check_rate_with_auth(&state, &addr, &headers)?;
-    let poawx_h = state
-        .status_height_cache
-        .load(std::sync::atomic::Ordering::Relaxed)
-        .saturating_add(1);
-    if !irium_node_rs::activation::poawx_serving_active(poawx_h) {
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
-    }
-    let difficulty = poawx_puzzle_difficulty_bits();
-    if difficulty < POAWX_MIN_ACTIVE_DIFFICULTY_BITS {
-        eprintln!(
-            "[poawx] puzzle difficulty {} bits below minimum {}; failing closed",
-            difficulty, POAWX_MIN_ACTIVE_DIFFICULTY_BITS
-        );
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
-    }
-    let solution_bytes = hex::decode(&req.solution).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let submitted_nonce_bytes =
-        hex::decode(&req.commitment_nonce).map_err(|_| StatusCode::BAD_REQUEST)?;
-    if submitted_nonce_bytes.len() != 32 {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-
-    let (derived_seed, derived_nonce) = {
-        let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-        if req.height == 0 || req.height + 2 < guard.height {
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        let parent_h = req.height - 1;
-        if parent_h as usize >= guard.chain.len() {
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        let parent_hash = guard.chain[parent_h as usize]
-            .header
-            .hash_for_height(parent_h);
-        let mut seed_hasher = Sha256::new();
-        seed_hasher.update(&parent_hash);
-        seed_hasher.update(parent_h.to_le_bytes());
-        seed_hasher.update(b"poawx_assignment_seed_v1");
-        let seed: [u8; 32] = seed_hasher.finalize().into();
-        let mut nonce_hasher = Sha256::new();
-        nonce_hasher.update(&seed);
-        nonce_hasher.update(b"commitment_nonce");
-        let nonce: [u8; 32] = nonce_hasher.finalize().into();
-        (seed, nonce)
-    };
-
-    if submitted_nonce_bytes != derived_nonce {
-        eprintln!(
-            "[poawx] receipt rejected: commitment_nonce mismatch height={} lane={} worker_pkh={}",
-            req.height, req.lane, req.worker_pkh
-        );
-        return Err(StatusCode::BAD_REQUEST);
-    }
-
-    if let Err(e) = verify_worker_identity(
-        &req.worker_pkh,
-        &req.worker_pubkey,
-        &req.worker_sig,
-        &solution_bytes,
-        &derived_nonce,
-        req.height,
-    ) {
-        eprintln!(
-            "[poawx] receipt rejected: identity ({}) height={} lane={} worker_pkh={}",
-            e, req.height, req.lane, req.worker_pkh
-        );
-        return Err(StatusCode::BAD_REQUEST);
-    }
-
-    {
-        let mut pow_input = Vec::with_capacity(32 + 32 + solution_bytes.len());
-        pow_input.extend_from_slice(&derived_seed);
-        pow_input.extend_from_slice(&derived_nonce);
-        pow_input.extend_from_slice(&solution_bytes);
-        let pow_hash = sha256d(&pow_input);
-        let leading = count_leading_zero_bits(&pow_hash);
-        if leading < difficulty {
-            eprintln!(
-                "[poawx] receipt rejected: insufficient PoW leading_zeros={} required={} height={} lane={} worker_pkh={}",
-                leading, difficulty, req.height, req.lane, req.worker_pkh
-            );
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    }
-
-    let receipt = PoawxPendingReceipt {
-        height: req.height,
-        lane: req.lane.clone(),
-        worker_pkh: req.worker_pkh.clone(),
-        solution: req.solution.clone(),
-        commitment_nonce: req.commitment_nonce.clone(),
-        worker_pubkey: req.worker_pubkey.clone(),
-        worker_sig: req.worker_sig.clone(),
-        delegation: req.delegation.clone(),
-        phase20_ext: req.phase20_ext.clone(),
-    };
-    let tip_height = state
-        .chain
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .tip_height();
-    let (count, receipts_snapshot) = {
-        let mut pending = state
-            .poawx_pending_receipts
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        pending.retain(|r| {
-            !(r.height == req.height && r.lane == req.lane && r.worker_pkh == req.worker_pkh)
-        });
-        pending.push(receipt);
-        if pending.len() > POAWX_MAX_PENDING_RECEIPTS {
-            let excess = pending.len() - POAWX_MAX_PENDING_RECEIPTS;
-            eprintln!(
-                "[poawx] pending receipt cap exceeded; dropping {} oldest",
-                excess
-            );
-            pending.drain(0..excess);
-        }
-        prune_expired_poawx_receipts(&mut pending, tip_height);
-        (pending.len(), pending.clone())
-    };
-    save_poawx_pending_receipts(&receipts_snapshot);
-    eprintln!(
-        "[poawx] receipt stored height={} lane={} worker_pkh={} pending_count={}",
-        req.height, req.lane, req.worker_pkh, count
-    );
-    Ok(Json(
-        serde_json::json!({ "ok": true, "pending_count": count }),
-    ))
-}
-
-async fn submit_block_extended(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    AxumJson(req): AxumJson<SubmitBlockExtendedRequest>,
-) -> Result<Json<Value>, StatusCode> {
-    check_rate_with_auth(&state, &addr, &headers)?;
-    require_rpc_auth(&headers)?;
-    // Phase 13-C: drain reorg-orphaned blocks and restore receipts to pending.
-    // These blocks were disconnected by a p2p-triggered reorg; their receipts
-    // may still be valid for inclusion in a future block.
-    {
-        let (orphaned, tip_h) = {
-            let mut chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-            let orphaned = std::mem::take(&mut chain.reorg_orphaned_blocks);
-            let h = chain.tip_height();
-            (orphaned, h)
-        };
-        if !orphaned.is_empty() {
-            let receipts_snapshot = {
-                let mut pending = state
-                    .poawx_pending_receipts
-                    .lock()
-                    .unwrap_or_else(|e| e.into_inner());
-                restore_orphaned_poawx_receipts(&mut pending, &orphaned, tip_h);
-                pending.clone()
-            };
-            save_poawx_pending_receipts(&receipts_snapshot);
-            eprintln!(
-                "[poawx] restored orphaned receipts from {} reorg block(s)",
-                orphaned.len()
-            );
-        }
-    }
-    // O-2: mainnet must never accept PoAW-X receipt submissions.
-    // C-3: when PoAW-X is active on testnet, receipts must be non-empty.
-    {
-        let poawx_h = state
-            .status_height_cache
-            .load(std::sync::atomic::Ordering::Relaxed)
-            .saturating_add(1);
-        let poawx_active = irium_node_rs::activation::poawx_serving_active(poawx_h);
-        if !poawx_active && !req.poawx_receipts.is_empty() {
-            eprintln!("[submit_block_extended] reject: poawx receipts not accepted (poawx inactive)");
-            return Err(StatusCode::SERVICE_UNAVAILABLE);
-        }
-        if poawx_active && req.poawx_receipts.is_empty() {
-            eprintln!(
-                "[submit_block_extended] reject: poawx active but receipts empty; include puzzle receipts"
-            );
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    }
-    let configured_difficulty = poawx_puzzle_difficulty_bits();
-    if !req.poawx_receipts.is_empty() && configured_difficulty < POAWX_MIN_ACTIVE_DIFFICULTY_BITS {
-        eprintln!(
-            "[submit_block_extended] puzzle difficulty {} bits below minimum {}; failing closed",
-            configured_difficulty, POAWX_MIN_ACTIVE_DIFFICULTY_BITS
-        );
-        return Err(StatusCode::SERVICE_UNAVAILABLE);
-    }
-    // Phase 31: when the proposer VRF gate is enforced, PoW is demoted to a trivial
-    // anti-spam floor; cap the effective puzzle difficulty so hashrate gives no edge.
-    // connect_block applies the identical cap, so the two paths always agree.
-    let difficulty = irium_node_rs::poawx_proposer::effective_puzzle_difficulty_bits(
-        configured_difficulty,
-        req.height,
-    );
-    // Phase 20: after production activation, the receipt extension is required and
-    // is bound into the receipts root. connect_block is the authoritative validator;
-    // this is an early, clear rejection for a missing extension on the submit path.
-    let sbe_phase20_active = irium_node_rs::chain::phase20_production_active(req.height);
-    if !req.poawx_receipts.is_empty()
-        && sbe_phase20_active
-        && req.poawx_receipts.iter().any(|r| r.phase20_ext.is_empty())
-    {
-        eprintln!(
-            "[submit_block_extended] reject: phase20 production active but a receipt is missing the extension at height={}",
-            req.height
-        );
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    let expected_root = if req.poawx_receipts.is_empty() {
-        [0u8; 32]
-    } else {
-        compute_poawx_receipts_root_gated(&req.poawx_receipts, sbe_phase20_active)
-    };
-    let submitted_root_bytes = if req.poawx_receipts_root.is_empty() {
-        [0u8; 32]
-    } else {
-        let b = hex::decode(&req.poawx_receipts_root).map_err(|_| StatusCode::BAD_REQUEST)?;
-        if b.len() != 32 {
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        let mut arr = [0u8; 32];
-        arr.copy_from_slice(&b);
-        arr
-    };
-    if !req.poawx_receipts.is_empty() && expected_root != submitted_root_bytes {
-        eprintln!(
-            "[submit_block_extended] reject receipts_root mismatch: expected={} got={}",
-            hex::encode(expected_root),
-            hex::encode(submitted_root_bytes)
-        );
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    if !req.poawx_receipts.is_empty() {
-        let (sbe_seed, sbe_nonce) = {
-            let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-            if req.height == 0 || req.height as usize > guard.chain.len() {
-                return Err(StatusCode::BAD_REQUEST);
-            }
-            let parent_h = req.height - 1;
-            let parent_hash = guard.chain[parent_h as usize]
-                .header
-                .hash_for_height(parent_h);
-            let mut s_hasher = Sha256::new();
-            s_hasher.update(&parent_hash);
-            s_hasher.update(parent_h.to_le_bytes());
-            s_hasher.update(b"poawx_assignment_seed_v1");
-            let seed: [u8; 32] = s_hasher.finalize().into();
-            let mut n_hasher = Sha256::new();
-            n_hasher.update(&seed);
-            n_hasher.update(b"commitment_nonce");
-            let nonce: [u8; 32] = n_hasher.finalize().into();
-            (seed, nonce)
-        };
-        let sbe_nonce_hex = hex::encode(sbe_nonce);
-        for r in &req.poawx_receipts {
-            if r.commitment_nonce != sbe_nonce_hex {
-                eprintln!(
-                    "[submit_block_extended] reject: commitment_nonce mismatch height={}",
-                    req.height
-                );
-                return Err(StatusCode::BAD_REQUEST);
-            }
-            let sol = hex::decode(&r.solution).map_err(|_| StatusCode::BAD_REQUEST)?;
-            // Phase 18B step-3: mode-0 (direct) uses verify_worker_identity;
-            // mode-1 (delegated) uses the delegation verifier. connect_block is
-            // the authoritative validator either way.
-            if r.delegation.is_empty() {
-                if let Err(e) = verify_worker_identity(
-                    &r.worker_pkh,
-                    &r.worker_pubkey,
-                    &r.worker_sig,
-                    &sol,
-                    &sbe_nonce,
-                    req.height,
-                ) {
-                    eprintln!(
-                        "[submit_block_extended] reject: worker identity failed ({}) height={}",
-                        e, req.height
-                    );
-                    return Err(StatusCode::BAD_REQUEST);
-                }
-            } else if let Err(e) = verify_delegated_pending_receipt(r, &sol, &sbe_nonce, req.height)
-            {
-                eprintln!(
-                    "[submit_block_extended] reject: delegated receipt ({}) height={}",
-                    e, req.height
-                );
-                return Err(StatusCode::BAD_REQUEST);
-            }
-            let mut pow_input = Vec::with_capacity(32 + 32 + sol.len());
-            pow_input.extend_from_slice(&sbe_seed);
-            pow_input.extend_from_slice(&sbe_nonce);
-            pow_input.extend_from_slice(&sol);
-            let pow_hash = sha256d(&pow_input);
-            let leading = count_leading_zero_bits(&pow_hash);
-            if leading < difficulty {
-                eprintln!(
-                    "[submit_block_extended] reject: puzzle PoW insufficient leading_zeros={} required={} height={}",
-                    leading, difficulty, req.height
-                );
-                return Err(StatusCode::BAD_REQUEST);
-            }
-        }
-    }
-
-    let header = &req.header;
-    let prev_bytes = hex::decode(&header.prev_hash).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let merkle_bytes = hex::decode(&header.merkle_root).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let hash_bytes = hex::decode(&header.hash).map_err(|_| StatusCode::BAD_REQUEST)?;
-    if prev_bytes.len() != 32 || merkle_bytes.len() != 32 || hash_bytes.len() != 32 {
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    let bits = parse_header_bits(&header.bits).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let mut prev_hash_arr = [0u8; 32];
-    prev_hash_arr.copy_from_slice(&prev_bytes);
-    let mut merkle_root_arr = [0u8; 32];
-    merkle_root_arr.copy_from_slice(&merkle_bytes);
-    let block_header = BlockHeader {
-        version: header.version,
-        prev_hash: prev_hash_arr,
-        merkle_root: merkle_root_arr,
-        time: header.time,
-        bits,
-        nonce: header.nonce,
-    };
-    let derived_hash = block_header.hash_for_height(req.height);
-    if derived_hash[..] != hash_bytes[..] {
-        eprintln!(
-            "[submit_block_extended] reject hash_mismatch derived={} provided={}",
-            hex::encode(derived_hash),
-            hex::encode(&hash_bytes)
-        );
-        return Err(StatusCode::BAD_REQUEST);
-    }
-    if req.tx_hex.is_empty() || req.tx_hex.len() > MAX_SUBMIT_BLOCK_TXS {
-        return Err(StatusCode::PAYLOAD_TOO_LARGE);
-    }
-    let mut txs: Vec<Transaction> = Vec::new();
-    for tx_hex_str in &req.tx_hex {
-        let raw = hex::decode(tx_hex_str).map_err(|_| StatusCode::BAD_REQUEST)?;
-        let tx = decode_full_tx(&raw).map_err(|_| StatusCode::BAD_REQUEST)?;
-        txs.push(tx);
-    }
-    let auxpow = if block_header.version & irium_node_rs::auxpow::AUXPOW_VERSION_BIT != 0 {
-        let hex_str = req.auxpow_hex.as_deref().ok_or_else(|| {
-            eprintln!("[submit_block_extended] AuxPoW block missing auxpow_hex");
-            StatusCode::BAD_REQUEST
-        })?;
-        let bytes = hex::decode(hex_str).map_err(|_| StatusCode::BAD_REQUEST)?;
-        let mut off = 0usize;
-        let ap = irium_node_rs::auxpow::deserialize(&bytes, &mut off).map_err(|e| {
-            eprintln!("[submit_block_extended] auxpow decode error: {e}");
-            StatusCode::BAD_REQUEST
-        })?;
-        Some(ap)
-    } else {
-        None
-    };
-    if !req.poawx_receipts.is_empty() {
-        let irx1_tag: &[u8] = b"irx1";
-        let coinbase = txs.first().ok_or(StatusCode::BAD_REQUEST)?;
-        let found = coinbase.outputs.iter().any(|out| {
-            let s = &out.script_pubkey;
-            s.len() == 38
-                && s[0] == 0x6a
-                && s[1] == 0x24
-                && &s[2..6] == irx1_tag
-                && s[6..38] == expected_root[..]
-        });
-        if !found {
-            eprintln!(
-                "[submit_block_extended] reject: no irx1 commitment in coinbase for root={}",
-                hex::encode(expected_root)
-            );
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        poawx_validate_reward_split(coinbase, &req.poawx_receipts, req.height).map_err(|e| {
-            eprintln!("[submit_block_extended] reject: reward split: {}", e);
-            StatusCode::BAD_REQUEST
-        })?;
-    }
-    let block = {
-        let receipts = if req.poawx_receipts.is_empty() {
-            None
-        } else {
-            Some(
-                req.poawx_receipts
-                    .iter()
-                    .filter_map(pending_receipt_to_block_receipt)
-                    .collect::<Vec<_>>(),
-            )
-        };
-        Block {
-            header: block_header,
-            transactions: txs,
-            auxpow,
-            poawx_receipts: receipts,
-        }
-    };
-    // Phase 31: fail-fast reject a block whose receipts carry no proposer VRF
-    // assignment when the gate is enforced. connect_block (validate_block_proposer)
-    // is the authoritative validator; this returns a clear early 400 for legacy
-    // (non-assigned) miners instead of a generic connect failure.
-    if irium_node_rs::poawx_proposer::proposer_vrf_enforced(req.height) {
-        if let Some(receipts) = &block.poawx_receipts {
-            for r in receipts {
-                let assigned = r
-                    .phase20_ext
-                    .as_ref()
-                    .map(|e| e.proposer_assignment.is_some())
-                    .unwrap_or(false);
-                if !assigned {
-                    eprintln!(
-                        "[submit_block_extended] reject: proposer VRF enforced but receipt has no proposer assignment height={}",
-                        req.height
-                    );
-                    return Err(StatusCode::BAD_REQUEST);
-                }
-            }
-        }
-    }
-    let (new_height, new_tip_hash) = {
-        let mut chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-        if req.height != chain.height {
-            eprintln!(
-                "[submit_block_extended] reject height_mismatch req={} chain={}",
-                req.height, chain.height
-            );
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        if let Err(e) = chain.connect_block(block.clone()) {
-            eprintln!(
-                "[submit_block_extended] reject connect_block_failed err={}",
-                e
-            );
-            return Err(StatusCode::BAD_REQUEST);
-        }
-        {
-            let mut mempool = state.mempool.lock().unwrap_or_else(|e| e.into_inner());
-            for tx in block.transactions.iter().skip(1) {
-                mempool.remove(&tx.txid());
-            }
-            evict_invalid_mempool_entries(&chain, &mut mempool);
-        }
-        let new_tip_h = chain.tip_height();
-        let tip_hash = block.header.hash_for_height(new_tip_h);
-        (new_tip_h, hex::encode(tip_hash))
-    };
-    if let Some(ref anchors) = state.anchors {
-        if !anchors.is_chain_valid(new_height, &new_tip_hash) {
-            eprintln!(
-                "[submit_block_extended] reject anchor_reject height={} tip={}",
-                new_height, new_tip_hash
-            );
-            return Err(StatusCode::BAD_REQUEST);
-        }
-    }
-    if !req.poawx_receipts.is_empty() {
-        let committed_height = req.height;
-        let receipts_snapshot = {
-            let mut pending = state
-                .poawx_pending_receipts
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            let before = pending.len();
-            pending.retain(|r| r.height != committed_height);
-            let cleared = before - pending.len();
-            prune_expired_poawx_receipts(&mut pending, new_height);
-            eprintln!(
-                "[poawx] block_extended accepted height={} cleared_receipts={} remaining={}",
-                new_height,
-                cleared,
-                pending.len()
-            );
-            pending.clone()
-        };
-        save_poawx_pending_receipts(&receipts_snapshot);
-    }
-    if let Err(_e) = storage::write_block_json(req.height, &block) {}
-    // Phase 12-M/13-A: broadcast accepted block (with receipts) to pre-connected peers.
-    if let Some(ref p2p) = state.p2p {
-        let bytes = block.serialize_for_height(new_height);
-        if let Err(e) = p2p.broadcast_block(&bytes).await {
-            eprintln!("Failed to broadcast accepted block over P2P: {}", e);
-        }
-    }
-    eprintln!(
-        "[submit_block_extended] accepted height={} tip={} source={}",
-        new_height,
-        new_tip_hash,
-        req.submit_source.as_deref().unwrap_or("unknown")
-    );
-    Ok(Json(serde_json::json!({
-        "accepted": true,
-        "height": new_height,
-        "tip": new_tip_hash,
-    })))
-}
-
-fn irx1_root_from_block(block: &Block) -> Option<String> {
-    let coinbase = block.transactions.first()?;
-    for output in &coinbase.outputs {
-        let s = &output.script_pubkey;
-        if s.len() == 38 && s[0] == 0x6a && s[1] == 0x24 && &s[2..6] == b"irx1" {
-            return Some(hex::encode(&s[6..38]));
-        }
-    }
-    None
 }
 
 fn block_json_for(height: u64, block: &Block) -> Value {
     let header = &block.header;
-    // PoAW-X multi-source seed components for this block (finality-proof digest,
-    // precommit root); the solo --poawx miner reads these to seed the NEXT block.
-    let (poawx_finality_digest, poawx_precommit_root) =
-        irium_node_rs::poawx_committed_admission::seed_components_from_block(Some(block));
     serde_json::json!({
         "height": height,
         "header": {
@@ -15314,43 +13542,10 @@ fn block_json_for(height: u64, block: &Block) -> Value {
         "tx_hex": block.transactions.iter().map(|tx| hex::encode(tx.serialize())).collect::<Vec<_>>(),
         "auxpow_hex": block.auxpow.as_ref().map(|ap| hex::encode(irium_node_rs::auxpow::serialize(ap))),
         "miner_address": miner_address_from_block(block),
-        "irx1_root": irx1_root_from_block(block),
         "submit_source": storage::read_block_submit_source(height),
         "coinbase_tag": block.transactions.first()
             .and_then(|tx| tx.inputs.first())
             .and_then(|inp| extract_coinbase_tag(&inp.script_sig)),
-        "poawx_finality_digest": hex::encode(poawx_finality_digest),
-        "poawx_precommit_root": hex::encode(poawx_precommit_root),
-        // PoAW-X: emit block-contained receipts so RPC-syncing clients (e.g.
-        // irium-miner) reconstruct the block byte-identically and pass receipt
-        // validation at/after activation. Additive only; shape matches the node's
-        // own persisted-block parser (parse_persisted_block_file) and
-        // storage::write_block_json. null for pre-activation blocks (no receipts).
-        "poawx_receipts": block.poawx_receipts.as_ref().map(|recs| {
-            recs.iter()
-                .map(|r| {
-                    serde_json::json!({
-                        "height": r.height,
-                        "lane": std::str::from_utf8(&[r.lane]).unwrap_or("?").to_string(),
-                        "worker_pkh": hex::encode(r.worker_pkh),
-                        "worker_pubkey": hex::encode(r.worker_pubkey),
-                        "worker_sig": hex::encode(r.worker_sig),
-                        "solution": hex::encode(r.solution),
-                        "commitment_nonce": hex::encode(r.commitment_nonce),
-                        "delegation": r
-                            .delegation
-                            .as_ref()
-                            .map(|d| hex::encode(d.serialize()))
-                            .unwrap_or_default(),
-                        "phase20_ext": r
-                            .phase20_ext
-                            .as_ref()
-                            .map(|e| hex::encode(e.serialize()))
-                            .unwrap_or_default(),
-                    })
-                })
-                .collect::<Vec<serde_json::Value>>()
-        }),
     })
 }
 async fn get_block(
@@ -15369,17 +13564,6 @@ async fn get_block(
     Ok(Json(block_json_for(q.height, block)))
 }
 
-async fn poawx_dominance(
-    ConnectInfo(addr): ConnectInfo<SocketAddr>,
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Result<Json<Value>, StatusCode> {
-    check_rate_with_auth(&state, &addr, &headers)?;
-    let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-    let bytes = guard.dominance_bytes();
-    Ok(Json(serde_json::json!({ "hex": hex::encode(bytes) })))
-}
-
 async fn get_blocks(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
@@ -15390,9 +13574,7 @@ async fn get_blocks(
     // Cap at 500 blocks per request to bound response size and chain-lock duration.
     let count = q.count.min(500);
     if count == 0 {
-        return Ok(Json(
-            serde_json::json!({"from": q.from, "count": 0, "blocks": []}),
-        ));
+        return Ok(Json(serde_json::json!({"from": q.from, "count": 0, "blocks": []})));
     }
     let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
     let start = q.from as usize;
@@ -15620,20 +13802,6 @@ async fn submit_block(
 ) -> Result<Json<Value>, StatusCode> {
     check_rate_with_auth(&state, &addr, &headers)?;
     require_rpc_auth(&headers)?;
-    // C-2: when PoAW-X is active the legacy submit path is disabled.
-    // Miners must use /rpc/submit_block_extended and include puzzle receipts.
-    {
-        let poawx_h = state
-            .status_height_cache
-            .load(std::sync::atomic::Ordering::Relaxed)
-            .saturating_add(1);
-        if irium_node_rs::activation::poawx_serving_active(poawx_h) {
-            eprintln!(
-                "[submit_block] reject: poawx active; use /rpc/submit_block_extended with puzzle receipts"
-            );
-            return Err(StatusCode::METHOD_NOT_ALLOWED);
-        }
-    }
     // Rebuild header from JSON.
     let header = &req.header;
 
@@ -15711,7 +13879,6 @@ async fn submit_block(
         header: block_header,
         transactions: txs,
         auxpow,
-        poawx_receipts: None,
     };
 
     // Apply to chain state under lock, enforcing consensus rules.
@@ -15792,14 +13959,10 @@ async fn submit_block(
         }
     }
 
-    emit_event(
-        &state.event_tx,
-        "block.new",
-        serde_json::json!({
-            "height": new_height,
-            "hash": new_tip_hash,
-        }),
-    );
+    emit_event(&state.event_tx, "block.new", serde_json::json!({
+        "height": new_height,
+        "hash": new_tip_hash,
+    }));
 
     Ok(Json(json!({
         "accepted": true,
@@ -15819,26 +13982,19 @@ async fn submit_tx(
     // status code. Empty txid on these paths because we either couldn't
     // decode the tx or didn't accept it.
     let empty_err = |sc: StatusCode, reason: &str| -> (StatusCode, Json<SubmitTxResponse>) {
-        (
-            sc,
-            Json(SubmitTxResponse {
-                txid: String::new(),
-                accepted: false,
-                reason: Some(reason.to_string()),
-            }),
-        )
+        (sc, Json(SubmitTxResponse {
+            txid: String::new(),
+            accepted: false,
+            reason: Some(reason.to_string()),
+        }))
     };
     check_rate_with_auth(&state, &addr, &headers)
         .map_err(|sc| empty_err(sc, "Rate limit or authentication check failed"))?;
-    require_rpc_auth(&headers).map_err(|sc| empty_err(sc, "RPC authentication required"))?;
+    require_rpc_auth(&headers)
+        .map_err(|sc| empty_err(sc, "RPC authentication required"))?;
     let bytes = match hex::decode(&req.tx_hex) {
         Ok(b) => b,
-        Err(_) => {
-            return Err(empty_err(
-                StatusCode::BAD_REQUEST,
-                "Invalid transaction hex",
-            ))
-        }
+        Err(_) => return Err(empty_err(StatusCode::BAD_REQUEST, "Invalid transaction hex")),
     };
     // A compact wallet tx payload may be ambiguously parseable by the full decoder.
     // Try both decoders and select the candidate that passes fee/signature checks.
@@ -15851,10 +14007,7 @@ async fn submit_tx(
     }
     if candidates.is_empty() {
         eprintln!("submit_tx decode failed: no valid decoder for payload");
-        return Err(empty_err(
-            StatusCode::BAD_REQUEST,
-            "Transaction decode failed",
-        ));
+        return Err(empty_err(StatusCode::BAD_REQUEST, "Transaction decode failed"));
     }
 
     let (tx, fee) = {
@@ -15905,14 +14058,11 @@ async fn submit_tx(
                 }
             });
         }
-        return Err((
-            StatusCode::CONFLICT,
-            Json(SubmitTxResponse {
-                txid: hex_txid,
-                accepted: false,
-                reason: Some("Transaction already in mempool".to_string()),
-            }),
-        ));
+        return Err((StatusCode::CONFLICT, Json(SubmitTxResponse {
+            txid: hex_txid,
+            accepted: false,
+            reason: Some("Transaction already in mempool".to_string()),
+        })));
     }
 
     // Fix B: input-conflict check. Prior to this, two txs that spent
@@ -15932,14 +14082,11 @@ async fn submit_tx(
                 input.prev_index,
                 hex::encode(existing),
             );
-            return Err((
-                StatusCode::UNPROCESSABLE_ENTITY,
-                Json(SubmitTxResponse {
-                    txid: hex_txid,
-                    accepted: false,
-                    reason: Some(reason),
-                }),
-            ));
+            return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(SubmitTxResponse {
+                txid: hex_txid,
+                accepted: false,
+                reason: Some(reason),
+            })));
         }
     }
 
@@ -15948,14 +14095,11 @@ async fn submit_tx(
     if let Err(e) = mempool.add_transaction(tx, raw, fee) {
         let mempool_err = format!("Failed to add to mempool: {}", e);
         eprintln!("{}", mempool_err);
-        return Err((
-            StatusCode::UNPROCESSABLE_ENTITY,
-            Json(SubmitTxResponse {
-                txid: hex_txid,
-                accepted: false,
-                reason: Some(mempool_err),
-            }),
-        ));
+        return Err((StatusCode::UNPROCESSABLE_ENTITY, Json(SubmitTxResponse {
+            txid: hex_txid,
+            accepted: false,
+            reason: Some(mempool_err),
+        })));
     }
     drop(mempool);
 
@@ -16102,18 +14246,12 @@ fn spawn_mempool_rebroadcast(state: AppState) {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
             let raw_txs: Vec<Vec<u8>> = {
                 let mempool = state.mempool.lock().unwrap_or_else(|e| e.into_inner());
-                mempool
-                    .iter_entries()
-                    .map(|(_, entry)| entry.raw.clone())
-                    .collect()
+                mempool.iter_entries().map(|(_, entry)| entry.raw.clone()).collect()
             };
             if raw_txs.is_empty() {
                 continue;
             }
-            eprintln!(
-                "[mempool-rebroadcast] rebroadcasting {} mempool tx(s)",
-                raw_txs.len()
-            );
+            eprintln!("[mempool-rebroadcast] rebroadcasting {} mempool tx(s)", raw_txs.len());
             for raw in &raw_txs {
                 if let Err(e) = p2p.broadcast_tx(raw).await {
                     eprintln!("[mempool-rebroadcast] broadcast_tx error: {e}");
@@ -16171,34 +14309,21 @@ fn spawn_offer_rebroadcast(state: AppState) {
             let mut to_broadcast: Vec<String> = Vec::new();
             for entry in entries.flatten() {
                 let path = entry.path();
-                if !path.extension().map(|e| e == "json").unwrap_or(false) {
-                    continue;
-                }
+                if !path.extension().map(|e| e == "json").unwrap_or(false) { continue; }
                 let filename = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if !filename.starts_with("offer-") || !filename.ends_with(".json") {
-                    continue;
-                }
+                if !filename.starts_with("offer-") || !filename.ends_with(".json") { continue; }
                 let data = match std::fs::read_to_string(&path) {
                     Ok(d) => d,
                     Err(_) => continue,
                 };
                 let status = serde_json::from_str::<serde_json::Value>(&data)
                     .ok()
-                    .and_then(|v| {
-                        v.get("status")
-                            .and_then(|s| s.as_str())
-                            .map(|s| s.to_string())
-                    });
-                if status.as_deref() != Some("open") {
-                    continue;
-                }
+                    .and_then(|v| v.get("status").and_then(|s| s.as_str()).map(|s| s.to_string()));
+                if status.as_deref() != Some("open") { continue; }
                 to_broadcast.push(data);
             }
             if !to_broadcast.is_empty() {
-                eprintln!(
-                    "[offer-rebroadcast] rebroadcasting {} open offer(s)",
-                    to_broadcast.len()
-                );
+                eprintln!("[offer-rebroadcast] rebroadcasting {} open offer(s)", to_broadcast.len());
                 for json in &to_broadcast {
                     p2p.broadcast_offer(json).await;
                 }
@@ -16225,14 +14350,10 @@ struct MempoolSpaceBlock {
 
 fn reconstruct_btc_header_from_mempool_space(b: &MempoolSpaceBlock) -> Result<BtcHeader, String> {
     let prev = b.previousblockhash.as_deref().unwrap_or("");
-    let prev_bytes =
-        hex::decode(prev).map_err(|e| format!("prev_hash hex decode at h={}: {}", b.height, e))?;
+    let prev_bytes = hex::decode(prev)
+        .map_err(|e| format!("prev_hash hex decode at h={}: {}", b.height, e))?;
     if prev_bytes.len() != 32 {
-        return Err(format!(
-            "prev_hash len {} != 32 at h={}",
-            prev_bytes.len(),
-            b.height
-        ));
+        return Err(format!("prev_hash len {} != 32 at h={}", prev_bytes.len(), b.height));
     }
     let mut prev_hash = [0u8; 32];
     prev_hash.copy_from_slice(&prev_bytes);
@@ -16243,11 +14364,7 @@ fn reconstruct_btc_header_from_mempool_space(b: &MempoolSpaceBlock) -> Result<Bt
     let merkle = hex::decode(&b.merkle_root)
         .map_err(|e| format!("merkle hex decode at h={}: {}", b.height, e))?;
     if merkle.len() != 32 {
-        return Err(format!(
-            "merkle len {} != 32 at h={}",
-            merkle.len(),
-            b.height
-        ));
+        return Err(format!("merkle len {} != 32 at h={}", merkle.len(), b.height));
     }
     let mut merkle_root = [0u8; 32];
     merkle_root.copy_from_slice(&merkle);
@@ -16360,7 +14477,10 @@ async fn fetch_btc_headers_from_mempool_space(
 /// On any HTTP / parse / validation error the function logs a warning and
 /// returns Ok(()) — iriumd still starts, and btc-header-sync.timer or a
 /// subsequent restart can complete the bootstrap later.
-async fn maybe_bootstrap_btc_headers(state: AppState, network: NetworkKind) -> Result<(), String> {
+async fn maybe_bootstrap_btc_headers(
+    state: AppState,
+    network: NetworkKind,
+) -> Result<(), String> {
     if !matches!(network, NetworkKind::Mainnet) {
         return Ok(());
     }
@@ -16375,10 +14495,7 @@ async fn maybe_bootstrap_btc_headers(state: AppState, network: NetworkKind) -> R
     let anchor = match resolve_btc_spv_params(network) {
         Some(p) => p.anchor,
         None => {
-            eprintln!(
-                "[btc-bootstrap] btc_spv params unresolved on {:?} — skipping",
-                network
-            );
+            eprintln!("[btc-bootstrap] btc_spv params unresolved on {:?} — skipping", network);
             return Ok(());
         }
     };
@@ -16457,17 +14574,21 @@ async fn maybe_bootstrap_btc_headers(state: AppState, network: NetworkKind) -> R
     let mut h = start_height;
     while h <= target_height {
         let chunk_end = (h + chunk_size - 1).min(target_height);
-        eprintln!("[btc-bootstrap] fetching headers {}..{}", h, chunk_end);
-        let headers = match fetch_btc_headers_from_mempool_space(&client, h, chunk_end).await {
-            Ok(hs) => hs,
-            Err(e) => {
-                eprintln!(
-                    "[btc-bootstrap] fetch {}..{} failed: {} — aborting bootstrap",
-                    h, chunk_end, e
-                );
-                return Ok(());
-            }
-        };
+        eprintln!(
+            "[btc-bootstrap] fetching headers {}..{}",
+            h, chunk_end
+        );
+        let headers =
+            match fetch_btc_headers_from_mempool_space(&client, h, chunk_end).await {
+                Ok(hs) => hs,
+                Err(e) => {
+                    eprintln!(
+                        "[btc-bootstrap] fetch {}..{} failed: {} — aborting bootstrap",
+                        h, chunk_end, e
+                    );
+                    return Ok(());
+                }
+            };
 
         // Apply via the existing validator. iriumd_block_time is used only
         // for the "header.time > iriumd_block_time + 2h" future-time guard;
@@ -16600,17 +14721,16 @@ where
 }
 
 fn maybe_spawn_btc_header_sync(state: AppState, network: NetworkKind) {
-    let act_height =
-        match irium_node_rs::activation::resolved_btc_spv_relay_activation_height(network) {
-            Some(h) => h,
-            None => {
-                eprintln!(
-                    "[header-sync/btc] activation gate is None on {:?}; not spawning",
-                    network
-                );
-                return;
-            }
-        };
+    let act_height = match irium_node_rs::activation::resolved_btc_spv_relay_activation_height(network) {
+        Some(h) => h,
+        None => {
+            eprintln!(
+                "[header-sync/btc] activation gate is None on {:?}; not spawning",
+                network
+            );
+            return;
+        }
+    };
     tokio::spawn(async move {
         let client = match reqwest::Client::builder()
             .user_agent("iriumd-btc-header-sync/1.0")
@@ -16650,17 +14770,16 @@ fn maybe_spawn_btc_header_sync(state: AppState, network: NetworkKind) {
 }
 
 fn maybe_spawn_ltc_header_sync(state: AppState, network: NetworkKind) {
-    let act_height =
-        match irium_node_rs::activation::resolved_ltc_spv_relay_activation_height(network) {
-            Some(h) => h,
-            None => {
-                eprintln!(
-                    "[header-sync/ltc] activation gate is None on {:?}; not spawning",
-                    network
-                );
-                return;
-            }
-        };
+    let act_height = match irium_node_rs::activation::resolved_ltc_spv_relay_activation_height(network) {
+        Some(h) => h,
+        None => {
+            eprintln!(
+                "[header-sync/ltc] activation gate is None on {:?}; not spawning",
+                network
+            );
+            return;
+        }
+    };
     let source = match header_sync::common::Source::from_env("IRIUM_LTC_HEADER_SYNC_SOURCE") {
         Ok(s) => s,
         Err(e) => {
@@ -16763,72 +14882,72 @@ async fn run_btc_header_sync_cycle(
     // ----- dead post-v1.9.67 code below; kept inside `#[allow]` block ----
     #[allow(unreachable_code, unused_variables, unused_assignments)]
     {
-        // v1.9.61: this cycle has NO mempool side effects. It only fetches
-        // headers from mempool.space and caches them. getblocktemplate builds
-        // a fresh signed carrier per template request using current wallet
-        // UTXOs, and the carrier rides into a mined block directly without
-        // ever entering the mempool. The previous mempool guard (v1.9.57)
-        // is therefore not relevant here anymore and is removed; the v1.9.58
-        // template carrier cap and v1.9.59 admission dedup still protect
-        // against peer-submitted carriers (e.g. via /rpc/submitbtcheaders).
-        let btc_net_tip = header_sync::btc::fetch_btc_net_tip(client).await?;
-        if btc_net_tip <= header_sync::common::SAFETY_LAG {
-            return Err(format!(
-                "btc network tip {btc_net_tip} <= safety lag {}; refusing to fetch",
-                header_sync::common::SAFETY_LAG
-            ));
-        }
-        let target = btc_net_tip - header_sync::common::SAFETY_LAG;
-        if relay_tip >= target {
-            header_sync_touch_last_file("btc");
-            return Ok(format!(
-                "up_to_date relay_tip={relay_tip} btc_net={btc_net_tip} target={target}"
-            ));
-        }
-        // FIX 2 (v1.9.63): floor at anchor.height on cold start. ChainState
-        // initialises btc_tip_height to 0 even when btc_spv is configured;
-        // fetching from height 1 would produce headers that do not connect
-        // to the anchor (LTC hit this hard at v1.9.62 activation; apply
-        // BTC the same protection for consistency even though v1.9.55
-        // bootstrap usually beats the cycle to it).
-        let anchor_height = {
-            let chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-            chain
-                .params
-                .btc_spv
-                .as_ref()
-                .map(|p| p.anchor.height)
-                .unwrap_or(0)
-        };
-        let effective_relay_tip = std::cmp::max(relay_tip, anchor_height);
-        let start = effective_relay_tip + 1;
-        let end = std::cmp::min(start + header_sync::common::BATCH_SIZE - 1, target);
-        let headers_hex = header_sync::btc::fetch_btc_headers(client, start, end).await?;
-        let live_relay_tip = {
-            let chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-            chain.btc_tip_height
-        };
-        if live_relay_tip >= end {
-            header_sync_touch_last_file("btc");
-            return Ok(format!(
+    // v1.9.61: this cycle has NO mempool side effects. It only fetches
+    // headers from mempool.space and caches them. getblocktemplate builds
+    // a fresh signed carrier per template request using current wallet
+    // UTXOs, and the carrier rides into a mined block directly without
+    // ever entering the mempool. The previous mempool guard (v1.9.57)
+    // is therefore not relevant here anymore and is removed; the v1.9.58
+    // template carrier cap and v1.9.59 admission dedup still protect
+    // against peer-submitted carriers (e.g. via /rpc/submitbtcheaders).
+    let btc_net_tip = header_sync::btc::fetch_btc_net_tip(client).await?;
+    if btc_net_tip <= header_sync::common::SAFETY_LAG {
+        return Err(format!(
+            "btc network tip {btc_net_tip} <= safety lag {}; refusing to fetch",
+            header_sync::common::SAFETY_LAG
+        ));
+    }
+    let target = btc_net_tip - header_sync::common::SAFETY_LAG;
+    if relay_tip >= target {
+        header_sync_touch_last_file("btc");
+        return Ok(format!(
+            "up_to_date relay_tip={relay_tip} btc_net={btc_net_tip} target={target}"
+        ));
+    }
+    // FIX 2 (v1.9.63): floor at anchor.height on cold start. ChainState
+    // initialises btc_tip_height to 0 even when btc_spv is configured;
+    // fetching from height 1 would produce headers that do not connect
+    // to the anchor (LTC hit this hard at v1.9.62 activation; apply
+    // BTC the same protection for consistency even though v1.9.55
+    // bootstrap usually beats the cycle to it).
+    let anchor_height = {
+        let chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
+        chain
+            .params
+            .btc_spv
+            .as_ref()
+            .map(|p| p.anchor.height)
+            .unwrap_or(0)
+    };
+    let effective_relay_tip = std::cmp::max(relay_tip, anchor_height);
+    let start = effective_relay_tip + 1;
+    let end = std::cmp::min(start + header_sync::common::BATCH_SIZE - 1, target);
+    let headers_hex = header_sync::btc::fetch_btc_headers(client, start, end).await?;
+    let live_relay_tip = {
+        let chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
+        chain.btc_tip_height
+    };
+    if live_relay_tip >= end {
+        header_sync_touch_last_file("btc");
+        return Ok(format!(
             "stand_down: chain advanced from {relay_tip} to {live_relay_tip} during fetch (planned end {end})"
         ));
-        }
-        {
-            let mut cache = state
-                .btc_template_headers_cache
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            *cache = Some(CachedHeaderBatchForTemplate {
-                headers_hex,
-                expected_relay_tip_height: live_relay_tip,
-                built_at: std::time::SystemTime::now(),
-            });
-        }
-        header_sync_touch_last_file("btc");
-        Ok(format!(
-            "cached_headers start={start} end={end} relay_tip={live_relay_tip}"
-        ))
+    }
+    {
+        let mut cache = state
+            .btc_template_headers_cache
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        *cache = Some(CachedHeaderBatchForTemplate {
+            headers_hex,
+            expected_relay_tip_height: live_relay_tip,
+            built_at: std::time::SystemTime::now(),
+        });
+    }
+    header_sync_touch_last_file("btc");
+    Ok(format!(
+        "cached_headers start={start} end={end} relay_tip={live_relay_tip}"
+    ))
     } // closes #[allow] block
 }
 
@@ -16930,7 +15049,8 @@ async fn run_ltc_header_sync_cycle(
     let effective_relay_tip = std::cmp::max(relay_tip, anchor_height);
     let start = effective_relay_tip + 1;
     let end = std::cmp::min(start + header_sync::common::BATCH_SIZE - 1, target);
-    let headers_hex = header_sync::ltc::fetch_ltc_headers(client, source, start, end).await?;
+    let headers_hex =
+        header_sync::ltc::fetch_ltc_headers(client, source, start, end).await?;
     let live_relay_tip = {
         let chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
         chain.ltc_tip_height
@@ -16958,36 +15078,12 @@ async fn run_ltc_header_sync_cycle(
     ))
 }
 
-/// Phase 24C: true when the user requested help. Help must print usage and exit
-/// WITHOUT initializing storage or starting a node.
-fn args_request_help(args: &[String]) -> bool {
-    args.iter().any(|a| a == "--help" || a == "-h")
-}
-
-fn print_iriumd_usage() {
-    println!("iriumd {} — Irium node", env!("CARGO_PKG_VERSION"));
-    println!("USAGE: iriumd [FLAGS]");
-    println!("  -V, --version   print version and exit");
-    println!("  -h, --help      print this help and exit");
-    println!();
-    println!("Configuration is via IRIUM_* environment variables (network, ports, PoAW-X");
-    println!("gates, storage dirs). Storage dirs IRIUM_DATA_DIR / IRIUM_BLOCKS_DIR /");
-    println!("IRIUM_STATE_DIR MUST resolve under $HOME; an explicit path that does not");
-    println!("(e.g. /tmp) causes iriumd to exit rather than fall back to ~/.irium.");
-}
-
 #[tokio::main(flavor = "multi_thread", worker_threads = 8)]
 async fn main() {
     // Added to allow --version to be displayed
     let args: Vec<String> = std::env::args().collect();
     if args.contains(&"--version".to_string()) || args.contains(&"-V".to_string()) {
         println!("iriumd version {}", env!("CARGO_PKG_VERSION"));
-        std::process::exit(0);
-    }
-    // Phase 24C: help must print usage and exit WITHOUT initializing storage or
-    // starting a node (so `iriumd --help` cannot touch ~/.irium).
-    if args_request_help(&args) {
-        print_iriumd_usage();
         std::process::exit(0);
     }
     // -----------------------
@@ -17009,13 +15105,6 @@ async fn main() {
         }
     }
 
-    // Phase 24C: fail closed if an explicit storage-dir env var is invalid, instead
-    // of silently falling back to ~/.irium (the Phase 24B incident). Runs AFTER any
-    // config data_dir was applied to the env, BEFORE any storage access.
-    if let Err(e) = storage::validate_storage_env() {
-        eprintln!("[fatal][storage] {e}");
-        std::process::exit(78);
-    }
     let (blocks_dir, state_dir) = storage::ensure_runtime_dirs().unwrap_or_else(|e| {
         eprintln!("Failed to init runtime dirs: {e}");
         std::process::exit(1);
@@ -17089,23 +15178,8 @@ async fn main() {
         }
     }
 
+    let pow_limit = Target { bits: 0x1d00_ffff };
     let network = network_kind_from_env();
-    // Phase 3 devnet: easy pow_limit so PoAW-X all-gates blocks can be CPU-mined
-    // in-process (the harness mine_pow caps attempts; difficulty-1 is infeasible).
-    // Mainnet/testnet keep the historical difficulty-1 floor (byte-identical).
-    let pow_limit = if network == NetworkKind::Devnet {
-        Target { bits: 0x207f_ffff }
-    } else {
-        Target { bits: 0x1d00_ffff }
-    };
-    // Resolve the standard-header (Fix 2a) activation height for this network and
-    // pin it process-wide before any header serialization/validation. Mainnet is
-    // always the historical constant; testnet/devnet default to 1
-    // (genesis-preserving; mined blocks height >= 1 use standard headers).
-    // Keeps mainnet byte-stable; lets fresh testnets be mined by standard miners.
-    irium_node_rs::block::set_standard_header_activation_height(
-        irium_node_rs::activation::resolved_standard_header_activation_height(network),
-    );
     let env_override = runtime_htlcv1_env_override();
     let lwma_env_override = runtime_lwma_env_override();
     let htlc_activation = resolved_htlcv1_activation_height(network);
@@ -17157,23 +15231,21 @@ async fn main() {
         mpsov1_activation_height: resolved_mpsov1_activation_height(network),
         lwma: LwmaParams::new(lwma_activation, pow_limit),
         lwma_v2: lwma_v2_activation.map(|h| LwmaParams::new_v2(Some(h), pow_limit)),
-        auxpow_activation_height: irium_node_rs::activation::resolved_auxpow_activation_height(
-            network,
-        ),
-        btc_spv: irium_node_rs::btc_spv::resolve_btc_spv_params(network),
-        ltc_spv: irium_node_rs::ltc_spv::resolve_ltc_spv_params(network),
-        htlc_btc_swap_v1_activation_height:
-            irium_node_rs::activation::resolved_htlc_btc_swap_v1_activation_height(network),
-        btc_swap_bech32_payment_activation_height:
-            irium_node_rs::activation::resolved_btc_swap_bech32_payment_activation_height(network),
-        htlc_ltc_swap_v1_activation_height:
-            irium_node_rs::activation::resolved_htlc_ltc_swap_v1_activation_height(network),
-        swap_order_v1_activation_height:
-            irium_node_rs::activation::resolved_swap_order_v1_activation_height(network),
-        ltc_swap_order_v1_activation_height:
-            irium_node_rs::activation::resolved_ltc_swap_order_v1_activation_height(network),
-        coinbase_header_batch_activation_height:
-            irium_node_rs::activation::resolved_coinbase_header_batch_activation_height(network),
+        auxpow_activation_height: irium_node_rs::activation::resolved_auxpow_activation_height(network),
+            btc_spv: irium_node_rs::btc_spv::resolve_btc_spv_params(network),
+            ltc_spv: irium_node_rs::ltc_spv::resolve_ltc_spv_params(network),
+            htlc_btc_swap_v1_activation_height:
+                irium_node_rs::activation::resolved_htlc_btc_swap_v1_activation_height(network),
+            btc_swap_bech32_payment_activation_height:
+                irium_node_rs::activation::resolved_btc_swap_bech32_payment_activation_height(network),
+            htlc_ltc_swap_v1_activation_height:
+                irium_node_rs::activation::resolved_htlc_ltc_swap_v1_activation_height(network),
+            swap_order_v1_activation_height:
+                irium_node_rs::activation::resolved_swap_order_v1_activation_height(network),
+            ltc_swap_order_v1_activation_height:
+                irium_node_rs::activation::resolved_ltc_swap_order_v1_activation_height(network),
+            coinbase_header_batch_activation_height:
+                irium_node_rs::activation::resolved_coinbase_header_batch_activation_height(network),
     };
     let mut state = ChainState::new(params);
     if load_persisted {
@@ -17188,12 +15260,7 @@ async fn main() {
             era.era_name, era.era_description
         );
     }
-    let mempool = Arc::new(Mutex::new(MempoolManager::new(
-        mempool_file(),
-        1000,
-        100.0,
-        10_000,
-    )));
+    let mempool = Arc::new(Mutex::new(MempoolManager::new(mempool_file(), 1000, 100.0, 10_000)));
     let limiter = Arc::new(Mutex::new(rate_limiter()));
     let wallet = Arc::new(Mutex::new(
         WalletManager::new(WalletManager::default_path()),
@@ -17261,8 +15328,7 @@ async fn main() {
         .filter(|s| !s.is_empty());
 
     // Set up P2P node if configured via IRIUM_P2P_BIND env var or node config.
-    let p2p_bind_str: Option<String> = std::env::var("IRIUM_P2P_BIND")
-        .ok()
+    let p2p_bind_str: Option<String> = std::env::var("IRIUM_P2P_BIND").ok()
         .or_else(|| node_cfg.as_ref().and_then(|cfg| cfg.p2p_bind.clone()));
     let p2p: Option<P2PNode> = if let Some(bind) = p2p_bind_str {
         match bind.parse::<SocketAddr>() {
@@ -17299,8 +15365,7 @@ async fn main() {
         .ok()
         .and_then(|p| p.parse().ok())
         .or_else(|| {
-            std::env::var("IRIUM_P2P_BIND")
-                .ok()
+            std::env::var("IRIUM_P2P_BIND").ok()
                 .or_else(|| node_cfg.as_ref().and_then(|cfg| cfg.p2p_bind.clone()))
                 .as_deref()
                 .and_then(|b| b.split(':').next_back())
@@ -17339,19 +15404,12 @@ async fn main() {
             scan_blocks_for_peers(&guard, 2016)
         };
         let m = block_peers.len();
-        eprintln!(
-            "[bootstrap] scanned {} blocks, found {} peer announcements",
-            scanned, m
-        );
+        eprintln!("[bootstrap] scanned {} blocks, found {} peer announcements", scanned, m);
         if m == 0 {
             eprintln!("[bootstrap] no peer announcements found in chain yet — falling back to signed seedlist");
         } else {
             let runtime_path = storage::bootstrap_dir().join("seedlist.runtime");
-            if let Ok(mut file) = fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&runtime_path)
-            {
+            if let Ok(mut file) = fs::OpenOptions::new().create(true).append(true).open(&runtime_path) {
                 use std::io::Write;
                 for addr in &block_peers {
                     let _ = writeln!(file, "{}", addr);
@@ -17365,22 +15423,14 @@ async fn main() {
             }
         }
     }
-    // Devnet/testnet must not fall back to mainnet bootstrap peers.
-    let fallback_seeds = if network_kind_from_env() == NetworkKind::Mainnet {
-        load_builtin_fallback_seeds()
-    } else {
-        Vec::new()
-    };
+    let fallback_seeds = load_builtin_fallback_seeds();
     let dns_seed_hosts = load_dns_seed_hosts(node_cfg.as_ref());
-    // Devnet/testnet: skip signed (mainnet-only) seed list entirely.
-    let signed_seeds =
-        if network_kind_from_env() != NetworkKind::Mainnet || load_runtime_seeds().len() >= 5 {
-            Vec::new()
-        } else {
-            load_signed_seeds()
-        };
-    let p2p_bind_for_local = std::env::var("IRIUM_P2P_BIND")
-        .ok()
+    let signed_seeds = if load_runtime_seeds().len() >= 5 {
+        Vec::new()
+    } else {
+        load_signed_seeds()
+    };
+    let p2p_bind_for_local = std::env::var("IRIUM_P2P_BIND").ok()
         .or_else(|| node_cfg.as_ref().and_then(|cfg| cfg.p2p_bind.clone()));
     let local_ips = local_ip_set(p2p_bind_for_local.as_ref());
 
@@ -17448,12 +15498,7 @@ async fn main() {
                         no_seed_logged = true;
                     }
                     let cur_peers = node.peer_count().await;
-                    tokio::time::sleep(if cur_peers < 2 {
-                        std::time::Duration::from_secs(5)
-                    } else {
-                        std::time::Duration::from_secs(30)
-                    })
-                    .await;
+                    tokio::time::sleep(if cur_peers < 2 { std::time::Duration::from_secs(5) } else { std::time::Duration::from_secs(30) }).await;
                     continue;
                 }
                 no_seed_logged = false;
@@ -17521,10 +15566,7 @@ async fn main() {
                                         msg
                                     );
                                     if suppressed > 0 {
-                                        line.push_str(&format!(
-                                            " (suppressed {} repeats)",
-                                            suppressed
-                                        ));
+                                        line.push_str(&format!(" (suppressed {} repeats)", suppressed));
                                     }
                                     eprintln!("{}", line);
                                 }
@@ -17536,12 +15578,7 @@ async fn main() {
 
                 // Adaptive wait: reconnect faster when low on peers.
                 let cur_peers = node.peer_count().await;
-                tokio::time::sleep(if cur_peers < 2 {
-                    std::time::Duration::from_secs(5)
-                } else {
-                    std::time::Duration::from_secs(30)
-                })
-                .await;
+                tokio::time::sleep(if cur_peers < 2 { std::time::Duration::from_secs(5) } else { std::time::Duration::from_secs(30) }).await;
             }
         });
     }
@@ -17689,11 +15726,8 @@ async fn main() {
                     match chain_clone.try_lock() {
                         Ok(g) => {
                             let local_height = g.tip_height();
-                            let tip_bytes = g
-                                .chain
-                                .last()
-                                .map(|b| b.header.hash_for_height(local_height))
-                                .unwrap_or([0u8; 32]);
+                            let tip_bytes =
+                                g.chain.last().map(|b| b.header.hash_for_height(local_height)).unwrap_or([0u8; 32]);
                             let tip = hex::encode(tip_bytes);
                             let best_hash = g.best_header_hash();
                             let best_header_height = g
@@ -17884,7 +15918,7 @@ async fn main() {
 
                     if stalled_ticks >= 6 {
                         eprintln!(
-                            "[{}] [🔁 sync] WARN stalled (local={}, best_header={}, best_peer={}, headers_inflight={}, getblocks_inflight={}); resuming sync from local tip",
+                            "[{}] [🔁 sync] WARN stalled (local={}, best_header={}, best_peer={}, headers_inflight={}, getblocks_inflight={}); clearing sync throttles and reconnecting",
                             Utc::now().format("%H:%M:%S"),
                             local_height,
                             sync_target_height,
@@ -17892,21 +15926,10 @@ async fn main() {
                             dbg.sync_requests,
                             dbg.getblocks_inflight
                         );
-                        // Fix 2: resume IBD from the LOCAL TIP instead of nuking all headers and
-                        // restarting from genesis. clear_transient_headers() wiped the valid header
-                        // chain, forcing a from-genesis re-request that the serve-side getblocks /
-                        // genesis throttles rejected -> a single flapping peer could never complete
-                        // IBD. Re-requesting blocks from the current tip (a known, advancing start
-                        // hash) lets sync progress to completion; clear_sync_throttles() first so the
-                        // resume request is not cooldown-blocked.
                         let stalled_node = node_clone.clone();
-                        let resume_tip = {
-                            let guard = chain_clone.lock().unwrap_or_else(|e| e.into_inner());
-                            guard.tip_hash()
-                        };
                         tokio::spawn(async move {
                             stalled_node.clear_sync_throttles().await;
-                            let _ = stalled_node.force_sync_burst_from_tip(resume_tip).await;
+                            stalled_node.clear_transient_headers().await;
                             let _ = tokio::time::timeout(
                                 std::time::Duration::from_secs(5),
                                 stalled_node.connect_known_peers(5),
@@ -18153,16 +16176,6 @@ async fn main() {
         resolvers_index: Arc::new(Mutex::new(load_all_resolvers_at_startup())),
         btc_template_headers_cache: Arc::new(Mutex::new(None)),
         ltc_template_headers_cache: Arc::new(Mutex::new(None)),
-        poawx_pending_receipts: Arc::new(Mutex::new({
-            let mut receipts = load_poawx_pending_receipts();
-            let tip = shared_state
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .tip_height();
-            prune_expired_poawx_receipts(&mut receipts, tip);
-            save_poawx_pending_receipts(&receipts);
-            receipts
-        })),
     };
 
     // Spawn the in-process header-sync background tasks. Each one no-ops
@@ -18210,30 +16223,20 @@ async fn main() {
                 let (h, hash) = {
                     let g = block_chain.lock().unwrap_or_else(|e| e.into_inner());
                     let height = g.tip_height();
-                    let hash = g
-                        .chain
-                        .last()
-                        .map(|b| hex::encode(b.header.hash_for_height(height)))
-                        .unwrap_or_default();
+                    let hash = g.chain.last().map(|b| hex::encode(b.header.hash_for_height(height))).unwrap_or_default();
                     (height, hash)
                 };
                 if h < last_known_height && last_known_height > 0 {
                     // Reorg detected: tip rewound. Emit proof_reorged for any proof
                     // submitted at a height now above the new tip.
                     let reorged_agreements = {
-                        let heights = reorg_proof_heights
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner());
+                        let heights = reorg_proof_heights.lock().unwrap_or_else(|e| e.into_inner());
                         let store = reorg_proof_store.lock().unwrap_or_else(|e| e.into_inner());
                         let mut agreements: std::collections::HashSet<String> = Default::default();
                         for (proof_id, &submitted_at) in heights.iter() {
                             if submitted_at > h {
                                 // This proof was submitted at a height that is now reorganized.
-                                if let Some(proof) = store
-                                    .list_all()
-                                    .into_iter()
-                                    .find(|p| p.proof_id == *proof_id)
-                                {
+                                if let Some(proof) = store.list_all().into_iter().find(|p| p.proof_id == *proof_id) {
                                     agreements.insert(proof.agreement_hash.clone());
                                 }
                             }
@@ -18241,30 +16244,20 @@ async fn main() {
                         agreements
                     };
                     for agreement_hash in reorged_agreements {
-                        emit_event(
-                            &block_event_tx,
-                            "agreement.proof_reorged",
-                            serde_json::json!({
-                                "agreement_hash": agreement_hash,
-                                "reorg_tip": h,
-                                "previous_tip": last_known_height,
-                                "note": "One or more proofs for this agreement were submitted at a height that has been reorganized. Resubmit the proof once the chain stabilizes.",
-                            }),
-                        );
+                        emit_event(&block_event_tx, "agreement.proof_reorged", serde_json::json!({
+                            "agreement_hash": agreement_hash,
+                            "reorg_tip": h,
+                            "previous_tip": last_known_height,
+                            "note": "One or more proofs for this agreement were submitted at a height that has been reorganized. Resubmit the proof once the chain stabilizes.",
+                        }));
                     }
                 }
-                if h > last_known_height
-                    || (h == last_known_height && hash != last_known_hash && !hash.is_empty())
-                {
+                if h > last_known_height || (h == last_known_height && hash != last_known_hash && !hash.is_empty()) {
                     if last_known_height > 0 {
-                        emit_event(
-                            &block_event_tx,
-                            "block.new",
-                            serde_json::json!({
-                                "height": h,
-                                "hash": hash,
-                            }),
-                        );
+                        emit_event(&block_event_tx, "block.new", serde_json::json!({
+                            "height": h,
+                            "hash": hash,
+                        }));
                         // Stage 3.2: scan newly-confirmed blocks for dispute/resolver anchor OP_RETURNs.
                         scan_new_blocks_for_dispute_anchors(
                             &block_chain,
@@ -18321,11 +16314,7 @@ async fn main() {
                 let offers_dir = offers_feed_dir();
                 if !offers_dir.exists() {
                     if let Err(e) = std::fs::create_dir_all(&offers_dir) {
-                        eprintln!(
-                            "[offer-broadcast] create_dir_all {}: {}",
-                            offers_dir.display(),
-                            e
-                        );
+                        eprintln!("[offer-broadcast] create_dir_all {}: {}", offers_dir.display(), e);
                         continue;
                     }
                 }
@@ -18344,11 +16333,8 @@ async fn main() {
                             continue;
                         }
                     };
-                    if id.len() > 128
-                        || id.is_empty()
-                        || !id
-                            .chars()
-                            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                    if id.len() > 128 || id.is_empty()
+                        || !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
                     {
                         eprintln!("[offer-broadcast] drop unsafe offer_id: {}", id);
                         continue;
@@ -18404,9 +16390,7 @@ async fn main() {
                     continue;
                 }
                 let gossip_tip_height = {
-                    let g = drain_chain_for_gossip
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner());
+                    let g = drain_chain_for_gossip.lock().unwrap_or_else(|e| e.into_inner());
                     g.tip_height()
                 };
                 let mut store = drain_proof_store.lock().unwrap_or_else(|e| e.into_inner());
@@ -18418,18 +16402,13 @@ async fn main() {
                             if outcome.accepted {
                                 // Phase 7: record gossip proof receipt height.
                                 {
-                                    let mut heights =
-                                        drain_heights.lock().unwrap_or_else(|e| e.into_inner());
+                                    let mut heights = drain_heights.lock().unwrap_or_else(|e| e.into_inner());
                                     heights.insert(pid_for_evt.clone(), gossip_tip_height);
                                 }
-                                emit_event(
-                                    &drain_event_tx,
-                                    "proof.gossip_received",
-                                    serde_json::json!({
-                                        "agreement_hash": ah_for_evt,
-                                        "proof_id": pid_for_evt,
-                                    }),
-                                );
+                                emit_event(&drain_event_tx, "proof.gossip_received", serde_json::json!({
+                                    "agreement_hash": ah_for_evt,
+                                    "proof_id": pid_for_evt,
+                                }));
                                 let rebroadcast = drain_node.clone();
                                 let j = json.clone();
                                 tokio::spawn(async move {
@@ -18456,22 +16435,14 @@ async fn main() {
                     let current_set: HashSet<String> =
                         current.iter().map(|p| p.multiaddr.clone()).collect();
                     for addr in current_set.difference(&known_peers) {
-                        emit_event(
-                            &peer_event_tx,
-                            "peer.connected",
-                            serde_json::json!({
-                                "multiaddr": addr,
-                            }),
-                        );
+                        emit_event(&peer_event_tx, "peer.connected", serde_json::json!({
+                            "multiaddr": addr,
+                        }));
                     }
                     for addr in known_peers.difference(&current_set) {
-                        emit_event(
-                            &peer_event_tx,
-                            "peer.disconnected",
-                            serde_json::json!({
-                                "multiaddr": addr,
-                            }),
-                        );
+                        emit_event(&peer_event_tx, "peer.disconnected", serde_json::json!({
+                            "multiaddr": addr,
+                        }));
                     }
                     known_peers = current_set;
                 }
@@ -18508,13 +16479,12 @@ async fn main() {
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(5)).await;
                 let dir = offers_feed_dir();
-                if !dir.exists() {
-                    continue;
-                }
-                let Ok(entries) = std::fs::read_dir(&dir) else {
-                    continue;
-                };
-                let tip_height: u64 = watcher_chain.lock().map(|g| g.tip_height()).unwrap_or(0);
+                if !dir.exists() { continue; }
+                let Ok(entries) = std::fs::read_dir(&dir) else { continue };
+                let tip_height: u64 = watcher_chain
+                    .lock()
+                    .map(|g| g.tip_height())
+                    .unwrap_or(0);
                 // Phase 1A+1B: collect open offers we have not yet announced.
                 // We queue here and broadcast outside the per-file loop so
                 // no async I/O happens while iterating fs entries.
@@ -18524,29 +16494,16 @@ async fn main() {
                     if !path.extension().map(|e| e == "json").unwrap_or(false) {
                         continue;
                     }
-                    let Ok(data) = std::fs::read_to_string(&path) else {
-                        continue;
-                    };
-                    let Ok(val) = serde_json::from_str::<serde_json::Value>(&data) else {
-                        continue;
-                    };
-                    let id = val
-                        .get("offer_id")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or_default()
-                        .to_string();
-                    if id.is_empty() {
-                        continue;
-                    }
-                    let mut status = val
-                        .get("status")
-                        .and_then(|s| s.as_str())
-                        .unwrap_or("open")
-                        .to_string();
+                    let Ok(data) = std::fs::read_to_string(&path) else { continue };
+                    let Ok(val) = serde_json::from_str::<serde_json::Value>(&data) else { continue };
+                    let id = val.get("offer_id")
+                        .and_then(|v| v.as_str()).unwrap_or_default().to_string();
+                    if id.is_empty() { continue; }
+                    let mut status = val.get("status")
+                        .and_then(|s| s.as_str()).unwrap_or("open").to_string();
                     let timeout_height = val.get("timeout_height").and_then(|v| v.as_u64());
                     let taken_at_height = val.get("taken_at_height").and_then(|v| v.as_u64());
-                    let agreement_hash = val
-                        .get("agreement_hash")
+                    let agreement_hash = val.get("agreement_hash")
                         .and_then(|v| v.as_str())
                         .map(|s| s.to_string());
 
@@ -18555,14 +16512,9 @@ async fn main() {
                     if status == "open" {
                         if let Some(th) = timeout_height {
                             if tip_height >= th {
-                                if let Ok(mut new_val) =
-                                    serde_json::from_str::<serde_json::Value>(&data)
-                                {
+                                if let Ok(mut new_val) = serde_json::from_str::<serde_json::Value>(&data) {
                                     if let Some(obj) = new_val.as_object_mut() {
-                                        obj.insert(
-                                            "status".to_string(),
-                                            serde_json::json!("expired"),
-                                        );
+                                        obj.insert("status".to_string(), serde_json::json!("expired"));
                                     }
                                     if let Ok(serialized) = serde_json::to_string_pretty(&new_val) {
                                         let _ = std::fs::write(&path, serialized);
@@ -18588,39 +16540,27 @@ async fn main() {
                                     .map(|g| agreement_hash_funded_on_chain(&g, ah))
                                     .unwrap_or(false);
                                 if !funded {
-                                    let previous_buyer = val
-                                        .get("buyer_address")
+                                    let previous_buyer = val.get("buyer_address")
                                         .and_then(|v| v.as_str())
                                         .unwrap_or("")
                                         .to_string();
-                                    if let Ok(mut new_val) =
-                                        serde_json::from_str::<serde_json::Value>(&data)
-                                    {
+                                    if let Ok(mut new_val) = serde_json::from_str::<serde_json::Value>(&data) {
                                         if let Some(obj) = new_val.as_object_mut() {
-                                            obj.insert(
-                                                "status".to_string(),
-                                                serde_json::json!("open"),
-                                            );
+                                            obj.insert("status".to_string(), serde_json::json!("open"));
                                             obj.remove("agreement_id");
                                             obj.remove("agreement_hash");
                                             obj.remove("buyer_address");
                                             obj.remove("taken_at");
                                             obj.remove("taken_at_height");
                                         }
-                                        if let Ok(serialized) =
-                                            serde_json::to_string_pretty(&new_val)
-                                        {
+                                        if let Ok(serialized) = serde_json::to_string_pretty(&new_val) {
                                             let _ = std::fs::write(&path, serialized);
                                         }
                                     }
-                                    emit_event(
-                                        &offer_event_tx,
-                                        "offer.relisted",
-                                        serde_json::json!({
-                                            "offer_id": id,
-                                            "previous_buyer_address": previous_buyer,
-                                        }),
-                                    );
+                                    emit_event(&offer_event_tx, "offer.relisted", serde_json::json!({
+                                        "offer_id": id,
+                                        "previous_buyer_address": previous_buyer,
+                                    }));
                                     status = "open".to_string();
                                 }
                             }
@@ -18629,29 +16569,17 @@ async fn main() {
 
                     let prev = seen.get(&id).cloned();
                     if prev.is_none() && status == "open" {
-                        emit_event(
-                            &offer_event_tx,
-                            "offer.created",
-                            serde_json::json!({
-                                "offer_id": id,
-                            }),
-                        );
+                        emit_event(&offer_event_tx, "offer.created", serde_json::json!({
+                            "offer_id": id,
+                        }));
                     } else if prev.as_deref() == Some("open") && status == "taken" {
-                        emit_event(
-                            &offer_event_tx,
-                            "offer.taken",
-                            serde_json::json!({
-                                "offer_id": id,
-                            }),
-                        );
+                        emit_event(&offer_event_tx, "offer.taken", serde_json::json!({
+                            "offer_id": id,
+                        }));
                     } else if prev.as_deref() == Some("open") && status == "expired" {
-                        emit_event(
-                            &offer_event_tx,
-                            "offer.expired",
-                            serde_json::json!({
-                                "offer_id": id,
-                            }),
-                        );
+                        emit_event(&offer_event_tx, "offer.expired", serde_json::json!({
+                            "offer_id": id,
+                        }));
                     }
                     // Phase 1A+1B: queue OPEN offers we have not yet
                     // announced this session. Status was potentially
@@ -18762,625 +16690,490 @@ async fn main() {
         }
     }
 
-    const OFFERS_FEED_DEFAULT_LIMIT: usize = 500;
 
-    /// LAYER 1 receive-side: a peer (the buyer) has broadcast an
-    /// OfferTakeNotification. If the local offers/ dir holds a matching offer
-    /// whose seller_pubkey matches the payload, mutate it to status="taken"
-    /// and emit `offer.taken` so the seller's GUI updates in real time.
-    ///
-    /// Validation is intentionally light for v1 — no cryptographic signature
-    /// is required. Structural match (offer_id present locally, seller_pubkey
-    /// match, status=="open") prevents accidental collisions; spoofing remains
-    /// possible until the security-follow-up adds ed25519 signing (see the
-    /// MessageType::OfferTakeNotification comment in protocol.rs).
-    fn process_received_offer_take(payload_json: &str, event_tx: &EventTx) -> Result<(), String> {
-        let val: serde_json::Value =
-            serde_json::from_str(payload_json).map_err(|e| format!("offer-take parse: {e}"))?;
-        let offer_id = val
-            .get("offer_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "offer-take: missing offer_id".to_string())?;
-        let buyer_address = val
-            .get("buyer_address")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "offer-take: missing buyer_address".to_string())?;
-        let agreement_id = val
-            .get("agreement_id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "offer-take: missing agreement_id".to_string())?;
-        let agreement_hash = val
-            .get("agreement_hash")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "offer-take: missing agreement_hash".to_string())?;
-        let taken_at = val.get("taken_at").and_then(|v| v.as_i64()).unwrap_or(0);
-        let taken_at_height = val.get("taken_at_height").and_then(|v| v.as_u64());
-        let seller_pubkey_claim = val
-            .get("seller_pubkey")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+const OFFERS_FEED_DEFAULT_LIMIT: usize = 500;
 
-        let dir = offers_feed_dir();
-        let path = dir.join(format!("offer-{}.json", offer_id));
-        if !path.exists() {
-            // Not our offer — silently ignore. Every connected peer receives
-            // the broadcast so most will land here.
+/// LAYER 1 receive-side: a peer (the buyer) has broadcast an
+/// OfferTakeNotification. If the local offers/ dir holds a matching offer
+/// whose seller_pubkey matches the payload, mutate it to status="taken"
+/// and emit `offer.taken` so the seller's GUI updates in real time.
+///
+/// Validation is intentionally light for v1 — no cryptographic signature
+/// is required. Structural match (offer_id present locally, seller_pubkey
+/// match, status=="open") prevents accidental collisions; spoofing remains
+/// possible until the security-follow-up adds ed25519 signing (see the
+/// MessageType::OfferTakeNotification comment in protocol.rs).
+fn process_received_offer_take(payload_json: &str, event_tx: &EventTx) -> Result<(), String> {
+    let val: serde_json::Value = serde_json::from_str(payload_json)
+        .map_err(|e| format!("offer-take parse: {e}"))?;
+    let offer_id = val
+        .get("offer_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "offer-take: missing offer_id".to_string())?;
+    let buyer_address = val
+        .get("buyer_address")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "offer-take: missing buyer_address".to_string())?;
+    let agreement_id = val
+        .get("agreement_id")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "offer-take: missing agreement_id".to_string())?;
+    let agreement_hash = val
+        .get("agreement_hash")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "offer-take: missing agreement_hash".to_string())?;
+    let taken_at = val.get("taken_at").and_then(|v| v.as_i64()).unwrap_or(0);
+    let taken_at_height = val.get("taken_at_height").and_then(|v| v.as_u64());
+    let seller_pubkey_claim = val
+        .get("seller_pubkey")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+
+    let dir = offers_feed_dir();
+    let path = dir.join(format!("offer-{}.json", offer_id));
+    if !path.exists() {
+        // Not our offer — silently ignore. Every connected peer receives
+        // the broadcast so most will land here.
+        return Ok(());
+    }
+    let data = std::fs::read_to_string(&path)
+        .map_err(|e| format!("read offer {offer_id}: {e}"))?;
+    let mut offer: serde_json::Value = serde_json::from_str(&data)
+        .map_err(|e| format!("parse offer {offer_id}: {e}"))?;
+
+    // Verify the seller_pubkey claim matches our local offer's seller_pubkey
+    // (when both are present). Mismatch → silently ignore (someone else's
+    // offer with a colliding id).
+    if !seller_pubkey_claim.is_empty() {
+        let local_pk = offer.get("seller_pubkey").and_then(|v| v.as_str()).unwrap_or("");
+        if !local_pk.is_empty() && local_pk != seller_pubkey_claim {
             return Ok(());
         }
-        let data =
-            std::fs::read_to_string(&path).map_err(|e| format!("read offer {offer_id}: {e}"))?;
-        let mut offer: serde_json::Value =
-            serde_json::from_str(&data).map_err(|e| format!("parse offer {offer_id}: {e}"))?;
-
-        // Verify the seller_pubkey claim matches our local offer's seller_pubkey
-        // (when both are present). Mismatch → silently ignore (someone else's
-        // offer with a colliding id).
-        if !seller_pubkey_claim.is_empty() {
-            let local_pk = offer
-                .get("seller_pubkey")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if !local_pk.is_empty() && local_pk != seller_pubkey_claim {
-                return Ok(());
-            }
-        }
-
-        let cur_status = offer
-            .get("status")
-            .and_then(|v| v.as_str())
-            .unwrap_or("open");
-        if cur_status != "open" {
-            return Ok(()); // already taken / expired / etc.
-        }
-
-        if let Some(obj) = offer.as_object_mut() {
-            obj.insert("status".to_string(), serde_json::json!("taken"));
-            obj.insert(
-                "buyer_address".to_string(),
-                serde_json::json!(buyer_address),
-            );
-            obj.insert("agreement_id".to_string(), serde_json::json!(agreement_id));
-            obj.insert(
-                "agreement_hash".to_string(),
-                serde_json::json!(agreement_hash),
-            );
-            obj.insert("taken_at".to_string(), serde_json::json!(taken_at));
-            if let Some(h) = taken_at_height {
-                obj.insert("taken_at_height".to_string(), serde_json::json!(h));
-            }
-        }
-        let serialized =
-            serde_json::to_string_pretty(&offer).map_err(|e| format!("serialise offer: {e}"))?;
-        std::fs::write(&path, serialized).map_err(|e| format!("write offer {offer_id}: {e}"))?;
-
-        // Emit offer.taken immediately so the seller's GUI updates without
-        // waiting for the 5 s fs-watcher tick. The watcher's own emit will
-        // fire on the next tick too (idempotent on the GUI side — both
-        // events trigger the same silent reload).
-        emit_event(
-            event_tx,
-            "offer.taken",
-            serde_json::json!({
-                "offer_id": offer_id,
-                "buyer_address": buyer_address,
-                "via": "p2p",
-            }),
-        );
-        Ok(())
     }
 
-    fn offers_feed_limit() -> usize {
-        std::env::var("IRIUM_OFFERS_FEED_LIMIT")
-            .ok()
-            .and_then(|s| s.parse::<usize>().ok())
-            .unwrap_or(OFFERS_FEED_DEFAULT_LIMIT)
+    let cur_status = offer.get("status").and_then(|v| v.as_str()).unwrap_or("open");
+    if cur_status != "open" {
+        return Ok(()); // already taken / expired / etc.
     }
 
-    async fn offers_feed(
-        ConnectInfo(addr): ConnectInfo<SocketAddr>,
-        State(state): State<AppState>,
-    ) -> Result<Json<serde_json::Value>, StatusCode> {
-        check_rate(&state, &addr)?;
-        let dir = offers_feed_dir();
-        let limit = offers_feed_limit();
-        // LAYER 2: hide offers whose timeout_height has been reached by the
-        // current chain tip. The 5 s offer-watcher background task is the one
-        // that permanently flips status="open" → "expired" on disk; this filter
-        // is a fast-path so we never serve an expired offer to a peer even in
-        // the short window between expiry and the next watcher tick.
-        let current_tip: u64 = state
-            .chain
-            .lock()
-            .map(|guard| guard.tip_height())
-            .unwrap_or(0);
-        let mut offers: Vec<serde_json::Value> = Vec::new();
-        if dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().map(|e| e == "json").unwrap_or(false) {
-                        if let Ok(data) = std::fs::read_to_string(&path) {
-                            if let Ok(mut val) = serde_json::from_str::<serde_json::Value>(&data) {
-                                if val.get("status").and_then(|s| s.as_str()) != Some("open") {
+    if let Some(obj) = offer.as_object_mut() {
+        obj.insert("status".to_string(), serde_json::json!("taken"));
+        obj.insert("buyer_address".to_string(), serde_json::json!(buyer_address));
+        obj.insert("agreement_id".to_string(), serde_json::json!(agreement_id));
+        obj.insert("agreement_hash".to_string(), serde_json::json!(agreement_hash));
+        obj.insert("taken_at".to_string(), serde_json::json!(taken_at));
+        if let Some(h) = taken_at_height {
+            obj.insert("taken_at_height".to_string(), serde_json::json!(h));
+        }
+    }
+    let serialized = serde_json::to_string_pretty(&offer)
+        .map_err(|e| format!("serialise offer: {e}"))?;
+    std::fs::write(&path, serialized)
+        .map_err(|e| format!("write offer {offer_id}: {e}"))?;
+
+    // Emit offer.taken immediately so the seller's GUI updates without
+    // waiting for the 5 s fs-watcher tick. The watcher's own emit will
+    // fire on the next tick too (idempotent on the GUI side — both
+    // events trigger the same silent reload).
+    emit_event(event_tx, "offer.taken", serde_json::json!({
+        "offer_id": offer_id,
+        "buyer_address": buyer_address,
+        "via": "p2p",
+    }));
+    Ok(())
+}
+
+fn offers_feed_limit() -> usize {
+    std::env::var("IRIUM_OFFERS_FEED_LIMIT")
+        .ok()
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(OFFERS_FEED_DEFAULT_LIMIT)
+}
+
+async fn offers_feed(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    check_rate(&state, &addr)?;
+    let dir = offers_feed_dir();
+    let limit = offers_feed_limit();
+    // LAYER 2: hide offers whose timeout_height has been reached by the
+    // current chain tip. The 5 s offer-watcher background task is the one
+    // that permanently flips status="open" → "expired" on disk; this filter
+    // is a fast-path so we never serve an expired offer to a peer even in
+    // the short window between expiry and the next watcher tick.
+    let current_tip: u64 = state
+        .chain
+        .lock()
+        .map(|guard| guard.tip_height())
+        .unwrap_or(0);
+    let mut offers: Vec<serde_json::Value> = Vec::new();
+    if dir.exists() {
+        if let Ok(entries) = std::fs::read_dir(&dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().map(|e| e == "json").unwrap_or(false) {
+                    if let Ok(data) = std::fs::read_to_string(&path) {
+                        if let Ok(mut val) =
+                            serde_json::from_str::<serde_json::Value>(&data)
+                        {
+                            if val.get("status").and_then(|s| s.as_str()) != Some("open") {
+                                continue;
+                            }
+                            // LAYER 2 expiry: skip if chain tip past timeout_height.
+                            if let Some(th) = val.get("timeout_height").and_then(|v| v.as_u64()) {
+                                if current_tip >= th {
                                     continue;
                                 }
-                                // LAYER 2 expiry: skip if chain tip past timeout_height.
-                                if let Some(th) = val.get("timeout_height").and_then(|v| v.as_u64())
-                                {
-                                    if current_tip >= th {
-                                        continue;
-                                    }
-                                }
-                                if let Some(obj) = val.as_object_mut() {
-                                    obj.remove("source");
-                                    obj.remove("agreement_id");
-                                    obj.remove("agreement_hash");
-                                    obj.remove("buyer_address");
-                                    obj.remove("taken_at");
-                                }
-                                offers.push(val);
                             }
+                            if let Some(obj) = val.as_object_mut() {
+                                obj.remove("source");
+                                obj.remove("agreement_id");
+                                obj.remove("agreement_hash");
+                                obj.remove("buyer_address");
+                                obj.remove("taken_at");
+                            }
+                            offers.push(val);
                         }
                     }
                 }
             }
         }
-        offers.sort_by(|a, b| {
-            let ta = a.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
-            let tb = b.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
-            tb.cmp(&ta)
-        });
-        if offers.len() > limit {
-            offers.truncate(limit);
-        }
-        let exported_at = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or(0);
-        Ok(Json(serde_json::json!({
-            "version": "1",
-            "exported_at": exported_at,
-            "count": offers.len(),
-            "offers": offers,
-        })))
     }
+    offers.sort_by(|a, b| {
+        let ta = a.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
+        let tb = b.get("created_at").and_then(|v| v.as_u64()).unwrap_or(0);
+        tb.cmp(&ta)
+    });
+    if offers.len() > limit {
+        offers.truncate(limit);
+    }
+    let exported_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    Ok(Json(serde_json::json!({
+        "version": "1",
+        "exported_at": exported_at,
+        "count": offers.len(),
+        "offers": offers,
+    })))
+}
 
-    /// LAYER 1 send-side RPC. The wallet binary calls this after `offer-take`
-    /// has saved its local agreement; iriumd then broadcasts the take to all
-    /// peers via MessageType::OfferTakeNotification. Gated behind
-    /// require_rpc_auth so only the local wallet (which shares
-    /// IRIUM_RPC_TOKEN) can broadcast — prevents a random LAN client from
-    /// spoof-taking other people's offers.
-    #[derive(Debug, serde::Deserialize)]
-    struct BroadcastOfferTakeRequest {
-        /// JSON-encoded payload {offer_id, buyer_address, agreement_id,
-        /// agreement_hash, taken_at, taken_at_height?, seller_pubkey}.
-        payload_json: String,
-    }
+/// LAYER 1 send-side RPC. The wallet binary calls this after `offer-take`
+/// has saved its local agreement; iriumd then broadcasts the take to all
+/// peers via MessageType::OfferTakeNotification. Gated behind
+/// require_rpc_auth so only the local wallet (which shares
+/// IRIUM_RPC_TOKEN) can broadcast — prevents a random LAN client from
+/// spoof-taking other people's offers.
+#[derive(Debug, serde::Deserialize)]
+struct BroadcastOfferTakeRequest {
+    /// JSON-encoded payload {offer_id, buyer_address, agreement_id,
+    /// agreement_hash, taken_at, taken_at_height?, seller_pubkey}.
+    payload_json: String,
+}
 
-    async fn broadcast_offer_take_rpc(
-        ConnectInfo(addr): ConnectInfo<SocketAddr>,
-        State(state): State<AppState>,
-        headers: HeaderMap,
-        AxumJson(req): AxumJson<BroadcastOfferTakeRequest>,
-    ) -> Result<Json<serde_json::Value>, StatusCode> {
-        check_rate_with_auth(&state, &addr, &headers)?;
-        require_rpc_auth(&headers)?;
-        if let Some(ref p2p) = state.p2p {
-            p2p.broadcast_offer_take(&req.payload_json).await;
-            Ok(Json(serde_json::json!({"ok": true})))
-        } else {
-            // No P2P node configured — broadcast is a no-op but we still
-            // return ok so the wallet's best-effort send doesn't error.
-            Ok(Json(
-                serde_json::json!({"ok": false, "reason": "p2p_disabled"}),
-            ))
-        }
+async fn broadcast_offer_take_rpc(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumJson(req): AxumJson<BroadcastOfferTakeRequest>,
+) -> Result<Json<serde_json::Value>, StatusCode> {
+    check_rate_with_auth(&state, &addr, &headers)?;
+    require_rpc_auth(&headers)?;
+    if let Some(ref p2p) = state.p2p {
+        p2p.broadcast_offer_take(&req.payload_json).await;
+        Ok(Json(serde_json::json!({"ok": true})))
+    } else {
+        // No P2P node configured — broadcast is a no-op but we still
+        // return ok so the wallet's best-effort send doesn't error.
+        Ok(Json(serde_json::json!({"ok": false, "reason": "p2p_disabled"})))
     }
+}
 
-    // --- Explorer endpoints (public, no auth, CORS * always on) -------------------
 
-    fn explorer_agreements_dir() -> std::path::PathBuf {
-        if let Ok(p) = std::env::var("IRIUM_AGREEMENT_BUNDLES_DIR") {
-            return std::path::PathBuf::from(p).join("raw");
-        }
-        if let Ok(p) = std::env::var("IRIUM_DATA_DIR") {
-            return std::path::PathBuf::from(p).join("agreements").join("raw");
-        }
-        // state_dir is {data_dir}/state/ so parent is {data_dir}
-        irium_node_rs::storage::state_dir()
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
-            .join("agreements")
-            .join("raw")
-    }
+// --- Explorer endpoints (public, no auth, CORS * always on) -------------------
 
-    fn explorer_cors_headers() -> HeaderMap {
-        let mut map = HeaderMap::new();
-        map.insert("Access-Control-Allow-Origin", HeaderValue::from_static("*"));
-        map.insert(
-            "Access-Control-Allow-Methods",
-            HeaderValue::from_static("GET, OPTIONS"),
-        );
-        map
+fn explorer_agreements_dir() -> std::path::PathBuf {
+    if let Ok(p) = std::env::var("IRIUM_AGREEMENT_BUNDLES_DIR") {
+        return std::path::PathBuf::from(p).join("raw");
     }
+    if let Ok(p) = std::env::var("IRIUM_DATA_DIR") {
+        return std::path::PathBuf::from(p).join("agreements").join("raw");
+    }
+    // state_dir is {data_dir}/state/ so parent is {data_dir}
+    irium_node_rs::storage::state_dir()
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| std::path::PathBuf::from("/tmp"))
+        .join("agreements")
+        .join("raw")
+}
 
-    #[derive(Deserialize)]
-    struct ExplorerPageQuery {
-        #[serde(default = "explorer_default_page")]
-        page: usize,
-        #[serde(default = "explorer_default_limit")]
-        limit: usize,
-    }
-    fn explorer_default_page() -> usize {
-        1
-    }
-    fn explorer_default_limit() -> usize {
-        20
-    }
+fn explorer_cors_headers() -> HeaderMap {
+    let mut map = HeaderMap::new();
+    map.insert("Access-Control-Allow-Origin", HeaderValue::from_static("*"));
+    map.insert("Access-Control-Allow-Methods", HeaderValue::from_static("GET, OPTIONS"));
+    map
+}
 
-    #[derive(Deserialize)]
-    struct ExplorerProofsQuery {
-        #[serde(default = "explorer_default_page")]
-        page: usize,
-        #[serde(default = "explorer_default_limit")]
-        limit: usize,
-        agreement_hash: Option<String>,
-    }
+#[derive(Deserialize)]
+struct ExplorerPageQuery {
+    #[serde(default = "explorer_default_page")]
+    page: usize,
+    #[serde(default = "explorer_default_limit")]
+    limit: usize,
+}
+fn explorer_default_page() -> usize { 1 }
+fn explorer_default_limit() -> usize { 20 }
 
-    #[derive(Serialize)]
-    struct ExplorerAgreementSummary {
-        hash: String,
-        agreement_id: String,
-        template_type: String,
-        total_amount: u64,
-        creation_time: u64,
-        parties: Vec<serde_json::Value>,
-    }
+#[derive(Deserialize)]
+struct ExplorerProofsQuery {
+    #[serde(default = "explorer_default_page")]
+    page: usize,
+    #[serde(default = "explorer_default_limit")]
+    limit: usize,
+    agreement_hash: Option<String>,
+}
 
-    #[derive(Serialize)]
-    struct ExplorerAgreementsResponse {
-        agreements: Vec<ExplorerAgreementSummary>,
-        total: usize,
-        page: usize,
-        limit: usize,
-    }
+#[derive(Serialize)]
+struct ExplorerAgreementSummary {
+    hash: String,
+    agreement_id: String,
+    template_type: String,
+    total_amount: u64,
+    creation_time: u64,
+    parties: Vec<serde_json::Value>,
+}
 
-    #[derive(Serialize)]
-    struct ExplorerProofEntry {
-        proof_id: String,
-        proof_type: String,
-        agreement_hash: String,
-        attested_by: String,
-        attestation_time: u64,
-        status: String,
-    }
+#[derive(Serialize)]
+struct ExplorerAgreementsResponse {
+    agreements: Vec<ExplorerAgreementSummary>,
+    total: usize,
+    page: usize,
+    limit: usize,
+}
 
-    #[derive(Serialize)]
-    struct ExplorerProofsResponse {
-        proofs: Vec<ExplorerProofEntry>,
-        total: usize,
-        page: usize,
-        limit: usize,
-    }
+#[derive(Serialize)]
+struct ExplorerProofEntry {
+    proof_id: String,
+    proof_type: String,
+    agreement_hash: String,
+    attested_by: String,
+    attestation_time: u64,
+    status: String,
+}
 
-    #[derive(Serialize)]
-    struct ExplorerReputationResponse {
-        pubkey: String,
-        total_agreements_as_seller: usize,
-        proofs_submitted: usize,
-        note: String,
-    }
+#[derive(Serialize)]
+struct ExplorerProofsResponse {
+    proofs: Vec<ExplorerProofEntry>,
+    total: usize,
+    page: usize,
+    limit: usize,
+}
 
-    #[derive(Serialize)]
-    struct ExplorerStatsResponse {
-        chain_height: u64,
-        total_agreements: usize,
-        total_proofs: usize,
-        peer_count: usize,
-        proof_types: std::collections::HashMap<String, usize>,
-    }
+#[derive(Serialize)]
+struct ExplorerReputationResponse {
+    pubkey: String,
+    total_agreements_as_seller: usize,
+    proofs_submitted: usize,
+    note: String,
+}
 
-    #[derive(Serialize)]
-    struct ExplorerAgreementDetailResponse {
-        hash: String,
-        agreement: serde_json::Value,
-        lifecycle: AgreementLifecycleView,
-        proofs: Vec<ExplorerProofEntry>,
-    }
+#[derive(Serialize)]
+struct ExplorerStatsResponse {
+    chain_height: u64,
+    total_agreements: usize,
+    total_proofs: usize,
+    peer_count: usize,
+    proof_types: std::collections::HashMap<String, usize>,
+}
 
-    async fn explorer_agreements(
-        ConnectInfo(addr): ConnectInfo<SocketAddr>,
-        State(state): State<AppState>,
-        Query(q): Query<ExplorerPageQuery>,
-    ) -> impl axum::response::IntoResponse {
-        check_rate(&state, &addr).unwrap_or(());
-        let dir = explorer_agreements_dir();
-        let mut entries: Vec<(u64, ExplorerAgreementSummary)> = Vec::new();
-        if let Ok(rd) = std::fs::read_dir(&dir) {
-            for entry in rd.flatten() {
-                let path = entry.path();
-                if !path.extension().map(|e| e == "json").unwrap_or(false) {
-                    continue;
-                }
-                let hash = match path.file_stem().and_then(|s| s.to_str()) {
-                    Some(h) => h.to_string(),
-                    None => continue,
-                };
-                let Ok(data) = std::fs::read_to_string(&path) else {
-                    continue;
-                };
-                let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else {
-                    continue;
-                };
-                let agreement_id = v
-                    .get("agreement_id")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let template_type = v
-                    .get("template_type")
-                    .and_then(|x| x.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                let total_amount = v.get("total_amount").and_then(|x| x.as_u64()).unwrap_or(0);
-                let creation_time = v.get("creation_time").and_then(|x| x.as_u64()).unwrap_or(0);
-                let parties: Vec<serde_json::Value> = v
-                    .get("parties")
-                    .and_then(|x| x.as_array())
-                    .map(|arr| {
-                        arr.iter().map(|p| serde_json::json!({
+#[derive(Serialize)]
+struct ExplorerAgreementDetailResponse {
+    hash: String,
+    agreement: serde_json::Value,
+    lifecycle: AgreementLifecycleView,
+    proofs: Vec<ExplorerProofEntry>,
+}
+
+async fn explorer_agreements(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    Query(q): Query<ExplorerPageQuery>,
+) -> impl axum::response::IntoResponse {
+    check_rate(&state, &addr).unwrap_or(());
+    let dir = explorer_agreements_dir();
+    let mut entries: Vec<(u64, ExplorerAgreementSummary)> = Vec::new();
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if !path.extension().map(|e| e == "json").unwrap_or(false) { continue; }
+            let hash = match path.file_stem().and_then(|s| s.to_str()) {
+                Some(h) => h.to_string(),
+                None => continue,
+            };
+            let Ok(data) = std::fs::read_to_string(&path) else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else { continue };
+            let agreement_id = v.get("agreement_id").and_then(|x| x.as_str()).unwrap_or("").to_string();
+            let template_type = v.get("template_type").and_then(|x| x.as_str()).unwrap_or("").to_string();
+            let total_amount = v.get("total_amount").and_then(|x| x.as_u64()).unwrap_or(0);
+            let creation_time = v.get("creation_time").and_then(|x| x.as_u64()).unwrap_or(0);
+            let parties: Vec<serde_json::Value> = v.get("parties")
+                .and_then(|x| x.as_array())
+                .map(|arr| arr.iter().map(|p| serde_json::json!({
                     "role": p.get("role").and_then(|r| r.as_str()).unwrap_or(""),
                     "display_name": p.get("display_name").and_then(|r| r.as_str()).unwrap_or(""),
                     "address": p.get("address").and_then(|r| r.as_str()).unwrap_or(""),
-                })).collect()
-                    })
-                    .unwrap_or_default();
-                entries.push((
-                    creation_time,
-                    ExplorerAgreementSummary {
-                        hash,
-                        agreement_id,
-                        template_type,
-                        total_amount,
-                        creation_time,
-                        parties,
-                    },
-                ));
-            }
+                })).collect())
+                .unwrap_or_default();
+            entries.push((creation_time, ExplorerAgreementSummary {
+                hash, agreement_id, template_type, total_amount, creation_time, parties,
+            }));
         }
-        entries.sort_by(|a, b| b.0.cmp(&a.0));
-        let total = entries.len();
-        let limit = q.limit.clamp(1, 100);
-        let page = q.page.max(1);
-        let skip = (page - 1) * limit;
-        let agreements: Vec<ExplorerAgreementSummary> = entries
-            .into_iter()
-            .skip(skip)
-            .take(limit)
-            .map(|(_, s)| s)
-            .collect();
-        (
-            explorer_cors_headers(),
-            Json(ExplorerAgreementsResponse {
-                agreements,
-                total,
-                page,
-                limit,
-            }),
-        )
     }
+    entries.sort_by(|a, b| b.0.cmp(&a.0));
+    let total = entries.len();
+    let limit = q.limit.clamp(1, 100);
+    let page = q.page.max(1);
+    let skip = (page - 1) * limit;
+    let agreements: Vec<ExplorerAgreementSummary> = entries.into_iter()
+        .skip(skip).take(limit).map(|(_, s)| s).collect();
+    (explorer_cors_headers(), Json(ExplorerAgreementsResponse { agreements, total, page, limit }))
+}
 
-    async fn explorer_agreement_detail(
-        ConnectInfo(addr): ConnectInfo<SocketAddr>,
-        State(state): State<AppState>,
-        AxumPath(hash): AxumPath<String>,
-    ) -> axum::response::Response {
-        use axum::response::IntoResponse;
-        check_rate(&state, &addr).unwrap_or(());
-        let hash = hash.to_lowercase();
-        let dir = explorer_agreements_dir();
-        let path = dir.join(format!("{}.json", hash));
-        let Ok(data) = std::fs::read_to_string(&path) else {
-            return (
-                explorer_cors_headers(),
-                Json(serde_json::json!({"error": "agreement not found"})),
-            )
-                .into_response();
-        };
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else {
-            return (
-                explorer_cors_headers(),
-                Json(serde_json::json!({"error": "parse error"})),
-            )
-                .into_response();
-        };
-        let agreement: irium_node_rs::settlement::AgreementObject =
-            match serde_json::from_value(v.clone()) {
-                Ok(a) => a,
-                Err(_) => {
-                    return (
-                        explorer_cors_headers(),
-                        Json(serde_json::json!({"error": "invalid agreement"})),
-                    )
-                        .into_response()
-                }
-            };
-        let lifecycle = {
-            let chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-            let linked = scan_agreement_linked_txs(&chain, &agreement, &hash);
-            let tip = chain.tip_height();
-            irium_node_rs::settlement::derive_lifecycle(&agreement, &hash, linked, tip)
-        };
-        let tip_height = state
-            .status_height_cache
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
-        let proofs: Vec<ExplorerProofEntry> = store
-            .list_by_agreement(&hash)
-            .into_iter()
-            .map(|p| ExplorerProofEntry {
-                proof_id: p.proof_id.clone(),
-                proof_type: p.proof_type.clone(),
-                agreement_hash: p.agreement_hash.clone(),
-                attested_by: p.attested_by.clone(),
-                attestation_time: p.attestation_time,
-                status: proof_lifecycle_status(p.expires_at_height, tip_height).to_string(),
-            })
-            .collect();
-        (
-            explorer_cors_headers(),
-            Json(ExplorerAgreementDetailResponse {
-                hash,
-                agreement: v,
-                lifecycle,
-                proofs,
-            }),
-        )
-            .into_response()
-    }
+async fn explorer_agreement_detail(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    AxumPath(hash): AxumPath<String>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    check_rate(&state, &addr).unwrap_or(());
+    let hash = hash.to_lowercase();
+    let dir = explorer_agreements_dir();
+    let path = dir.join(format!("{}.json", hash));
+    let Ok(data) = std::fs::read_to_string(&path) else {
+        return (explorer_cors_headers(), Json(serde_json::json!({"error": "agreement not found"}))).into_response();
+    };
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else {
+        return (explorer_cors_headers(), Json(serde_json::json!({"error": "parse error"}))).into_response();
+    };
+    let agreement: irium_node_rs::settlement::AgreementObject = match serde_json::from_value(v.clone()) {
+        Ok(a) => a,
+        Err(_) => return (explorer_cors_headers(), Json(serde_json::json!({"error": "invalid agreement"}))).into_response(),
+    };
+    let lifecycle = {
+        let chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
+        let linked = scan_agreement_linked_txs(&chain, &agreement, &hash);
+        let tip = chain.tip_height();
+        irium_node_rs::settlement::derive_lifecycle(&agreement, &hash, linked, tip)
+    };
+    let tip_height = state.status_height_cache.load(std::sync::atomic::Ordering::Relaxed);
+    let store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
+    let proofs: Vec<ExplorerProofEntry> = store.list_by_agreement(&hash).into_iter().map(|p| {
+        ExplorerProofEntry {
+            proof_id: p.proof_id.clone(),
+            proof_type: p.proof_type.clone(),
+            agreement_hash: p.agreement_hash.clone(),
+            attested_by: p.attested_by.clone(),
+            attestation_time: p.attestation_time,
+            status: proof_lifecycle_status(p.expires_at_height, tip_height).to_string(),
+        }
+    }).collect();
+    (explorer_cors_headers(), Json(ExplorerAgreementDetailResponse { hash, agreement: v, lifecycle, proofs })).into_response()
+}
 
-    async fn explorer_proofs(
-        ConnectInfo(addr): ConnectInfo<SocketAddr>,
-        State(state): State<AppState>,
-        Query(q): Query<ExplorerProofsQuery>,
-    ) -> impl axum::response::IntoResponse {
-        check_rate(&state, &addr).unwrap_or(());
-        let tip_height = state
-            .status_height_cache
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
-        let all: Vec<ExplorerProofEntry> = match q.agreement_hash.as_deref() {
-            Some(h) => store
-                .list_by_agreement(h)
-                .into_iter()
-                .map(|p| ExplorerProofEntry {
-                    proof_id: p.proof_id.clone(),
-                    proof_type: p.proof_type.clone(),
-                    agreement_hash: p.agreement_hash.clone(),
-                    attested_by: p.attested_by.clone(),
-                    attestation_time: p.attestation_time,
-                    status: proof_lifecycle_status(p.expires_at_height, tip_height).to_string(),
-                })
-                .collect(),
-            None => store
-                .list_all()
-                .into_iter()
-                .map(|p| ExplorerProofEntry {
-                    proof_id: p.proof_id.clone(),
-                    proof_type: p.proof_type.clone(),
-                    agreement_hash: p.agreement_hash.clone(),
-                    attested_by: p.attested_by.clone(),
-                    attestation_time: p.attestation_time,
-                    status: proof_lifecycle_status(p.expires_at_height, tip_height).to_string(),
-                })
-                .collect(),
-        };
-        let total = all.len();
-        let limit = q.limit.clamp(1, 100);
-        let page = q.page.max(1);
-        let skip = (page - 1) * limit;
-        let proofs: Vec<ExplorerProofEntry> = all.into_iter().skip(skip).take(limit).collect();
-        (
-            explorer_cors_headers(),
-            Json(ExplorerProofsResponse {
-                proofs,
-                total,
-                page,
-                limit,
-            }),
-        )
-    }
+async fn explorer_proofs(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    Query(q): Query<ExplorerProofsQuery>,
+) -> impl axum::response::IntoResponse {
+    check_rate(&state, &addr).unwrap_or(());
+    let tip_height = state.status_height_cache.load(std::sync::atomic::Ordering::Relaxed);
+    let store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
+    let all: Vec<ExplorerProofEntry> = match q.agreement_hash.as_deref() {
+        Some(h) => store.list_by_agreement(h).into_iter().map(|p| ExplorerProofEntry {
+            proof_id: p.proof_id.clone(), proof_type: p.proof_type.clone(),
+            agreement_hash: p.agreement_hash.clone(), attested_by: p.attested_by.clone(),
+            attestation_time: p.attestation_time,
+            status: proof_lifecycle_status(p.expires_at_height, tip_height).to_string(),
+        }).collect(),
+        None => store.list_all().into_iter().map(|p| ExplorerProofEntry {
+            proof_id: p.proof_id.clone(), proof_type: p.proof_type.clone(),
+            agreement_hash: p.agreement_hash.clone(), attested_by: p.attested_by.clone(),
+            attestation_time: p.attestation_time,
+            status: proof_lifecycle_status(p.expires_at_height, tip_height).to_string(),
+        }).collect(),
+    };
+    let total = all.len();
+    let limit = q.limit.clamp(1, 100);
+    let page = q.page.max(1);
+    let skip = (page - 1) * limit;
+    let proofs: Vec<ExplorerProofEntry> = all.into_iter().skip(skip).take(limit).collect();
+    (explorer_cors_headers(), Json(ExplorerProofsResponse { proofs, total, page, limit }))
+}
 
-    async fn explorer_reputation(
-        ConnectInfo(addr): ConnectInfo<SocketAddr>,
-        State(state): State<AppState>,
-        AxumPath(pubkey): AxumPath<String>,
-    ) -> impl axum::response::IntoResponse {
-        check_rate(&state, &addr).unwrap_or(());
-        let dir = explorer_agreements_dir();
-        let mut total_seller: usize = 0;
-        if let Ok(rd) = std::fs::read_dir(&dir) {
-            for entry in rd.flatten() {
-                let path = entry.path();
-                if !path.extension().map(|e| e == "json").unwrap_or(false) {
-                    continue;
-                }
-                let Ok(data) = std::fs::read_to_string(&path) else {
-                    continue;
-                };
-                let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else {
-                    continue;
-                };
-                if let Some(parties) = v.get("parties").and_then(|p| p.as_array()) {
-                    for party in parties {
-                        let role = party.get("role").and_then(|r| r.as_str()).unwrap_or("");
-                        let addr = party.get("address").and_then(|a| a.as_str()).unwrap_or("");
-                        if (role == "seller" || role == "payee") && addr == pubkey.as_str() {
-                            total_seller += 1;
-                            break;
-                        }
+async fn explorer_reputation(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    AxumPath(pubkey): AxumPath<String>,
+) -> impl axum::response::IntoResponse {
+    check_rate(&state, &addr).unwrap_or(());
+    let dir = explorer_agreements_dir();
+    let mut total_seller: usize = 0;
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if !path.extension().map(|e| e == "json").unwrap_or(false) { continue; }
+            let Ok(data) = std::fs::read_to_string(&path) else { continue };
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(&data) else { continue };
+            if let Some(parties) = v.get("parties").and_then(|p| p.as_array()) {
+                for party in parties {
+                    let role = party.get("role").and_then(|r| r.as_str()).unwrap_or("");
+                    let addr = party.get("address").and_then(|a| a.as_str()).unwrap_or("");
+                    if (role == "seller" || role == "payee") && addr == pubkey.as_str() {
+                        total_seller += 1;
+                        break;
                     }
                 }
             }
         }
-        let store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
-        let proofs_submitted = store
-            .list_all()
-            .into_iter()
-            .filter(|p| p.attested_by == pubkey)
-            .count();
-        (
-            explorer_cors_headers(),
-            Json(ExplorerReputationResponse {
-                pubkey,
-                total_agreements_as_seller: total_seller,
-                proofs_submitted,
-                note:
-                    "Reputation derived from locally stored agreement and proof data on this node."
-                        .to_string(),
-            }),
-        )
     }
+    let store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
+    let proofs_submitted = store.list_all().into_iter()
+        .filter(|p| p.attested_by == pubkey)
+        .count();
+    (explorer_cors_headers(), Json(ExplorerReputationResponse {
+        pubkey,
+        total_agreements_as_seller: total_seller,
+        proofs_submitted,
+        note: "Reputation derived from locally stored agreement and proof data on this node.".to_string(),
+    }))
+}
 
-    async fn explorer_stats(
-        ConnectInfo(addr): ConnectInfo<SocketAddr>,
-        State(state): State<AppState>,
-    ) -> impl axum::response::IntoResponse {
-        check_rate(&state, &addr).unwrap_or(());
-        let chain_height = state
-            .status_height_cache
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let peer_count = state
-            .status_peer_count_cache
-            .load(std::sync::atomic::Ordering::Relaxed);
-        let dir = explorer_agreements_dir();
-        let total_agreements = std::fs::read_dir(&dir)
-            .map(|rd| {
-                rd.flatten()
-                    .filter(|e| e.path().extension().map(|ex| ex == "json").unwrap_or(false))
-                    .count()
-            })
-            .unwrap_or(0);
-        let store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
-        let total_proofs = store.count();
-        let mut proof_types: std::collections::HashMap<String, usize> =
-            std::collections::HashMap::new();
-        for p in store.list_all() {
-            *proof_types.entry(p.proof_type.clone()).or_insert(0) += 1;
-        }
-        (
-            explorer_cors_headers(),
-            Json(ExplorerStatsResponse {
-                chain_height,
-                total_agreements,
-                total_proofs,
-                peer_count,
-                proof_types,
-            }),
-        )
+async fn explorer_stats(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+) -> impl axum::response::IntoResponse {
+    check_rate(&state, &addr).unwrap_or(());
+    let chain_height = state.status_height_cache.load(std::sync::atomic::Ordering::Relaxed);
+    let peer_count = state.status_peer_count_cache.load(std::sync::atomic::Ordering::Relaxed);
+    let dir = explorer_agreements_dir();
+    let total_agreements = std::fs::read_dir(&dir)
+        .map(|rd| rd.flatten().filter(|e| {
+            e.path().extension().map(|ex| ex == "json").unwrap_or(false)
+        }).count())
+        .unwrap_or(0);
+    let store = state.proof_store.lock().unwrap_or_else(|e| e.into_inner());
+    let total_proofs = store.count();
+    let mut proof_types: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    for p in store.list_all() {
+        *proof_types.entry(p.proof_type.clone()).or_insert(0) += 1;
     }
+    (explorer_cors_headers(), Json(ExplorerStatsResponse {
+        chain_height, total_agreements, total_proofs, peer_count, proof_types,
+    }))
+}
 
     let mut app = Router::new()
         .route("/status", get(status))
@@ -19397,47 +17190,10 @@ async fn main() {
         .route("/rpc/utxo", get(get_utxo))
         .route("/rpc/getblocktemplate", get(get_block_template))
         .route("/rpc/block", get(get_block))
-        .route("/rpc/poawx_dominance", get(poawx_dominance))
         .route("/rpc/blocks", get(get_blocks))
         .route("/rpc/block_by_hash", get(get_block_by_hash))
         .route("/rpc/tx", get(get_tx))
         .route("/rpc/submit_block", post(submit_block))
-        .route("/rpc/submit_block_extended", post(submit_block_extended))
-        .route("/poawx/assignment", get(poawx_get_assignment))
-        .route("/poawx/receipt", post(poawx_post_receipt))
-        // Phase 20 Step 6D: loopback-only role-gossip bridge (testnet/devnet,
-        // mainnet-hard-off, disabled unless role gossip enabled).
-        .route(
-            "/poawx/role-gossip/precommit",
-            post(poawx_role_gossip_precommit_post),
-        )
-        .route(
-            "/poawx/role-gossip/reveal",
-            post(poawx_role_gossip_reveal_post),
-        )
-        .route(
-            "/poawx/role-gossip/precommits",
-            get(poawx_role_gossip_precommits_get),
-        )
-        .route(
-            "/poawx/role-gossip/reveals",
-            get(poawx_role_gossip_reveals_get),
-        )
-        // Phase 21E: loopback-only candidate-admission bridge (testnet/devnet,
-        // mainnet hard-off, disabled unless the admission gate is configured).
-        .route(
-            "/poawx/candidate-admission",
-            post(poawx_candidate_admission_post),
-        )
-        .route(
-            "/poawx/candidate-admissions",
-            get(poawx_candidate_admissions_get),
-        )
-        // Phase 21I: loopback-only finality-vote bridge (testnet/devnet, mainnet
-        // hard-off, disabled unless the finality gossip gate is configured).
-        .route("/poawx/finality-vote", post(poawx_finality_vote_post))
-        .route("/poawx/registration", post(poawx_post_registration))
-        .route("/poawx/finality-votes", get(poawx_finality_votes_get))
         .route("/rpc/submit_tx", post(submit_tx))
         // Fix D: pending-tx introspection + per-address pending-spent
         // outpoints. Both are public (rate-limited only) so the wallet's
@@ -19535,10 +17291,7 @@ async fn main() {
         .route("/wallet/unlock", post(wallet_unlock))
         .route("/wallet/lock", post(wallet_lock))
         .route("/wallet/info", get(wallet_info))
-        .route(
-            "/wallet/migrate_to_encrypted",
-            post(wallet_migrate_to_encrypted),
-        )
+        .route("/wallet/migrate_to_encrypted", post(wallet_migrate_to_encrypted))
         .route("/wallet/recover_from_seed", post(wallet_recover_from_seed))
         .route("/wallet/addresses", get(wallet_addresses))
         .route("/wallet/receive", get(wallet_receive))
@@ -19615,18 +17368,9 @@ async fn main() {
         "[i] HTTP status: http://{}:{}/status",
         status_host, status_port
     );
-    println!(
-        "[i] WebSocket: ws://{}:{}/ws  SSE: http://{}:{}/events",
-        host, port, host, port
-    );
-    println!(
-        "[i] Explorer: http://{}:{}/explorer/stats | /explorer/agreements | /explorer/proofs",
-        host, port
-    );
-    println!(
-        "[i] Proof finality depth: {} blocks (IRIUM_PROOF_FINALITY_DEPTH)",
-        proof_finality_depth()
-    );
+    println!("[i] WebSocket: ws://{}:{}/ws  SSE: http://{}:{}/events", host, port, host, port);
+    println!("[i] Explorer: http://{}:{}/explorer/stats | /explorer/agreements | /explorer/proofs", host, port);
+    println!("[i] Proof finality depth: {} blocks (IRIUM_PROOF_FINALITY_DEPTH)", proof_finality_depth());
 
     let tls_cert = std::env::var("IRIUM_TLS_CERT").ok();
     let tls_key = std::env::var("IRIUM_TLS_KEY").ok();
@@ -19669,6 +17413,7 @@ async fn main() {
 
 #[cfg(test)]
 mod tests {
+    use irium_node_rs::settlement::TypedProofPayload;
     use super::*;
     use axum::extract::{ConnectInfo, Query, State};
     use axum::http::HeaderMap;
@@ -19676,7 +17421,6 @@ mod tests {
     use irium_node_rs::chain::{block_from_locked, ChainParams, ChainState, OutPoint, UtxoEntry};
     use irium_node_rs::genesis::load_locked_genesis;
     use irium_node_rs::mempool::MempoolManager;
-    use irium_node_rs::settlement::TypedProofPayload;
     use irium_node_rs::settlement::{
         settlement_proof_payload_bytes, AgreementDeadlines, AgreementMilestone, AgreementObject,
         AgreementParty, AgreementRefundCondition, AgreementReleaseCondition, AgreementTemplateType,
@@ -19691,20 +17435,6 @@ mod tests {
     use std::sync::atomic::{AtomicU64, AtomicU8, AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
     use std::time::{SystemTime, UNIX_EPOCH};
-
-    #[test]
-    fn phase24c_args_request_help() {
-        assert!(args_request_help(&[
-            "iriumd".to_string(),
-            "--help".to_string()
-        ]));
-        assert!(args_request_help(&["iriumd".to_string(), "-h".to_string()]));
-        assert!(!args_request_help(&[
-            "iriumd".to_string(),
-            "--version".to_string()
-        ]));
-        assert!(!args_request_help(&["iriumd".to_string()]));
-    }
 
     fn test_socket() -> SocketAddr {
         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 38000)
@@ -19803,17 +17533,13 @@ mod tests {
                 "irium_policies",
                 "json",
             )))),
-            event_tx: tokio::sync::broadcast::channel::<std::sync::Arc<String>>(
-                WS_BROADCAST_CAPACITY,
-            )
-            .0,
+            event_tx: tokio::sync::broadcast::channel::<std::sync::Arc<String>>(WS_BROADCAST_CAPACITY).0,
             proof_heights: Arc::new(Mutex::new(std::collections::HashMap::new())),
             disputes_index: Arc::new(Mutex::new(std::collections::HashMap::new())),
             resolvers_index: Arc::new(Mutex::new(std::collections::HashMap::new())),
             btc_template_headers_cache: Arc::new(Mutex::new(None)),
             ltc_template_headers_cache: Arc::new(Mutex::new(None)),
-            poawx_pending_receipts: Arc::new(Mutex::new(Vec::new())),
-        };
+            };
 
         (state, sender, recipient, refund)
     }
@@ -25989,25 +23715,13 @@ mod tests {
     // Total supply: 25 IRM. Per-entry percentages: 60% / 20% / 4% = 84%.
     // The remaining 16% is the non-P2PKH bucket and is intentionally not
     // surfaced as an "entry" (no single owning address for that script).
-    fn insert_utxo(
-        state: &AppState,
-        txid_byte: u8,
-        index: u32,
-        value: u64,
-        script_pubkey: Vec<u8>,
-    ) {
+    fn insert_utxo(state: &AppState, txid_byte: u8, index: u32, value: u64, script_pubkey: Vec<u8>) {
         let mut chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
         let tip = chain.tip_height();
         chain.utxos.insert(
-            OutPoint {
-                txid: [txid_byte; 32],
-                index,
-            },
+            OutPoint { txid: [txid_byte; 32], index },
             UtxoEntry {
-                output: TxOutput {
-                    value,
-                    script_pubkey,
-                },
+                output: TxOutput { value, script_pubkey },
                 height: tip,
                 is_coinbase: false,
             },
@@ -26035,13 +23749,13 @@ mod tests {
         };
 
         // 5 P2PKH UTXOs + 1 non-P2PKH output.
-        insert_utxo(&state, 0x01, 0, 10_00_000_000, p2pkh(&sender)); // 10 IRM
-        insert_utxo(&state, 0x02, 0, 5_00_000_000, p2pkh(&sender)); //  5 IRM
-        insert_utxo(&state, 0x03, 0, 3_00_000_000, p2pkh(&recipient)); //  3 IRM
-        insert_utxo(&state, 0x04, 0, 2_00_000_000, p2pkh(&recipient)); //  2 IRM
-        insert_utxo(&state, 0x05, 0, 1_00_000_000, p2pkh(&refund)); //  1 IRM
-                                                                    // Non-P2PKH: 1-byte script will fail p2pkh_hash_from_script's len==25 gate.
-        insert_utxo(&state, 0x06, 0, 4_00_000_000, vec![0x00]); //  4 IRM
+        insert_utxo(&state, 0x01, 0, 10_00_000_000, p2pkh(&sender));    // 10 IRM
+        insert_utxo(&state, 0x02, 0,  5_00_000_000, p2pkh(&sender));    //  5 IRM
+        insert_utxo(&state, 0x03, 0,  3_00_000_000, p2pkh(&recipient)); //  3 IRM
+        insert_utxo(&state, 0x04, 0,  2_00_000_000, p2pkh(&recipient)); //  2 IRM
+        insert_utxo(&state, 0x05, 0,  1_00_000_000, p2pkh(&refund));    //  1 IRM
+        // Non-P2PKH: 1-byte script will fail p2pkh_hash_from_script's len==25 gate.
+        insert_utxo(&state, 0x06, 0,  4_00_000_000, vec![0x00]);        //  4 IRM
 
         let resp = get_richlist(
             ConnectInfo(test_socket()),
@@ -26054,10 +23768,7 @@ mod tests {
         .0;
 
         // total_supply_sats includes ALL outputs (P2PKH + non-P2PKH).
-        assert_eq!(
-            resp.total_supply_sats, 25_00_000_000,
-            "total supply must include non-P2PKH outputs"
-        );
+        assert_eq!(resp.total_supply_sats, 25_00_000_000, "total supply must include non-P2PKH outputs");
 
         // entries excludes the non-P2PKH output → exactly 3 addresses.
         assert_eq!(resp.count, 3);
@@ -26082,17 +23793,9 @@ mod tests {
 
         // Percentages match the balance-to-total ratio and never exceed 100.
         let pct_sum: f64 = resp.entries.iter().map(|e| e.percentage).sum();
-        assert!(
-            pct_sum <= 100.0 + 1e-9,
-            "percentages must sum to ≤ 100, got {}",
-            pct_sum
-        );
+        assert!(pct_sum <= 100.0 + 1e-9, "percentages must sum to ≤ 100, got {}", pct_sum);
         // The non-P2PKH 4 IRM is the 16% gap — entry percentages should sum to 84%.
-        assert!(
-            (pct_sum - 84.0).abs() < 0.01,
-            "expected ≈84% sum, got {}",
-            pct_sum
-        );
+        assert!((pct_sum - 84.0).abs() < 0.01, "expected ≈84% sum, got {}", pct_sum);
 
         // Sanity-check the rank-1 percentage matches 15/25 = 60%.
         assert!((resp.entries[0].percentage - 60.0).abs() < 0.01);
@@ -26186,11 +23889,7 @@ mod tests {
         r.signature.signature = hex::encode(sig.to_bytes());
     }
 
-    fn s32_otc_with_resolver(
-        buyer: &str,
-        seller: &str,
-        primary_resolver: Option<&str>,
-    ) -> AgreementObject {
+    fn s32_otc_with_resolver(buyer: &str, seller: &str, primary_resolver: Option<&str>) -> AgreementObject {
         let buyer_party = irium_node_rs::settlement::AgreementParty {
             party_id: "buyer".to_string(),
             display_name: "Buyer".to_string(),
@@ -26225,11 +23924,7 @@ mod tests {
         a
     }
 
-    fn s32_make_raise(
-        agreement: &AgreementObject,
-        raising_party: &str,
-        sk: &SigningKey,
-    ) -> DisputeRaise {
+    fn s32_make_raise(agreement: &AgreementObject, raising_party: &str, sk: &SigningKey) -> DisputeRaise {
         let agreement_hash = compute_agreement_hash_hex(agreement).expect("hash");
         let mut d = DisputeRaise {
             version: irium_node_rs::settlement::DISPUTE_RAISE_VERSION,
@@ -26246,11 +23941,7 @@ mod tests {
         d
     }
 
-    fn s32_make_evidence(
-        agreement: &AgreementObject,
-        submitter: &str,
-        sk: &SigningKey,
-    ) -> DisputeEvidence {
+    fn s32_make_evidence(agreement: &AgreementObject, submitter: &str, sk: &SigningKey) -> DisputeEvidence {
         let agreement_hash = compute_agreement_hash_hex(agreement).expect("hash");
         let mut d = DisputeEvidence {
             version: irium_node_rs::settlement::DISPUTE_EVIDENCE_VERSION,
@@ -26315,7 +24006,10 @@ mod tests {
             let mut txid = [0xAAu8; 32];
             txid[31] = i as u8;
             chain.utxos.insert(
-                OutPoint { txid, index: 0 },
+                OutPoint {
+                    txid,
+                    index: 0,
+                },
                 UtxoEntry {
                     output: TxOutput {
                         value: value_each,
@@ -26382,14 +24076,13 @@ mod tests {
             resolution_anchored_at_height: None,
             escalated_to_fallback: false,
             escalated_at_height: None,
-            reresolve_nomination: None,
+        reresolve_nomination: None,
         };
         {
             let mut guard = state.disputes_index.lock().unwrap();
             guard.insert(agreement_hash.clone(), dstate);
         }
-        let mut resp =
-            s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "release");
+        let mut resp = s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "release");
         apply_dispute_status_to_eligibility(&state, &agreement, true, &mut resp);
         assert!(!resp.eligible);
         assert!(resp.reasons.iter().any(|r| r == "dispute_open"));
@@ -26415,14 +24108,13 @@ mod tests {
             resolution_anchored_at_height: None,
             escalated_to_fallback: false,
             escalated_at_height: None,
-            reresolve_nomination: None,
+        reresolve_nomination: None,
         };
         {
             let mut guard = state.disputes_index.lock().unwrap();
             guard.insert(agreement_hash.clone(), dstate);
         }
-        let mut resp =
-            s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "refund");
+        let mut resp = s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "refund");
         apply_dispute_status_to_eligibility(&state, &agreement, false, &mut resp);
         assert!(!resp.eligible);
         assert!(resp.reasons.iter().any(|r| r == "dispute_open"));
@@ -26451,26 +24143,21 @@ mod tests {
             resolution_anchored_at_height: Some(20),
             escalated_to_fallback: false,
             escalated_at_height: None,
-            reresolve_nomination: None,
+        reresolve_nomination: None,
         };
         {
             let mut guard = state.disputes_index.lock().unwrap();
             guard.insert(agreement_hash.clone(), dstate);
         }
         // Release branch should pass (no dispute block).
-        let mut release_resp =
-            s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "release");
+        let mut release_resp = s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "release");
         apply_dispute_status_to_eligibility(&state, &agreement, true, &mut release_resp);
         assert!(release_resp.eligible);
         // Refund branch should be blocked.
-        let mut refund_resp =
-            s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "refund");
+        let mut refund_resp = s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "refund");
         apply_dispute_status_to_eligibility(&state, &agreement, false, &mut refund_resp);
         assert!(!refund_resp.eligible);
-        assert!(refund_resp
-            .reasons
-            .iter()
-            .any(|r| r == "dispute_resolution_blocks_branch"));
+        assert!(refund_resp.reasons.iter().any(|r| r == "dispute_resolution_blocks_branch"));
     }
 
     #[test]
@@ -26496,24 +24183,19 @@ mod tests {
             resolution_anchored_at_height: Some(20),
             escalated_to_fallback: false,
             escalated_at_height: None,
-            reresolve_nomination: None,
+        reresolve_nomination: None,
         };
         {
             let mut guard = state.disputes_index.lock().unwrap();
             guard.insert(agreement_hash.clone(), dstate);
         }
-        let mut refund_resp =
-            s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "refund");
+        let mut refund_resp = s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "refund");
         apply_dispute_status_to_eligibility(&state, &agreement, false, &mut refund_resp);
         assert!(refund_resp.eligible);
-        let mut release_resp =
-            s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "release");
+        let mut release_resp = s32_stub_eligibility(&agreement_hash, &agreement.agreement_id, true, "release");
         apply_dispute_status_to_eligibility(&state, &agreement, true, &mut release_resp);
         assert!(!release_resp.eligible);
-        assert!(release_resp
-            .reasons
-            .iter()
-            .any(|r| r == "dispute_resolution_blocks_branch"));
+        assert!(release_resp.reasons.iter().any(|r| r == "dispute_resolution_blocks_branch"));
     }
 
     #[tokio::test]
@@ -26536,7 +24218,7 @@ mod tests {
             resolution_anchored_at_height: None,
             escalated_to_fallback: false,
             escalated_at_height: None,
-            reresolve_nomination: None,
+        reresolve_nomination: None,
         };
         {
             let mut guard = state.disputes_index.lock().unwrap();
@@ -26570,7 +24252,7 @@ mod tests {
             resolution_anchored_at_height: None,
             escalated_to_fallback: false,
             escalated_at_height: None,
-            reresolve_nomination: None,
+        reresolve_nomination: None,
         };
         {
             let mut guard = state.disputes_index.lock().unwrap();
@@ -26678,7 +24360,10 @@ mod tests {
             ConnectInfo(test_socket()),
             State(state.clone()),
             HeaderMap::new(),
-            AxumJson(RaiseDisputeRequest { dispute, agreement }),
+            AxumJson(RaiseDisputeRequest {
+                dispute,
+                agreement,
+            }),
         )
         .await;
         let (status, msg) = result.expect_err("should reject");
@@ -26701,7 +24386,10 @@ mod tests {
             ConnectInfo(test_socket()),
             State(state),
             HeaderMap::new(),
-            AxumJson(RaiseDisputeRequest { dispute, agreement }),
+            AxumJson(RaiseDisputeRequest {
+                dispute,
+                agreement,
+            }),
         )
         .await;
         let (status, msg) = result.expect_err("should reject");
@@ -26749,7 +24437,10 @@ mod tests {
             ConnectInfo(test_socket()),
             State(state),
             HeaderMap::new(),
-            AxumJson(RaiseDisputeRequest { dispute, agreement }),
+            AxumJson(RaiseDisputeRequest {
+                dispute,
+                agreement,
+            }),
         )
         .await;
         let (status, msg) = result.expect_err("should reject");
@@ -27185,8 +24876,7 @@ mod tests {
             resolvers_index: Arc::new(Mutex::new(std::collections::HashMap::new())),
             btc_template_headers_cache: Arc::new(Mutex::new(None)),
             ltc_template_headers_cache: Arc::new(Mutex::new(None)),
-            poawx_pending_receipts: Arc::new(Mutex::new(Vec::new())),
-        }
+            }
     }
 
     /// Empty headers; with IRIUM_RPC_TOKEN unset (which
@@ -27220,9 +24910,13 @@ mod tests {
         ensure_rpc_token_env();
         let path = unique_path("walletinfo_none", "json");
         let state = make_wallet_app_state(path.clone());
-        let resp = wallet_info(ConnectInfo(test_socket()), State(state), auth_headers())
-            .await
-            .expect("Ok");
+        let resp = wallet_info(
+            ConnectInfo(test_socket()),
+            State(state),
+            auth_headers(),
+        )
+        .await
+        .expect("Ok");
         let body = resp.0;
         assert!(!body.exists);
         assert_eq!(body.mode, WalletMode::None);
@@ -27236,9 +24930,13 @@ mod tests {
         let path = unique_path("walletinfo_plain", "json");
         write_legacy_plaintext_at(&path);
         let state = make_wallet_app_state(path.clone());
-        let resp = wallet_info(ConnectInfo(test_socket()), State(state), auth_headers())
-            .await
-            .expect("Ok");
+        let resp = wallet_info(
+            ConnectInfo(test_socket()),
+            State(state),
+            auth_headers(),
+        )
+        .await
+        .expect("Ok");
         assert!(resp.0.exists);
         assert_eq!(resp.0.mode, WalletMode::Plaintext);
         let _ = std::fs::remove_file(&path);
@@ -27254,9 +24952,13 @@ mod tests {
             let mut w = state.wallet.lock().unwrap_or_else(|e| e.into_inner());
             w.create_with_seed("p", None).expect("create");
         }
-        let resp = wallet_info(ConnectInfo(test_socket()), State(state), auth_headers())
-            .await
-            .expect("Ok");
+        let resp = wallet_info(
+            ConnectInfo(test_socket()),
+            State(state),
+            auth_headers(),
+        )
+        .await
+        .expect("Ok");
         assert_eq!(resp.0.mode, WalletMode::Encrypted);
         let _ = std::fs::remove_file(&path);
     }
@@ -27455,11 +25157,7 @@ mod tests {
         .0;
 
         assert!(resp.accepted);
-        assert!(
-            resp.fee >= 19_200,
-            "fee {} should clear raw estimate",
-            resp.fee
-        );
+        assert!(resp.fee >= 19_200, "fee {} should clear raw estimate", resp.fee);
         assert_eq!(resp.total_input, 100_000_000);
         assert_eq!(resp.change, 0);
         // amount = total - fee; no change output.
@@ -27492,11 +25190,8 @@ mod tests {
 
         let err = result.err().expect("expected error");
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        let body = err.1 .0;
-        assert_eq!(
-            body.get("error").and_then(|v| v.as_str()),
-            Some("insufficient_funds_for_fee")
-        );
+        let body = err.1.0;
+        assert_eq!(body.get("error").and_then(|v| v.as_str()), Some("insufficient_funds_for_fee"));
     }
 
     #[tokio::test]
@@ -27524,7 +25219,7 @@ mod tests {
 
         let err = result.err().expect("expected error");
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        let body = err.1 .0;
+        let body = err.1.0;
         // wallet_send rejects at the empty-UTXO step before reaching the
         // send_max branch when from_address has nothing in chain.utxos.
         let reason = body.get("error").and_then(|v| v.as_str()).unwrap_or("");
@@ -27560,11 +25255,8 @@ mod tests {
 
         let err = result.err().expect("expected error");
         assert_eq!(err.0, StatusCode::BAD_REQUEST);
-        let body = err.1 .0;
-        assert_eq!(
-            body.get("error").and_then(|v| v.as_str()),
-            Some("missing_amount")
-        );
+        let body = err.1.0;
+        assert_eq!(body.get("error").and_then(|v| v.as_str()), Some("missing_amount"));
     }
 
     #[tokio::test]
@@ -27596,3093 +25288,12 @@ mod tests {
         assert!(resp.accepted);
         assert_eq!(resp.total_input, 100_000_000);
         // Change goes back to sender (it's the change_address when from_address is set).
-        assert!(
-            resp.change > 0,
-            "expected change output, got {}",
-            resp.change
-        );
+        assert!(resp.change > 0, "expected change output, got {}", resp.change);
         // Standard fee_per_byte=1 with no floor: tiny fee (~250 sat range).
-        assert!(
-            resp.fee < 10_000,
-            "non-send_max fee should not be floored: {}",
-            resp.fee
-        );
-    }
-
-    // --- Phase 12-B PoAW-X critical consensus tests ---
-
-    fn poawx_env_lock() -> &'static std::sync::Mutex<()> {
-        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        LOCK.get_or_init(|| std::sync::Mutex::new(()))
-    }
-
-    #[tokio::test]
-    async fn phase24f_assignment_served_at_genesis_devnet_only() {
-        let _env_guard = poawx_env_lock().lock().unwrap();
-        let (state, _, _, _) = create_test_state(None);
-        let addr: SocketAddr = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 9);
-        let headers = HeaderMap::new();
-        // devnet + active: served at the genesis tip (tip_h == 0) — Phase 24F fix.
-        std::env::set_var("IRIUM_NETWORK", "devnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        let ok =
-            poawx_get_assignment(ConnectInfo(addr), State(state.clone()), headers.clone()).await;
-        assert!(ok.is_ok(), "devnet genesis must serve assignment");
-        let v = ok.unwrap().0;
-        assert_eq!(v["height"].as_u64(), Some(0), "genesis height 0");
-        assert_eq!(
-            v["seed"].as_str().map(|s| s.len()),
-            Some(64),
-            "32-byte seed hex"
-        );
-        assert!(v["pow_bits"].as_str().is_some(), "pow_bits present");
-        assert!(
-            v["puzzle_difficulty"].as_u64().is_some(),
-            "puzzle_difficulty present"
-        );
-        // mainnet: rejected (hard-off preserved).
-        std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(
-            poawx_get_assignment(ConnectInfo(addr), State(state.clone()), headers.clone())
-                .await
-                .is_err(),
-            "mainnet must reject assignment"
-        );
-        // inactive: rejected.
-        std::env::set_var("IRIUM_NETWORK", "devnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "off");
-        assert!(
-            poawx_get_assignment(ConnectInfo(addr), State(state), headers)
-                .await
-                .is_err(),
-            "inactive poawx must reject assignment"
-        );
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-    }
-
-    fn minimal_header() -> SubmitBlockHeader {
-        SubmitBlockHeader {
-            version: 1,
-            prev_hash: "00".repeat(32),
-            merkle_root: "00".repeat(32),
-            time: 1_700_000_000,
-            bits: "207fffff".to_string(),
-            nonce: 0,
-            hash: "00".repeat(32),
-        }
-    }
-
-    /// C-2: /rpc/submit_block returns 405 when poawx mode=active on testnet.
-    #[tokio::test]
-    async fn test_submit_block_rejected_when_poawx_active() {
-        let _env_guard = poawx_env_lock().lock().unwrap();
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let (state, _, _, _) = create_test_state(None);
-        let req = SubmitBlockRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-        };
-        let result = submit_block(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_NETWORK");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::METHOD_NOT_ALLOWED,
-            "submit_block must return 405 when poawx mode=active"
-        );
-    }
-
-    /// C-2 negative: submit_block proceeds past gate when poawx is inactive.
-    #[tokio::test]
-    async fn test_submit_block_proceeds_past_gate_when_inactive() {
-        let _env_guard = poawx_env_lock().lock().unwrap();
-        ensure_rpc_token_env();
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let (state, _, _, _) = create_test_state(None);
-        let req = SubmitBlockRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-        };
-        let result = submit_block(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        let err = result.unwrap_err();
-        assert_ne!(
-            err,
-            StatusCode::METHOD_NOT_ALLOWED,
-            "submit_block must not return 405 when poawx inactive (got {:?})",
-            err
-        );
-    }
-
-    /// C-3: SBE returns 400 when poawx active and receipts are empty.
-    #[tokio::test]
-    async fn test_sbe_rejects_empty_receipts_when_poawx_active() {
-        let _env_guard = poawx_env_lock().lock().unwrap();
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let (state, _, _, _) = create_test_state(None);
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![],
-            poawx_receipts_root: String::new(),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_NETWORK");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::BAD_REQUEST,
-            "SBE must return 400 when poawx active and receipts empty"
-        );
-    }
-
-    /// C-3 negative: SBE does not apply empty-receipt gate when poawx inactive.
-    #[tokio::test]
-    async fn test_sbe_allows_empty_receipts_when_poawx_inactive() {
-        let _env_guard = poawx_env_lock().lock().unwrap();
-        ensure_rpc_token_env();
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let (state, _, _, _) = create_test_state(None);
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![],
-            poawx_receipts_root: String::new(),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        // poawx gate does not fire when mode unset; request may fail for other reasons.
-        if let Err(code) = result {
-            // 400 from invalid tx_hex is expected; that is NOT the poawx gate.
-            // The key assertion: mode is unset so no 400 from our specific gate path.
-            let _ = code; // any error is acceptable here as long as it is not from our gate
-        }
-    }
-
-    /// O-2: SBE returns 503 when receipts are non-empty on mainnet.
-    #[tokio::test]
-    async fn test_sbe_rejects_poawx_receipts_on_mainnet() {
-        let _env_guard = poawx_env_lock().lock().unwrap();
-        ensure_rpc_token_env();
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_NETWORK");
-        let (state, _, _, _) = create_test_state(None);
-        let fake_receipt = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "ab".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![fake_receipt],
-            poawx_receipts_root: "aa".repeat(32),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "SBE must return 503 when poawx receipts submitted on mainnet"
-        );
-    }
-
-    // ---- Phase 12-C: puzzle difficulty configuration tests ----
-
-    /// Default difficulty (no env var) must be sane: >= MIN_ACTIVE and > 1.
-    #[test]
-    fn test_poawx_difficulty_default_is_sane() {
-        let _guard = poawx_env_lock().lock().unwrap();
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        let d = poawx_puzzle_difficulty_bits();
-        assert!(
-            d >= POAWX_MIN_ACTIVE_DIFFICULTY_BITS,
-            "default difficulty {} must be >= MIN_ACTIVE {}",
-            d,
-            POAWX_MIN_ACTIVE_DIFFICULTY_BITS
-        );
-        assert!(d > 1, "default difficulty {} must be greater than 1", d);
-    }
-
-    /// Valid env value is parsed and returned unchanged (if within MAX).
-    #[test]
-    fn test_poawx_difficulty_env_parsed() {
-        let _guard = poawx_env_lock().lock().unwrap();
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "10");
-        let d = poawx_puzzle_difficulty_bits();
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(d, 10, "difficulty must equal the parsed env value");
-    }
-
-    /// Invalid (non-numeric) env value fails closed: returns 0.
-    #[test]
-    fn test_poawx_difficulty_invalid_fails_closed() {
-        let _guard = poawx_env_lock().lock().unwrap();
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "notanumber");
-        let d = poawx_puzzle_difficulty_bits();
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(d, 0, "invalid env value must fail closed (return 0)");
-    }
-
-    /// Value above MAX is capped at POAWX_MAX_DIFFICULTY_BITS.
-    #[test]
-    fn test_poawx_difficulty_too_high_is_capped() {
-        let _guard = poawx_env_lock().lock().unwrap();
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "9999");
-        let d = poawx_puzzle_difficulty_bits();
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(
-            d, POAWX_MAX_DIFFICULTY_BITS,
-            "difficulty above MAX must be capped to {}",
-            POAWX_MAX_DIFFICULTY_BITS
-        );
-    }
-
-    /// Value below MIN_ACTIVE is returned as-is; callers enforce the minimum.
-    #[test]
-    fn test_poawx_difficulty_below_min_returned_raw() {
-        let _guard = poawx_env_lock().lock().unwrap();
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "2");
-        let d = poawx_puzzle_difficulty_bits();
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(d, 2, "value below MIN_ACTIVE returned as-is");
-        assert!(d < POAWX_MIN_ACTIVE_DIFFICULTY_BITS);
-    }
-
-    /// SBE returns 503 when difficulty is below minimum while mode=active (testnet).
-    /// The difficulty check fires before the chain-height check so no populated chain is needed.
-    #[tokio::test]
-    async fn test_sbe_rejects_trivial_difficulty_when_active() {
-        let _env_guard = poawx_env_lock().lock().unwrap();
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "2");
-        let (state, _, _, _) = create_test_state(None);
-        let fake_receipt = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "ab".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![fake_receipt],
-            poawx_receipts_root: "aa".repeat(32),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "SBE must return 503 when difficulty below minimum on active testnet"
-        );
-    }
-
-    // ── Phase 18B step-3: mode-1 submit-side verification / mapping / root ──
-
-    fn p18b3_pk33(sk: &k256::ecdsa::SigningKey) -> [u8; 33] {
-        let vk = k256::ecdsa::VerifyingKey::from(sk);
-        let enc = vk.to_encoded_point(true);
-        let mut p = [0u8; 33];
-        p.copy_from_slice(enc.as_bytes());
-        p
-    }
-
-    fn p18b3_worker_tag(worker: &str) -> [u8; 32] {
-        if worker.is_empty() {
-            return [0u8; 32];
-        }
-        let mut h = Sha256::new();
-        h.update(worker.as_bytes());
-        h.finalize().into()
-    }
-
-    fn p18b3_signed_delegation(
-        miner: &k256::ecdsa::SigningKey,
-        pool_pub: [u8; 33],
-        network_id: u8,
-        worker: &str,
-        expiry: u64,
-        fee_bps: u16,
-    ) -> irium_node_rs::poawx::Delegation {
-        use k256::ecdsa::signature::hazmat::PrehashSigner;
-        let mut d = irium_node_rs::poawx::Delegation {
-            deleg_version: irium_node_rs::poawx::Delegation::VERSION,
-            network_id,
-            miner_pubkey: p18b3_pk33(miner),
-            pool_pubkey: pool_pub,
-            worker_tag: p18b3_worker_tag(worker),
-            expiry_height: expiry,
-            fee_bps,
-            fee_pkh: [0u8; 20],
-            deleg_nonce: [0x5au8; 32],
-            delegation_sig: [0u8; 64],
-        };
-        let sig: k256::ecdsa::Signature = miner.sign_prehash(&d.message_hash()).unwrap();
-        d.delegation_sig.copy_from_slice(&sig.to_bytes());
-        d
-    }
-
-    /// Build a mode-1 pending receipt where the pool delegate signs the per-height
-    /// challenge over solution [0x11;8].
-    fn p18b3_mode1_pending(
-        height: u64,
-        nonce: [u8; 32],
-        miner: &k256::ecdsa::SigningKey,
-        pool: &k256::ecdsa::SigningKey,
-        network_id: u8,
-        worker: &str,
-        expiry: u64,
-        fee_bps: u16,
-    ) -> PoawxPendingReceipt {
-        use k256::ecdsa::signature::hazmat::PrehashSigner;
-        let pool_pub = p18b3_pk33(pool);
-        let d = p18b3_signed_delegation(miner, pool_pub, network_id, worker, expiry, fee_bps);
-        let miner_pkh = d.miner_pkh();
-        let solution = [0x11u8; 8];
-        let challenge: [u8; 32] = {
-            let mut h = Sha256::new();
-            h.update(solution);
-            h.update(nonce);
-            h.update(height.to_le_bytes());
-            h.finalize().into()
-        };
-        let sig: k256::ecdsa::Signature = pool.sign_prehash(&challenge).unwrap();
-        let mut signer_sig = [0u8; 64];
-        signer_sig.copy_from_slice(&sig.to_bytes());
-        PoawxPendingReceipt {
-            height,
-            lane: "cpu".to_string(),
-            worker_pkh: hex::encode(miner_pkh),
-            solution: hex::encode(solution),
-            commitment_nonce: hex::encode(nonce),
-            worker_pubkey: hex::encode(pool_pub),
-            worker_sig: hex::encode(signer_sig),
-            delegation: hex::encode(d.serialize()),
-            phase20_ext: String::new(),
-        }
-    }
-
-    #[test]
-    fn phase18b3_compute_root_mode1_parity() {
-        let miner = k256::ecdsa::SigningKey::from_slice(&[5u8; 32]).unwrap();
-        let pool = k256::ecdsa::SigningKey::from_slice(&[6u8; 32]).unwrap();
-        let pend = p18b3_mode1_pending(1, [0x44u8; 32], &miner, &pool, 1, "rig1", 1000, 0);
-        let block_rec = pending_receipt_to_block_receipt(&pend).expect("map");
-        let node_root =
-            irium_node_rs::poawx::irx1_root_from_block_receipts(std::slice::from_ref(&block_rec));
-        let pool_root = compute_poawx_receipts_root(std::slice::from_ref(&pend));
-        assert_eq!(
-            pool_root, node_root,
-            "compute_poawx_receipts_root mode-1 must equal irx1_root_from_block_receipts"
-        );
-    }
-
-    #[test]
-    fn phase18b3_pending_json_roundtrips_delegation() {
-        let miner = k256::ecdsa::SigningKey::from_slice(&[5u8; 32]).unwrap();
-        let pool = k256::ecdsa::SigningKey::from_slice(&[6u8; 32]).unwrap();
-        let pend = p18b3_mode1_pending(1, [0x44u8; 32], &miner, &pool, 1, "rig1", 1000, 0);
-        let json = serde_json::to_string(&pend).unwrap();
-        assert!(json.contains("delegation"));
-        let back: PoawxPendingReceipt = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.delegation, pend.delegation);
-        // mode-0 omits the delegation field entirely (byte-identical).
-        let mut m0 = pend.clone();
-        m0.delegation = String::new();
-        let j0 = serde_json::to_string(&m0).unwrap();
-        assert!(
-            !j0.contains("delegation"),
-            "mode-0 pending JSON omits delegation"
-        );
-        let b0: PoawxPendingReceipt = serde_json::from_str(&j0).unwrap();
-        assert!(b0.delegation.is_empty());
-    }
-
-    #[test]
-    fn phase18b3_reorg_restore_preserves_delegation() {
-        let miner = k256::ecdsa::SigningKey::from_slice(&[5u8; 32]).unwrap();
-        let pool = k256::ecdsa::SigningKey::from_slice(&[6u8; 32]).unwrap();
-        let pend = p18b3_mode1_pending(1, [0x44u8; 32], &miner, &pool, 1, "rig1", 1000, 0);
-        let block_rec = pending_receipt_to_block_receipt(&pend).expect("map");
-        assert!(block_rec.delegation.is_some());
-        // reorg restore path must preserve the delegation (no down-convert).
-        let restored = block_receipt_to_pending(&block_rec);
-        assert_eq!(
-            restored.delegation, pend.delegation,
-            "reorg restore preserves delegation"
-        );
-        let block_rec2 = pending_receipt_to_block_receipt(&restored).expect("map2");
-        assert_eq!(block_rec2.delegation, block_rec.delegation);
-    }
-
-    #[test]
-    fn phase18b3_verify_delegated_pending_receipt_accept_and_reject() {
-        let _g = poawx_env_lock().lock().unwrap();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT", "1");
-        let miner = k256::ecdsa::SigningKey::from_slice(&[5u8; 32]).unwrap();
-        let pool = k256::ecdsa::SigningKey::from_slice(&[6u8; 32]).unwrap();
-        let nonce = [0x44u8; 32];
-        let height = 1u64;
-        let sol = hex::decode("1111111111111111").unwrap();
-
-        let ok = p18b3_mode1_pending(height, nonce, &miner, &pool, 1, "rig1", 1000, 0);
-        assert!(
-            verify_delegated_pending_receipt(&ok, &sol, &nonce, height).is_ok(),
-            "valid delegated receipt accepted"
-        );
-        // fee>0
-        let feebad = p18b3_mode1_pending(height, nonce, &miner, &pool, 1, "rig1", 1000, 100);
-        assert!(verify_delegated_pending_receipt(&feebad, &sol, &nonce, height).is_err());
-        // expired (expiry_height 0 < height 1; rule is height > expiry)
-        let exp = p18b3_mode1_pending(height, nonce, &miner, &pool, 1, "rig1", 0, 0);
-        assert!(verify_delegated_pending_receipt(&exp, &sol, &nonce, height).is_err());
-        // worker_pkh mismatch
-        let mut wrongpkh = p18b3_mode1_pending(height, nonce, &miner, &pool, 1, "rig1", 1000, 0);
-        wrongpkh.worker_pkh = "ff".repeat(20);
-        assert!(verify_delegated_pending_receipt(&wrongpkh, &sol, &nonce, height).is_err());
-        // network mismatch (delegation says devnet=2, node testnet=1)
-        let netbad = p18b3_mode1_pending(height, nonce, &miner, &pool, 2, "rig1", 1000, 0);
-        assert!(verify_delegated_pending_receipt(&netbad, &sol, &nonce, height).is_err());
-        // signer != delegated pool_pubkey
-        let other = k256::ecdsa::SigningKey::from_slice(&[7u8; 32]).unwrap();
-        let mut signerbad = p18b3_mode1_pending(height, nonce, &miner, &pool, 1, "rig1", 1000, 0);
-        signerbad.worker_pubkey = hex::encode(p18b3_pk33(&other));
-        assert!(verify_delegated_pending_receipt(&signerbad, &sol, &nonce, height).is_err());
-        // mainnet hard-off
-        std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(verify_delegated_pending_receipt(&ok, &sol, &nonce, height).is_err());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        // before activation
-        std::env::set_var("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT", "100");
-        assert!(verify_delegated_pending_receipt(&ok, &sol, &nonce, height).is_err());
-
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT");
-    }
-
-    /// post_receipt returns 503 when difficulty is below minimum while mode=active (testnet).
-    #[tokio::test]
-    async fn test_poawx_receipt_rejects_trivial_difficulty() {
-        let _env_guard = poawx_env_lock().lock().unwrap();
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "2");
-        let (state, _, _, _) = create_test_state(None);
-        let req = PoawxReceiptRequest {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "ab".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let result = poawx_post_receipt(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "post_receipt must return 503 when difficulty below minimum on active testnet"
-        );
-    }
-
-    /// Mainnet returns 503 for poawx receipts regardless of difficulty setting (O-2 fires first).
-    #[tokio::test]
-    async fn test_poawx_mainnet_ignores_difficulty_setting() {
-        let _env_guard = poawx_env_lock().lock().unwrap();
-        ensure_rpc_token_env();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "4");
-        let (state, _, _, _) = create_test_state(None);
-        let fake_receipt = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "ab".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![fake_receipt],
-            poawx_receipts_root: "aa".repeat(32),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "SBE must return 503 on mainnet regardless of difficulty setting (O-2)"
-        );
-    }
-
-    // --- Phase 12-D: Receipt Persistence ---
-
-    #[test]
-    fn test_poawx_receipts_saved_and_reloaded() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_d1.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let receipt = PoawxPendingReceipt {
-            height: 42,
-            lane: "cpu".to_string(),
-            worker_pkh: "ab".repeat(20),
-            solution: "cd".repeat(32),
-            commitment_nonce: "ef".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        save_poawx_pending_receipts(&[receipt.clone()]);
-        let loaded = load_poawx_pending_receipts();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].height, 42);
-        assert_eq!(loaded[0].lane, "cpu");
-        assert_eq!(loaded[0].worker_pkh, "ab".repeat(20));
-    }
-
-    #[test]
-    fn test_poawx_receipts_clean_start_no_file() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_d2.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let loaded = load_poawx_pending_receipts();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        assert!(
-            loaded.is_empty(),
-            "missing file must yield empty Vec on startup"
-        );
-    }
-
-    #[test]
-    fn test_poawx_corrupt_receipt_file_starts_clean() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_d3.json");
-        std::fs::write(&tmp, b"this is not valid json {{{{").unwrap();
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let loaded = load_poawx_pending_receipts();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert!(
-            loaded.is_empty(),
-            "corrupt file must yield empty Vec without panic"
-        );
-    }
-
-    #[test]
-    fn test_poawx_wrong_json_shape_starts_clean() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_d4.json");
-        std::fs::write(&tmp, br#"{"height":1}"#).unwrap();
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let loaded = load_poawx_pending_receipts();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert!(
-            loaded.is_empty(),
-            "wrong JSON shape must yield empty Vec without panic"
-        );
-    }
-
-    #[test]
-    fn test_poawx_mainnet_save_persists_receipts() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::remove_var("IRIUM_NETWORK");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_d5.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let receipt = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        save_poawx_pending_receipts(&[receipt]);
-        let exists = tmp.exists();
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert!(exists, "mainnet save must persist pending receipts");
-    }
-
-    #[test]
-    fn test_poawx_mainnet_load_returns_persisted_receipts() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::remove_var("IRIUM_NETWORK");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_d6.json");
-        let receipt = PoawxPendingReceipt {
-            height: 99,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let json = serde_json::to_string(&vec![receipt]).unwrap();
-        std::fs::write(&tmp, json).unwrap();
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let loaded = load_poawx_pending_receipts();
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert_eq!(loaded.len(), 1, "mainnet load must return persisted receipts");
-        assert_eq!(loaded[0].height, 99);
-    }
-
-    #[test]
-    fn test_poawx_receipt_cap_drops_oldest() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_d7.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let mut receipts: Vec<PoawxPendingReceipt> = (0..(POAWX_MAX_PENDING_RECEIPTS + 2) as u64)
-            .map(|i| PoawxPendingReceipt {
-                height: i,
-                lane: "cpu".to_string(),
-                worker_pkh: "00".repeat(20),
-                solution: "00".repeat(32),
-                commitment_nonce: "00".repeat(32),
-                worker_pubkey: String::new(),
-                worker_sig: String::new(),
-                delegation: String::new(),
-                phase20_ext: String::new(),
-            })
-            .collect();
-        if receipts.len() > POAWX_MAX_PENDING_RECEIPTS {
-            let excess = receipts.len() - POAWX_MAX_PENDING_RECEIPTS;
-            receipts.drain(0..excess);
-        }
-        save_poawx_pending_receipts(&receipts);
-        let loaded = load_poawx_pending_receipts();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert_eq!(loaded.len(), POAWX_MAX_PENDING_RECEIPTS);
-        assert_eq!(
-            loaded[0].height, 2,
-            "oldest receipts must be dropped when cap exceeded"
-        );
-    }
-
-    #[test]
-    fn test_poawx_consumed_receipts_not_reloaded() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_d8.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let make_r = |h: u64| PoawxPendingReceipt {
-            height: h,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let mut receipts = vec![make_r(100), make_r(200)];
-        save_poawx_pending_receipts(&receipts);
-        receipts.retain(|r| r.height != 100u64);
-        save_poawx_pending_receipts(&receipts);
-        let loaded = load_poawx_pending_receipts();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert_eq!(
-            loaded.len(),
-            1,
-            "consumed receipts must not be reloaded after restart"
-        );
-        assert_eq!(
-            loaded[0].height, 200,
-            "only uncommitted receipt must survive"
-        );
-    }
-
-    // --- Phase 12-E: Receipt Expiry & Lifecycle Cleanup ---
-
-    #[test]
-    fn test_poawx_fresh_receipt_retained() {
-        let mut receipts = vec![PoawxPendingReceipt {
-            height: 100,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        }];
-        prune_expired_poawx_receipts(&mut receipts, 100);
-        assert_eq!(receipts.len(), 1, "fresh receipt at tip must be retained");
-    }
-
-    #[test]
-    fn test_poawx_stale_receipt_pruned() {
-        let mut receipts = vec![PoawxPendingReceipt {
-            height: 10,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        }];
-        let tip = 10 + POAWX_RECEIPT_MAX_AGE_BLOCKS + 1;
-        prune_expired_poawx_receipts(&mut receipts, tip);
-        assert!(
-            receipts.is_empty(),
-            "receipt older than max age must be pruned"
-        );
-    }
-
-    #[test]
-    fn test_poawx_mixed_receipts_leaves_only_fresh() {
-        let make_r = |h: u64| PoawxPendingReceipt {
-            height: h,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let mut receipts = vec![make_r(50), make_r(80), make_r(100)];
-        // tip=105: 50+24=74<105 stale, 80+24=104<105 stale, 100+24=124>=105 fresh
-        prune_expired_poawx_receipts(&mut receipts, 105);
-        assert_eq!(receipts.len(), 1, "only fresh receipt must remain");
-        assert_eq!(receipts[0].height, 100);
-    }
-
-    #[test]
-    fn test_poawx_future_height_receipt_retained() {
-        let mut receipts = vec![PoawxPendingReceipt {
-            height: 200,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        }];
-        prune_expired_poawx_receipts(&mut receipts, 50);
-        assert_eq!(
-            receipts.len(),
-            1,
-            "future-height receipt must never be pruned"
-        );
-    }
-
-    #[test]
-    fn test_poawx_prune_empty_list_safe() {
-        let mut receipts: Vec<PoawxPendingReceipt> = Vec::new();
-        prune_expired_poawx_receipts(&mut receipts, 9999);
-        assert!(receipts.is_empty(), "pruning empty list must not panic");
-    }
-
-    #[test]
-    fn test_poawx_startup_prune_stale_persisted() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_e6.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let stale = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        save_poawx_pending_receipts(&[stale]);
-        let mut receipts = load_poawx_pending_receipts();
-        let simulated_tip = 1 + POAWX_RECEIPT_MAX_AGE_BLOCKS + 1;
-        prune_expired_poawx_receipts(&mut receipts, simulated_tip);
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert!(
-            receipts.is_empty(),
-            "startup must prune stale persisted receipts"
-        );
-    }
-
-    #[test]
-    fn test_poawx_save_after_prune_updates_file() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_e7.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let make_r = |h: u64| PoawxPendingReceipt {
-            height: h,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let mut receipts = vec![make_r(1), make_r(500)];
-        save_poawx_pending_receipts(&receipts);
-        let tip = 1 + POAWX_RECEIPT_MAX_AGE_BLOCKS + 1;
-        prune_expired_poawx_receipts(&mut receipts, tip);
-        save_poawx_pending_receipts(&receipts);
-        let reloaded = load_poawx_pending_receipts();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert_eq!(
-            reloaded.len(),
-            1,
-            "file must contain only fresh receipt after save-after-prune"
-        );
-        assert_eq!(reloaded[0].height, 500);
-    }
-
-    #[test]
-    fn test_poawx_mainnet_persists_and_prunes_receipts() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::remove_var("IRIUM_NETWORK");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_e8.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let receipt = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        save_poawx_pending_receipts(&[receipt]);
-        let loaded = load_poawx_pending_receipts();
-        let mut v = loaded.clone();
-        prune_expired_poawx_receipts(&mut v, 9999);
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert_eq!(loaded.len(), 1, "mainnet must load persisted receipts");
-        assert!(v.is_empty(), "mainnet must prune expired persisted receipts");
-    }
-
-    #[tokio::test]
-    async fn test_poawx_12e_c3_gate_still_fires_with_receipt_file() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_e9.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let receipt_on_disk = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        save_poawx_pending_receipts(&[receipt_on_disk]);
-        let (state, _, _, _) = create_test_state(None);
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![],
-            poawx_receipts_root: "00".repeat(32),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::BAD_REQUEST,
-            "C-3 gate must reject empty receipts even when receipt file exists on disk"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_poawx_12e_difficulty_check_still_fires_with_receipt_file() {
-        let _env_guard = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "2");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_e10.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let receipt_on_disk = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "00".repeat(20),
-            solution: "00".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        save_poawx_pending_receipts(&[receipt_on_disk.clone()]);
-        let (state, _, _, _) = create_test_state(None);
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![receipt_on_disk],
-            poawx_receipts_root: "aa".repeat(32),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        let _ = std::fs::remove_file(&tmp);
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "difficulty check must still reject trivial difficulty even when receipt file exists"
-        );
-    }
-
-    #[test]
-    fn test_poawx_12f_irx1_commitment_false_for_no_irx1_script() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let block = Block {
-            header: BlockHeader {
-                version: 1,
-                prev_hash: [0u8; 32],
-                merkle_root: [0u8; 32],
-                time: 0,
-                bits: 0x207fffff,
-                nonce: 0,
-            },
-            transactions: vec![Transaction {
-                version: 1,
-                inputs: vec![TxInput {
-                    prev_txid: [0u8; 32],
-                    prev_index: 0xffff_ffff,
-                    script_sig: vec![0x01, 0x00],
-                    sequence: 0xffff_ffff,
-                }],
-                outputs: vec![TxOutput {
-                    value: 50_0000_0000,
-                    script_pubkey: vec![0x51],
-                }],
-                locktime: 0,
-            }],
-            auxpow: None,
-            poawx_receipts: None,
-        };
-        assert!(
-            !irium_node_rs::poawx::block_has_irx1_commitment(&block),
-            "block without irx1 output must return false (same function called from connect_block)"
-        );
-    }
-
-    #[test]
-    fn test_poawx_12f_irx1_commitment_true_for_valid_script() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let mut root = [0u8; 32];
-        root[0] = 0xde;
-        root[31] = 0xad;
-        let mut irx1_script = vec![0x6a, 0x24u8];
-        irx1_script.extend_from_slice(b"irx1");
-        irx1_script.extend_from_slice(&root);
-        let block = Block {
-            header: BlockHeader {
-                version: 1,
-                prev_hash: [0u8; 32],
-                merkle_root: [0u8; 32],
-                time: 0,
-                bits: 0x207fffff,
-                nonce: 0,
-            },
-            transactions: vec![Transaction {
-                version: 1,
-                inputs: vec![TxInput {
-                    prev_txid: [0u8; 32],
-                    prev_index: 0xffff_ffff,
-                    script_sig: vec![0x01, 0x00],
-                    sequence: 0xffff_ffff,
-                }],
-                outputs: vec![
-                    TxOutput {
-                        value: 50_0000_0000,
-                        script_pubkey: vec![0x51],
-                    },
-                    TxOutput {
-                        value: 0,
-                        script_pubkey: irx1_script,
-                    },
-                ],
-                locktime: 0,
-            }],
-            auxpow: None,
-            poawx_receipts: None,
-        };
-        assert!(
-            irium_node_rs::poawx::block_has_irx1_commitment(&block),
-            "block with valid irx1 output must return true (same function called from connect_block)"
-        );
-    }
-
-    #[test]
-    fn test_poawx_12f_receipt_persistence_regression() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_12f_regression.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let receipts = vec![PoawxPendingReceipt {
-            height: 42,
-            lane: "cpu".to_string(),
-            worker_pkh: "ab".repeat(20),
-            solution: "cd".repeat(32),
-            commitment_nonce: "ef".repeat(32),
-            worker_pubkey: String::new(),
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        }];
-        save_poawx_pending_receipts(&receipts);
-        let loaded = load_poawx_pending_receipts();
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].height, 42);
-        assert_eq!(loaded[0].lane, "cpu");
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        std::env::remove_var("IRIUM_NETWORK");
-        let _ = std::fs::remove_file(&tmp);
-    }
-
-    // --- Phase 12-G: Worker Identity Binding ---
-
-    fn make_test_worker_identity() -> (SigningKey, String, String) {
-        let secret_bytes = [0x42u8; 32];
-        let sk = SigningKey::from_bytes((&secret_bytes).into()).unwrap();
-        let vk = sk.verifying_key();
-        let pubkey_ep = vk.to_encoded_point(true);
-        let pubkey_bytes = pubkey_ep.as_bytes();
-        let pubkey_hex = hex::encode(pubkey_bytes);
-        let sha = Sha256::digest(pubkey_bytes);
-        let rip = ripemd::Ripemd160::digest(sha);
-        let pkh_hex = hex::encode(&*rip);
-        (sk, pubkey_hex, pkh_hex)
-    }
-
-    fn sign_worker_challenge(
-        sk: &SigningKey,
-        solution_bytes: &[u8],
-        nonce_bytes: &[u8],
-        height: u64,
-    ) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(solution_bytes);
-        hasher.update(nonce_bytes);
-        hasher.update(&height.to_le_bytes());
-        let digest: [u8; 32] = hasher.finalize().into();
-        let sig: Signature = sk.sign_prehash(&digest).unwrap();
-        hex::encode(sig.to_bytes())
-    }
-
-    #[test]
-    fn test_verify_worker_identity_valid() {
-        let (sk, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let solution = b"deadbeef00000000";
-        let nonce = [0xabu8; 32];
-        let height = 42u64;
-        let sig_hex = sign_worker_challenge(&sk, solution, &nonce, height);
-        let result =
-            verify_worker_identity(&pkh_hex, &pubkey_hex, &sig_hex, solution, &nonce, height);
-        assert!(
-            result.is_ok(),
-            "valid binding must be accepted: {:?}",
-            result
-        );
-    }
-
-    #[test]
-    fn test_verify_worker_identity_empty_fields_rejected() {
-        let result = verify_worker_identity(&"ab".repeat(20), "", "", b"solution", &[0u8; 32], 1);
-        assert!(result.is_err(), "empty worker_pubkey/sig must be rejected");
-        let msg = result.unwrap_err();
-        assert!(
-            msg.contains("missing"),
-            "error must mention missing: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn test_verify_worker_identity_spoofed_pkh_rejected() {
-        let (sk, pubkey_hex, _) = make_test_worker_identity();
-        let solution = b"somesolution";
-        let nonce = [0x01u8; 32];
-        let height = 10u64;
-        let sig_hex = sign_worker_challenge(&sk, solution, &nonce, height);
-        let wrong_pkh = "ff".repeat(20);
-        let result =
-            verify_worker_identity(&wrong_pkh, &pubkey_hex, &sig_hex, solution, &nonce, height);
-        assert!(result.is_err(), "spoofed pkh must be rejected");
-        let msg = result.unwrap_err();
-        assert!(
-            msg.contains("does not match"),
-            "error must mention mismatch: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn test_verify_worker_identity_bad_pubkey_hex() {
-        let result =
-            verify_worker_identity(&"ab".repeat(20), "NOTVALIDHEX!", "", b"sol", &[0u8; 32], 1);
-        assert!(result.is_err());
-        let msg = result.unwrap_err();
-        assert!(
-            msg.contains("invalid hex") || msg.contains("missing"),
-            "expected hex or missing error: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn test_verify_worker_identity_bad_sig_hex() {
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let result =
-            verify_worker_identity(&pkh_hex, &pubkey_hex, "NOTVALIDHEX!", b"sol", &[0u8; 32], 1);
-        assert!(result.is_err());
-        let msg = result.unwrap_err();
-        assert!(
-            msg.contains("invalid") || msg.contains("mismatch"),
-            "expected invalid sig error: {}",
-            msg
-        );
-    }
-
-    #[test]
-    fn test_verify_worker_identity_wrong_height() {
-        let (sk, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let solution = b"testsolution";
-        let nonce = [0xbbu8; 32];
-        let sig_hex = sign_worker_challenge(&sk, solution, &nonce, 100u64);
-        let result =
-            verify_worker_identity(&pkh_hex, &pubkey_hex, &sig_hex, solution, &nonce, 101u64);
-        assert!(result.is_err(), "sig at height 100 must fail at height 101");
-    }
-
-    #[test]
-    fn test_verify_worker_identity_wrong_solution() {
-        let (sk, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let real_solution = b"correct_solution_bytes_here";
-        let fake_solution = b"different_solution_content!!";
-        let nonce = [0xccu8; 32];
-        let height = 5u64;
-        let sig_hex = sign_worker_challenge(&sk, real_solution, &nonce, height);
-        let result = verify_worker_identity(
-            &pkh_hex,
-            &pubkey_hex,
-            &sig_hex,
-            fake_solution,
-            &nonce,
-            height,
-        );
-        assert!(
-            result.is_err(),
-            "sig for different solution must be rejected"
-        );
-    }
-
-    #[test]
-    fn test_verify_worker_identity_truncated_sig_rejected() {
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let result =
-            verify_worker_identity(&pkh_hex, &pubkey_hex, "deadbeef", b"sol", &[0u8; 32], 1);
-        assert!(result.is_err(), "truncated sig must be rejected");
-    }
-
-    #[test]
-    fn test_poawx_12g_receipt_with_identity_fields_persists() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let tmp = std::env::temp_dir().join("irium_test_poawx_12g_persist.json");
-        let _ = std::fs::remove_file(&tmp);
-        std::env::set_var("IRIUM_POAWX_RECEIPTS_FILE", tmp.to_str().unwrap());
-        let receipt = PoawxPendingReceipt {
-            height: 77,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex.clone(),
-            solution: "ab".repeat(32),
-            commitment_nonce: "cd".repeat(32),
-            worker_pubkey: pubkey_hex.clone(),
-            worker_sig: "ef".repeat(64),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        save_poawx_pending_receipts(&[receipt]);
-        let loaded = load_poawx_pending_receipts();
-        std::env::remove_var("IRIUM_POAWX_RECEIPTS_FILE");
-        std::env::remove_var("IRIUM_NETWORK");
-        let _ = std::fs::remove_file(&tmp);
-        assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].worker_pubkey, pubkey_hex);
-        assert_eq!(loaded[0].worker_pkh, pkh_hex);
-        assert_eq!(loaded[0].worker_sig, "ef".repeat(64));
-    }
-
-    #[tokio::test]
-    async fn test_poawx_12g_mode_inactive_still_503() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let (state, _, _, _) = create_test_state(None);
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let req = PoawxReceiptRequest {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex,
-            solution: "aa".repeat(32),
-            commitment_nonce: "bb".repeat(32),
-            worker_pubkey: pubkey_hex,
-            worker_sig: "cc".repeat(64),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let result = poawx_post_receipt(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "inactive mode must still return 503 (O-2 guard)"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_poawx_12g_trivial_difficulty_still_503() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "2");
-        let (state, _, _, _) = create_test_state(None);
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let req = PoawxReceiptRequest {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex,
-            solution: "aa".repeat(32),
-            commitment_nonce: "bb".repeat(32),
-            worker_pubkey: pubkey_hex,
-            worker_sig: "cc".repeat(64),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let result = poawx_post_receipt(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "trivial difficulty must still return 503"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_poawx_12g_mainnet_receipt_still_503() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        let (state, _, _, _) = create_test_state(None);
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let req = PoawxReceiptRequest {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex,
-            solution: "aa".repeat(32),
-            commitment_nonce: "bb".repeat(32),
-            worker_pubkey: pubkey_hex,
-            worker_sig: "cc".repeat(64),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let result = poawx_post_receipt(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "mainnet must still return 503 (O-2 guard)"
-        );
-    }
-
-    // ── Phase 12-H: Reward Split Enforcement ──────────────────────────────────
-
-    fn make_coinbase(outputs: Vec<TxOutput>) -> Transaction {
-        Transaction {
-            version: 1,
-            inputs: vec![TxInput {
-                prev_txid: [0u8; 32],
-                prev_index: 0xffff_ffff,
-                script_sig: vec![0x01, 0x00],
-                sequence: 0xffff_ffff,
-            }],
-            outputs,
-            locktime: 0,
-        }
-    }
-
-    fn pkh_arr(byte: u8) -> [u8; 20] {
-        [byte; 20]
-    }
-
-    fn receipts_for(pkh_hex: &str, count: usize) -> Vec<PoawxPendingReceipt> {
-        (0..count)
-            .map(|_| PoawxPendingReceipt {
-                height: 1,
-                lane: "cpu".to_string(),
-                worker_pkh: pkh_hex.to_string(),
-                solution: "aa".repeat(32),
-                commitment_nonce: "bb".repeat(32),
-                worker_pubkey: String::new(),
-                worker_sig: String::new(),
-                delegation: String::new(),
-                phase20_ext: String::new(),
-            })
-            .collect()
-    }
-
-    #[test]
-    fn test_poawx_worker_due_calculation() {
-        assert_eq!(poawx_worker_due(5_000_000_000), 500_000_000);
-        assert_eq!(poawx_worker_due(2_500_000_000), 250_000_000);
-        assert_eq!(poawx_worker_due(0), 0);
-    }
-
-    #[test]
-    fn test_poawx_max_pending_within_wire_limit() {
-        assert!(
-            POAWX_MAX_PENDING_RECEIPTS <= 255,
-            "POAWX_MAX_PENDING_RECEIPTS must not exceed u8::MAX (block wire format limit)"
-        );
-    }
-
-    #[test]
-    fn test_compute_receipts_root_lane_cpu_matches_block_receipt_root() {
-        // B-1 regression: lane "cpu" was hashed as 3 bytes; fix canonicalises to first byte.
-        let pkh = "ab".repeat(20);
-        let pubk = "02".to_string() + &"cd".repeat(32);
-        let r = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh,
-            worker_pubkey: pubk,
-            worker_sig: "ee".repeat(64),
-            delegation: String::new(),
-            solution: "0123456789abcdef".to_string(),
-            commitment_nonce: "ff".repeat(32),
-            phase20_ext: String::new(),
-        };
-        let pending_root = compute_poawx_receipts_root(&[r.clone()]);
-        let block_receipt = pending_receipt_to_block_receipt(&r).expect("valid test receipt");
-        let block_root = irium_node_rs::poawx::irx1_root_from_block_receipts(&[block_receipt]);
-        assert_eq!(
-            hex::encode(pending_root),
-            hex::encode(block_root),
-            "B-1: lane multi-byte string must hash as single canonical byte"
-        );
-    }
-
-    #[test]
-    fn phase20_gated_root_parity_pending_vs_block_and_byte_identity() {
-        use irium_node_rs::poawx::{
-            Phase20ReceiptExt, PoawxRoleClaim, RoleReward, ROLE_COMPUTE_CONTRIBUTOR,
-            ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
-        };
-        let mk_claim = |role: u8| PoawxRoleClaim {
-            role_id: role,
-            lane_id: 0,
-            solver_pkh: [role; 20],
-            nonce: [1u8; 32],
-            secret: [2u8; 32],
-            claim_digest: [3u8; 32],
-            commitment_hash: None,
-        };
-        let ext = Phase20ReceiptExt {
-            role_reward: RoleReward {
-                compute_contributor_pkh: [0xC1u8; 20],
-                verify_contributor_pkh: [0xC2u8; 20],
-                support_contributor_pkh: [0xC3u8; 20],
-            },
-            compute_claim: mk_claim(ROLE_COMPUTE_CONTRIBUTOR),
-            verify_claim: mk_claim(ROLE_VERIFY_CONTRIBUTOR),
-            support_claim: mk_claim(ROLE_SUPPORT_CONTRIBUTOR),
-            fee_bps: 0,
-            fee_pkh: [0u8; 20],
-            precommit_root: None,
-            role_ticket_proofs: None,
-            role_dominance_weights: None,
-            candidate_set: None,
-            role_puzzle_proofs: None,
-            finality_proof: None,
-            committed_admission: None,
-            role_assignment_v2: None,
-            fraud_proofs: None,
-            proposer_assignment: None,
-            proposer_registrations: None,
-        };
-        let pubk = "02".to_string() + &"cd".repeat(32);
-        let r = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "ab".repeat(20),
-            worker_pubkey: pubk,
-            worker_sig: "ee".repeat(64),
-            delegation: String::new(),
-            solution: "0123456789abcdef".to_string(),
-            commitment_nonce: "ff".repeat(32),
-            phase20_ext: hex::encode(ext.serialize()),
-        };
-        // Gate OFF: byte-identical to the legacy root (extension ignored).
-        assert_eq!(
-            compute_poawx_receipts_root_gated(&[r.clone()], false),
-            compute_poawx_receipts_root(&[r.clone()]),
-            "gate off must equal legacy root"
-        );
-        // Gate ON: the submit-path (pending) root equals the connect-path (block) root.
-        let pending_on = compute_poawx_receipts_root_gated(&[r.clone()], true);
-        let block_rec = pending_receipt_to_block_receipt(&r).expect("valid receipt");
-        assert_eq!(block_rec.phase20_ext.as_ref(), Some(&ext));
-        let block_on =
-            irium_node_rs::poawx::irx1_root_from_block_receipts_gated(&[block_rec], true);
-        assert_eq!(
-            hex::encode(pending_on),
-            hex::encode(block_on),
-            "phase20 gated submit-root must equal connect-root"
-        );
-        // Gate ON differs from gate OFF (the extension actually contributes).
-        assert_ne!(
-            pending_on,
-            compute_poawx_receipts_root(&[r.clone()]),
-            "gate on must differ from legacy root"
-        );
-    }
-
-    #[test]
-    fn test_poawx_validate_reward_split_empty_receipts_ok() {
-        let coinbase = make_coinbase(vec![]);
-        assert!(
-            poawx_validate_reward_split(&coinbase, &[], 1).is_ok(),
-            "empty receipts must not require any payment"
-        );
-    }
-
-    #[test]
-    fn test_poawx_validate_reward_split_valid_payout() {
-        let arr = pkh_arr(0xab);
-        let script = p2pkh_script(&arr);
-        let due = poawx_worker_due(block_reward(1));
-        let coinbase = make_coinbase(vec![TxOutput {
-            value: due,
-            script_pubkey: script,
-        }]);
-        let receipts = receipts_for(&hex::encode(arr), 1);
-        assert!(
-            poawx_validate_reward_split(&coinbase, &receipts, 1).is_ok(),
-            "exact required payment must pass"
-        );
-    }
-
-    #[test]
-    fn test_poawx_validate_reward_split_underpaid() {
-        let arr = pkh_arr(0xab);
-        let script = p2pkh_script(&arr);
-        let due = poawx_worker_due(block_reward(1));
-        let coinbase = make_coinbase(vec![TxOutput {
-            value: due - 1,
-            script_pubkey: script,
-        }]);
-        let receipts = receipts_for(&hex::encode(arr), 1);
-        let err = poawx_validate_reward_split(&coinbase, &receipts, 1).unwrap_err();
-        assert!(
-            err.contains("payout"),
-            "error must reference payout: {}",
-            err
-        );
-    }
-
-    #[test]
-    fn test_poawx_validate_reward_split_missing_output() {
-        let worker = pkh_arr(0xab);
-        let other = pkh_arr(0xcd);
-        let due = poawx_worker_due(block_reward(1));
-        let coinbase = make_coinbase(vec![TxOutput {
-            value: due,
-            script_pubkey: p2pkh_script(&other),
-        }]);
-        let receipts = receipts_for(&hex::encode(worker), 1);
-        assert!(
-            poawx_validate_reward_split(&coinbase, &receipts, 1).is_err(),
-            "worker with no matching output must be rejected"
-        );
-    }
-
-    #[test]
-    fn test_poawx_validate_reward_split_wrong_script_type() {
-        let arr = pkh_arr(0xab);
-        let coinbase = make_coinbase(vec![TxOutput {
-            value: 9_999_999_999,
-            script_pubkey: vec![0x6a, 0x04, 0xde, 0xad, 0xbe, 0xef],
-        }]);
-        let receipts = receipts_for(&hex::encode(arr), 1);
-        assert!(
-            poawx_validate_reward_split(&coinbase, &receipts, 1).is_err(),
-            "OP_RETURN-only coinbase must be rejected for worker payout"
-        );
-    }
-
-    #[test]
-    fn test_poawx_validate_reward_split_multiple_workers_both_paid() {
-        let arr_a = pkh_arr(0xaa);
-        let arr_b = pkh_arr(0xbb);
-        let due = poawx_worker_due(block_reward(1));
-        let coinbase = make_coinbase(vec![
-            TxOutput {
-                value: due,
-                script_pubkey: p2pkh_script(&arr_a),
-            },
-            TxOutput {
-                value: due,
-                script_pubkey: p2pkh_script(&arr_b),
-            },
-        ]);
-        let mut receipts = receipts_for(&hex::encode(arr_a), 1);
-        receipts.extend(receipts_for(&hex::encode(arr_b), 1));
-        assert!(
-            poawx_validate_reward_split(&coinbase, &receipts, 1).is_ok(),
-            "both workers paid correctly must pass"
-        );
-    }
-
-    #[test]
-    fn test_poawx_validate_reward_split_multiple_workers_one_missing() {
-        let arr_a = pkh_arr(0xaa);
-        let arr_b = pkh_arr(0xbb);
-        let due = poawx_worker_due(block_reward(1));
-        let coinbase = make_coinbase(vec![TxOutput {
-            value: due,
-            script_pubkey: p2pkh_script(&arr_a),
-        }]);
-        let mut receipts = receipts_for(&hex::encode(arr_a), 1);
-        receipts.extend(receipts_for(&hex::encode(arr_b), 1));
-        assert!(
-            poawx_validate_reward_split(&coinbase, &receipts, 1).is_err(),
-            "missing second worker payout must be rejected"
-        );
-    }
-
-    #[test]
-    fn test_poawx_validate_reward_split_multi_receipts_same_worker_paid() {
-        let arr = pkh_arr(0xab);
-        let due = poawx_worker_due(block_reward(1));
-        let coinbase = make_coinbase(vec![TxOutput {
-            value: due * 2,
-            script_pubkey: p2pkh_script(&arr),
-        }]);
-        let receipts = receipts_for(&hex::encode(arr), 2);
-        assert!(
-            poawx_validate_reward_split(&coinbase, &receipts, 2).is_ok(),
-            "double-receipt double-pay must pass"
-        );
-    }
-
-    #[test]
-    fn test_poawx_validate_reward_split_multi_receipts_same_worker_underpaid() {
-        let arr = pkh_arr(0xab);
-        let due = poawx_worker_due(block_reward(1));
-        let coinbase = make_coinbase(vec![TxOutput {
-            value: due,
-            script_pubkey: p2pkh_script(&arr),
-        }]);
-        let receipts = receipts_for(&hex::encode(arr), 2);
-        assert!(
-            poawx_validate_reward_split(&coinbase, &receipts, 2).is_err(),
-            "double-receipt single-pay must be rejected"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_poawx_12h_mainnet_still_503() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        let (state, _, _, _) = create_test_state(None);
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let req = PoawxReceiptRequest {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex,
-            solution: "aa".repeat(32),
-            commitment_nonce: "bb".repeat(32),
-            worker_pubkey: pubkey_hex,
-            worker_sig: "cc".repeat(64),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let result = poawx_post_receipt(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "12-H: mainnet must still return 503 (O-2 guard)"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_poawx_12h_inactive_mode_still_503() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        let (state, _, _, _) = create_test_state(None);
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let req = PoawxReceiptRequest {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex,
-            solution: "aa".repeat(32),
-            commitment_nonce: "bb".repeat(32),
-            worker_pubkey: pubkey_hex,
-            worker_sig: "cc".repeat(64),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let result = poawx_post_receipt(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "12-H: inactive mode must still return 503"
-        );
-    }
-
-    // ── Phase 12-I: Internal End-to-End PoAW-X Cycle ─────────────────────────────
-
-    fn sbe_seed_nonce_for_height(state: &AppState, height: u64) -> ([u8; 32], [u8; 32]) {
-        let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-        let parent_h = height - 1;
-        let parent_hash = guard.chain[parent_h as usize]
-            .header
-            .hash_for_height(parent_h);
-        let mut s = Sha256::new();
-        s.update(&parent_hash);
-        s.update(parent_h.to_le_bytes());
-        s.update(b"poawx_assignment_seed_v1");
-        let seed: [u8; 32] = s.finalize().into();
-        let mut n = Sha256::new();
-        n.update(&seed);
-        n.update(b"commitment_nonce");
-        let nonce: [u8; 32] = n.finalize().into();
-        (seed, nonce)
-    }
-
-    fn brute_force_solution(seed: &[u8; 32], nonce: &[u8; 32], bits: u32) -> Vec<u8> {
-        let mut ctr: u64 = 0;
-        loop {
-            let sol = ctr.to_le_bytes().to_vec();
-            let mut inp = Vec::new();
-            inp.extend_from_slice(seed);
-            inp.extend_from_slice(nonce);
-            inp.extend_from_slice(&sol);
-            if count_leading_zero_bits(&sha256d(&inp)) >= bits {
-                return sol;
-            }
-            ctr += 1;
-        }
-    }
-
-    fn make_e2e_receipt(
-        state: &AppState,
-        height: u64,
-        sk: &SigningKey,
-        bits: u32,
-    ) -> PoawxPendingReceipt {
-        let (seed, nonce) = sbe_seed_nonce_for_height(state, height);
-        let solution = brute_force_solution(&seed, &nonce, bits);
-        let sig_str = sign_worker_challenge(sk, &solution, &nonce, height);
-        let vk = sk.verifying_key();
-        let pubkey_bytes = vk.to_encoded_point(true);
-        let pubkey_hex = hex::encode(pubkey_bytes.as_bytes());
-        let pkh_hex = hex::encode(&*ripemd::Ripemd160::digest(Sha256::digest(
-            pubkey_bytes.as_bytes(),
-        )));
-        PoawxPendingReceipt {
-            height,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex,
-            solution: hex::encode(&solution),
-            commitment_nonce: hex::encode(nonce),
-            worker_pubkey: pubkey_hex,
-            worker_sig: sig_str,
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        }
-    }
-
-    fn header_for_height(height: u64) -> SubmitBlockHeader {
-        let bh = BlockHeader {
-            version: 1,
-            prev_hash: [0u8; 32],
-            merkle_root: [0u8; 32],
-            time: 1_700_000_000,
-            bits: 0x207f_ffff,
-            nonce: 0,
-        };
-        SubmitBlockHeader {
-            version: 1,
-            prev_hash: "00".repeat(32),
-            merkle_root: "00".repeat(32),
-            time: 1_700_000_000,
-            bits: "207fffff".to_string(),
-            nonce: 0,
-            hash: hex::encode(bh.hash_for_height(height)),
-        }
-    }
-
-    fn coinbase_no_irx1_hex() -> String {
-        let tx = Transaction {
-            version: 1,
-            inputs: vec![TxInput {
-                prev_txid: [0u8; 32],
-                prev_index: 0xffff_ffff,
-                script_sig: vec![0x51],
-                sequence: 0xffff_ffff,
-            }],
-            outputs: vec![TxOutput {
-                value: 1000,
-                script_pubkey: vec![0x51],
-            }],
-            locktime: 0,
-        };
-        hex::encode(tx.serialize())
-    }
-
-    fn coinbase_irx1_no_payout_hex(root: &[u8; 32]) -> String {
-        let mut op_return = vec![0x6a_u8, 0x24];
-        op_return.extend_from_slice(b"irx1");
-        op_return.extend_from_slice(root);
-        let tx = Transaction {
-            version: 1,
-            inputs: vec![TxInput {
-                prev_txid: [0u8; 32],
-                prev_index: 0xffff_ffff,
-                script_sig: vec![0x51],
-                sequence: 0xffff_ffff,
-            }],
-            outputs: vec![TxOutput {
-                value: 0,
-                script_pubkey: op_return,
-            }],
-            locktime: 0,
-        };
-        hex::encode(tx.serialize())
-    }
-
-    fn coinbase_irx1_wrong_pkh_hex(root: &[u8; 32], wrong_pkh: &[u8; 20], amount: u64) -> String {
-        let mut op_return = vec![0x6a_u8, 0x24];
-        op_return.extend_from_slice(b"irx1");
-        op_return.extend_from_slice(root);
-        let tx = Transaction {
-            version: 1,
-            inputs: vec![TxInput {
-                prev_txid: [0u8; 32],
-                prev_index: 0xffff_ffff,
-                script_sig: vec![0x51],
-                sequence: 0xffff_ffff,
-            }],
-            outputs: vec![
-                TxOutput {
-                    value: 0,
-                    script_pubkey: op_return,
-                },
-                TxOutput {
-                    value: amount,
-                    script_pubkey: p2pkh_script(wrong_pkh),
-                },
-            ],
-            locktime: 0,
-        };
-        hex::encode(tx.serialize())
-    }
-
-    // Test 1: receipt posting returns 200 and updates pending state
-    #[tokio::test]
-    async fn test_poawx_12i_receipt_post_full_cycle() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "4");
-        let (state, _, _, _) = create_test_state(None);
-        let (sk, _, _) = make_test_worker_identity();
-        let (seed, nonce) = sbe_seed_nonce_for_height(&state, 1);
-        let solution = brute_force_solution(&seed, &nonce, 4);
-        let sig = sign_worker_challenge(&sk, &solution, &nonce, 1);
-        let vk = sk.verifying_key();
-        let pubkey_bytes = vk.to_encoded_point(true);
-        let pubkey_hex = hex::encode(pubkey_bytes.as_bytes());
-        let pkh_hex = hex::encode(&*ripemd::Ripemd160::digest(Sha256::digest(
-            pubkey_bytes.as_bytes(),
-        )));
-        let req = PoawxReceiptRequest {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex.clone(),
-            solution: hex::encode(&solution),
-            commitment_nonce: hex::encode(nonce),
-            worker_pubkey: pubkey_hex,
-            worker_sig: sig,
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let result = poawx_post_receipt(
-            ConnectInfo(test_socket()),
-            State(state.clone()),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert!(result.is_ok(), "receipt post must succeed: {:?}", result);
-        let pending = state
-            .poawx_pending_receipts
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        assert_eq!(pending.len(), 1, "one receipt must be in pending state");
-        assert_eq!(pending[0].worker_pkh, pkh_hex, "worker_pkh must match");
-        assert_eq!(pending[0].height, 1, "height must be 1");
-    }
-
-    // Test 2: all receipt fields are preserved exactly in pending state
-    #[tokio::test]
-    async fn test_poawx_12i_receipt_fields_preserved_in_state() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "4");
-        let (state, _, _, _) = create_test_state(None);
-        let (sk, _, _) = make_test_worker_identity();
-        let (seed, nonce) = sbe_seed_nonce_for_height(&state, 1);
-        let solution = brute_force_solution(&seed, &nonce, 4);
-        let solution_hex = hex::encode(&solution);
-        let nonce_hex = hex::encode(nonce);
-        let sig = sign_worker_challenge(&sk, &solution, &nonce, 1);
-        let vk = sk.verifying_key();
-        let pubkey_bytes = vk.to_encoded_point(true);
-        let pubkey_hex = hex::encode(pubkey_bytes.as_bytes());
-        let pkh_hex = hex::encode(&*ripemd::Ripemd160::digest(Sha256::digest(
-            pubkey_bytes.as_bytes(),
-        )));
-        let req = PoawxReceiptRequest {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex.clone(),
-            solution: solution_hex.clone(),
-            commitment_nonce: nonce_hex.clone(),
-            worker_pubkey: pubkey_hex.clone(),
-            worker_sig: sig.clone(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let result = poawx_post_receipt(
-            ConnectInfo(test_socket()),
-            State(state.clone()),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert!(result.is_ok(), "receipt post must succeed: {:?}", result);
-        let pending = state
-            .poawx_pending_receipts
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let r = &pending[0];
-        assert_eq!(r.lane, "cpu", "lane preserved");
-        assert_eq!(r.solution, solution_hex, "solution preserved");
-        assert_eq!(r.commitment_nonce, nonce_hex, "nonce preserved");
-        assert_eq!(r.worker_pubkey, pubkey_hex, "pubkey preserved");
-        assert_eq!(r.worker_sig, sig, "sig preserved");
-    }
-
-    // Test 3: receipt for stale height (too far behind chain tip) is rejected
-    #[tokio::test]
-    async fn test_poawx_12i_stale_receipt_rejected() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        let (state, _, _, _) = create_test_state(None);
-        state.chain.lock().unwrap_or_else(|e| e.into_inner()).height = 100;
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let req = PoawxReceiptRequest {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex,
-            solution: "aa".repeat(8),
-            commitment_nonce: "bb".repeat(32),
-            worker_pubkey: pubkey_hex,
-            worker_sig: "cc".repeat(64),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let result = poawx_post_receipt(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::BAD_REQUEST,
-            "stale receipt (height 1, chain at 100) must be rejected"
-        );
-    }
-
-    // Test 4: SBE receipt with empty worker_sig is rejected at identity check
-    #[tokio::test]
-    async fn test_poawx_12i_sbe_missing_worker_sig_rejected() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        let (state, _, _, _) = create_test_state(None);
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let (_, nonce) = sbe_seed_nonce_for_height(&state, 1);
-        let receipt = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex,
-            solution: "aa".repeat(32),
-            commitment_nonce: hex::encode(nonce),
-            worker_pubkey: pubkey_hex,
-            worker_sig: String::new(),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let root = compute_poawx_receipts_root(&[receipt.clone()]);
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![receipt],
-            poawx_receipts_root: hex::encode(root),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::BAD_REQUEST,
-            "empty worker_sig must be rejected at identity check"
-        );
-    }
-
-    // Test 5: SBE receipt with spoofed worker_pkh is rejected at identity check
-    #[tokio::test]
-    async fn test_poawx_12i_sbe_spoofed_pkh_rejected() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        let (state, _, _, _) = create_test_state(None);
-        let (_, pubkey_hex, _) = make_test_worker_identity();
-        let (_, nonce) = sbe_seed_nonce_for_height(&state, 1);
-        let receipt = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: "ab".repeat(20),
-            solution: "aa".repeat(32),
-            commitment_nonce: hex::encode(nonce),
-            worker_pubkey: pubkey_hex,
-            worker_sig: "dd".repeat(64),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let root = compute_poawx_receipts_root(&[receipt.clone()]);
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![receipt],
-            poawx_receipts_root: hex::encode(root),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::BAD_REQUEST,
-            "spoofed worker_pkh must be rejected at identity check"
-        );
-    }
-
-    // Test 6: SBE receipt with wrong commitment_nonce is rejected at nonce check
-    #[tokio::test]
-    async fn test_poawx_12i_sbe_wrong_nonce_rejected() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        let (state, _, _, _) = create_test_state(None);
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let receipt = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex,
-            solution: "aa".repeat(32),
-            commitment_nonce: "00".repeat(32),
-            worker_pubkey: pubkey_hex,
-            worker_sig: "dd".repeat(64),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let root = compute_poawx_receipts_root(&[receipt.clone()]);
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![receipt],
-            poawx_receipts_root: hex::encode(root),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::BAD_REQUEST,
-            "all-zero nonce must be rejected at nonce check"
-        );
-    }
-
-    // Test 7: SBE receipt with insufficient puzzle PoW is rejected
-    #[tokio::test]
-    async fn test_poawx_12i_sbe_insufficient_pow_rejected() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        let (state, _, _, _) = create_test_state(None);
-        let (sk, _, pkh_hex) = make_test_worker_identity();
-        let (seed, nonce) = sbe_seed_nonce_for_height(&state, 1);
-        let bad_solution = vec![0xff_u8; 32];
-        let mut pow_in = Vec::new();
-        pow_in.extend_from_slice(&seed);
-        pow_in.extend_from_slice(&nonce);
-        pow_in.extend_from_slice(&bad_solution);
-        let leading = count_leading_zero_bits(&sha256d(&pow_in));
-        assert!(
-            leading < 8,
-            "test invariant: 0xff*32 must not meet 8-bit difficulty (got {})",
-            leading
-        );
-        let vk = sk.verifying_key();
-        let pubkey_hex = hex::encode(vk.to_encoded_point(true).as_bytes());
-        let sig = sign_worker_challenge(&sk, &bad_solution, &nonce, 1);
-        let receipt = PoawxPendingReceipt {
-            height: 1,
-            lane: "cpu".to_string(),
-            worker_pkh: pkh_hex,
-            solution: hex::encode(&bad_solution),
-            commitment_nonce: hex::encode(nonce),
-            worker_pubkey: pubkey_hex,
-            worker_sig: sig,
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        };
-        let root = compute_poawx_receipts_root(&[receipt.clone()]);
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![receipt],
-            poawx_receipts_root: hex::encode(root),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::BAD_REQUEST,
-            "insufficient puzzle PoW must be rejected"
-        );
-    }
-
-    // Test 8: valid receipt + valid header, coinbase has no irx1 OP_RETURN
-    #[tokio::test]
-    async fn test_poawx_12i_sbe_missing_irx1_rejected() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "4");
-        let (state, _, _, _) = create_test_state(None);
-        let (sk, _, _) = make_test_worker_identity();
-        let receipt = make_e2e_receipt(&state, 1, &sk, 4);
-        let root = compute_poawx_receipts_root(&[receipt.clone()]);
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: header_for_height(1),
-            tx_hex: vec![coinbase_no_irx1_hex()],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![receipt],
-            poawx_receipts_root: hex::encode(root),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::BAD_REQUEST,
-            "missing irx1 OP_RETURN must be rejected"
-        );
-    }
-
-    // Test 9: irx1 present but no P2PKH payout to worker
-    #[tokio::test]
-    async fn test_poawx_12i_sbe_missing_worker_payout_rejected() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "4");
-        let (state, _, _, _) = create_test_state(None);
-        let (sk, _, _) = make_test_worker_identity();
-        let receipt = make_e2e_receipt(&state, 1, &sk, 4);
-        let root = compute_poawx_receipts_root(&[receipt.clone()]);
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: header_for_height(1),
-            tx_hex: vec![coinbase_irx1_no_payout_hex(&root)],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![receipt],
-            poawx_receipts_root: hex::encode(root),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::BAD_REQUEST,
-            "irx1 with no worker payout must be rejected"
-        );
-    }
-
-    // Test 10: irx1 present + payout to wrong worker pkh is rejected
-    #[tokio::test]
-    async fn test_poawx_12i_sbe_wrong_payout_pkh_rejected() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "4");
-        let (state, _, _, _) = create_test_state(None);
-        let (sk, _, _) = make_test_worker_identity();
-        let receipt = make_e2e_receipt(&state, 1, &sk, 4);
-        let root = compute_poawx_receipts_root(&[receipt.clone()]);
-        let wrong_pkh = [0xde_u8; 20];
-        let amount = poawx_worker_due(block_reward(1));
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: header_for_height(1),
-            tx_hex: vec![coinbase_irx1_wrong_pkh_hex(&root, &wrong_pkh, amount)],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![receipt],
-            poawx_receipts_root: hex::encode(root),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::BAD_REQUEST,
-            "payout to wrong pkh must be rejected"
-        );
-    }
-
-    // Test 11: mainnet SBE with receipts still returns 503 (O-2 regression)
-    #[tokio::test]
-    async fn test_poawx_12i_mainnet_sbe_unaffected() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::remove_var("IRIUM_NETWORK");
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        let (state, _, _, _) = create_test_state(None);
-        let (_, pubkey_hex, pkh_hex) = make_test_worker_identity();
-        let req = SubmitBlockExtendedRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-            poawx_receipts: vec![PoawxPendingReceipt {
-                height: 1,
-                lane: "cpu".to_string(),
-                worker_pkh: pkh_hex,
-                solution: "aa".repeat(32),
-                commitment_nonce: "bb".repeat(32),
-                worker_pubkey: pubkey_hex,
-                worker_sig: "cc".repeat(64),
-                delegation: String::new(),
-                phase20_ext: String::new(),
-            }],
-            poawx_receipts_root: "dd".repeat(32),
-        };
-        let result = submit_block_extended(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::SERVICE_UNAVAILABLE,
-            "12-I: mainnet SBE must still return 503 (O-2 guard)"
-        );
-    }
-
-    // Test 12: legacy submit_block returns 405 when PoAW-X active (C-3 regression)
-    #[tokio::test]
-    async fn test_poawx_12i_legacy_submit_rejected_when_active() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        ensure_rpc_token_env();
-        std::env::set_var("IRIUM_POAWX_MODE", "active");
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let (state, _, _, _) = create_test_state(None);
-        let req = SubmitBlockRequest {
-            height: 1,
-            header: minimal_header(),
-            tx_hex: vec![],
-            auxpow_hex: None,
-            submit_source: None,
-        };
-        let result = submit_block(
-            ConnectInfo(test_socket()),
-            State(state),
-            auth_headers(),
-            AxumJson(req),
-        )
-        .await;
-        std::env::remove_var("IRIUM_POAWX_MODE");
-        std::env::remove_var("IRIUM_NETWORK");
-        assert_eq!(
-            result.unwrap_err(),
-            StatusCode::METHOD_NOT_ALLOWED,
-            "12-I: legacy submit_block must still return 405 when PoAW-X active"
-        );
-    }
-
-    // ── Phase 12-L: Devnet P2P seed isolation ────────────────────────────────
-
-    /// Devnet must not be identified as mainnet (guards the seed isolation logic).
-    #[test]
-    fn test_12l_devnet_network_kind_is_not_mainnet() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "devnet");
-        let is_mainnet = network_kind_from_env() == NetworkKind::Mainnet;
-        std::env::remove_var("IRIUM_NETWORK");
-        assert!(!is_mainnet, "devnet must not be classified as mainnet");
-    }
-
-    /// Testnet must not be identified as mainnet (same guard, testnet variant).
-    #[test]
-    fn test_12l_testnet_network_kind_is_not_mainnet() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "testnet");
-        let is_mainnet = network_kind_from_env() == NetworkKind::Mainnet;
-        std::env::remove_var("IRIUM_NETWORK");
-        assert!(!is_mainnet, "testnet must not be classified as mainnet");
-    }
-
-    /// Default (no IRIUM_NETWORK) must be mainnet so fallback/signed seeds load.
-    #[test]
-    fn test_12l_default_network_kind_is_mainnet() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::remove_var("IRIUM_NETWORK");
-        let is_mainnet = network_kind_from_env() == NetworkKind::Mainnet;
-        assert!(is_mainnet, "unset IRIUM_NETWORK must be mainnet");
-    }
-
-    /// The fallback seed gate: devnet → empty; mainnet → calls loader.
-    #[test]
-    fn test_12l_devnet_fallback_seed_gate_returns_empty() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "devnet");
-        let fallback: Vec<String> = if network_kind_from_env() == NetworkKind::Mainnet {
-            load_builtin_fallback_seeds()
-        } else {
-            Vec::new()
-        };
-        std::env::remove_var("IRIUM_NETWORK");
-        assert!(
-            fallback.is_empty(),
-            "devnet fallback seed gate must return empty Vec, got: {:?}",
-            fallback
-        );
-    }
-
-    /// The signed seed gate: devnet → skipped; mainnet → may load.
-    #[test]
-    fn test_12l_devnet_signed_seed_gate_skipped() {
-        let _g = poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_NETWORK", "devnet");
-        // The condition in the patched code: non-mainnet OR runtime_seeds >= 5 → Vec::new()
-        let signed: Vec<String> =
-            if network_kind_from_env() != NetworkKind::Mainnet || load_runtime_seeds().len() >= 5 {
-                Vec::new()
-            } else {
-                load_signed_seeds()
-            };
-        std::env::remove_var("IRIUM_NETWORK");
-        assert!(
-            signed.is_empty(),
-            "devnet signed seed gate must return empty Vec"
-        );
-    }
-    // --- Phase 13-C: Reorg Receipt Restore unit tests ---
-
-    fn make_test_block_receipt_c(
-        height: u64,
-        lane: u8,
-        pkh_byte: u8,
-    ) -> irium_node_rs::poawx::PoawxBlockReceipt {
-        irium_node_rs::poawx::PoawxBlockReceipt {
-            height,
-            lane,
-            worker_pkh: [pkh_byte; 20],
-            worker_pubkey: [pkh_byte; 33],
-            worker_sig: [pkh_byte; 64],
-            solution: [pkh_byte; 8],
-            commitment_nonce: [pkh_byte; 32],
-            delegation: None,
-            phase20_ext: None,
-        }
-    }
-
-    fn make_block_with_receipts_c(
-        receipts: Option<Vec<irium_node_rs::poawx::PoawxBlockReceipt>>,
-    ) -> irium_node_rs::block::Block {
-        use irium_node_rs::block::{Block, BlockHeader};
-        Block {
-            header: BlockHeader {
-                version: 1,
-                prev_hash: [0u8; 32],
-                merkle_root: [0u8; 32],
-                time: 0,
-                bits: 0,
-                nonce: 0,
-            },
-            transactions: Vec::new(),
-            auxpow: None,
-            poawx_receipts: receipts,
-        }
-    }
-
-    // ── Phase 18B: JSON persist/reload round-trip for delegated receipts ──
-
-    fn p18b_blocks_env_lock() -> &'static std::sync::Mutex<()> {
-        static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
-        LOCK.get_or_init(|| std::sync::Mutex::new(()))
-    }
-
-    fn p18b_temp_blocks_dir(tag: &str) -> std::path::PathBuf {
-        // Must live UNDER the home dir: storage::configured_dir only honors
-        // IRIUM_BLOCKS_DIR when the path normalizes under $HOME (otherwise it
-        // silently falls back to the real data dir).
-        let stamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
-        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-        std::path::PathBuf::from(home).join(format!(".irium-p18b-{tag}-{stamp}"))
-    }
-
-    fn p18b_sample_delegation() -> irium_node_rs::poawx::Delegation {
-        irium_node_rs::poawx::Delegation {
-            deleg_version: irium_node_rs::poawx::Delegation::VERSION,
-            network_id: 1,
-            miner_pubkey: [0xa1u8; 33],
-            pool_pubkey: [0xb2u8; 33],
-            worker_tag: [0xc3u8; 32],
-            expiry_height: 12_345,
-            fee_bps: 0,
-            fee_pkh: [0u8; 20],
-            deleg_nonce: [0xd4u8; 32],
-            delegation_sig: [0xe5u8; 64],
-        }
-    }
-
-    /// A structurally-complete mode-1 block at height 1 with bits=0x207fffff
-    /// (trivially meets target) and a coinbase irx1 commitment matching the
-    /// receipt root, so `parse_persisted_block_file` accepts it.
-    fn p18b_mode1_block() -> irium_node_rs::block::Block {
-        use irium_node_rs::block::{Block, BlockHeader};
-        let deleg = p18b_sample_delegation();
-        let receipt = irium_node_rs::poawx::PoawxBlockReceipt {
-            height: 1,
-            lane: b'A',
-            worker_pkh: [0x11u8; 20],
-            worker_pubkey: deleg.pool_pubkey,
-            worker_sig: [0x22u8; 64],
-            solution: [0x33u8; 8],
-            commitment_nonce: [0x44u8; 32],
-            delegation: Some(deleg),
-            phase20_ext: None,
-        };
-        let root =
-            irium_node_rs::poawx::irx1_root_from_block_receipts(std::slice::from_ref(&receipt));
-        let mut irx1 = vec![0x6au8, 0x24u8];
-        irx1.extend_from_slice(b"irx1");
-        irx1.extend_from_slice(&root);
-        let coinbase = Transaction {
-            version: 1,
-            inputs: vec![TxInput {
-                prev_txid: [0u8; 32],
-                prev_index: 0xffff_ffff,
-                script_sig: vec![0x01, 0x00],
-                sequence: 0xffff_ffff,
-            }],
-            outputs: vec![
-                TxOutput {
-                    value: 50_0000_0000,
-                    script_pubkey: vec![0x51],
-                },
-                TxOutput {
-                    value: 0,
-                    script_pubkey: irx1,
-                },
-            ],
-            locktime: 0,
-        };
-        let mut block = Block {
-            header: BlockHeader {
-                version: 1,
-                prev_hash: [0u8; 32],
-                merkle_root: [0u8; 32],
-                time: 0,
-                bits: 0x207f_ffff,
-                nonce: 0,
-            },
-            transactions: vec![coinbase],
-            auxpow: None,
-            poawx_receipts: Some(vec![receipt]),
-        };
-        block.header.merkle_root = block.merkle_root();
-        // Grind the nonce so the header meets the regtest target (≈50% hit rate),
-        // matching the check parse_persisted_block_file performs on reload.
-        while !meets_target(&block.header.hash_for_height(1), block.header.target()) {
-            block.header.nonce = block.header.nonce.wrapping_add(1);
-        }
-        block
-    }
-
-    // PoAW-X: end-to-end round-trip proving the RPC serializer (block_json_for)
-    // emits block-contained receipts in the exact shape the node's own parser
-    // (parse_persisted_block_file) reads back, byte-for-byte, including the
-    // delegation optional field. This is the node side of the irium-miner sync
-    // fix: connect_block_from_json uses a verbatim mirror of this parser.
-    // Self-contained; touches no live node.
-    #[test]
-    fn block_json_for_receipts_roundtrip_via_persisted_parse() {
-        let _g = p18b_blocks_env_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let base = p18b_temp_blocks_dir("bjf-roundtrip");
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
-        std::env::set_var("IRIUM_BLOCKS_DIR", &base);
-
-        let block = p18b_mode1_block();
-        let original = block.poawx_receipts.clone().expect("receipts present");
-        let original_root =
-            irium_node_rs::poawx::irx1_root_from_block_receipts(&original);
-
-        // Real RPC emit path (now includes poawx_receipts).
-        let j = block_json_for(1, &block);
-        assert_eq!(
-            j.get("poawx_receipts")
-                .and_then(|v| v.as_array())
-                .map(|a| a.len()),
-            Some(1),
-            "block_json_for must emit the receipts array"
-        );
-
-        // Persist exactly what /rpc/block returns, then parse via the REAL node
-        // parser (the same logic irium-miner mirrors).
-        let path = base.join("block_1.json");
-        std::fs::write(&path, serde_json::to_string(&j).unwrap()).unwrap();
-        let (_h, reloaded) =
-            parse_persisted_block_file(&path, &"00".repeat(32)).expect("parse");
-
-        let got = reloaded
-            .poawx_receipts
-            .expect("receipts present after reload");
-        assert_eq!(
-            got, original,
-            "receipts survive block_json_for -> parse byte-for-byte"
-        );
-        assert_eq!(
-            irium_node_rs::poawx::irx1_root_from_block_receipts(&got),
-            original_root,
-            "receipts-root matches byte-for-byte after round-trip"
-        );
-        let _ = std::fs::remove_dir_all(&base);
-        std::env::remove_var("IRIUM_BLOCKS_DIR");
-    }
-
-    #[test]
-    fn phase18b_persisted_mode1_block_reload_preserves_delegation() {
-        let _g = p18b_blocks_env_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let base = p18b_temp_blocks_dir("mode1");
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
-        std::env::set_var("IRIUM_BLOCKS_DIR", &base);
-
-        let block = p18b_mode1_block();
-        let original = block.poawx_receipts.clone().unwrap();
-        let original_root = irium_node_rs::poawx::irx1_root_from_block_receipts(&original);
-        let original_digest = original[0].delegation.as_ref().unwrap().digest();
-
-        // Synchronous writer (the default write_block_json is async).
-        irium_node_rs::storage::write_block_json_with_source(1, &block, None).unwrap();
-        let path = irium_node_rs::storage::blocks_dir().join("block_1.json");
-        let (h, reloaded) = parse_persisted_block_file(&path, "").expect("reload");
-        assert_eq!(h, 1);
-        let rrec = reloaded.poawx_receipts.as_ref().expect("receipts present");
-        assert_eq!(rrec.len(), 1);
-        // Full byte-equality (incl delegation) => connect_block behaves identically.
-        assert_eq!(
-            rrec[0], original[0],
-            "mode-1 receipt incl delegation must survive persist/reload"
-        );
-        assert_eq!(
-            rrec[0].delegation.as_ref().unwrap().digest(),
-            original_digest,
-            "delegation digest unchanged"
-        );
-        assert_eq!(
-            irium_node_rs::poawx::irx1_root_from_block_receipts(rrec),
-            original_root,
-            "receipt root unchanged"
-        );
-        // Internal consistency check connect_block performs: coinbase irx1 == root.
-        let coinbase_root = irium_node_rs::poawx::irx1_root_from_block_bytes(&reloaded).unwrap();
-        assert_eq!(
-            coinbase_root, original_root,
-            "reloaded coinbase irx1 root matches recomputed receipts root"
-        );
-
-        std::env::remove_var("IRIUM_BLOCKS_DIR");
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    #[test]
-    fn phase18b_persisted_mode0_block_json_has_no_delegation_field() {
-        let _g = p18b_blocks_env_lock()
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let base = p18b_temp_blocks_dir("mode0");
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
-        std::env::set_var("IRIUM_BLOCKS_DIR", &base);
-
-        let mut block = p18b_mode1_block();
-        if let Some(recs) = block.poawx_receipts.as_mut() {
-            recs[0].delegation = None;
-        }
-        // Recompute coinbase irx1 + merkle for the mode-0 root.
-        let root = irium_node_rs::poawx::irx1_root_from_block_receipts(
-            block.poawx_receipts.as_ref().unwrap(),
-        );
-        let mut irx1 = vec![0x6au8, 0x24u8];
-        irx1.extend_from_slice(b"irx1");
-        irx1.extend_from_slice(&root);
-        block.transactions[0].outputs[1].script_pubkey = irx1;
-        block.header.merkle_root = block.merkle_root();
-        block.header.nonce = 0;
-        while !meets_target(&block.header.hash_for_height(1), block.header.target()) {
-            block.header.nonce = block.header.nonce.wrapping_add(1);
-        }
-
-        // Synchronous writer (the default write_block_json is async).
-        irium_node_rs::storage::write_block_json_with_source(1, &block, None).unwrap();
-        let path = irium_node_rs::storage::blocks_dir().join("block_1.json");
-        let raw = std::fs::read_to_string(&path).unwrap();
-        assert!(
-            !raw.contains("delegation"),
-            "mode-0 persisted JSON must omit the delegation field (byte-identical)"
-        );
-        let (_h, reloaded) = parse_persisted_block_file(&path, "").expect("reload");
-        let rrec = reloaded.poawx_receipts.as_ref().unwrap();
-        assert!(
-            rrec[0].delegation.is_none(),
-            "reloaded receipt stays mode-0"
-        );
-
-        std::env::remove_var("IRIUM_BLOCKS_DIR");
-        let _ = std::fs::remove_dir_all(&base);
-    }
-
-    fn pending_entry_c(height: u64, lane: &str, pkh_hex: &str) -> PoawxPendingReceipt {
-        PoawxPendingReceipt {
-            height,
-            lane: lane.to_string(),
-            worker_pkh: pkh_hex.to_string(),
-            solution: "0000000000000000".to_string(),
-            commitment_nonce: "0".repeat(64),
-            worker_pubkey: "00".repeat(33),
-            worker_sig: "00".repeat(64),
-            delegation: String::new(),
-            phase20_ext: String::new(),
-        }
-    }
-
-    #[test]
-    fn phase13c_block_receipt_to_pending_fields_correct() {
-        let r = make_test_block_receipt_c(42, b'A', 0xab);
-        let p = block_receipt_to_pending(&r);
-        assert_eq!(p.height, 42);
-        assert_eq!(p.lane, "A");
-        assert_eq!(p.worker_pkh, hex::encode([0xabu8; 20]));
-        assert_eq!(p.solution, hex::encode([0xabu8; 8]));
-        assert_eq!(p.commitment_nonce, hex::encode([0xabu8; 32]));
-        assert_eq!(p.worker_pubkey, hex::encode([0xabu8; 33]));
-        assert_eq!(p.worker_sig, hex::encode([0xabu8; 64]));
-    }
-
-    #[test]
-    fn phase20_reorg_mapper_preserves_extension() {
-        // block_receipt_to_pending -> pending_receipt_to_block_receipt must preserve
-        // a Phase20ReceiptExt across reorg restore (Step 1 threading; no enforcement).
-        let claim = |role_id: u8| irium_node_rs::poawx::PoawxRoleClaim {
-            role_id,
-            lane_id: 0,
-            solver_pkh: [role_id; 20],
-            nonce: [1u8; 32],
-            secret: [2u8; 32],
-            claim_digest: [3u8; 32],
-            commitment_hash: None,
-        };
-        let ext = irium_node_rs::poawx::Phase20ReceiptExt {
-            role_reward: irium_node_rs::poawx::RoleReward {
-                compute_contributor_pkh: [0xC1u8; 20],
-                verify_contributor_pkh: [0xC2u8; 20],
-                support_contributor_pkh: [0xC3u8; 20],
-            },
-            compute_claim: claim(1),
-            verify_claim: claim(2),
-            support_claim: claim(3),
-            fee_bps: 0,
-            fee_pkh: [0u8; 20],
-            precommit_root: None,
-            role_ticket_proofs: None,
-            role_dominance_weights: None,
-            candidate_set: None,
-            role_puzzle_proofs: None,
-            finality_proof: None,
-            committed_admission: None,
-            role_assignment_v2: None,
-            fraud_proofs: None,
-            proposer_assignment: None,
-            proposer_registrations: None,
-        };
-        let mut r = make_test_block_receipt_c(90, b'A', 7);
-        r.phase20_ext = Some(ext.clone());
-        // block -> pending preserves the extension as hex.
-        let p = block_receipt_to_pending(&r);
-        assert!(
-            !p.phase20_ext.is_empty(),
-            "pending carries the extension hex"
-        );
-        // pending -> block restores the identical extension.
-        let back = pending_receipt_to_block_receipt(&p).expect("map back");
-        assert_eq!(back.phase20_ext, Some(ext));
-        assert_eq!(back, r);
-        // a receipt without an extension maps back to None (byte-identical behaviour).
-        let plain = make_test_block_receipt_c(91, b'A', 8);
-        let pp = block_receipt_to_pending(&plain);
-        assert!(pp.phase20_ext.is_empty());
-        assert_eq!(
-            pending_receipt_to_block_receipt(&pp).unwrap().phase20_ext,
-            None
-        );
-    }
-
-    #[test]
-    fn phase13c_restore_empty_orphaned_noop() {
-        let mut pending: Vec<PoawxPendingReceipt> = Vec::new();
-        restore_orphaned_poawx_receipts(&mut pending, &[], 100);
-        assert!(pending.is_empty());
-    }
-
-    #[test]
-    fn phase13c_restore_adds_receipts_to_pending() {
-        let receipt = make_test_block_receipt_c(90, b'A', 1);
-        let block = make_block_with_receipts_c(Some(vec![receipt]));
-        let mut pending: Vec<PoawxPendingReceipt> = Vec::new();
-        restore_orphaned_poawx_receipts(&mut pending, &[block], 100);
-        assert_eq!(pending.len(), 1);
-        assert_eq!(pending[0].height, 90);
-        assert_eq!(pending[0].lane, "A");
-    }
-
-    #[test]
-    fn phase13c_restore_idempotent_no_duplicates() {
-        let receipt = make_test_block_receipt_c(90, b'A', 1);
-        let block = make_block_with_receipts_c(Some(vec![receipt]));
-        let blocks = [block.clone(), block.clone()];
-        let mut pending: Vec<PoawxPendingReceipt> = Vec::new();
-        restore_orphaned_poawx_receipts(&mut pending, &blocks, 100);
-        assert_eq!(pending.len(), 1, "duplicate not added");
-    }
-
-    #[test]
-    fn phase13c_expired_receipt_not_restored() {
-        // height=1, tip=100: 1 + 24 = 25 < 100 => expired
-        let receipt = make_test_block_receipt_c(1, b'A', 2);
-        let block = make_block_with_receipts_c(Some(vec![receipt]));
-        let mut pending: Vec<PoawxPendingReceipt> = Vec::new();
-        restore_orphaned_poawx_receipts(&mut pending, &[block], 100);
-        assert!(pending.is_empty(), "expired receipt must not be restored");
-    }
-
-    #[test]
-    fn phase13c_non_expired_at_boundary_restored() {
-        // height=76, tip=100: 76 + 24 = 100 == tip, NOT expired (condition is < tip)
-        let receipt = make_test_block_receipt_c(76, b'A', 3);
-        let block = make_block_with_receipts_c(Some(vec![receipt]));
-        let mut pending: Vec<PoawxPendingReceipt> = Vec::new();
-        restore_orphaned_poawx_receipts(&mut pending, &[block], 100);
-        assert_eq!(
-            pending.len(),
-            1,
-            "receipt at exact boundary should be restored"
-        );
-    }
-
-    #[test]
-    fn phase13c_receipt_expired_by_one_skipped() {
-        // height=75, tip=100: 75 + 24 = 99 < 100 => expired
-        let receipt = make_test_block_receipt_c(75, b'A', 4);
-        let block = make_block_with_receipts_c(Some(vec![receipt]));
-        let mut pending: Vec<PoawxPendingReceipt> = Vec::new();
-        restore_orphaned_poawx_receipts(&mut pending, &[block], 100);
-        assert!(
-            pending.is_empty(),
-            "receipt expired by 1 must not be restored"
-        );
-    }
-
-    #[test]
-    fn phase13c_dedup_across_two_orphaned_blocks() {
-        let receipt = make_test_block_receipt_c(90, b'A', 5);
-        let block1 = make_block_with_receipts_c(Some(vec![receipt.clone()]));
-        let block2 = make_block_with_receipts_c(Some(vec![receipt]));
-        let mut pending: Vec<PoawxPendingReceipt> = Vec::new();
-        restore_orphaned_poawx_receipts(&mut pending, &[block1, block2], 100);
-        assert_eq!(
-            pending.len(),
-            1,
-            "same receipt from two blocks added only once"
-        );
-    }
-
-    #[test]
-    fn phase13c_restore_does_not_remove_existing_pending() {
-        let existing = pending_entry_c(80, "B", &hex::encode([0x11u8; 20]));
-        let mut pending = vec![existing];
-        let receipt = make_test_block_receipt_c(90, b'A', 7);
-        let block = make_block_with_receipts_c(Some(vec![receipt]));
-        restore_orphaned_poawx_receipts(&mut pending, &[block], 100);
-        assert_eq!(
-            pending.len(),
-            2,
-            "existing pending receipt must be preserved"
-        );
-        assert_eq!(pending[0].height, 80, "existing entry not disturbed");
-    }
-
-    #[test]
-    fn phase13c_block_without_receipts_ignored() {
-        let block_none = make_block_with_receipts_c(None);
-        let block_empty = make_block_with_receipts_c(Some(vec![]));
-        let mut pending: Vec<PoawxPendingReceipt> = Vec::new();
-        restore_orphaned_poawx_receipts(&mut pending, &[block_none, block_empty], 100);
-        assert!(
-            pending.is_empty(),
-            "blocks with no receipts must not affect pending"
-        );
+        assert!(resp.fee < 10_000, "non-send_max fee should not be floored: {}", resp.fee);
     }
 }
+
 
 // ============================================================================
 // Stage 3.2: Dispute and Resolver System
@@ -30825,10 +25436,7 @@ fn apply_dispute_status_to_eligibility(
         return;
     };
     let dispute = {
-        let guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
         guard.get(&agreement_hash).cloned()
     };
     let Some(d) = dispute else {
@@ -30888,8 +25496,7 @@ fn build_and_broadcast_anchor_tx(
             .keys()
             .map_err(|_| "wallet_keys_unavailable".to_string())?;
         for key in keys {
-            let bytes =
-                hex::decode(&key.pkh).map_err(|_| "wallet_key_pkh_decode_failed".to_string())?;
+            let bytes = hex::decode(&key.pkh).map_err(|_| "wallet_key_pkh_decode_failed".to_string())?;
             if bytes.len() != 20 {
                 continue;
             }
@@ -30941,8 +25548,7 @@ fn build_and_broadcast_anchor_tx(
             break;
         }
     }
-    let utxo =
-        chosen.ok_or_else(|| "insufficient_spendable_funds_or_immature_coinbase".to_string())?;
+    let utxo = chosen.ok_or_else(|| "insufficient_spendable_funds_or_immature_coinbase".to_string())?;
 
     let change_value = utxo.output.value.saturating_sub(estimated_fee);
     let mut outputs = vec![anchor_output];
@@ -30967,8 +25573,8 @@ fn build_and_broadcast_anchor_tx(
     };
 
     // Sign the input.
-    let priv_bytes =
-        hex::decode(&utxo.pkh_key_priv(&key_map)?).map_err(|_| "wallet_priv_decode".to_string())?;
+    let priv_bytes = hex::decode(&utxo.pkh_key_priv(&key_map)?)
+        .map_err(|_| "wallet_priv_decode".to_string())?;
     if priv_bytes.len() != 32 {
         return Err("wallet_priv_len".to_string());
     }
@@ -31040,8 +25646,8 @@ fn build_and_broadcast_rep_event_tx(
             .keys()
             .map_err(|_| "wallet_keys_unavailable".to_string())?;
         for key in keys {
-            let bytes =
-                hex::decode(&key.pkh).map_err(|_| "wallet_key_pkh_decode_failed".to_string())?;
+            let bytes = hex::decode(&key.pkh)
+                .map_err(|_| "wallet_key_pkh_decode_failed".to_string())?;
             if bytes.len() != 20 {
                 continue;
             }
@@ -31089,8 +25695,8 @@ fn build_and_broadcast_rep_event_tx(
             break;
         }
     }
-    let utxo =
-        chosen.ok_or_else(|| "insufficient_spendable_funds_or_immature_coinbase".to_string())?;
+    let utxo = chosen
+        .ok_or_else(|| "insufficient_spendable_funds_or_immature_coinbase".to_string())?;
     let change_value = utxo.output.value.saturating_sub(estimated_fee);
     let mut outputs = rep_outputs;
     outputs.push(TxOutput {
@@ -31108,8 +25714,8 @@ fn build_and_broadcast_rep_event_tx(
         outputs,
         locktime: 0,
     };
-    let priv_bytes =
-        hex::decode(&utxo.pkh_key_priv(&key_map)?).map_err(|_| "wallet_priv_decode".to_string())?;
+    let priv_bytes = hex::decode(&utxo.pkh_key_priv(&key_map)?)
+        .map_err(|_| "wallet_priv_decode".to_string())?;
     if priv_bytes.len() != 32 {
         return Err("wallet_priv_len".to_string());
     }
@@ -31249,8 +25855,10 @@ fn verify_envelope_signature(
     if derived_address != expected_address {
         return Err("pubkey_does_not_match_signer_address".to_string());
     }
-    let sig_bytes = hex::decode(&envelope.signature).map_err(|_| "signature_decode".to_string())?;
-    let parsed = Signature::from_slice(&sig_bytes).map_err(|_| "signature_format".to_string())?;
+    let sig_bytes =
+        hex::decode(&envelope.signature).map_err(|_| "signature_decode".to_string())?;
+    let parsed = Signature::from_slice(&sig_bytes)
+        .map_err(|_| "signature_format".to_string())?;
     verifying_key
         .verify_prehash(digest, &parsed)
         .map_err(|_| "signature_verify_failed".to_string())?;
@@ -31387,23 +25995,21 @@ async fn raise_dispute(
     verify_envelope_signature(&req.dispute.signature, &digest, &party.address)
         .map_err(|e| bad(&format!("signature:{e}")))?;
     {
-        let guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(existing) = guard.get(&agreement_hash) {
             if existing.is_open() {
                 return Err(bad("dispute_already_open"));
             }
         }
     }
-    let anchor_txid = build_and_broadcast_anchor_tx(
-        &state,
-        &agreement_hash,
-        AgreementAnchorRole::DisputeRaise,
-        Vec::new(),
-    )
-    .map_err(|e| bad(&format!("anchor_tx:{e}")))?;
+    let anchor_txid =
+        build_and_broadcast_anchor_tx(
+            &state,
+            &agreement_hash,
+            AgreementAnchorRole::DisputeRaise,
+            Vec::new(),
+        )
+        .map_err(|e| bad(&format!("anchor_tx:{e}")))?;
     let new_state = DisputeState {
         raise: req.dispute.clone(),
         raise_anchor_txid: Some(anchor_txid.clone()),
@@ -31414,14 +26020,11 @@ async fn raise_dispute(
         resolution_anchored_at_height: None,
         escalated_to_fallback: false,
         escalated_at_height: None,
-        reresolve_nomination: None,
+    reresolve_nomination: None,
     };
     save_dispute_state(&new_state).map_err(|e| bad(&format!("persist:{e}")))?;
     {
-        let mut guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(agreement_hash.clone(), new_state);
     }
     emit_event(
@@ -31476,13 +26079,8 @@ async fn submit_dispute_evidence(
     verify_envelope_signature(&req.evidence.signature, &digest, &party.address)
         .map_err(|e| bad(&format!("signature:{e}")))?;
     {
-        let guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let d = guard
-            .get(&agreement_hash)
-            .ok_or_else(|| bad("no_open_dispute"))?;
+        let guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
+        let d = guard.get(&agreement_hash).ok_or_else(|| bad("no_open_dispute"))?;
         if !d.is_open() {
             return Err(bad("dispute_already_resolved"));
         }
@@ -31501,13 +26099,8 @@ async fn submit_dispute_evidence(
         anchored_at_height: None,
     };
     let snapshot = {
-        let mut guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let d = guard
-            .get_mut(&agreement_hash)
-            .ok_or_else(|| bad("no_open_dispute"))?;
+        let mut guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
+        let d = guard.get_mut(&agreement_hash).ok_or_else(|| bad("no_open_dispute"))?;
         d.evidence.push(evidence_record);
         d.clone()
     };
@@ -31523,10 +26116,7 @@ async fn submit_dispute_evidence(
     );
     if let Some(ref node) = state.p2p {
         let evidence_clone = {
-            let guard = state
-                .disputes_index
-                .lock()
-                .unwrap_or_else(|e| e.into_inner());
+            let guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
             guard
                 .get(&agreement_hash)
                 .and_then(|d| d.evidence.last().map(|r| r.evidence.clone()))
@@ -31571,13 +26161,10 @@ async fn resolve_dispute(
     );
     // Stage 3.4.1: a co-signed reresolve nomination overrides the
     // agreement's named resolvers for this dispute.
-    let agreement_hash_for_role =
-        compute_agreement_hash_hex(&req.agreement).map_err(|_| bad("agreement_hash_failed"))?;
+    let agreement_hash_for_role = compute_agreement_hash_hex(&req.agreement)
+        .map_err(|_| bad("agreement_hash_failed"))?;
     let (effective_primary, effective_fallback) = {
-        let guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(d) = guard.get(&agreement_hash_for_role) {
             if let Some(ref nom) = d.reresolve_nomination {
                 (
@@ -31592,10 +26179,10 @@ async fn resolve_dispute(
         }
     };
     let expected_address = match role {
-        "primary" => effective_primary.ok_or_else(|| bad("agreement_has_no_primary_resolver"))?,
-        "fallback" => {
-            effective_fallback.ok_or_else(|| bad("agreement_has_no_fallback_resolver"))?
-        }
+        "primary" => effective_primary
+            .ok_or_else(|| bad("agreement_has_no_primary_resolver"))?,
+        "fallback" => effective_fallback
+            .ok_or_else(|| bad("agreement_has_no_fallback_resolver"))?,
         _ => return Err(bad("invalid_resolver_role")),
     };
     if expected_address != req.resolution.resolver_address {
@@ -31606,10 +26193,7 @@ async fn resolve_dispute(
     verify_envelope_signature(&req.resolution.signature, &digest, &expected_address)
         .map_err(|e| bad(&format!("signature:{e}")))?;
     {
-        let guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
         let d = guard
             .get(&agreement_hash)
             .ok_or_else(|| bad("no_open_dispute"))?;
@@ -31673,13 +26257,8 @@ async fn resolve_dispute(
     let outcome = req.resolution.outcome.clone();
     let resolver_role = req.resolution.resolver_role.clone();
     let snapshot = {
-        let mut guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        let d = guard
-            .get_mut(&agreement_hash)
-            .ok_or_else(|| bad("no_open_dispute"))?;
+        let mut guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
+        let d = guard.get_mut(&agreement_hash).ok_or_else(|| bad("no_open_dispute"))?;
         d.resolution = Some(req.resolution);
         d.resolution_anchor_txid = Some(anchor_txid.clone());
         d.clone()
@@ -31753,10 +26332,7 @@ async fn register_resolver(
     };
     save_resolver_record(&record).map_err(|e| bad(&format!("persist:{e}")))?;
     {
-        let mut guard = state
-            .resolvers_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut guard = state.resolvers_index.lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(resolver_address.clone(), record);
     }
     emit_event(
@@ -31794,16 +26370,14 @@ async fn broadcast_reputation_non_response(
     if req.resolver_address.trim().is_empty() {
         return Err(bad("resolver_address_empty"));
     }
-    if req.agreement_hash.len() != 64 || !req.agreement_hash.chars().all(|c| c.is_ascii_hexdigit())
+    if req.agreement_hash.len() != 64
+        || !req.agreement_hash.chars().all(|c| c.is_ascii_hexdigit())
     {
         return Err(bad("agreement_hash_invalid"));
     }
     // Look up the dispute and validate state.
     let (raise_height, is_open) = {
-        let guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
         let d = guard
             .get(&req.agreement_hash)
             .ok_or_else(|| bad("dispute_not_found"))?;
@@ -31851,10 +26425,7 @@ async fn resolvers_list(
     check_rate_with_auth(&state, &addr, &headers)?;
     let limit = query.limit.unwrap_or(50).min(500);
     let resolvers: Vec<ResolverRegistrationRecord> = {
-        let guard = state
-            .resolvers_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let guard = state.resolvers_index.lock().unwrap_or_else(|e| e.into_inner());
         guard.values().cloned().collect()
     };
     let mut sorted = resolvers;
@@ -31878,7 +26449,8 @@ async fn resolvers_list(
     };
     let page: Vec<&ResolverRegistrationRecord> = sorted.iter().skip(start).take(limit).collect();
     let next_cursor = if start + page.len() < sorted.len() {
-        page.last().map(|r| r.registration.resolver_address.clone())
+        page.last()
+            .map(|r| r.registration.resolver_address.clone())
     } else {
         None
     };
@@ -31898,6 +26470,7 @@ async fn resolvers_list(
         next_cursor,
     }))
 }
+
 
 // Stage 3.2: scan newly-confirmed blocks for dispute/resolver anchor OP_RETURNs.
 fn scan_new_blocks_for_dispute_anchors(
@@ -32101,6 +26674,7 @@ async fn escalation_tick(
     }
 }
 
+
 // ============================================================================
 // Stage 3.3.1: P2P dispute notification drain — apply incoming peer broadcasts
 // to the local disputes_index. The drain task runs every 5 s and consumes the
@@ -32165,7 +26739,7 @@ fn process_received_dispute_raise(
         resolution_anchored_at_height: None,
         escalated_to_fallback: false,
         escalated_at_height: None,
-        reresolve_nomination: None,
+    reresolve_nomination: None,
     };
     let _ = save_dispute_state(&new_state);
     {
@@ -32216,10 +26790,7 @@ fn process_received_dispute_evidence(
         let mut guard = disputes.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(d) = guard.get_mut(&agreement_hash) {
             if d.is_open()
-                && !d
-                    .evidence
-                    .iter()
-                    .any(|r| r.evidence.evidence_hash == evidence_hash)
+                && !d.evidence.iter().any(|r| r.evidence.evidence_hash == evidence_hash)
             {
                 d.evidence.push(DisputeEvidenceRecord {
                     evidence: e,
@@ -32341,6 +26912,7 @@ fn process_received_dispute_escalated(
     }
 }
 
+
 // ============================================================================
 // Stage 3.4.1: dispute-show + dispute-reresolve handlers
 // ============================================================================
@@ -32365,10 +26937,7 @@ async fn get_dispute_state(
     check_rate_with_auth(&state, &addr, &headers)?;
     require_rpc_auth(&headers)?;
     let s = {
-        let guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
         guard.get(&q.agreement_hash).cloned()
     };
     Ok(Json(DisputeStateRpcResp {
@@ -32390,7 +26959,9 @@ struct ReResolveAgreementResponse {
     new_fallback_resolver: Option<String>,
 }
 
-fn dispute_reresolve_payload_hash(n: &DisputeReResolverNomination) -> Result<[u8; 32], String> {
+fn dispute_reresolve_payload_hash(
+    n: &DisputeReResolverNomination,
+) -> Result<[u8; 32], String> {
     let mut tmp = n.clone();
     tmp.party_a_signature.signature = String::new();
     tmp.party_b_signature.signature = String::new();
@@ -32445,14 +27016,14 @@ async fn reresolve_agreement(
     ];
     let mut pair_valid = false;
     for (a, b) in pairs {
-        if sa_addr == a
-            && sb_addr == b
+        if sa_addr == a && sb_addr == b
             && verify_envelope_signature(&req.nomination.party_a_signature, &digest, &a).is_ok()
-            && verify_envelope_signature(&req.nomination.party_b_signature, &digest, &b).is_ok()
-        {
-            pair_valid = true;
-            break;
-        }
+                && verify_envelope_signature(&req.nomination.party_b_signature, &digest, &b)
+                    .is_ok()
+            {
+                pair_valid = true;
+                break;
+            }
     }
     if !pair_valid {
         return Err(bad("co_signatures_invalid"));
@@ -32472,10 +27043,7 @@ async fn reresolve_agreement(
     let new_primary = req.nomination.new_primary_resolver.clone();
     let new_fallback = req.nomination.new_fallback_resolver.clone();
     let snapshot: Option<DisputeState> = {
-        let mut guard = state
-            .disputes_index
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
+        let mut guard = state.disputes_index.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(d) = guard.get_mut(&agreement_hash) {
             if !d.is_open() {
                 return Err(bad("dispute_already_resolved"));

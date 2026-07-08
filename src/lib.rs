@@ -63,9 +63,9 @@
 #![allow(clippy::needless_lifetimes)]
 
 pub mod activation;
-pub mod anchors;
 pub mod attestor_bond;
 pub mod auxpow;
+pub mod anchors;
 pub mod block;
 pub mod btc_p2p;
 pub mod btc_spv;
@@ -81,21 +81,6 @@ pub mod network;
 pub mod network_era;
 pub mod p2p;
 pub mod p2p_wire;
-pub mod poawx;
-pub mod poawx_adaptive;
-pub mod poawx_admission;
-pub mod poawx_candidate;
-pub mod poawx_challenge;
-pub mod poawx_committed_admission;
-pub mod poawx_dominance;
-pub mod poawx_finality;
-pub mod poawx_gossip;
-pub mod poawx_miner_client;
-pub mod poawx_mining_harness;
-pub mod poawx_penalty;
-pub mod poawx_proposer;
-pub mod poawx_puzzle;
-pub mod poawx_ticket;
 pub mod pow;
 pub mod protocol;
 pub mod qr;

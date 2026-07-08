@@ -11,8 +11,8 @@ pub struct Target {
 impl Target {
     /// Convert compact bits to full target integer (Bitcoin-style).
     pub fn to_target(self) -> BigUint {
-        let exponent = self.bits >> 24;
-        let mantissa = self.bits & 0x00ff_ffff;
+        let exponent = self.bits >> 24 ;
+        let mantissa = self.bits & 0x00ff_ffff ;
         let mut value = BigUint::from(mantissa);
         if exponent <= 3 {
             let shift = 8 * (3 - exponent);

@@ -105,12 +105,8 @@ struct WalletState {
 
 impl Drop for WalletState {
     fn drop(&mut self) {
-        if let Some(ref mut p) = self.passphrase {
-            p.zeroize();
-        }
-        if let Some(ref mut w) = self.unlocked {
-            w.zeroize();
-        }
+        if let Some(ref mut p) = self.passphrase { p.zeroize(); }
+        if let Some(ref mut w) = self.unlocked { w.zeroize(); }
     }
 }
 
@@ -222,7 +218,9 @@ impl WalletManager {
             return Err("wallet_needs_migration".to_string());
         }
         let mut plain = decrypt_wallet(passphrase, &file)?;
-        if plain.next_index == 0 && (plain.seed_hex.is_some() || plain.bip32_seed.is_some()) {
+        if plain.next_index == 0
+            && (plain.seed_hex.is_some() || plain.bip32_seed.is_some())
+        {
             plain.next_index = plain.keys.len() as u32;
         }
         self.state.unlocked = Some(plain);
@@ -326,14 +324,16 @@ impl WalletManager {
         // Backup the original plaintext content. fs::copy preserves the
         // original at its current location until the encrypted write
         // succeeds — defense against a crash between write and rename.
-        let backup = self.path.with_file_name(format!(
-            "{}.plaintext.bak.{}",
-            self.path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("wallet.json"),
-            now_secs()
-        ));
+        let backup = self
+            .path
+            .with_file_name(format!(
+                "{}.plaintext.bak.{}",
+                self.path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("wallet.json"),
+                now_secs()
+            ));
         fs::copy(&self.path, &backup).map_err(|e| format!("backup failed: {e}"))?;
 
         // Encrypt under the new passphrase and write to a temp path.
@@ -377,7 +377,9 @@ impl WalletManager {
         let seed_lower = seed_hex.trim().to_lowercase();
         let _ = hex::decode(&seed_lower).map_err(|_| "seed must be valid hex".to_string())?;
         if seed_lower.len() != 64 && seed_lower.len() != 128 {
-            return Err("seed must be 64-char (custom) or 128-char (BIP32) hex".to_string());
+            return Err(
+                "seed must be 64-char (custom) or 128-char (BIP32) hex".to_string()
+            );
         }
 
         if self.path.exists() {
@@ -1008,10 +1010,7 @@ mod tests {
         let backups = mgr.plaintext_backups();
         assert_eq!(backups.len(), 1, "exactly one backup expected");
         let bname = backups[0].file_name().unwrap().to_str().unwrap();
-        assert!(
-            bname.contains(".plaintext.bak."),
-            "backup name shape: {bname}"
-        );
+        assert!(bname.contains(".plaintext.bak."), "backup name shape: {bname}");
 
         // Cleanup
         for b in &backups {
@@ -1061,7 +1060,9 @@ mod tests {
         mgr.create_with_seed("p1", None).unwrap();
         // Force-overwrite with a known seed; the original is preserved
         // as <path>.recovery-bak.<ts>.
-        let _ = mgr.recover_from_seed(&"b".repeat(64), "p2", true).unwrap();
+        let _ = mgr
+            .recover_from_seed(&"b".repeat(64), "p2", true)
+            .unwrap();
         assert_eq!(mgr.mode(), WalletMode::Encrypted);
         // The overwrite happened: addresses now derive from the new seed.
         mgr.lock();
@@ -1087,7 +1088,9 @@ mod tests {
     fn recover_from_seed_accepts_64_hex_seed() {
         let path = tmp_path("recover_64hex");
         let mut mgr = WalletManager::new(path.clone());
-        let key = mgr.recover_from_seed(&"c".repeat(64), "p", false).unwrap();
+        let key = mgr
+            .recover_from_seed(&"c".repeat(64), "p", false)
+            .unwrap();
         // 64-hex path uses wallet_store's custom derivation; same seed
         // must yield the same address.
         let mgr2_path = tmp_path("recover_64hex_verify");
@@ -1104,7 +1107,9 @@ mod tests {
     fn recover_from_seed_accepts_128_hex_bip32_seed() {
         let path = tmp_path("recover_128hex");
         let mut mgr = WalletManager::new(path.clone());
-        let _key = mgr.recover_from_seed(&"d".repeat(128), "p", false).unwrap();
+        let _key = mgr
+            .recover_from_seed(&"d".repeat(128), "p", false)
+            .unwrap();
         // 128-hex path stores bip32_seed; round-trip through unlock.
         mgr.lock();
         mgr.unlock("p").unwrap();

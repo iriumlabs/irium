@@ -1,8 +1,6 @@
 #![allow(warnings)]
 #![allow(clippy::all)]
 
-use bip39::Mnemonic;
-use hmac::{Hmac, Mac};
 use irium_node_rs::constants::coinbase_maturity;
 use irium_node_rs::pow::sha256d;
 use irium_node_rs::qr::{render_ascii, render_svg};
@@ -13,32 +11,36 @@ use irium_node_rs::settlement::{
     build_agreement_share_package_verification, build_agreement_statement, build_deposit_agreement,
     build_milestone_agreement, build_otc_agreement, build_simple_settlement_agreement,
     canonical_serialization_rules, compute_agreement_bundle_hash_hex,
-    compute_agreement_signature_payload_hash, dispute_evidence_canonical_bytes,
-    dispute_raise_canonical_bytes, dispute_reresolve_canonical_bytes,
-    dispute_resolution_canonical_bytes, escrow_receipt_signing_digest,
-    inspect_agreement_share_package, inspect_agreement_signature, render_agreement_audit_csv,
-    resolver_registration_canonical_bytes, settlement_proof_payload_bytes,
+    compute_agreement_signature_payload_hash, inspect_agreement_share_package,
+    inspect_agreement_signature, render_agreement_audit_csv, settlement_proof_payload_bytes,
     summarize_agreement_authenticity, validate_agreement_signature_envelope,
-    verify_agreement_bundle, verify_agreement_share_package, verify_bundle_signatures,
-    verify_escrow_receipt_signature, AgreementAnchorRole, AgreementArtifactVerificationResult,
-    AgreementAuditRecord, AgreementBundle, AgreementBundleChainObservationSnapshot,
-    AgreementEscrowReceipt, AgreementLifecycleState, AgreementLifecycleView,
-    AgreementLinkedTx as SettlementLinkedTx, AgreementMilestone,
-    AgreementMilestoneStatus as SettlementMilestoneStatus, AgreementObject, AgreementParty,
-    AgreementSharePackage, AgreementSharePackageInspection,
-    AgreementSharePackageVerificationResult, AgreementSignatureEnvelope,
-    AgreementSignatureTargetType, AgreementSignatureVerification, AgreementStatement,
-    AgreementSummary, AgreementTemplateType, ApprovedAttestor, DisputeEvidence, DisputeRaise,
-    DisputeReResolverNomination, DisputeResolution, EscrowReceiptDisputeRef, EscrowReceiptProofRef,
-    ExporterSignatureEnvelope, HoldbackEvaluationResult, HoldbackOutcome,
-    MilestoneEvaluationResult, NoResponseRule, NoResponseTrigger, PolicyOutcome, ProofPolicy,
-    ProofRequirement, ProofResolution, ProofSignatureEnvelope, ResolverRegistration,
-    SettlementProof, TxidWithHeight, TypedProofPayload, AGREEMENT_SIGNATURE_TYPE_SECP256K1,
-    AGREEMENT_SIGNATURE_VERSION, DISPUTE_EVIDENCE_SCHEMA_ID, DISPUTE_EVIDENCE_VERSION,
-    DISPUTE_RAISE_SCHEMA_ID, DISPUTE_RAISE_VERSION, DISPUTE_RERESOLVE_SCHEMA_ID,
-    DISPUTE_RERESOLVE_VERSION, DISPUTE_RESOLUTION_SCHEMA_ID, DISPUTE_RESOLUTION_VERSION,
-    ESCROW_RECEIPT_SCHEMA_ID, ESCROW_RECEIPT_VERSION, PROOF_POLICY_SCHEMA_ID,
-    RESOLVER_REGISTRATION_SCHEMA_ID, RESOLVER_REGISTRATION_VERSION, SETTLEMENT_PROOF_SCHEMA_ID,
+    verify_agreement_bundle, verify_agreement_share_package,
+    verify_bundle_signatures, AgreementArtifactVerificationResult, AgreementAuditRecord,
+    AgreementBundle, AgreementBundleChainObservationSnapshot, AgreementLifecycleView,
+    AgreementMilestone, AgreementObject, AgreementParty, AgreementSharePackage,
+    AgreementSharePackageInspection, AgreementSharePackageVerificationResult,
+    AgreementSignatureEnvelope, AgreementSignatureTargetType, AgreementSignatureVerification,
+    AgreementStatement, AgreementSummary, AgreementTemplateType, ApprovedAttestor,
+    HoldbackEvaluationResult, HoldbackOutcome, MilestoneEvaluationResult, NoResponseRule,
+    NoResponseTrigger, PolicyOutcome, ProofPolicy, ProofRequirement, ProofResolution,
+    ProofSignatureEnvelope, SettlementProof, TypedProofPayload, AGREEMENT_SIGNATURE_TYPE_SECP256K1,
+    AGREEMENT_SIGNATURE_VERSION, PROOF_POLICY_SCHEMA_ID, SETTLEMENT_PROOF_SCHEMA_ID,
+    AgreementAnchorRole, AgreementEscrowReceipt, AgreementLifecycleState,
+    EscrowReceiptDisputeRef, EscrowReceiptProofRef, ExporterSignatureEnvelope,
+    TxidWithHeight, ESCROW_RECEIPT_SCHEMA_ID, ESCROW_RECEIPT_VERSION,
+    escrow_receipt_signing_digest, verify_escrow_receipt_signature,
+    AgreementLinkedTx as SettlementLinkedTx,
+    AgreementMilestoneStatus as SettlementMilestoneStatus,
+    DisputeEvidence, DisputeRaise, DisputeReResolverNomination, DisputeResolution,
+    ResolverRegistration,
+    DISPUTE_EVIDENCE_SCHEMA_ID, DISPUTE_EVIDENCE_VERSION,
+    DISPUTE_RAISE_SCHEMA_ID, DISPUTE_RAISE_VERSION,
+    DISPUTE_RERESOLVE_SCHEMA_ID, DISPUTE_RERESOLVE_VERSION,
+    DISPUTE_RESOLUTION_SCHEMA_ID, DISPUTE_RESOLUTION_VERSION,
+    RESOLVER_REGISTRATION_SCHEMA_ID, RESOLVER_REGISTRATION_VERSION,
+    dispute_evidence_canonical_bytes, dispute_raise_canonical_bytes,
+    dispute_reresolve_canonical_bytes,
+    dispute_resolution_canonical_bytes, resolver_registration_canonical_bytes,
 };
 use irium_node_rs::tx::{
     decode_full_tx, encode_mpso_claim_witness, encode_mpso_refund_witness, encode_mpso_script,
@@ -48,14 +50,16 @@ use k256::ecdsa::signature::hazmat::PrehashSigner;
 use k256::ecdsa::{Signature, SigningKey};
 use k256::elliptic_curve::sec1::ToEncodedPoint;
 use k256::SecretKey;
-use num_bigint::BigUint;
-use num_traits::Zero;
 use rand_core::{OsRng, RngCore};
 use reqwest::blocking::Client;
 use ripemd::Ripemd160;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256, Sha512};
+use hmac::{Hmac, Mac};
+use bip39::Mnemonic;
+use num_bigint::BigUint;
+use num_traits::Zero;
 use std::cmp::Reverse;
 use std::collections::{HashMap, HashSet};
 use std::env;
@@ -2101,6 +2105,7 @@ fn base58check_encode(body: &[u8]) -> String {
     bs58::encode(full).into_string()
 }
 
+
 // ---- Multisig address helpers (Phase 4) ----
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -2181,8 +2186,8 @@ fn multisig_build_mpso_output(
 }
 
 fn multisig_script_to_mpso(script_pubkey_hex: &str) -> Result<MpsoV1Output, String> {
-    let script =
-        hex::decode(script_pubkey_hex).map_err(|_| "invalid script_pubkey hex".to_string())?;
+    let script = hex::decode(script_pubkey_hex)
+        .map_err(|_| "invalid script_pubkey hex".to_string())?;
     irium_node_rs::tx::parse_mpso_script(&script)
         .ok_or_else(|| "failed to parse MPSO script".to_string())
 }
@@ -2231,9 +2236,12 @@ fn derive_secret_from_seed_hex(seed_hex: &str, index: u32) -> Result<SecretKey, 
     Err("failed to derive valid key from seed".to_string())
 }
 
+
 const SECP256K1_N: [u8; 32] = [
-    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
-    0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
+    0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B,
+    0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
 ];
 
 fn bip32_master_key(seed: &[u8]) -> ([u8; 32], [u8; 32]) {
@@ -2266,9 +2274,7 @@ fn bip32_ckd_priv(
     mac.update(&index.to_be_bytes());
     let result = mac.finalize().into_bytes();
     let il = &result[..32];
-    let cc: [u8; 32] = result[32..]
-        .try_into()
-        .map_err(|_| "chain code slice".to_string())?;
+    let cc: [u8; 32] = result[32..].try_into().map_err(|_| "chain code slice".to_string())?;
     let n = BigUint::from_bytes_be(&SECP256K1_N);
     let il_int = BigUint::from_bytes_be(il);
     let pk_int = BigUint::from_bytes_be(parent_key);
@@ -2316,24 +2322,11 @@ fn usage() {
     eprintln!("  irium-wallet export-wif <base58_addr> --out <file>");
     eprintln!("  irium-wallet import-wif <wif>");
     eprintln!("  irium-wallet export-seed --out <file>");
-    eprintln!("  irium-wallet export-mnemonic --out <file>");
+  eprintln!("  irium-wallet export-mnemonic --out <file>");
     eprintln!("  irium-wallet import-seed <64hex> [--force]");
     eprintln!("  irium-wallet backup [--out <file>]");
     eprintln!("  irium-wallet restore-backup <file> [--force]");
     eprintln!("  irium-wallet address-to-pkh <base58_addr>");
-    eprintln!("  irium-wallet poawx-register --pool <url> --addr <addr> --worker <name> --expiry-height <N> [--fee-bps 0]");
-    eprintln!("  irium-wallet poawx-register --emit-only --pool-pubkey <66hex> --network-id <id> --addr <addr> --worker <name> --expiry-height <N> --fee-bps 0  > poawx-delegation.json");
-    eprintln!("      (third-party pool, opt-in only) add: --third-party-pool --fee-bps <1..200> --fee-pkh <base58-addr|40hex>");
-    eprintln!("  irium-wallet poawx-role-precommit --network-id <id> --target-height <H> --role <compute|verify|support> --solver <addr|40hex> --secret <64hex> --nonce <64hex>");
-    eprintln!("  irium-wallet poawx-role-reveal --network-id <id> --target-height <H> --role <compute|verify|support> --solver <addr|40hex> --secret <64hex> --nonce <64hex> --prev-hash <64hex>");
-    eprintln!("  irium-wallet poawx-ticket-proof --network-id <id> --target-height <H> --role <compute|verify|support> --solver <addr|40hex> --epoch <N> --expiry-height <N> [--assignment-pubkey <66hex>] [--sybil-nonce <64hex>] [--penalty-status <0..4>]");
-    eprintln!("  irium-wallet poawx-assignment-proof --network-id <id> --target-height <H> --role <compute|verify|support> --solver <addr|40hex> --ticket-digest <64hex> --seed <64hex> [--assignment-pubkey <66hex>]  (VRF-style placeholder; testnet/devnet only; no private key)");
-    eprintln!("  irium-wallet poawx-assignment-proof-v2 --network-id <id> --target-height <H> --role <compute|verify|support> --solver <addr|40hex> --ticket-digest <64hex> --seed <64hex> --secret-hex <64hex>  (true secp256k1 RFC 9381 ECVRF; testnet/devnet only; VRF secret is input-only, never echoed)");
-    eprintln!("  irium-wallet poawx-candidate-admission --network-id <id> --target-height <H> --role <compute|verify|support> --solver <addr|40hex> --ticket-digest <64hex> --seed <64hex> [--role-claim-digest <64hex>] [--penalty-status <0..4>] [--dominance-weight <N>] [--assignment-pubkey <66hex>] [--secret-hex <64hex> (binds a true-VRF proof; input-only, never echoed)] [--submit --node-rpc <loopback-url>]  (emits wire_hex to POST to /poawx/candidate-admission; testnet/devnet only)");
-    eprintln!("  irium-wallet poawx-puzzle-challenge --network-id <id> --target-height <H> --role <compute|verify|support> --solver <addr|40hex> [--ticket-digest <64hex>] [--assignment-proof-digest <64hex>] [--candidate-digest <64hex>] [--seed <64hex>]  (assigned-work puzzle, NOT chain PoW; testnet/devnet only; no private key)");
-    eprintln!("  irium-wallet poawx-puzzle-solve <same flags as poawx-puzzle-challenge>  (emits solution wire_hex; testnet/devnet only; no private key)");
-    eprintln!("  irium-wallet poawx-finality-vote --network-id <id> --target-height <H> --block-hash <64hex> [--parent-hash <64hex>] [--committee-epoch <N>] [--ticket-digest <64hex>] [--vote-type precommit|commit|checkpoint] --secret-hex <64hex> [--submit --node-rpc <loopback-url>]  (real secp256k1 vote; emit-only by default; --submit POSTs to the loopback node; testnet/devnet only; signing key is input-only, never echoed)");
-    eprintln!("  irium-wallet poawx-committed-admission --network-id <id> --target-height <H> --candidate-admission-root <64hex> --candidate-count <N> --seed <64hex> [--commit-height <N>] [--window-id <N>]  (chain-committed admission root; testnet/devnet only; no private key)");
     eprintln!("  irium-wallet qr <base58_addr> [--svg] [--out <file>]");
     eprintln!("  irium-wallet balance <base58_addr> [--rpc <url>]");
     eprintln!("  irium-wallet list-unspent <base58_addr> [--rpc <url>]");
@@ -2424,9 +2417,7 @@ fn usage() {
     eprintln!("  irium-wallet otc-status --agreement <hash|id|path> [--rpc <url>]");
     eprintln!("  irium-wallet offer-create --seller <addr> --amount <irm> --payment-method <text> --timeout <height> [--price-note <text>] [--payment-instructions <text>] [--offer-id <id>] [--json]");
     eprintln!("  irium-wallet offer-list [--status open|taken|settled] [--source local|imported|remote|all] [--seller <pubkey|addr>]");
-    eprintln!(
-        "  irium-wallet offer-list [--payment <method>] [--min-amount <irm>] [--max-amount <irm>]"
-    );
+    eprintln!("  irium-wallet offer-list [--payment <method>] [--min-amount <irm>] [--max-amount <irm>]");
     eprintln!("  irium-wallet offer-list [--sort score|newest|amount|seller] [--limit <n>] [--summary] [--json]");
     eprintln!("  irium-wallet offer-show --offer <offer_id> [--json]");
     eprintln!("  irium-wallet offer-take --offer <offer_id> --buyer <addr> [--rpc <url>] [--json]");
@@ -2515,8 +2506,7 @@ fn is_loopback_host(host: &str) -> bool {
 }
 
 fn https_to_http(base: &str) -> Option<String> {
-    base.strip_prefix("https://")
-        .map(|rest| format!("http://{}", rest))
+    base.strip_prefix("https://").map(|rest| format!("http://{}", rest))
 }
 
 fn send_with_https_fallback<F>(
@@ -3372,1538 +3362,6 @@ fn signer_material_from_wallet(address: &str) -> Result<(WalletKey, SigningKey),
     Ok((key, signing_key))
 }
 
-// ── Phase 18B step-2: PoAW-X one-time delegation registration ────────────────
-
-/// Build a delegation and sign it with the miner wallet key. The private key is
-/// used only in memory (inside `signing_key`) and never returned or printed.
-/// OFFICIAL pool fee is 0% (`fee_bps == 0`, zero `fee_pkh`). Phase 20 Step 4: a
-/// third-party fee (`fee_bps` in 1..=200 with a non-zero `fee_pkh`) is supported
-/// on non-mainnet networks; the fee terms are bound into the miner's signature.
-fn build_signed_delegation(
-    signing_key: &SigningKey,
-    pool_pubkey: [u8; 33],
-    network_id: u8,
-    worker: &str,
-    expiry_height: u64,
-    fee_bps: u16,
-    fee_pkh: [u8; 20],
-    deleg_nonce: [u8; 32],
-) -> Result<irium_node_rs::poawx::Delegation, String> {
-    use k256::ecdsa::signature::hazmat::PrehashSigner;
-    use sha2::{Digest, Sha256};
-    if fee_bps == 0 {
-        if fee_pkh != [0u8; 20] {
-            return Err("fee_pkh must be empty when --fee-bps is 0 (official 0%)".to_string());
-        }
-    } else {
-        if network_id == 0 {
-            return Err("third-party fee not allowed on mainnet (network_id 0)".to_string());
-        }
-        if fee_bps > irium_node_rs::poawx::THIRD_PARTY_FEE_CAP_BPS {
-            return Err(format!(
-                "--fee-bps {} exceeds cap {} (2.00%)",
-                fee_bps,
-                irium_node_rs::poawx::THIRD_PARTY_FEE_CAP_BPS
-            ));
-        }
-        if fee_pkh == [0u8; 20] {
-            return Err("--fee-pkh required when --fee-bps > 0".to_string());
-        }
-    }
-    let vk = k256::ecdsa::VerifyingKey::from(signing_key);
-    let enc = vk.to_encoded_point(true);
-    let mut miner_pubkey = [0u8; 33];
-    miner_pubkey.copy_from_slice(enc.as_bytes());
-    let worker_tag = if worker.is_empty() {
-        [0u8; 32]
-    } else {
-        let mut h = Sha256::new();
-        h.update(worker.as_bytes());
-        h.finalize().into()
-    };
-    let mut d = irium_node_rs::poawx::Delegation {
-        deleg_version: irium_node_rs::poawx::Delegation::VERSION,
-        network_id,
-        miner_pubkey,
-        pool_pubkey,
-        worker_tag,
-        expiry_height,
-        fee_bps,
-        fee_pkh,
-        deleg_nonce,
-        delegation_sig: [0u8; 64],
-    };
-    let sig: Signature = signing_key
-        .sign_prehash(&d.message_hash())
-        .map_err(|e| format!("sign delegation: {e}"))?;
-    d.delegation_sig.copy_from_slice(&sig.to_bytes());
-    Ok(d)
-}
-
-fn next_flag_value(args: &[String], i: &mut usize) -> Result<String, String> {
-    if *i + 1 >= args.len() {
-        return Err(format!("missing value for {}", args[*i]));
-    }
-    let v = args[*i + 1].clone();
-    *i += 2;
-    Ok(v)
-}
-
-/// The exact JSON body the wallet sends to the pool's loopback-only
-/// `POST /poawx/delegation` endpoint. Used by BOTH the online register path
-/// (as the POST body) and the `--emit-only` path (printed verbatim), so the
-/// two are byte-identical by construction. Contains only public data — the
-/// canonical 226-byte delegation hex, the worker name, and the miner pkh.
-/// It never includes the wallet private key.
-fn delegation_post_body(d: &irium_node_rs::poawx::Delegation, worker: &str) -> serde_json::Value {
-    serde_json::json!({
-        "delegation": hex::encode(d.serialize()),
-        "worker": worker,
-        "miner_pkh": hex::encode(d.miner_pkh()),
-    })
-}
-
-/// Parsed `poawx-register` flags (mode-agnostic). `emit_only` selects the
-/// offline path; the remaining fields are validated per-mode afterwards.
-struct PoawxRegisterArgs {
-    emit_only: bool,
-    pool: Option<String>,
-    pool_pubkey_hex: Option<String>,
-    network_id: Option<u8>,
-    addr: Option<String>,
-    worker: String,
-    expiry: Option<u64>,
-    fee_bps: u16,
-    /// Phase 20 Step 4: explicit third-party fee opt-in.
-    third_party_pool: bool,
-    /// Phase 20 Step 4: third-party fee recipient (base58 address or 40-hex pkh).
-    fee_pkh: Option<String>,
-}
-
-/// Resolve a `--fee-pkh` argument: a 40-char hex (20-byte) pkh, or a base58 P2PKH
-/// address. Fails closed on malformed input.
-fn resolve_fee_pkh_arg(s: &str) -> Result<[u8; 20], String> {
-    if s.len() == 40 {
-        if let Ok(b) = hex::decode(s) {
-            if b.len() == 20 {
-                let mut a = [0u8; 20];
-                a.copy_from_slice(&b);
-                return Ok(a);
-            }
-        }
-    }
-    let v = base58_p2pkh_to_hash(s)
-        .ok_or_else(|| "--fee-pkh: invalid base58 address or 20-byte hex".to_string())?;
-    if v.len() != 20 {
-        return Err("--fee-pkh: decoded pkh is not 20 bytes".to_string());
-    }
-    let mut a = [0u8; 20];
-    a.copy_from_slice(&v);
-    Ok(a)
-}
-
-fn parse_poawx_register_args(args: &[String]) -> Result<PoawxRegisterArgs, String> {
-    let mut a = PoawxRegisterArgs {
-        emit_only: false,
-        pool: None,
-        pool_pubkey_hex: None,
-        network_id: None,
-        addr: None,
-        worker: String::new(),
-        expiry: None,
-        fee_bps: 0,
-        third_party_pool: false,
-        fee_pkh: None,
-    };
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--emit-only" => {
-                a.emit_only = true;
-                i += 1;
-            }
-            "--pool" => a.pool = Some(next_flag_value(args, &mut i)?),
-            "--pool-pubkey" => a.pool_pubkey_hex = Some(next_flag_value(args, &mut i)?),
-            "--network-id" => {
-                a.network_id = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --network-id".to_string())?,
-                )
-            }
-            "--addr" => a.addr = Some(next_flag_value(args, &mut i)?),
-            "--worker" => a.worker = next_flag_value(args, &mut i)?,
-            "--expiry-height" => {
-                a.expiry = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --expiry-height".to_string())?,
-                )
-            }
-            "--fee-bps" => {
-                a.fee_bps = next_flag_value(args, &mut i)?
-                    .parse()
-                    .map_err(|_| "invalid --fee-bps".to_string())?
-            }
-            "--third-party-pool" => {
-                a.third_party_pool = true;
-                i += 1;
-            }
-            "--fee-pkh" => a.fee_pkh = Some(next_flag_value(args, &mut i)?),
-            other => return Err(format!("unknown flag {other}")),
-        }
-    }
-    Ok(a)
-}
-
-/// Resolve fee terms from the register flags (shared by emit-only + online).
-/// OFFICIAL: `--fee-bps 0`, no `--third-party-pool`, no `--fee-pkh` → `(0, zero)`.
-/// THIRD-PARTY: `--fee-bps 1..=200` + `--third-party-pool` + `--fee-pkh` →
-/// `(bps, pkh)`. Fails closed on any inconsistent combination.
-fn resolve_fee_terms(a: &PoawxRegisterArgs) -> Result<(u16, [u8; 20]), String> {
-    if a.fee_bps == 0 {
-        if a.third_party_pool {
-            return Err("--third-party-pool requires --fee-bps 1..200".to_string());
-        }
-        if a.fee_pkh.is_some() {
-            return Err("--fee-pkh is only valid with --fee-bps > 0".to_string());
-        }
-        Ok((0, [0u8; 20]))
-    } else {
-        if !a.third_party_pool {
-            return Err(
-                "--fee-bps > 0 requires --third-party-pool (official pool is 0%)".to_string(),
-            );
-        }
-        if a.fee_bps > irium_node_rs::poawx::THIRD_PARTY_FEE_CAP_BPS {
-            return Err(format!(
-                "--fee-bps {} exceeds cap {} (2.00%)",
-                a.fee_bps,
-                irium_node_rs::poawx::THIRD_PARTY_FEE_CAP_BPS
-            ));
-        }
-        let s = a
-            .fee_pkh
-            .as_deref()
-            .ok_or_else(|| "--fee-pkh required with --fee-bps > 0".to_string())?;
-        let pkh = resolve_fee_pkh_arg(s)?;
-        Ok((a.fee_bps, pkh))
-    }
-}
-
-/// Validate the offline (`--emit-only`) inputs and resolve the 33-byte pool
-/// pubkey + fee terms. Pure: no wallet access, no network, no signing.
-/// Returns `(pool_pubkey, network_id, addr, worker, expiry, fee_bps, fee_pkh)`.
-fn resolve_emit_only_args(
-    a: &PoawxRegisterArgs,
-) -> Result<([u8; 33], u8, String, String, u64, u16, [u8; 20]), String> {
-    if a.pool.is_some() {
-        return Err("--pool is not used with --emit-only (offline: no network access)".to_string());
-    }
-    let (fee_bps, fee_pkh) = resolve_fee_terms(a)?;
-    let pool_pubkey_hex = a
-        .pool_pubkey_hex
-        .as_deref()
-        .ok_or_else(|| "--pool-pubkey <66hex> required with --emit-only".to_string())?;
-    let network_id = a
-        .network_id
-        .ok_or_else(|| "--network-id <id> required with --emit-only".to_string())?;
-    let addr = a
-        .addr
-        .clone()
-        .ok_or_else(|| "--addr <miner-address> required".to_string())?;
-    if a.worker.is_empty() {
-        return Err("--worker <name> required with --emit-only".to_string());
-    }
-    let expiry = a
-        .expiry
-        .ok_or_else(|| "--expiry-height <N> required".to_string())?;
-    let pool_pubkey_bytes =
-        hex::decode(pool_pubkey_hex).map_err(|_| "--pool-pubkey invalid hex".to_string())?;
-    if pool_pubkey_bytes.len() != 33 {
-        return Err("--pool-pubkey must be 33 bytes (66 hex chars)".to_string());
-    }
-    let mut pool_pubkey = [0u8; 33];
-    pool_pubkey.copy_from_slice(&pool_pubkey_bytes);
-    Ok((
-        pool_pubkey,
-        network_id,
-        addr,
-        a.worker.clone(),
-        expiry,
-        fee_bps,
-        fee_pkh,
-    ))
-}
-
-/// Validate online-mode flags + required args (pure; no network). Mirrors the
-/// previous inline online checks exactly (same messages/order) so online behavior
-/// is unchanged and unit-testable. Returns (pool_url, addr, worker, fee_bps, expiry).
-/// Rejects the emit-only-only flags (`--pool-pubkey`/`--network-id`) and any non-zero fee.
-fn resolve_online_args(
-    a: &PoawxRegisterArgs,
-) -> Result<(String, String, String, u16, [u8; 20], u64), String> {
-    if a.pool_pubkey_hex.is_some() || a.network_id.is_some() {
-        return Err(
-            "--pool-pubkey/--network-id are only valid with --emit-only (online mode reads them from /poawx/pool-identity)"
-                .to_string(),
-        );
-    }
-    let (fee_bps, fee_pkh) = resolve_fee_terms(a)?;
-    let pool = a
-        .pool
-        .clone()
-        .ok_or_else(|| "--pool <url> required".to_string())?;
-    let addr = a
-        .addr
-        .clone()
-        .ok_or_else(|| "--addr <miner-address> required".to_string())?;
-    let expiry = a
-        .expiry
-        .ok_or_else(|| "--expiry-height <N> required".to_string())?;
-    Ok((pool, addr, a.worker.clone(), fee_bps, fee_pkh, expiry))
-}
-
-/// Phase 20 Step 6B: emit a role precommit (hides secret/nonce) or role reveal
-/// (carries secret/nonce + lane + claim_digest) as loopback JSON. Pure: no wallet,
-/// no network, no private key — the caller supplies the solver pkh + secret/nonce
-/// (the miner keeps secret/nonce private and reuses the SAME pair for precommit and
-/// reveal). The reveal additionally needs `--prev-hash` (parent hash of the target
-/// block) to compute the deterministic lane + claim digest.
-fn cmd_poawx_role_emit(args: &[String], reveal: bool) -> Result<(), String> {
-    use irium_node_rs::poawx;
-    let mut network_id: Option<u8> = None;
-    let mut target_height: Option<u64> = None;
-    let mut role: Option<u8> = None;
-    let mut solver: Option<[u8; 20]> = None;
-    let mut secret: Option<[u8; 32]> = None;
-    let mut nonce: Option<[u8; 32]> = None;
-    let mut prev_hash: Option<[u8; 32]> = None;
-    let hex32 = |s: &str| -> Result<[u8; 32], String> {
-        let b = hex::decode(s.trim()).map_err(|_| "invalid 32-byte hex".to_string())?;
-        if b.len() != 32 {
-            return Err("expected 32 bytes (64 hex)".to_string());
-        }
-        let mut a = [0u8; 32];
-        a.copy_from_slice(&b);
-        Ok(a)
-    };
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--network-id" => {
-                network_id = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --network-id".to_string())?,
-                )
-            }
-            "--target-height" => {
-                target_height = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --target-height".to_string())?,
-                )
-            }
-            "--role" => {
-                let r = next_flag_value(args, &mut i)?;
-                role = Some(match r.to_ascii_lowercase().as_str() {
-                    "compute" | "1" => poawx::ROLE_COMPUTE_CONTRIBUTOR,
-                    "verify" | "2" => poawx::ROLE_VERIFY_CONTRIBUTOR,
-                    "support" | "3" => poawx::ROLE_SUPPORT_CONTRIBUTOR,
-                    other => {
-                        return Err(format!("invalid --role {other} (compute|verify|support)"))
-                    }
-                });
-            }
-            "--solver" => solver = Some(resolve_fee_pkh_arg(&next_flag_value(args, &mut i)?)?),
-            "--secret" => secret = Some(hex32(&next_flag_value(args, &mut i)?)?),
-            "--nonce" => nonce = Some(hex32(&next_flag_value(args, &mut i)?)?),
-            "--prev-hash" => prev_hash = Some(hex32(&next_flag_value(args, &mut i)?)?),
-            other => return Err(format!("unknown flag {other}")),
-        }
-    }
-    let network_id = network_id.ok_or("--network-id required")?;
-    if network_id == 0 {
-        return Err("role protocol is mainnet-hard-off (network_id 0)".to_string());
-    }
-    let target_height = target_height.ok_or("--target-height required")?;
-    let role = role.ok_or("--role required")?;
-    let solver = solver.ok_or("--solver <addr|40hex> required")?;
-    let secret = secret.ok_or("--secret <64hex> required")?;
-    let nonce = nonce.ok_or("--nonce <64hex> required")?;
-    let commitment = poawx::role_precommit_commitment(&secret, &nonce);
-
-    let body = if !reveal {
-        serde_json::json!({
-            "network_id": network_id,
-            "target_height": target_height,
-            "role_id": role,
-            "solver_pkh": hex::encode(solver),
-            "commitment_hash": hex::encode(commitment),
-        })
-    } else {
-        let prev = prev_hash.ok_or("--prev-hash <64hex> required for reveal".to_string())?;
-        let lane = poawx::assign_lane(network_id, target_height, &prev, role, 0).id();
-        let claim_digest = poawx::role_claim_digest(
-            network_id,
-            target_height,
-            &prev,
-            role,
-            lane,
-            &solver,
-            &nonce,
-            &secret,
-        );
-        serde_json::json!({
-            "network_id": network_id,
-            "target_height": target_height,
-            "role_id": role,
-            "lane_id": lane,
-            "solver_pkh": hex::encode(solver),
-            "secret": hex::encode(secret),
-            "nonce": hex::encode(nonce),
-            "commitment_hash": hex::encode(commitment),
-            "claim_digest": hex::encode(claim_digest),
-        })
-    };
-    println!(
-        "{}",
-        serde_json::to_string(&body).map_err(|e| format!("serialize: {e}"))?
-    );
-    if reveal {
-        eprintln!("[role-reveal] target_height {target_height} role {role}; carries secret/nonce — POST to the operator's loopback /poawx/role-reveal only.");
-    } else {
-        eprintln!("[role-precommit] target_height {target_height} role {role}; hides secret/nonce. POST to the operator's loopback /poawx/role-precommit before the target height.");
-    }
-    Ok(())
-}
-
-/// Phase 21B: emit a PoAW-X miner work-ticket PROOF bound to a role + height
-/// (testnet/devnet only; mainnet hard-off). Prints JSON only — no private key.
-/// Phase 22A: build the committed-admission JSON (+ wire hex). Pure + testable; no
-/// private key. Mainnet hard-off (network_id 0). The committed-admission root is an
-/// input (computed from the admitted candidate set); this helper packages it.
-fn committed_admission_json(args: &[String]) -> Result<serde_json::Value, String> {
-    use irium_node_rs::poawx_committed_admission::{
-        committed_admission_window_id, AdmissionCommitmentV1,
-    };
-    let mut network_id: Option<u8> = None;
-    let mut target_height: Option<u64> = None;
-    let mut commit_height: Option<u64> = None;
-    let mut window_id: Option<u64> = None;
-    let mut candidate_count: u16 = 0;
-    let mut seed = [0u8; 32];
-    let mut root = [0u8; 32];
-    let hex_into = |s: &str, out: &mut [u8]| -> Result<(), String> {
-        let b = hex::decode(s.trim()).map_err(|_| "invalid hex".to_string())?;
-        if b.len() != out.len() {
-            return Err(format!("expected {} bytes", out.len()));
-        }
-        out.copy_from_slice(&b);
-        Ok(())
-    };
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--network-id" => {
-                network_id = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --network-id".to_string())?,
-                )
-            }
-            "--target-height" => {
-                target_height = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --target-height".to_string())?,
-                )
-            }
-            "--commit-height" => {
-                commit_height = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --commit-height".to_string())?,
-                )
-            }
-            "--window-id" => {
-                window_id = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --window-id".to_string())?,
-                )
-            }
-            "--candidate-count" => {
-                candidate_count = next_flag_value(args, &mut i)?
-                    .parse()
-                    .map_err(|_| "invalid --candidate-count".to_string())?
-            }
-            "--seed" | "--prev-hash" => hex_into(&next_flag_value(args, &mut i)?, &mut seed)?,
-            "--candidate-admission-root" => hex_into(&next_flag_value(args, &mut i)?, &mut root)?,
-            other => return Err(format!("unknown flag {other}")),
-        }
-    }
-    let network_id = network_id.ok_or("--network-id required")?;
-    if network_id == 0 {
-        return Err("committed admission is mainnet-hard-off (network_id 0)".to_string());
-    }
-    let target_height = target_height.ok_or("--target-height required")?;
-    let commit_height = commit_height.unwrap_or_else(|| target_height.saturating_sub(1));
-    let window_id = window_id.unwrap_or_else(|| committed_admission_window_id(target_height));
-    let ca = AdmissionCommitmentV1::new(
-        network_id,
-        target_height,
-        commit_height,
-        seed,
-        root,
-        candidate_count,
-        window_id,
-    );
-    Ok(serde_json::json!({
-        "committed_admission": {
-            "network_id": ca.network_id,
-            "target_height": ca.target_height,
-            "commit_height": ca.commit_height,
-            "seed": hex::encode(ca.seed),
-            "candidate_admission_root": hex::encode(ca.candidate_admission_root),
-            "candidate_count": ca.candidate_count,
-            "window_id": ca.window_id,
-        },
-        "digest": hex::encode(ca.digest),
-        "wire_hex": hex::encode(ca.serialize()),
-        "note": "chain-committed admission root; testnet/devnet only; no signing key needed; producer embeds this in the commit block (target-1) ext",
-    }))
-}
-
-fn cmd_poawx_committed_admission(args: &[String]) -> Result<(), String> {
-    let v = committed_admission_json(args)?;
-    println!(
-        "{}",
-        serde_json::to_string(&v).map_err(|e| format!("serialize: {e}"))?
-    );
-    eprintln!("[committed-admission] chain-committed admission root; testnet/devnet only; no private key.");
-    Ok(())
-}
-
-/// Phase 21H: build + sign a finality-committee vote (testable). The signing key
-/// is an INPUT (--secret-hex, testnet throwaway) and is NEVER echoed; the output
-/// carries only the public key, signature, digest, and wire. Mainnet hard-off.
-fn finality_vote_json(args: &[String]) -> Result<serde_json::Value, String> {
-    use irium_node_rs::poawx_finality::{FinalityVoteType, FinalityVoteV1};
-    let mut network_id: Option<u8> = None;
-    let mut target_height: Option<u64> = None;
-    let mut block_hash = [0u8; 32];
-    let mut parent_hash = [0u8; 32];
-    let mut committee_epoch: u64 = 0;
-    let mut ticket_digest = [0u8; 32];
-    let mut vote_type = FinalityVoteType::Commit;
-    let mut secret: Option<[u8; 32]> = None;
-    let mut have_block = false;
-    let hex_into = |s: &str, out: &mut [u8]| -> Result<(), String> {
-        let b = hex::decode(s.trim()).map_err(|_| "invalid hex".to_string())?;
-        if b.len() != out.len() {
-            return Err(format!("expected {} bytes", out.len()));
-        }
-        out.copy_from_slice(&b);
-        Ok(())
-    };
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--network-id" => {
-                network_id = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --network-id".to_string())?,
-                )
-            }
-            "--target-height" => {
-                target_height = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --target-height".to_string())?,
-                )
-            }
-            "--block-hash" | "--finalized-hash" => {
-                hex_into(&next_flag_value(args, &mut i)?, &mut block_hash)?;
-                have_block = true;
-            }
-            "--parent-hash" => hex_into(&next_flag_value(args, &mut i)?, &mut parent_hash)?,
-            "--committee-epoch" => {
-                committee_epoch = next_flag_value(args, &mut i)?
-                    .parse()
-                    .map_err(|_| "invalid --committee-epoch".to_string())?
-            }
-            "--ticket-digest" => hex_into(&next_flag_value(args, &mut i)?, &mut ticket_digest)?,
-            "--vote-type" => {
-                let t = next_flag_value(args, &mut i)?;
-                vote_type = match t.to_ascii_lowercase().as_str() {
-                    "precommit" | "0" => FinalityVoteType::Precommit,
-                    "commit" | "1" => FinalityVoteType::Commit,
-                    "checkpoint" | "2" => FinalityVoteType::Checkpoint,
-                    other => return Err(format!("invalid --vote-type {other}")),
-                };
-            }
-            "--secret-hex" => {
-                let mut sk = [0u8; 32];
-                hex_into(&next_flag_value(args, &mut i)?, &mut sk)?;
-                secret = Some(sk);
-            }
-            // Phase 21I: loopback-submit flags are handled by the command wrapper;
-            // accept (and skip) them here so the JSON builder does not error.
-            "--submit" => {
-                i += 1;
-            }
-            "--node-rpc" => {
-                let _ = next_flag_value(args, &mut i)?;
-            }
-            other => return Err(format!("unknown flag {other}")),
-        }
-    }
-    let network_id = network_id.ok_or("--network-id required")?;
-    if network_id == 0 {
-        return Err("finality vote is mainnet-hard-off (network_id 0)".to_string());
-    }
-    let target_height = target_height.ok_or("--target-height required")?;
-    if !have_block {
-        return Err("--block-hash <64hex> required".to_string());
-    }
-    let sk_bytes = secret.ok_or("--secret-hex <64hex> required (testnet throwaway)")?;
-    let sk = k256::ecdsa::SigningKey::from_slice(&sk_bytes)
-        .map_err(|_| "invalid --secret-hex".to_string())?;
-    let vote = FinalityVoteV1::signed(
-        &sk,
-        network_id,
-        target_height,
-        block_hash,
-        parent_hash,
-        committee_epoch,
-        ticket_digest,
-        vote_type,
-    );
-    let vt_name = match vote.vote_type {
-        0 => "precommit",
-        1 => "commit",
-        _ => "checkpoint",
-    };
-    Ok(serde_json::json!({
-        "vote": {
-            "network_id": vote.network_id,
-            "target_height": vote.target_height,
-            "block_hash": hex::encode(vote.block_hash),
-            "parent_hash": hex::encode(vote.parent_hash),
-            "committee_epoch": vote.committee_epoch,
-            "member_pkh": hex::encode(vote.member_pkh),
-            "member_pubkey": hex::encode(vote.member_pubkey),
-            "ticket_digest": hex::encode(vote.ticket_digest),
-            "vote_type": vote.vote_type,
-            "vote_type_name": vt_name,
-        },
-        "vote_digest": hex::encode(vote.digest()),
-        "signature": hex::encode(vote.signature),
-        "wire_hex": hex::encode(vote.serialize()),
-        "note": "real secp256k1 finality vote; testnet/devnet only; the signing key is an input and is never echoed; POST wire_hex to the pool/operator finality collector",
-    }))
-}
-
-fn cmd_poawx_finality_vote(args: &[String]) -> Result<(), String> {
-    let v = finality_vote_json(args)?;
-    println!(
-        "{}",
-        serde_json::to_string(&v).map_err(|e| format!("serialize: {e}"))?
-    );
-    // Phase 21I: optional explicit loopback submit (default emit-only). Only POSTs
-    // when --submit is given; requires --node-rpc <loopback-url>. Testnet/devnet.
-    let mut submit = false;
-    let mut node_rpc: Option<String> = None;
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--submit" => {
-                submit = true;
-                i += 1;
-            }
-            "--node-rpc" => {
-                node_rpc = Some(next_flag_value(args, &mut i)?);
-            }
-            _ => {
-                i += 1;
-            }
-        }
-    }
-    if submit {
-        let url = node_rpc.ok_or("--submit requires --node-rpc <loopback-url>")?;
-        let wire = v["wire_hex"].as_str().ok_or("missing wire_hex")?;
-        let bytes = hex::decode(wire).map_err(|_| "bad wire_hex".to_string())?;
-        let client = reqwest::blocking::Client::builder()
-            .build()
-            .map_err(|e| format!("http client: {e}"))?;
-        let endpoint = format!("{}/poawx/finality-vote", url.trim_end_matches('/'));
-        match client.post(&endpoint).body(bytes).send() {
-            Ok(r) => eprintln!(
-                "[finality-vote] submitted to {} -> status {}",
-                endpoint,
-                r.status()
-            ),
-            Err(e) => eprintln!("[finality-vote] submit failed (best-effort): {e}"),
-        }
-    }
-    eprintln!("[finality-vote] real secp256k1 vote; testnet/devnet only; signing key input is never echoed.");
-    Ok(())
-}
-
-/// Phase 21F: parse the shared puzzle-challenge inputs (testable). No private key.
-/// Mainnet hard-off (network_id 0).
-fn parse_puzzle_challenge(
-    args: &[String],
-) -> Result<irium_node_rs::poawx_puzzle::PuzzleChallengeV1, String> {
-    use irium_node_rs::poawx_puzzle::{default_profile, PuzzleChallengeV1};
-    let mut network_id: Option<u8> = None;
-    let mut target_height: Option<u64> = None;
-    let mut role: Option<u8> = None;
-    let mut solver: Option<[u8; 20]> = None;
-    let mut ticket_digest = [0u8; 32];
-    let mut assignment_proof_digest = [0u8; 32];
-    let mut candidate_digest = [0u8; 32];
-    let mut seed = [0u8; 32];
-    let hex_into = |s: &str, out: &mut [u8]| -> Result<(), String> {
-        let b = hex::decode(s.trim()).map_err(|_| "invalid hex".to_string())?;
-        if b.len() != out.len() {
-            return Err(format!("expected {} bytes", out.len()));
-        }
-        out.copy_from_slice(&b);
-        Ok(())
-    };
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--network-id" => {
-                network_id = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --network-id".to_string())?,
-                )
-            }
-            "--target-height" => {
-                target_height = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --target-height".to_string())?,
-                )
-            }
-            "--role" => {
-                let r = next_flag_value(args, &mut i)?;
-                role = Some(match r.to_ascii_lowercase().as_str() {
-                    "compute" | "1" => irium_node_rs::poawx::ROLE_COMPUTE_CONTRIBUTOR,
-                    "verify" | "2" => irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR,
-                    "support" | "3" => irium_node_rs::poawx::ROLE_SUPPORT_CONTRIBUTOR,
-                    other => return Err(format!("invalid --role {other}")),
-                });
-            }
-            "--solver" => solver = Some(resolve_fee_pkh_arg(&next_flag_value(args, &mut i)?)?),
-            "--ticket-digest" => hex_into(&next_flag_value(args, &mut i)?, &mut ticket_digest)?,
-            "--assignment-proof-digest" => hex_into(
-                &next_flag_value(args, &mut i)?,
-                &mut assignment_proof_digest,
-            )?,
-            "--candidate-digest" => {
-                hex_into(&next_flag_value(args, &mut i)?, &mut candidate_digest)?
-            }
-            "--seed" | "--prev-hash" => hex_into(&next_flag_value(args, &mut i)?, &mut seed)?,
-            other => return Err(format!("unknown flag {other}")),
-        }
-    }
-    let network_id = network_id.ok_or("--network-id required")?;
-    if network_id == 0 {
-        return Err("puzzle work is mainnet-hard-off (network_id 0)".to_string());
-    }
-    let target_height = target_height.ok_or("--target-height required")?;
-    let role = role.ok_or("--role required")?;
-    let solver = solver.ok_or("--solver <addr|40hex> required")?;
-    Ok(PuzzleChallengeV1::build(
-        network_id,
-        target_height,
-        role,
-        solver,
-        ticket_digest,
-        assignment_proof_digest,
-        candidate_digest,
-        seed,
-        default_profile(),
-    ))
-}
-
-fn puzzle_mode_name(m: irium_node_rs::poawx_puzzle::PuzzleMode) -> &'static str {
-    use irium_node_rs::poawx_puzzle::PuzzleMode::*;
-    match m {
-        Sha256dAnchor => "sha256d_anchor",
-        RandomMemory => "random_memory",
-        ParallelCompute => "parallel_compute",
-        VerificationWork => "verification_work",
-        FinalityWorkPlaceholder => "finality_work_placeholder",
-    }
-}
-
-fn puzzle_challenge_json(args: &[String]) -> Result<serde_json::Value, String> {
-    let c = parse_puzzle_challenge(args)?;
-    Ok(serde_json::json!({
-        "challenge": {
-            "network_id": c.network_id,
-            "target_height": c.target_height,
-            "role_id": c.role_id,
-            "solver_pkh": hex::encode(c.solver_pkh),
-            "ticket_digest": hex::encode(c.ticket_digest),
-            "assignment_proof_digest": hex::encode(c.assignment_proof_digest),
-            "candidate_digest": hex::encode(c.candidate_digest),
-            "seed": hex::encode(c.seed),
-            "mode": c.mode.id(),
-            "mode_name": puzzle_mode_name(c.mode),
-            "profile": {
-                "anchor_bits": c.profile.anchor_bits,
-                "mem_words": c.profile.mem_words,
-                "lanes": c.profile.lanes,
-                "iterations": c.profile.iterations,
-            },
-        },
-        "challenge_digest": hex::encode(c.challenge_digest),
-        "note": "assigned-work puzzle (NOT chain PoW); testnet/devnet only; no signing key needed",
-    }))
-}
-
-fn puzzle_solve_json(args: &[String]) -> Result<serde_json::Value, String> {
-    use irium_node_rs::poawx_puzzle::{solve_dev, verify_solution};
-    let c = parse_puzzle_challenge(args)?;
-    let sol = solve_dev(&c).ok_or("no solution found within bounded grind".to_string())?;
-    let valid = verify_solution(&c, &sol).is_valid();
-    Ok(serde_json::json!({
-        "mode": sol.mode,
-        "mode_name": puzzle_mode_name(c.mode),
-        "nonce": sol.nonce,
-        "proof_digest": hex::encode(sol.proof_digest),
-        "wire_hex": hex::encode(sol.serialize()),
-        "challenge_digest": hex::encode(c.challenge_digest),
-        "valid": valid,
-        "note": "assigned-work solution (NOT chain PoW); testnet/devnet only; no signing key needed",
-    }))
-}
-
-fn cmd_poawx_puzzle_challenge(args: &[String]) -> Result<(), String> {
-    let v = puzzle_challenge_json(args)?;
-    println!(
-        "{}",
-        serde_json::to_string(&v).map_err(|e| format!("serialize: {e}"))?
-    );
-    eprintln!("[puzzle-challenge] assigned-work puzzle (NOT chain PoW); testnet/devnet only; no private key.");
-    Ok(())
-}
-
-fn cmd_poawx_puzzle_solve(args: &[String]) -> Result<(), String> {
-    let v = puzzle_solve_json(args)?;
-    println!(
-        "{}",
-        serde_json::to_string(&v).map_err(|e| format!("serialize: {e}"))?
-    );
-    eprintln!("[puzzle-solve] assigned-work solution (NOT chain PoW); testnet/devnet only; no private key.");
-    Ok(())
-}
-
-/// Phase 21E: build the candidate-admission JSON (+ wire hex). Pure + testable;
-/// no private key, no seed phrase. Mainnet hard-off (network_id 0).
-fn candidate_admission_json(args: &[String]) -> Result<serde_json::Value, String> {
-    use irium_node_rs::poawx_admission::CandidateAdmissionV1;
-    use irium_node_rs::poawx_candidate::{AssignmentProofV2, RoleCandidate};
-    use irium_node_rs::poawx_dominance::DOMINANCE_BASE_WORK_SCORE;
-    let mut network_id: Option<u8> = None;
-    let mut target_height: Option<u64> = None;
-    let mut role: Option<u8> = None;
-    let mut solver: Option<[u8; 20]> = None;
-    let mut apk: [u8; 33] = [0x02u8; 33];
-    let mut ticket_digest: [u8; 32] = [0u8; 32];
-    let mut seed: [u8; 32] = [0u8; 32];
-    let mut role_claim_digest: [u8; 32] = [0u8; 32];
-    let mut penalty_status: u8 = 0;
-    let mut dominance_weight: u64 = DOMINANCE_BASE_WORK_SCORE;
-    let mut secret: Option<[u8; 32]> = None;
-    let hex_into = |s: &str, out: &mut [u8]| -> Result<(), String> {
-        let b = hex::decode(s.trim()).map_err(|_| "invalid hex".to_string())?;
-        if b.len() != out.len() {
-            return Err(format!("expected {} bytes", out.len()));
-        }
-        out.copy_from_slice(&b);
-        Ok(())
-    };
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--network-id" => {
-                network_id = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --network-id".to_string())?,
-                )
-            }
-            "--target-height" => {
-                target_height = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --target-height".to_string())?,
-                )
-            }
-            "--role" => {
-                let r = next_flag_value(args, &mut i)?;
-                role = Some(match r.to_ascii_lowercase().as_str() {
-                    "compute" | "1" => irium_node_rs::poawx::ROLE_COMPUTE_CONTRIBUTOR,
-                    "verify" | "2" => irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR,
-                    "support" | "3" => irium_node_rs::poawx::ROLE_SUPPORT_CONTRIBUTOR,
-                    other => return Err(format!("invalid --role {other}")),
-                });
-            }
-            "--solver" => solver = Some(resolve_fee_pkh_arg(&next_flag_value(args, &mut i)?)?),
-            "--assignment-pubkey" => hex_into(&next_flag_value(args, &mut i)?, &mut apk)?,
-            "--ticket-digest" => hex_into(&next_flag_value(args, &mut i)?, &mut ticket_digest)?,
-            "--seed" | "--prev-hash" => hex_into(&next_flag_value(args, &mut i)?, &mut seed)?,
-            "--role-claim-digest" => {
-                hex_into(&next_flag_value(args, &mut i)?, &mut role_claim_digest)?
-            }
-            "--penalty-status" => {
-                penalty_status = next_flag_value(args, &mut i)?
-                    .parse()
-                    .map_err(|_| "invalid --penalty-status".to_string())?
-            }
-            "--dominance-weight" => {
-                dominance_weight = next_flag_value(args, &mut i)?
-                    .parse()
-                    .map_err(|_| "invalid --dominance-weight".to_string())?
-            }
-            "--secret-hex" => {
-                let mut sk = [0u8; 32];
-                hex_into(&next_flag_value(args, &mut i)?, &mut sk)?;
-                secret = Some(sk);
-            }
-            // Phase 22E: loopback-submit flags handled by the command wrapper;
-            // accept + skip here so the JSON builder does not error.
-            "--submit" => {
-                i += 1;
-            }
-            "--node-rpc" => {
-                let _ = next_flag_value(args, &mut i)?;
-            }
-            other => return Err(format!("unknown flag {other}")),
-        }
-    }
-    let network_id = network_id.ok_or("--network-id required")?;
-    if network_id == 0 {
-        return Err("candidate admission is mainnet-hard-off (network_id 0)".to_string());
-    }
-    let target_height = target_height.ok_or("--target-height required")?;
-    let role = role.ok_or("--role required")?;
-    let solver = solver.ok_or("--solver <addr|40hex> required")?;
-    if irium_node_rs::poawx_penalty::PenaltyStatus::from_id(penalty_status).is_none() {
-        return Err("invalid --penalty-status (0..=4)".to_string());
-    }
-    // Phase 22E: when --secret-hex is given, produce a true-VRF AssignmentProofV2
-    // (secret is input-only, never echoed) and bind it into the admission; the
-    // candidate's assignment_public_key + digest come from the VRF proof. Otherwise
-    // emit the V1 placeholder admission (backward compatible).
-    let v2 = match secret {
-        Some(sk) => Some(AssignmentProofV2::prove(
-            &sk,
-            network_id,
-            target_height,
-            role,
-            solver,
-            ticket_digest,
-            seed,
-        )?),
-        None => None,
-    };
-    let (candidate, adm) = match &v2 {
-        Some(p) => {
-            let c = RoleCandidate::from_assignment_v2(
-                p,
-                penalty_status,
-                dominance_weight,
-                role_claim_digest,
-            );
-            let a = CandidateAdmissionV1::new_with_v2(
-                network_id,
-                target_height,
-                seed,
-                c.clone(),
-                Some(p.clone()),
-            );
-            (c, a)
-        }
-        None => {
-            let c = RoleCandidate::build(
-                network_id,
-                target_height,
-                &seed,
-                role,
-                solver,
-                apk,
-                ticket_digest,
-                penalty_status,
-                dominance_weight,
-                role_claim_digest,
-            );
-            let a = CandidateAdmissionV1::new(network_id, target_height, seed, c.clone());
-            (c, a)
-        }
-    };
-    let v2_json = v2.as_ref().map(|p| {
-        serde_json::json!({
-            "vrf_output": hex::encode(p.vrf_output),
-            "vrf_proof": hex::encode(p.vrf_proof),
-            "assignment_proof_digest": hex::encode(p.digest),
-            "assignment_score": p.score(),
-        })
-    });
-    Ok(serde_json::json!({
-        "admission": {
-            "network_id": adm.network_id,
-            "target_height": adm.target_height,
-            "seed": hex::encode(adm.seed),
-            "candidate": {
-                "role_id": candidate.role_id,
-                "solver_pkh": hex::encode(candidate.solver_pkh),
-                "assignment_public_key": hex::encode(candidate.assignment_public_key),
-                "ticket_digest": hex::encode(candidate.ticket_digest),
-                "penalty_status": candidate.penalty_status,
-                "assignment_proof_digest": hex::encode(candidate.assignment_proof_digest),
-                "dominance_weight": candidate.dominance_weight,
-                "penalty_weight": candidate.penalty_weight,
-                "effective_score": candidate.effective_score,
-                "role_claim_digest": hex::encode(candidate.role_claim_digest),
-            },
-            "assignment_proof_v2": v2_json,
-        },
-        "admission_digest": hex::encode(adm.digest),
-        "true_vrf": v2.is_some(),
-        "wire_hex": hex::encode(adm.serialize()),
-        "note": "testnet/devnet only; provide a VRF key to bind a true-VRF AssignmentProofV2 (the key is input-only and never echoed); POST wire_hex to /poawx/candidate-admission",
-    }))
-}
-
-/// Phase 21E: emit a PoAW-X candidate admission (+ wire hex to POST to the node).
-/// No private key, testnet/devnet only, mainnet hard-off.
-fn cmd_poawx_candidate_admission_emit(args: &[String]) -> Result<(), String> {
-    let v = candidate_admission_json(args)?;
-    println!(
-        "{}",
-        serde_json::to_string(&v).map_err(|e| format!("serialize: {e}"))?
-    );
-    // Phase 22E: optional loopback submit (default emit-only). Only POSTs when
-    // --submit is given; requires --node-rpc <loopback-url>. Testnet/devnet.
-    let mut submit = false;
-    let mut node_rpc: Option<String> = None;
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--submit" => {
-                submit = true;
-                i += 1;
-            }
-            "--node-rpc" => {
-                node_rpc = Some(next_flag_value(args, &mut i)?);
-            }
-            _ => {
-                i += 1;
-            }
-        }
-    }
-    if submit {
-        let url = node_rpc.ok_or("--submit requires --node-rpc <loopback-url>")?;
-        let wire = v["wire_hex"].as_str().ok_or("missing wire_hex")?;
-        let bytes = hex::decode(wire).map_err(|_| "bad wire_hex".to_string())?;
-        let client = reqwest::blocking::Client::builder()
-            .build()
-            .map_err(|e| format!("http client: {e}"))?;
-        let endpoint = format!("{}/poawx/candidate-admission", url.trim_end_matches('/'));
-        match client.post(&endpoint).body(bytes).send() {
-            Ok(r) => eprintln!(
-                "[candidate-admission] submitted to {} -> status {}",
-                endpoint,
-                r.status()
-            ),
-            Err(e) => eprintln!("[candidate-admission] submit failed (best-effort): {e}"),
-        }
-    }
-    eprintln!("[candidate-admission] testnet/devnet only; with --secret-hex a true-VRF proof is bound; the VRF secret is input-only and never echoed; POST wire_hex to the node's loopback /poawx/candidate-admission.");
-    Ok(())
-}
-
-/// Phase 21D: build the assignment-proof JSON (VRF-style placeholder). Pure +
-/// testable; no private key, no seed phrase. Mainnet hard-off (network_id 0).
-fn assignment_proof_json(args: &[String]) -> Result<serde_json::Value, String> {
-    use irium_node_rs::poawx_candidate::AssignmentProofV1;
-    let mut network_id: Option<u8> = None;
-    let mut target_height: Option<u64> = None;
-    let mut role: Option<u8> = None;
-    let mut solver: Option<[u8; 20]> = None;
-    let mut apk: [u8; 33] = [0x02u8; 33];
-    let mut ticket_digest: [u8; 32] = [0u8; 32];
-    let mut seed: [u8; 32] = [0u8; 32];
-    let hex_into = |s: &str, out: &mut [u8]| -> Result<(), String> {
-        let b = hex::decode(s.trim()).map_err(|_| "invalid hex".to_string())?;
-        if b.len() != out.len() {
-            return Err(format!("expected {} bytes", out.len()));
-        }
-        out.copy_from_slice(&b);
-        Ok(())
-    };
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--network-id" => {
-                network_id = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --network-id".to_string())?,
-                )
-            }
-            "--target-height" => {
-                target_height = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --target-height".to_string())?,
-                )
-            }
-            "--role" => {
-                let r = next_flag_value(args, &mut i)?;
-                role = Some(match r.to_ascii_lowercase().as_str() {
-                    "compute" | "1" => irium_node_rs::poawx::ROLE_COMPUTE_CONTRIBUTOR,
-                    "verify" | "2" => irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR,
-                    "support" | "3" => irium_node_rs::poawx::ROLE_SUPPORT_CONTRIBUTOR,
-                    other => return Err(format!("invalid --role {other}")),
-                });
-            }
-            "--solver" => solver = Some(resolve_fee_pkh_arg(&next_flag_value(args, &mut i)?)?),
-            "--assignment-pubkey" => hex_into(&next_flag_value(args, &mut i)?, &mut apk)?,
-            "--ticket-digest" => hex_into(&next_flag_value(args, &mut i)?, &mut ticket_digest)?,
-            "--seed" | "--prev-hash" => hex_into(&next_flag_value(args, &mut i)?, &mut seed)?,
-            other => return Err(format!("unknown flag {other}")),
-        }
-    }
-    let network_id = network_id.ok_or("--network-id required")?;
-    if network_id == 0 {
-        return Err("assignment proof is mainnet-hard-off (network_id 0)".to_string());
-    }
-    let target_height = target_height.ok_or("--target-height required")?;
-    let role = role.ok_or("--role required")?;
-    let solver = solver.ok_or("--solver <addr|40hex> required")?;
-    let proof = AssignmentProofV1::new(
-        network_id,
-        target_height,
-        role,
-        solver,
-        apk,
-        ticket_digest,
-        seed,
-    );
-    Ok(serde_json::json!({
-        "assignment_proof": {
-            "network_id": proof.network_id,
-            "target_height": proof.target_height,
-            "role_id": proof.role_id,
-            "solver_pkh": hex::encode(proof.solver_pkh),
-            "assignment_public_key": hex::encode(proof.assignment_public_key),
-            "ticket_digest": hex::encode(proof.ticket_digest),
-            "seed": hex::encode(proof.seed),
-        },
-        "assignment_score": proof.score(),
-        "assignment_proof_digest": hex::encode(proof.proof_digest),
-        "note": "VRF-style placeholder (not final cryptographic VRF); testnet/devnet only; no signing key needed",
-    }))
-}
-
-/// Phase 21D: emit a PoAW-X assignment proof (VRF-style placeholder). No private
-/// key, testnet/devnet only, mainnet hard-off.
-/// Phase 22D: emit a true secp256k1 RFC 9381 ECVRF AssignmentProofV2. The VRF
-/// secret is an INPUT (--secret-hex, testnet throwaway) and is NEVER echoed; the
-/// output carries only the public key, VRF output, proof, digest, score, and wire.
-/// Mainnet hard-off (network_id 0). Emit-only (operator/pool attaches to the gated
-/// Phase 20 ext; the node re-verifies).
-fn assignment_proof_v2_json(args: &[String]) -> Result<serde_json::Value, String> {
-    use irium_node_rs::poawx_candidate::AssignmentProofV2;
-    let mut network_id: Option<u8> = None;
-    let mut target_height: Option<u64> = None;
-    let mut role: Option<u8> = None;
-    let mut solver: Option<[u8; 20]> = None;
-    let mut ticket_digest = [0u8; 32];
-    let mut seed = [0u8; 32];
-    let mut secret: Option<[u8; 32]> = None;
-    let hex_into = |s: &str, out: &mut [u8]| -> Result<(), String> {
-        let b = hex::decode(s.trim()).map_err(|_| "invalid hex".to_string())?;
-        if b.len() != out.len() {
-            return Err(format!("expected {} bytes", out.len()));
-        }
-        out.copy_from_slice(&b);
-        Ok(())
-    };
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--network-id" => {
-                network_id = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --network-id".to_string())?,
-                )
-            }
-            "--target-height" => {
-                target_height = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --target-height".to_string())?,
-                )
-            }
-            "--role" => {
-                let r = next_flag_value(args, &mut i)?;
-                role = Some(match r.to_ascii_lowercase().as_str() {
-                    "compute" | "1" => irium_node_rs::poawx::ROLE_COMPUTE_CONTRIBUTOR,
-                    "verify" | "2" => irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR,
-                    "support" | "3" => irium_node_rs::poawx::ROLE_SUPPORT_CONTRIBUTOR,
-                    other => return Err(format!("invalid --role {other}")),
-                });
-            }
-            "--solver" => solver = Some(resolve_fee_pkh_arg(&next_flag_value(args, &mut i)?)?),
-            "--ticket-digest" => hex_into(&next_flag_value(args, &mut i)?, &mut ticket_digest)?,
-            "--seed" | "--prev-hash" => hex_into(&next_flag_value(args, &mut i)?, &mut seed)?,
-            "--secret-hex" => {
-                let mut sk = [0u8; 32];
-                hex_into(&next_flag_value(args, &mut i)?, &mut sk)?;
-                secret = Some(sk);
-            }
-            other => return Err(format!("unknown flag {other}")),
-        }
-    }
-    let network_id = network_id.ok_or("--network-id required")?;
-    if network_id == 0 {
-        return Err("assignment proof v2 is mainnet-hard-off (network_id 0)".to_string());
-    }
-    let target_height = target_height.ok_or("--target-height required")?;
-    let role = role.ok_or("--role required")?;
-    let solver = solver.ok_or("--solver <addr|40hex> required")?;
-    let secret = secret.ok_or("--secret-hex <64hex> required (testnet throwaway)")?;
-    let proof = AssignmentProofV2::prove(
-        &secret,
-        network_id,
-        target_height,
-        role,
-        solver,
-        ticket_digest,
-        seed,
-    )?;
-    // Self-verify before emitting (never emit an invalid proof).
-    proof.validate(network_id, target_height)?;
-    Ok(serde_json::json!({
-        "version": proof.version,
-        "network_id": proof.network_id,
-        "target_height": proof.target_height,
-        "role_id": proof.role_id,
-        "solver_pkh": hex::encode(proof.solver_pkh),
-        "assignment_public_key": hex::encode(proof.assignment_public_key),
-        "ticket_digest": hex::encode(proof.ticket_digest),
-        "seed": hex::encode(proof.seed),
-        "vrf_output": hex::encode(proof.vrf_output),
-        "vrf_proof": hex::encode(proof.vrf_proof),
-        "assignment_proof_digest": hex::encode(proof.digest),
-        "assignment_score": proof.score(),
-        "wire_hex": hex::encode(proof.serialize()),
-        "note": "true secp256k1 RFC 9381 ECVRF assignment proof; testnet/devnet only; the VRF secret is an input and is never echoed; operator/pool attaches the AVR2 wire to the gated Phase 20 ext and the node re-verifies",
-    }))
-}
-
-fn cmd_poawx_assignment_v2_emit(args: &[String]) -> Result<(), String> {
-    let v = assignment_proof_v2_json(args)?;
-    println!(
-        "{}",
-        serde_json::to_string(&v).map_err(|e| format!("serialize: {e}"))?
-    );
-    eprintln!("[assignment-proof-v2] real secp256k1 ECVRF; testnet/devnet only; the VRF secret is input-only and never echoed.");
-    Ok(())
-}
-
-fn cmd_poawx_assignment_emit(args: &[String]) -> Result<(), String> {
-    let v = assignment_proof_json(args)?;
-    println!(
-        "{}",
-        serde_json::to_string(&v).map_err(|e| format!("serialize: {e}"))?
-    );
-    eprintln!("[assignment-proof] VRF-style placeholder, no private key; operator/pool attaches it to the gated Phase 20 candidate set (testnet/devnet only).");
-    Ok(())
-}
-
-fn cmd_poawx_ticket_emit(args: &[String]) -> Result<(), String> {
-    use irium_node_rs::poawx_ticket::TicketProof;
-    let mut network_id: Option<u8> = None;
-    let mut target_height: Option<u64> = None;
-    let mut role: Option<u8> = None;
-    let mut solver: Option<[u8; 20]> = None;
-    let mut epoch: u64 = 0;
-    let mut expiry_height: Option<u64> = None;
-    let mut apk: [u8; 33] = [0x02u8; 33];
-    let mut nonce: [u8; 32] = [0u8; 32];
-    let mut prev_hash: [u8; 32] = [0u8; 32];
-    let mut penalty_status: u8 = 0;
-    let hex_into = |s: &str, out: &mut [u8]| -> Result<(), String> {
-        let b = hex::decode(s.trim()).map_err(|_| "invalid hex".to_string())?;
-        if b.len() != out.len() {
-            return Err(format!("expected {} bytes", out.len()));
-        }
-        out.copy_from_slice(&b);
-        Ok(())
-    };
-    let mut i = 1usize;
-    while i < args.len() {
-        match args[i].as_str() {
-            "--network-id" => {
-                network_id = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --network-id".to_string())?,
-                )
-            }
-            "--target-height" => {
-                target_height = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --target-height".to_string())?,
-                )
-            }
-            "--role" => {
-                let r = next_flag_value(args, &mut i)?;
-                role = Some(match r.to_ascii_lowercase().as_str() {
-                    "compute" | "1" => irium_node_rs::poawx::ROLE_COMPUTE_CONTRIBUTOR,
-                    "verify" | "2" => irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR,
-                    "support" | "3" => irium_node_rs::poawx::ROLE_SUPPORT_CONTRIBUTOR,
-                    other => return Err(format!("invalid --role {other}")),
-                });
-            }
-            "--solver" => solver = Some(resolve_fee_pkh_arg(&next_flag_value(args, &mut i)?)?),
-            "--epoch" => {
-                epoch = next_flag_value(args, &mut i)?
-                    .parse()
-                    .map_err(|_| "invalid --epoch".to_string())?
-            }
-            "--expiry-height" => {
-                expiry_height = Some(
-                    next_flag_value(args, &mut i)?
-                        .parse()
-                        .map_err(|_| "invalid --expiry-height".to_string())?,
-                )
-            }
-            "--assignment-pubkey" => hex_into(&next_flag_value(args, &mut i)?, &mut apk)?,
-            "--sybil-nonce" => hex_into(&next_flag_value(args, &mut i)?, &mut nonce)?,
-            "--prev-hash" => hex_into(&next_flag_value(args, &mut i)?, &mut prev_hash)?,
-            "--penalty-status" => {
-                penalty_status = next_flag_value(args, &mut i)?
-                    .parse()
-                    .map_err(|_| "invalid --penalty-status".to_string())?
-            }
-            other => return Err(format!("unknown flag {other}")),
-        }
-    }
-    let network_id = network_id.ok_or("--network-id required")?;
-    if network_id == 0 {
-        return Err("ticket proof is mainnet-hard-off (network_id 0)".to_string());
-    }
-    let target_height = target_height.ok_or("--target-height required")?;
-    let role = role.ok_or("--role required")?;
-    let solver = solver.ok_or("--solver <addr|40hex> required")?;
-    let expiry_height = expiry_height.ok_or("--expiry-height required")?;
-    if irium_node_rs::poawx_penalty::PenaltyStatus::from_id(penalty_status).is_none() {
-        return Err("invalid --penalty-status (0..=4)".to_string());
-    }
-    let proof = TicketProof::new(
-        network_id,
-        target_height,
-        prev_hash,
-        role,
-        solver,
-        epoch,
-        expiry_height,
-        apk,
-        nonce,
-        penalty_status,
-    );
-    let body = serde_json::json!({
-        "network_id": proof.network_id,
-        "target_height": proof.target_height,
-        "role_id": proof.role_id,
-        "miner_pkh": hex::encode(proof.miner_pkh),
-        "epoch": proof.epoch,
-        "expiry_height": proof.expiry_height,
-        "assignment_public_key": hex::encode(proof.assignment_public_key),
-        "sybil_work_nonce": hex::encode(proof.sybil_work_nonce),
-        "sybil_work_digest": hex::encode(proof.sybil_work_digest),
-        "penalty_status": proof.penalty_status,
-        "ticket_digest": hex::encode(proof.ticket_digest),
-    });
-    println!(
-        "{}",
-        serde_json::to_string(&body).map_err(|e| format!("serialize: {e}"))?
-    );
-    eprintln!("[ticket-proof] target_height {target_height} role {role}; no private key. Operator attaches it to the gated Phase 20 ext (testnet/devnet only).");
-    Ok(())
-}
-
-fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
-    use rand_core::{OsRng, RngCore};
-    let a = parse_poawx_register_args(args)?;
-
-    // ── Offline path: sign locally, print the POSTable payload, no network. ──
-    // For a trusted external miner pilot: the operator shares the public pool
-    // identity out-of-band; the miner signs locally (private key never leaves
-    // the wallet) and returns ONLY the printed JSON, which the operator submits
-    // to the loopback-only /poawx/delegation endpoint. No GET, no POST, no SSH.
-    if a.emit_only {
-        let (pool_pubkey, network_id, addr, worker, expiry, fee_bps, fee_pkh) =
-            resolve_emit_only_args(&a)?;
-        let (_key, signing_key) = signer_material_from_wallet(&addr)?;
-        let mut nonce = [0u8; 32];
-        OsRng.fill_bytes(&mut nonce);
-        let d = build_signed_delegation(
-            &signing_key,
-            pool_pubkey,
-            network_id,
-            &worker,
-            expiry,
-            fee_bps,
-            fee_pkh,
-            nonce,
-        )?;
-        d.verify_signature()
-            .map_err(|e| format!("self-verify failed before emit: {e}"))?;
-        let body = delegation_post_body(&d, &worker);
-        // stdout carries ONLY the JSON payload so `> poawx-delegation.json`
-        // produces a file usable directly with `curl --data @`. All human
-        // notes go to stderr. The private key is never printed or logged.
-        let line = serde_json::to_string(&body)
-            .map_err(|e| format!("serialize delegation payload: {e}"))?;
-        println!("{line}");
-        let fee_note = if fee_bps > 0 {
-            format!(
-                "third-party fee_bps {} fee_pkh {}",
-                fee_bps,
-                hex::encode(fee_pkh)
-            )
-        } else {
-            "official fee_bps 0".to_string()
-        };
-        eprintln!(
-            "[emit-only] signed delegation for miner_pkh {} (worker {worker}, expiry {expiry}, {fee_note}); no network used. Send the JSON above to the operator to POST to the loopback-only /poawx/delegation endpoint.",
-            hex::encode(d.miner_pkh())
-        );
-        return Ok(());
-    }
-
-    // ── Online path: GET pool-identity, sign in memory, POST. ──
-    let (pool, addr, worker, fee_bps, fee_pkh, expiry) = resolve_online_args(&a)?;
-
-    let base = pool.trim_end_matches('/').to_string();
-    let client = rpc_client(&base)?;
-
-    // 1. GET pool identity.
-    let id: serde_json::Value = client
-        .get(format!("{base}/poawx/pool-identity"))
-        .send()
-        .map_err(|e| format!("GET pool-identity: {e}"))
-        .and_then(|r| {
-            if r.status().is_success() {
-                r.json::<serde_json::Value>()
-                    .map_err(|e| format!("decode pool-identity: {e}"))
-            } else {
-                Err(format!("pool-identity returned HTTP {}", r.status()))
-            }
-        })?;
-    let pool_pubkey_hex = id
-        .get("pool_pubkey")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| "pool-identity missing pool_pubkey".to_string())?;
-    let network_id = id
-        .get("network_id")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| "pool-identity missing network_id".to_string())? as u8;
-    let pool_fee = id.get("fee_bps").and_then(|v| v.as_u64()).unwrap_or(0);
-    if fee_bps == 0 {
-        // Official: refuse if the pool advertises any fee (opt in explicitly with
-        // --third-party-pool --fee-bps --fee-pkh).
-        if pool_fee != 0 {
-            return Err(format!(
-                "pool reports non-zero fee_bps={pool_fee}; refusing (opt in with --third-party-pool --fee-bps <1..200> --fee-pkh <addr>)"
-            ));
-        }
-    } else {
-        // Third-party: the pool MUST advertise the exact terms the miner signs, so
-        // the registry (which checks delegation==identity) accepts them.
-        if pool_fee != fee_bps as u64 {
-            return Err(format!(
-                "pool advertises fee_bps={pool_fee} but --fee-bps={fee_bps}; terms must match"
-            ));
-        }
-        let pool_fee_pkh = id
-            .get("fee_pkh")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "pool-identity missing fee_pkh for third-party fee".to_string())?;
-        let pool_fee_pkh_bytes =
-            hex::decode(pool_fee_pkh).map_err(|_| "pool fee_pkh invalid hex".to_string())?;
-        if pool_fee_pkh_bytes.as_slice() != fee_pkh.as_slice() {
-            return Err("pool fee_pkh does not match --fee-pkh; terms must match".to_string());
-        }
-    }
-    let pool_pubkey_bytes =
-        hex::decode(pool_pubkey_hex).map_err(|_| "pool_pubkey invalid hex".to_string())?;
-    if pool_pubkey_bytes.len() != 33 {
-        return Err("pool_pubkey must be 33 bytes".to_string());
-    }
-    let mut pool_pubkey = [0u8; 33];
-    pool_pubkey.copy_from_slice(&pool_pubkey_bytes);
-
-    // 2. Sign delegation with the wallet key (in memory only).
-    let (_key, signing_key) = signer_material_from_wallet(&addr)?;
-    let mut nonce = [0u8; 32];
-    OsRng.fill_bytes(&mut nonce);
-    let d = build_signed_delegation(
-        &signing_key,
-        pool_pubkey,
-        network_id,
-        &worker,
-        expiry,
-        fee_bps,
-        fee_pkh,
-        nonce,
-    )?;
-    d.verify_signature()
-        .map_err(|e| format!("self-verify failed before submit: {e}"))?;
-    if fee_bps > 0 {
-        eprintln!(
-            "[register] third-party fee terms: fee_bps {} fee_pkh {}",
-            fee_bps,
-            hex::encode(fee_pkh)
-        );
-    }
-    let miner_pkh_hex = hex::encode(d.miner_pkh());
-
-    // 3. POST the canonical 226-byte delegation hex.
-    let body = delegation_post_body(&d, &worker);
-    let resp = client
-        .post(format!("{base}/poawx/delegation"))
-        .json(&body)
-        .send()
-        .map_err(|e| format!("POST delegation: {e}"))?;
-    let status = resp.status();
-    let text = resp.text().unwrap_or_default();
-    if status.is_success() {
-        println!("delegation registered (miner_pkh {miner_pkh_hex}, worker {worker}, expiry {expiry}): {text}");
-        Ok(())
-    } else {
-        Err(format!("delegation rejected (HTTP {status}): {text}"))
-    }
-}
-
 fn sign_target_hash(
     target_type: AgreementSignatureTargetType,
     target_hash: String,
@@ -4974,10 +3432,7 @@ fn create_settlement_proof_signed(
         // non-empty proof_kind) is satisfied.
         typed_payload: if opts.proof_kind.is_some() || opts.attributes.is_some() {
             Some(TypedProofPayload {
-                proof_kind: opts
-                    .proof_kind
-                    .clone()
-                    .unwrap_or_else(|| opts.proof_type.clone()),
+                proof_kind: opts.proof_kind.clone().unwrap_or_else(|| opts.proof_type.clone()),
                 content_hash: None,
                 reference_id: opts.reference_id.clone(),
                 attributes: opts.attributes.clone(),
@@ -7320,7 +5775,8 @@ fn parse_proof_create_cli(args: &[String]) -> Result<ProofCreateCliOptions, Stri
     let mut proof_kind: Option<String> = None;
     let mut reference_id: Option<String> = None;
     // GROUP D: collect repeated --attribute key=value into a serde_json::Map.
-    let mut attr_map: serde_json::Map<String, serde_json::Value> = serde_json::Map::new();
+    let mut attr_map: serde_json::Map<String, serde_json::Value> =
+        serde_json::Map::new();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -7444,9 +5900,9 @@ fn parse_proof_create_cli(args: &[String]) -> Result<ProofCreateCliOptions, Stri
                     return Err("--attribute requires key=value".to_string());
                 }
                 let raw = &args[i];
-                let (k, v) = raw
-                    .split_once('=')
-                    .ok_or_else(|| format!("--attribute must be key=value, got: {raw}"))?;
+                let (k, v) = raw.split_once('=').ok_or_else(|| {
+                    format!("--attribute must be key=value, got: {raw}")
+                })?;
                 let key = k.trim().to_string();
                 if key.is_empty() {
                     return Err("--attribute key must not be empty".to_string());
@@ -8523,6 +6979,7 @@ fn bundle_chain_snapshot_from_audit(
     }
 }
 
+
 fn private_agreements_dir() -> PathBuf {
     if let Ok(p) = std::env::var("IRIUM_PRIVATE_AGREEMENTS_DIR") {
         return PathBuf::from(p);
@@ -8550,11 +7007,11 @@ fn load_private_agreement_by_hash(hash: &str) -> Result<AgreementObject, String>
 }
 
 fn ecies_encrypt_agreement(plaintext: &[u8], recipient_pubkey_hex: &str) -> Result<String, String> {
-    use aes_gcm::aead::{Aead, KeyInit};
-    use aes_gcm::{Aes256Gcm, Nonce as AesNonce};
     use k256::ecdh::diffie_hellman;
     use k256::PublicKey;
     use sha2::Digest as _;
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Nonce as AesNonce};
     let pubkey_bytes = hex::decode(recipient_pubkey_hex)
         .map_err(|_| "invalid recipient pubkey hex".to_string())?;
     let recipient_pk = PublicKey::from_sec1_bytes(&pubkey_bytes)
@@ -8567,8 +7024,7 @@ fn ecies_encrypt_agreement(plaintext: &[u8], recipient_pubkey_hex: &str) -> Resu
     OsRng.fill_bytes(&mut nonce_bytes);
     let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| e.to_string())?;
     let nonce = AesNonce::from(nonce_bytes);
-    let ciphertext_bytes = cipher
-        .encrypt(&nonce, plaintext)
+    let ciphertext_bytes = cipher.encrypt(&nonce, plaintext)
         .map_err(|_| "encryption failed".to_string())?;
     serde_json::to_string_pretty(&json!({
         "version": 1,
@@ -8576,45 +7032,42 @@ fn ecies_encrypt_agreement(plaintext: &[u8], recipient_pubkey_hex: &str) -> Resu
         "ephemeral_pubkey": eph_pubkey_hex,
         "nonce": hex::encode(nonce_bytes),
         "ciphertext": hex::encode(ciphertext_bytes),
-    }))
-    .map_err(|e| e.to_string())
+    })).map_err(|e| e.to_string())
 }
 
 fn ecies_decrypt_agreement(blob_json: &str, secret_key: &SecretKey) -> Result<Vec<u8>, String> {
-    use aes_gcm::aead::{Aead, KeyInit};
-    use aes_gcm::{Aes256Gcm, Nonce as AesNonce};
     use k256::ecdh::diffie_hellman;
     use k256::PublicKey;
     use sha2::Digest as _;
-    let val: serde_json::Value =
-        serde_json::from_str(blob_json).map_err(|_| "invalid blob JSON".to_string())?;
+    use aes_gcm::aead::{Aead, KeyInit};
+    use aes_gcm::{Aes256Gcm, Nonce as AesNonce};
+    let val: serde_json::Value = serde_json::from_str(blob_json)
+        .map_err(|_| "invalid blob JSON".to_string())?;
     let scheme = val["scheme"].as_str().unwrap_or("");
     if scheme != "ecies-secp256k1-aes256gcm" {
         return Err(format!("unsupported scheme: {}", scheme));
     }
-    let eph_hex = val["ephemeral_pubkey"]
-        .as_str()
+    let eph_hex = val["ephemeral_pubkey"].as_str()
         .ok_or_else(|| "missing ephemeral_pubkey".to_string())?;
-    let nonce_hex = val["nonce"]
-        .as_str()
+    let nonce_hex = val["nonce"].as_str()
         .ok_or_else(|| "missing nonce".to_string())?;
-    let ct_hex = val["ciphertext"]
-        .as_str()
+    let ct_hex = val["ciphertext"].as_str()
         .ok_or_else(|| "missing ciphertext".to_string())?;
-    let eph_bytes = hex::decode(eph_hex).map_err(|_| "invalid ephemeral_pubkey hex".to_string())?;
+    let eph_bytes = hex::decode(eph_hex)
+        .map_err(|_| "invalid ephemeral_pubkey hex".to_string())?;
     let eph_pk = PublicKey::from_sec1_bytes(&eph_bytes)
         .map_err(|_| "invalid ephemeral pubkey".to_string())?;
     let shared = diffie_hellman(secret_key.to_nonzero_scalar(), eph_pk.as_affine());
     let aes_key = sha2::Sha256::digest(shared.raw_secret_bytes());
-    let nonce_bytes = hex::decode(nonce_hex).map_err(|_| "invalid nonce hex".to_string())?;
-    let cipher_bytes = hex::decode(ct_hex).map_err(|_| "invalid ciphertext hex".to_string())?;
+    let nonce_bytes = hex::decode(nonce_hex)
+        .map_err(|_| "invalid nonce hex".to_string())?;
+    let cipher_bytes = hex::decode(ct_hex)
+        .map_err(|_| "invalid ciphertext hex".to_string())?;
     let cipher = Aes256Gcm::new_from_slice(&aes_key).map_err(|e| e.to_string())?;
-    let nonce_arr: [u8; 12] = nonce_bytes
-        .try_into()
+    let nonce_arr: [u8; 12] = nonce_bytes.try_into()
         .map_err(|_| "invalid nonce: must be 12 bytes".to_string())?;
     let nonce = AesNonce::from(nonce_arr);
-    cipher
-        .decrypt(&nonce, cipher_bytes.as_ref())
+    cipher.decrypt(&nonce, cipher_bytes.as_ref())
         .map_err(|_| "decryption failed (wrong key or corrupt blob)".to_string())
 }
 
@@ -9210,10 +7663,7 @@ fn handle_offer_create(args: &[String]) -> Result<(), String> {
             "--template-type" => {
                 let raw = parse_required_string_flag(args, &mut i, "--template-type")?;
                 let normalized = raw.trim().to_lowercase();
-                if !matches!(
-                    normalized.as_str(),
-                    "otc" | "freelance" | "milestone" | "deposit"
-                ) {
+                if !matches!(normalized.as_str(), "otc" | "freelance" | "milestone" | "deposit") {
                     return Err(format!(
                         "--template-type must be otc|freelance|milestone|deposit, got: {}",
                         raw
@@ -9223,9 +7673,9 @@ fn handle_offer_create(args: &[String]) -> Result<(), String> {
             }
             "--milestone-count" => {
                 let raw = parse_required_string_flag(args, &mut i, "--milestone-count")?;
-                let n = raw
-                    .parse::<u32>()
-                    .map_err(|_| "--milestone-count must be a positive integer".to_string())?;
+                let n = raw.parse::<u32>().map_err(|_| {
+                    "--milestone-count must be a positive integer".to_string()
+                })?;
                 if n == 0 {
                     return Err("--milestone-count must be at least 1".to_string());
                 }
@@ -9309,11 +7759,7 @@ fn handle_offer_create(args: &[String]) -> Result<(), String> {
         milestone_count: milestone_count.or({
             // Default 1 only when template requires milestones; leave None
             // for otc/freelance/deposit so the offer JSON stays compact.
-            if matches!(template_type.as_deref(), Some("milestone")) {
-                Some(1)
-            } else {
-                None
-            }
+            if matches!(template_type.as_deref(), Some("milestone")) { Some(1) } else { None }
         }),
         source: Some("local".to_string()),
         seller_pubkey,
@@ -9412,7 +7858,9 @@ fn handle_offer_list(args: &[String]) -> Result<(), String> {
         match sf.as_str() {
             "all" => {}
             "remote" => {
-                offers.retain(|o| o.source.as_deref().unwrap_or("").starts_with("remote:"));
+                offers.retain(|o| {
+                    o.source.as_deref().unwrap_or("").starts_with("remote:")
+                });
             }
             other => {
                 offers.retain(|o| o.source.as_deref().unwrap_or("local") == other);
@@ -9537,9 +7985,7 @@ fn handle_offer_list(args: &[String]) -> Result<(), String> {
             println!("(no offers found)");
             if load_feeds_config().map(|f| f.is_empty()).unwrap_or(false) {
                 println!();
-                println!(
-                    "tip  run `irium-wallet feed-bootstrap` to connect to the public marketplace"
-                );
+                println!("tip  run `irium-wallet feed-bootstrap` to connect to the public marketplace");
             }
         }
         for (idx, offer) in offers.iter().enumerate() {
@@ -9551,10 +7997,7 @@ fn handle_offer_list(args: &[String]) -> Result<(), String> {
             if let Some(ref pn) = offer.price_note {
                 println!("    note:     {}", pn);
             }
-            println!(
-                "    source:   {}",
-                offer.source.as_deref().unwrap_or("local")
-            );
+            println!("    source:   {}", offer.source.as_deref().unwrap_or("local"));
             println!("    status:   {}", offer.status);
             let fallback_rep;
             let rep = match rep_cache.get(&offer.seller_address) {
@@ -9913,8 +8356,7 @@ fn handle_offer_take(args: &[String]) -> Result<(), String> {
         if let Some(feed_url) = src.strip_prefix("remote:") {
             let client = reqwest::blocking::Client::builder()
                 .timeout(std::time::Duration::from_secs(5))
-                .build()
-                .ok();
+                .build().ok();
             if let Some(c) = client {
                 match c.get(feed_url).send() {
                     Ok(resp) if resp.status().is_success() => {
@@ -9924,16 +8366,20 @@ fn handle_offer_take(args: &[String]) -> Result<(), String> {
                                 .and_then(|v| v.as_array())
                                 .map(|arr| {
                                     arr.iter().any(|o| {
-                                        o.get("offer_id").and_then(|v| v.as_str())
+                                        o.get("offer_id")
+                                            .and_then(|v| v.as_str())
                                             == Some(offer_id.as_str())
-                                            && o.get("status").and_then(|v| v.as_str())
+                                            && o.get("status")
+                                                .and_then(|v| v.as_str())
                                                 == Some("open")
                                     })
                                 })
                                 .unwrap_or(false);
                             if !still_open {
-                                return Err("This offer has already been taken by another buyer."
-                                    .to_string());
+                                return Err(
+                                    "This offer has already been taken by another buyer."
+                                        .to_string(),
+                                );
                             }
                         }
                     }
@@ -9981,8 +8427,8 @@ fn handle_offer_take(args: &[String]) -> Result<(), String> {
         "freelance" => build_simple_settlement_agreement(
             agreement_id.clone(),
             now,
-            buyer_party,  // party_a / payer  = client (buyer)
-            seller_party, // party_b / payee  = contractor (seller)
+            buyer_party,    // party_a / payer  = client (buyer)
+            seller_party,   // party_b / payee  = contractor (seller)
             offer.amount_irm,
             None,
             offer.timeout_height,
@@ -9996,8 +8442,8 @@ fn handle_offer_take(args: &[String]) -> Result<(), String> {
         "deposit" => build_deposit_agreement(
             agreement_id.clone(),
             now,
-            buyer_party,  // payer  = depositor (buyer)
-            seller_party, // payee  = recipient (seller)
+            buyer_party,    // payer  = depositor (buyer)
+            seller_party,   // payee  = recipient (seller)
             offer.amount_irm,
             "Refundable deposit".to_string(),
             "Deposit refund returns to depositor on timeout".to_string(),
@@ -10256,10 +8702,7 @@ fn validate_offer_id(id: &str) -> Result<(), String> {
     if id.is_empty() {
         return Err("offer_id is missing or empty".to_string());
     }
-    if !id
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
+    if !id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
         return Err(format!(
             "offer_id contains invalid characters: '{}'; only a-z, A-Z, 0-9, hyphen, underscore are allowed",
             id
@@ -10414,6 +8857,7 @@ fn handle_offer_fetch(args: &[String]) -> Result<(), String> {
     import_offer_from_json(&json, json_mode)
 }
 
+
 // Returns Ok(true) if imported, Ok(false) if deduplicated, Err if invalid.
 fn import_single_offer_with_source(json: &str, source_tag: &str) -> Result<bool, String> {
     let mut offer: IrmOffer =
@@ -10470,7 +8914,8 @@ fn handle_offer_feed_export(args: &[String]) -> Result<(), String> {
         count: offer_values.len(),
         offers: offer_values,
     };
-    let json = serde_json::to_string_pretty(&feed).map_err(|e| format!("serialize feed: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(&feed).map_err(|e| format!("serialize feed: {e}"))?;
     if let Some(ref path) = out_path {
         std::fs::write(path, &json).map_err(|e| format!("write {path}: {e}"))?;
         eprintln!("written {}", path);
@@ -10591,8 +9036,8 @@ fn load_feeds_config() -> Result<Vec<String>, String> {
     if !path.exists() {
         return Ok(Vec::new());
     }
-    let data =
-        std::fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let data = std::fs::read_to_string(&path)
+        .map_err(|e| format!("read {}: {e}", path.display()))?;
     let v: serde_json::Value =
         serde_json::from_str(&data).map_err(|e| format!("invalid feeds.json: {e}"))?;
     let arr = v
@@ -10611,15 +9056,20 @@ fn load_feeds_config() -> Result<Vec<String>, String> {
 fn save_feeds_config(urls: &[String]) -> Result<(), String> {
     let path = feeds_config_path();
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| format!("create config dir: {e}"))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("create config dir: {e}"))?;
     }
     let doc = serde_json::json!({ "feeds": urls });
-    let json = serde_json::to_string_pretty(&doc).map_err(|e| format!("serialize feeds: {e}"))?;
-    std::fs::write(&path, &json).map_err(|e| format!("write {}: {e}", path.display()))?;
+    let json = serde_json::to_string_pretty(&doc)
+        .map_err(|e| format!("serialize feeds: {e}"))?;
+    std::fs::write(&path, &json)
+        .map_err(|e| format!("write {}: {e}", path.display()))?;
     Ok(())
 }
 
-fn validate_and_dedupe_sync_feeds(urls: &[String]) -> (Vec<String>, Vec<FeedFetchResult>) {
+fn validate_and_dedupe_sync_feeds(
+    urls: &[String],
+) -> (Vec<String>, Vec<FeedFetchResult>) {
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
     let mut valid: Vec<String> = Vec::new();
     let mut rejected: Vec<FeedFetchResult> = Vec::new();
@@ -10640,7 +9090,9 @@ fn validate_and_dedupe_sync_feeds(urls: &[String]) -> (Vec<String>, Vec<FeedFetc
                 imported: 0,
                 skipped: 0,
                 errors: 0,
-                fetch_error: Some("invalid URL: must start with http:// or https://".to_string()),
+                fetch_error: Some(
+                    "invalid URL: must start with http:// or https://".to_string(),
+                ),
             });
             continue;
         }
@@ -10818,8 +9270,10 @@ fn handle_offer_feed_sync(args: &[String]) -> Result<(), String> {
         return Ok(());
     }
     let (valid_urls, mut rejected) = validate_and_dedupe_sync_feeds(&raw_urls);
-    let mut results: Vec<FeedFetchResult> =
-        valid_urls.iter().map(|u| fetch_single_feed(u)).collect();
+    let mut results: Vec<FeedFetchResult> = valid_urls
+        .iter()
+        .map(|u| fetch_single_feed(u))
+        .collect();
     results.append(&mut rejected);
     print_feed_results(&results, json_mode);
     Ok(())
@@ -10830,10 +9284,7 @@ fn handle_offer_feed_discover(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--json" => { json_mode = true; i += 1; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
@@ -10844,9 +9295,7 @@ fn handle_offer_feed_discover(args: &[String]) -> Result<(), String> {
             .and_then(|data| serde_json::from_str::<serde_json::Value>(&data).ok())
             .and_then(|v| {
                 v.get("feeds").and_then(|f| f.as_array()).map(|arr| {
-                    arr.iter()
-                        .filter_map(|e| e.as_str().map(|s| s.to_string()))
-                        .collect()
+                    arr.iter().filter_map(|e| e.as_str().map(|s| s.to_string())).collect()
                 })
             })
             .unwrap_or_default()
@@ -10873,9 +9322,7 @@ fn handle_offer_feed_discover(args: &[String]) -> Result<(), String> {
             println!("  {}", url);
         }
         println!();
-        println!(
-            "tip  Run `irium-wallet offer-feed-sync` to fetch offers from all discovered feeds."
-        );
+        println!("tip  Run `irium-wallet offer-feed-sync` to fetch offers from all discovered feeds.");
     }
     Ok(())
 }
@@ -10885,21 +9332,14 @@ fn handle_marketplace_sync(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--json" => { json_mode = true; i += 1; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
     if !json_mode {
         println!("step 1/2  syncing offers from all feeds (manual + P2P-discovered)...");
     }
-    handle_offer_feed_sync(&if json_mode {
-        vec!["--json".to_string()]
-    } else {
-        vec![]
-    })?;
+    handle_offer_feed_sync(&if json_mode { vec!["--json".to_string()] } else { vec![] })?;
     if !json_mode {
         println!();
         println!("step 2/2  listing remote offers...");
@@ -10923,13 +9363,8 @@ fn handle_attestor_list(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
-            "--rpc" => {
-                rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?;
-            }
+            "--json" => { json_mode = true; i += 1; }
+            "--rpc" => { rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
@@ -10939,23 +9374,16 @@ fn handle_attestor_list(args: &[String]) -> Result<(), String> {
     let policies: Vec<ProofPolicy> = (|| -> Option<Vec<ProofPolicy>> {
         let client = rpc_client(base).ok()?;
         let summary_resp = rpc_post_json::<serde_json::Value, serde_json::Value>(
-            &client,
-            base,
-            "/rpc/listpolicies",
+            &client, base, "/rpc/listpolicies",
             &serde_json::json!({ "active_only": false }),
-        )
-        .ok()?;
+        ).ok()?;
         let summaries = summary_resp.get("policies")?.as_array()?;
         let mut out = Vec::new();
         for s in summaries {
             let hash = s.get("agreement_hash")?.as_str()?;
             if let Ok(resp) = rpc_post_json::<GetPolicyRpcRequest, GetPolicyRpcResponse>(
-                &client,
-                base,
-                "/rpc/getpolicy",
-                &GetPolicyRpcRequest {
-                    agreement_hash: hash.to_string(),
-                },
+                &client, base, "/rpc/getpolicy",
+                &GetPolicyRpcRequest { agreement_hash: hash.to_string() },
             ) {
                 if let Some(p) = resp.policy {
                     out.push(p);
@@ -10963,17 +9391,16 @@ fn handle_attestor_list(args: &[String]) -> Result<(), String> {
             }
         }
         Some(out)
-    })()
-    .unwrap_or_default();
+    })().unwrap_or_default();
     use std::collections::HashMap;
     let mut seen: HashMap<String, irium_node_rs::settlement::ApprovedAttestor> = HashMap::new();
     for policy in &policies {
         for att in &policy.attestors {
-            seen.entry(att.attestor_id.clone())
-                .or_insert_with(|| att.clone());
+            seen.entry(att.attestor_id.clone()).or_insert_with(|| att.clone());
         }
     }
-    let attestors: Vec<&irium_node_rs::settlement::ApprovedAttestor> = seen.values().collect();
+    let attestors: Vec<&irium_node_rs::settlement::ApprovedAttestor> =
+        seen.values().collect();
     if json_mode {
         println!(
             "{}",
@@ -11007,25 +9434,19 @@ fn handle_attestor_list(args: &[String]) -> Result<(), String> {
             }
             // Show bond status: derive pkh from pubkey_hex to look up bond record
             if let Some(pkh_hex) = hex::decode(&att.pubkey_hex).ok().and_then(|b| {
-                use ripemd::Ripemd160;
                 use sha2::{Digest, Sha256};
+                use ripemd::Ripemd160;
                 if b.len() == 33 || b.len() == 65 {
                     let sha = Sha256::digest(&b);
                     let ripe = Ripemd160::digest(sha);
                     Some(hex::encode(ripe))
-                } else {
-                    None
-                }
+                } else { None }
             }) {
                 if let Some(rec) = bond_store.find_by_pkh(&pkh_hex) {
                     if rec.withdrawn {
                         print!(" [bond: withdrawn]");
                     } else if rec.slash_count > 0 {
-                        print!(
-                            " [bond: {} IRM SLASHED x{}]",
-                            format_irm(rec.bond_atoms),
-                            rec.slash_count
-                        );
+                        print!(" [bond: {} IRM SLASHED x{}]", format_irm(rec.bond_atoms), rec.slash_count);
                     } else {
                         print!(" [bond: {} IRM active]", format_irm(rec.bond_atoms));
                     }
@@ -11041,6 +9462,7 @@ fn handle_attestor_list(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+
 fn attestor_bond_store_path() -> std::path::PathBuf {
     irium_node_rs::attestor_bond::bond_store_path()
 }
@@ -11050,15 +9472,13 @@ fn warn_unbonded_attestors(pubkey_hexes: &[String]) {
     let store = AttestorBondStore::load(&irium_node_rs::attestor_bond::bond_store_path());
     for pubkey_hex in pubkey_hexes {
         let pkh_hex = hex::decode(pubkey_hex).ok().and_then(|b| {
-            use ripemd::Ripemd160;
             use sha2::{Digest, Sha256};
+            use ripemd::Ripemd160;
             if b.len() == 33 || b.len() == 65 {
                 let sha = Sha256::digest(&b);
                 let ripe = Ripemd160::digest(sha);
                 Some(hex::encode(ripe))
-            } else {
-                None
-            }
+            } else { None }
         });
         if let Some(ref pkh) = pkh_hex {
             match store.find_by_pkh(pkh) {
@@ -11068,10 +9488,7 @@ fn warn_unbonded_attestors(pubkey_hexes: &[String]) {
                 _ => {}
             }
         } else {
-            eprintln!(
-                "warn  could not derive pkh for attestor {} — bond status unknown",
-                pubkey_hex
-            );
+            eprintln!("warn  could not derive pkh for attestor {} — bond status unknown", pubkey_hex);
         }
     }
 }
@@ -11086,37 +9503,23 @@ fn handle_attestor_register(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--bond" => {
-                bond_amount = Some(parse_irm(&parse_required_string_flag(
-                    args, &mut i, "--bond",
-                )?)?);
-            }
-            "--from" => {
-                from_addr = Some(parse_required_string_flag(args, &mut i, "--from")?);
-            }
-            "--rpc" => {
-                rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?;
-            }
+            "--bond" => { bond_amount = Some(parse_irm(&parse_required_string_flag(args, &mut i, "--bond")?)?); }
+            "--from" => { from_addr = Some(parse_required_string_flag(args, &mut i, "--from")?); }
+            "--rpc" => { rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
     let bond_atoms = bond_amount.ok_or_else(|| "--bond <amount_irm> is required".to_string())?;
-    if bond_atoms == 0 {
-        return Err("bond amount must be greater than zero".to_string());
-    }
+    if bond_atoms == 0 { return Err("bond amount must be greater than zero".to_string()); }
     let path = wallet_path();
     let wallet = load_wallet(&path)?;
     let addr = match from_addr {
         Some(ref a) => a.clone(),
-        None => wallet
-            .keys
-            .first()
-            .map(|k| k.address.clone())
+        None => wallet.keys.first().map(|k| k.address.clone())
             .ok_or_else(|| "wallet has no addresses; run new-address first".to_string())?,
     };
     let key = find_key(&wallet, &addr)
-        .ok_or_else(|| format!("address {} not found in wallet", addr))?
-        .clone();
+        .ok_or_else(|| format!("address {} not found in wallet", addr))?.clone();
     let base = rpc_url.trim_end_matches('/');
     let client = rpc_client(base)?;
     let payload = fetch_utxos(&client, base, &addr)?;
@@ -11131,38 +9534,26 @@ fn handle_attestor_register(args: &[String]) -> Result<(), String> {
     let mut fee_per_byte = DEFAULT_FEE_PER_BYTE;
     if let Ok(est) = fetch_fee_estimate(&client, base) {
         let est_fee = est.min_fee_per_byte.ceil() as u64;
-        if est_fee > fee_per_byte {
-            fee_per_byte = est_fee;
-        }
+        if est_fee > fee_per_byte { fee_per_byte = est_fee; }
     }
-    let fee = estimate_tx_size(1, 2)
-        .saturating_mul(fee_per_byte)
-        .max(10_000);
+    let fee = estimate_tx_size(1, 2).saturating_mul(fee_per_byte).max(10_000);
     let mut selected = Vec::new();
     let mut total = 0u64;
     for utxo in utxos.iter() {
         let confirmations = current_height.saturating_sub(utxo.height);
-        if utxo.is_coinbase && confirmations < coinbase_maturity() {
-            continue;
-        }
+        if utxo.is_coinbase && confirmations < coinbase_maturity() { continue; }
         selected.push(utxo.clone());
         total = total.saturating_add(utxo.value);
-        if total >= fee {
-            break;
-        }
+        if total >= fee { break; }
     }
     if total < fee {
-        return Err(format!(
-            "insufficient funds for registration fee ({} IRM needed)",
-            format_irm(fee)
-        ));
+        return Err(format!("insufficient funds for registration fee ({} IRM needed)", format_irm(fee)));
     }
     let wallet_total: u64 = payload.utxos.iter().map(|u| u.value).sum();
     if wallet_total < bond_atoms {
         return Err(format!(
             "wallet balance ({} IRM) is less than declared bond ({} IRM)",
-            format_irm(wallet_total),
-            format_irm(bond_atoms)
+            format_irm(wallet_total), format_irm(bond_atoms)
         ));
     }
     let pkh_vec = base58_p2pkh_to_hash(&addr).ok_or_else(|| "invalid from address".to_string())?;
@@ -11188,37 +9579,18 @@ fn handle_attestor_register(args: &[String]) -> Result<(), String> {
     let mut inputs: Vec<TxInput> = Vec::new();
     for utxo in &selected {
         let txid = hex_to_32(&utxo.txid)?;
-        inputs.push(TxInput {
-            prev_txid: txid,
-            prev_index: utxo.index,
-            script_sig: Vec::new(),
-            sequence: 0xffff_ffff,
-        });
+        inputs.push(TxInput { prev_txid: txid, prev_index: utxo.index, script_sig: Vec::new(), sequence: 0xffff_ffff });
     }
     let outputs = vec![
-        TxOutput {
-            value: 0,
-            script_pubkey: bond_script,
-        },
-        TxOutput {
-            value: total.saturating_sub(fee),
-            script_pubkey: change_script,
-        },
+        TxOutput { value: 0, script_pubkey: bond_script },
+        TxOutput { value: total.saturating_sub(fee), script_pubkey: change_script },
     ];
-    let mut tx = Transaction {
-        version: 1,
-        inputs,
-        outputs,
-        locktime: 0,
-    };
+    let mut tx = Transaction { version: 1, inputs, outputs, locktime: 0 };
     for _ in 0..2 {
         for (idx, utxo) in selected.iter().enumerate() {
-            let script_pubkey =
-                hex::decode(&utxo.script_pubkey).map_err(|e| format!("invalid utxo: {e}"))?;
+            let script_pubkey = hex::decode(&utxo.script_pubkey).map_err(|e| format!("invalid utxo: {e}"))?;
             let digest = signature_digest(&tx, idx, &script_pubkey);
-            let sig: Signature = signing_key
-                .sign_prehash(&digest)
-                .map_err(|e| format!("{e}"))?;
+            let sig: Signature = signing_key.sign_prehash(&digest).map_err(|e| format!("{e}"))?;
             let sig = sig.normalize_s().unwrap_or(sig);
             let mut sig_bytes = sig.to_der().as_bytes().to_vec();
             sig_bytes.push(0x01);
@@ -11229,9 +9601,7 @@ fn handle_attestor_register(args: &[String]) -> Result<(), String> {
             script.extend_from_slice(&pub_bytes);
             tx.inputs[idx].script_sig = script;
         }
-        let actual_fee = (tx.serialize().len() as u64)
-            .saturating_mul(fee_per_byte)
-            .max(10_000);
+        let actual_fee = (tx.serialize().len() as u64).saturating_mul(fee_per_byte).max(10_000);
         tx.outputs[1].value = total.saturating_sub(actual_fee);
     }
     submit_tx(&client, base, &tx)?;
@@ -11270,28 +9640,19 @@ fn handle_attestor_register(args: &[String]) -> Result<(), String> {
     println!("bond_amount      {} IRM", format_irm(bond_atoms));
     println!("registration_tx  {}", txid);
     println!("registered_at    height {}", current_height);
-    println!(
-        "withdraw_eligible_after  height {}",
-        current_height + irium_node_rs::attestor_bond::BOND_COOLDOWN_BLOCKS
-    );
+    println!("withdraw_eligible_after  height {}", current_height + irium_node_rs::attestor_bond::BOND_COOLDOWN_BLOCKS);
     Ok(())
 }
 
 fn handle_attestor_withdraw_bond(args: &[String]) -> Result<(), String> {
-    use irium_node_rs::attestor_bond::{
-        build_withdraw_anchor_script, AttestorBondStore, BOND_COOLDOWN_BLOCKS,
-    };
+    use irium_node_rs::attestor_bond::{build_withdraw_anchor_script, AttestorBondStore, BOND_COOLDOWN_BLOCKS};
     let mut from_addr: Option<String> = None;
     let mut rpc_url = default_rpc_url();
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--from" => {
-                from_addr = Some(parse_required_string_flag(args, &mut i, "--from")?);
-            }
-            "--rpc" => {
-                rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?;
-            }
+            "--from" => { from_addr = Some(parse_required_string_flag(args, &mut i, "--from")?); }
+            "--rpc" => { rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
@@ -11299,32 +9660,21 @@ fn handle_attestor_withdraw_bond(args: &[String]) -> Result<(), String> {
     let wallet = load_wallet(&path)?;
     let addr = match from_addr {
         Some(ref a) => a.clone(),
-        None => wallet
-            .keys
-            .first()
-            .map(|k| k.address.clone())
+        None => wallet.keys.first().map(|k| k.address.clone())
             .ok_or_else(|| "wallet has no addresses".to_string())?,
     };
     let bond_store_file = attestor_bond_store_path();
     let mut store = AttestorBondStore::load(&bond_store_file);
-    let record = store
-        .find_by_address(&addr)
-        .ok_or_else(|| format!("no bond record for {}; run attestor-register first", addr))?
-        .clone();
+    let record = store.find_by_address(&addr)
+        .ok_or_else(|| format!("no bond record for {}; run attestor-register first", addr))?.clone();
     if record.withdrawn {
-        return Err(format!(
-            "bond for {} is already withdrawn (height {})",
-            addr,
-            record.withdraw_height.unwrap_or(0)
-        ));
+        return Err(format!("bond for {} is already withdrawn (height {})",
+            addr, record.withdraw_height.unwrap_or(0)));
     }
     let base = rpc_url.trim_end_matches('/');
     let client = rpc_client(base)?;
     let current_height = fetch_tip_height(&client, base)?;
-    let cooldown_from = record
-        .last_attestation_height
-        .unwrap_or(record.registered_height)
-        .max(record.registered_height);
+    let cooldown_from = record.last_attestation_height.unwrap_or(record.registered_height).max(record.registered_height);
     let eligible_at = cooldown_from + BOND_COOLDOWN_BLOCKS;
     if current_height < eligible_at {
         return Err(format!(
@@ -11332,9 +9682,7 @@ fn handle_attestor_withdraw_bond(args: &[String]) -> Result<(), String> {
             current_height, eligible_at, eligible_at - current_height
         ));
     }
-    let key = find_key(&wallet, &addr)
-        .ok_or_else(|| format!("address {} not found in wallet", addr))?
-        .clone();
+    let key = find_key(&wallet, &addr).ok_or_else(|| format!("address {} not found in wallet", addr))?.clone();
     let payload = fetch_utxos(&client, base, &addr)?;
     let mut utxos = payload.utxos.clone();
     // Fix A: filter out outpoints already pending-spent by another
@@ -11346,82 +9694,49 @@ fn handle_attestor_withdraw_bond(args: &[String]) -> Result<(), String> {
     let mut fee_per_byte = DEFAULT_FEE_PER_BYTE;
     if let Ok(est) = fetch_fee_estimate(&client, base) {
         let est_fee = est.min_fee_per_byte.ceil() as u64;
-        if est_fee > fee_per_byte {
-            fee_per_byte = est_fee;
-        }
+        if est_fee > fee_per_byte { fee_per_byte = est_fee; }
     }
-    let fee = estimate_tx_size(1, 2)
-        .saturating_mul(fee_per_byte)
-        .max(10_000);
+    let fee = estimate_tx_size(1, 2).saturating_mul(fee_per_byte).max(10_000);
     let mut selected = Vec::new();
     let mut total = 0u64;
     for utxo in utxos.iter() {
         let confirmations = current_height.saturating_sub(utxo.height);
-        if utxo.is_coinbase && confirmations < coinbase_maturity() {
-            continue;
-        }
+        if utxo.is_coinbase && confirmations < coinbase_maturity() { continue; }
         selected.push(utxo.clone());
         total = total.saturating_add(utxo.value);
-        if total >= fee {
-            break;
-        }
+        if total >= fee { break; }
     }
     if total < fee {
-        return Err(format!(
-            "insufficient funds for withdrawal fee ({} IRM needed)",
-            format_irm(fee)
-        ));
+        return Err(format!("insufficient funds for withdrawal fee ({} IRM needed)", format_irm(fee)));
     }
     let pkh_vec = base58_p2pkh_to_hash(&addr).ok_or_else(|| "invalid address".to_string())?;
     let mut pkh_arr = [0u8; 20];
     pkh_arr.copy_from_slice(&pkh_vec);
     let pkh_hex = hex::encode(pkh_arr);
     let priv_bytes = hex::decode(&key.privkey).map_err(|e| format!("{e}"))?;
-    let signing_key =
-        SigningKey::from_bytes(priv_bytes.as_slice().into()).map_err(|e| format!("{e}"))?;
+    let signing_key = SigningKey::from_bytes(priv_bytes.as_slice().into()).map_err(|e| format!("{e}"))?;
     let vk = signing_key.verifying_key();
     let pk_comp = vk.to_encoded_point(true);
     let pk_uncomp = vk.to_encoded_point(false);
-    let pub_bytes = if hash160(pk_comp.as_bytes()) == pkh_arr {
-        pk_comp.as_bytes().to_vec()
-    } else {
-        pk_uncomp.as_bytes().to_vec()
-    };
+    let pub_bytes = if hash160(pk_comp.as_bytes()) == pkh_arr { pk_comp.as_bytes().to_vec() }
+        else { pk_uncomp.as_bytes().to_vec() };
     let withdraw_script = build_withdraw_anchor_script(&pkh_hex);
     let change_script = p2pkh_script(&pkh_arr);
     let mut inputs: Vec<TxInput> = Vec::new();
     for utxo in &selected {
         let txid = hex_to_32(&utxo.txid)?;
-        inputs.push(TxInput {
-            prev_txid: txid,
-            prev_index: utxo.index,
-            script_sig: Vec::new(),
-            sequence: 0xffff_ffff,
-        });
+        inputs.push(TxInput { prev_txid: txid, prev_index: utxo.index, script_sig: Vec::new(), sequence: 0xffff_ffff });
     }
     let outputs = vec![
-        TxOutput {
-            value: 0,
-            script_pubkey: withdraw_script,
-        },
-        TxOutput {
-            value: total.saturating_sub(fee),
-            script_pubkey: change_script,
-        },
+        TxOutput { value: 0, script_pubkey: withdraw_script },
+        TxOutput { value: total.saturating_sub(fee), script_pubkey: change_script },
     ];
-    let mut tx = Transaction {
-        version: 1,
-        inputs,
-        outputs,
-        locktime: 0,
-    };
+    let mut tx = Transaction { version: 1, inputs, outputs, locktime: 0 };
     for _ in 0..2 {
         for (idx, utxo) in selected.iter().enumerate() {
             let script_pubkey = hex::decode(&utxo.script_pubkey).map_err(|e| format!("{e}"))?;
             let digest = signature_digest(&tx, idx, &script_pubkey);
-            let sig: Signature = signing_key
-                .sign_prehash(&digest)
-                .map_err(|e| format!("{e}"))?;
+            let sig: Signature = signing_key.sign_prehash(&digest).map_err(|e| format!("{e}"))?;
             let sig = sig.normalize_s().unwrap_or(sig);
             let mut sig_bytes = sig.to_der().as_bytes().to_vec();
             sig_bytes.push(0x01);
@@ -11432,9 +9747,7 @@ fn handle_attestor_withdraw_bond(args: &[String]) -> Result<(), String> {
             script.extend_from_slice(&pub_bytes);
             tx.inputs[idx].script_sig = script;
         }
-        let actual_fee = (tx.serialize().len() as u64)
-            .saturating_mul(fee_per_byte)
-            .max(10_000);
+        let actual_fee = (tx.serialize().len() as u64).saturating_mul(fee_per_byte).max(10_000);
         tx.outputs[1].value = total.saturating_sub(actual_fee);
     }
     submit_tx(&client, base, &tx)?;
@@ -11460,102 +9773,62 @@ fn handle_attestor_bond_status(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--address" => {
-                address_filter = Some(parse_required_string_flag(args, &mut i, "--address")?);
-            }
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
-            "--rpc" => {
-                rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?;
-            }
+            "--address" => { address_filter = Some(parse_required_string_flag(args, &mut i, "--address")?); }
+            "--json" => { json_mode = true; i += 1; }
+            "--rpc" => { rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
     let bond_store_file = attestor_bond_store_path();
     let store = AttestorBondStore::load(&bond_store_file);
     let base = rpc_url.trim_end_matches('/');
-    let current_height = rpc_client(base)
-        .and_then(|c| fetch_tip_height(&c, base))
-        .unwrap_or(0);
-    let bonds: Vec<&irium_node_rs::attestor_bond::AttestorBondRecord> = store
-        .bonds
-        .iter()
+    let current_height = rpc_client(base).and_then(|c| fetch_tip_height(&c, base)).unwrap_or(0);
+    let bonds: Vec<&irium_node_rs::attestor_bond::AttestorBondRecord> = store.bonds.iter()
         .filter(|b| address_filter.as_ref().is_none_or(|a| &b.address == a))
         .collect();
     if json_mode {
-        let items: Vec<_> = bonds
-            .iter()
-            .map(|b| {
-                let cooldown_from = b
-                    .last_attestation_height
-                    .unwrap_or(b.registered_height)
-                    .max(b.registered_height);
-                let eligible_at = cooldown_from + BOND_COOLDOWN_BLOCKS;
-                serde_json::json!({
-                    "address": b.address,
-                    "pkh_hex": b.pkh_hex,
-                    "bond_atoms": b.bond_atoms,
-                    "bond_irm": format_irm(b.bond_atoms),
-                    "registered_height": b.registered_height,
-                    "registration_txid": b.registration_txid,
-                    "last_attestation_height": b.last_attestation_height,
-                    "withdraw_eligible_at": eligible_at,
-                    "withdraw_eligible": current_height >= eligible_at,
-                    "withdrawn": b.withdrawn,
-                    "withdraw_height": b.withdraw_height,
-                    "slash_count": b.slash_count,
-                    "slashed_atoms": b.slashed_atoms,
-                })
+        let items: Vec<_> = bonds.iter().map(|b| {
+            let cooldown_from = b.last_attestation_height.unwrap_or(b.registered_height).max(b.registered_height);
+            let eligible_at = cooldown_from + BOND_COOLDOWN_BLOCKS;
+            serde_json::json!({
+                "address": b.address,
+                "pkh_hex": b.pkh_hex,
+                "bond_atoms": b.bond_atoms,
+                "bond_irm": format_irm(b.bond_atoms),
+                "registered_height": b.registered_height,
+                "registration_txid": b.registration_txid,
+                "last_attestation_height": b.last_attestation_height,
+                "withdraw_eligible_at": eligible_at,
+                "withdraw_eligible": current_height >= eligible_at,
+                "withdrawn": b.withdrawn,
+                "withdraw_height": b.withdraw_height,
+                "slash_count": b.slash_count,
+                "slashed_atoms": b.slashed_atoms,
             })
-            .collect();
-        println!(
-            "{}",
-            serde_json::to_string_pretty(
-                &serde_json::json!({"bonds": items, "count": bonds.len()})
-            )
-            .unwrap()
-        );
+        }).collect();
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({"bonds": items, "count": bonds.len()})).unwrap());
     } else if bonds.is_empty() {
         println!("no bond records found");
         println!();
         println!("tip  Run: irium-wallet attestor-register --bond <amount_irm>");
     } else {
         for b in &bonds {
-            let cooldown_from = b
-                .last_attestation_height
-                .unwrap_or(b.registered_height)
-                .max(b.registered_height);
+            let cooldown_from = b.last_attestation_height.unwrap_or(b.registered_height).max(b.registered_height);
             let eligible_at = cooldown_from + BOND_COOLDOWN_BLOCKS;
-            let status = if b.withdrawn {
-                "withdrawn"
-            } else if b.slash_count > 0 {
-                "slashed"
-            } else {
-                "active"
-            };
+            let status = if b.withdrawn { "withdrawn" } else if b.slash_count > 0 { "slashed" } else { "active" };
             println!("address          {}", b.address);
             println!("bond_amount      {} IRM", format_irm(b.bond_atoms));
             println!("status           {}", status);
             println!("registered_at    height {}", b.registered_height);
             println!("registration_tx  {}", b.registration_txid);
-            if let Some(h) = b.last_attestation_height {
-                println!("last_attestation height {}", h);
-            }
+            if let Some(h) = b.last_attestation_height { println!("last_attestation height {}", h); }
             if b.withdrawn {
                 println!("withdrawn_at     height {}", b.withdraw_height.unwrap_or(0));
             } else if current_height >= eligible_at {
-                println!(
-                    "withdraw_eligible yes (cooldown passed at height {})",
-                    eligible_at
-                );
+                println!("withdraw_eligible yes (cooldown passed at height {})", eligible_at);
             } else {
-                println!(
-                    "withdraw_eligible no ({} blocks remaining; eligible at height {})",
-                    eligible_at.saturating_sub(current_height),
-                    eligible_at
-                );
+                println!("withdraw_eligible no ({} blocks remaining; eligible at height {})",
+                    eligible_at.saturating_sub(current_height), eligible_at);
             }
             if b.slash_count > 0 {
                 println!("slash_count      {}", b.slash_count);
@@ -11577,139 +9850,82 @@ fn handle_attestor_slash(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--attestor" => {
-                attestor_addr = Some(parse_required_string_flag(args, &mut i, "--attestor")?);
-            }
-            "--proof1" => {
-                proof1_id = Some(parse_required_string_flag(args, &mut i, "--proof1")?);
-            }
-            "--proof2" => {
-                proof2_id = Some(parse_required_string_flag(args, &mut i, "--proof2")?);
-            }
-            "--agreement" => {
-                agreement_hash_opt = Some(parse_required_string_flag(args, &mut i, "--agreement")?);
-            }
-            "--rpc" => {
-                rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?;
-            }
+            "--attestor" => { attestor_addr = Some(parse_required_string_flag(args, &mut i, "--attestor")?); }
+            "--proof1" => { proof1_id = Some(parse_required_string_flag(args, &mut i, "--proof1")?); }
+            "--proof2" => { proof2_id = Some(parse_required_string_flag(args, &mut i, "--proof2")?); }
+            "--agreement" => { agreement_hash_opt = Some(parse_required_string_flag(args, &mut i, "--agreement")?); }
+            "--rpc" => { rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
-    let attestor_address =
-        attestor_addr.ok_or_else(|| "--attestor <address> is required".to_string())?;
+    let attestor_address = attestor_addr.ok_or_else(|| "--attestor <address> is required".to_string())?;
     let p1 = proof1_id.ok_or_else(|| "--proof1 <proof_id> is required".to_string())?;
     let p2 = proof2_id.ok_or_else(|| "--proof2 <proof_id> is required".to_string())?;
-    if p1 == p2 {
-        return Err("--proof1 and --proof2 must be different proofs".to_string());
-    }
+    if p1 == p2 { return Err("--proof1 and --proof2 must be different proofs".to_string()); }
     let bond_store_file = attestor_bond_store_path();
     let mut store = AttestorBondStore::load(&bond_store_file);
-    let record = store
-        .find_by_address(&attestor_address)
-        .ok_or_else(|| format!("no bond record for attestor {}", attestor_address))?
-        .clone();
-    if record.withdrawn {
-        return Err("attestor bond is already withdrawn; cannot slash".to_string());
-    }
+    let record = store.find_by_address(&attestor_address)
+        .ok_or_else(|| format!("no bond record for attestor {}", attestor_address))?.clone();
+    if record.withdrawn { return Err("attestor bond is already withdrawn; cannot slash".to_string()); }
     let combined = format!("{}{}", p1, p2);
-    let agreement_hash =
-        agreement_hash_opt.unwrap_or_else(|| combined[..combined.len().min(64)].to_string());
+    let agreement_hash = agreement_hash_opt.unwrap_or_else(|| combined[..combined.len().min(64)].to_string());
     let base = rpc_url.trim_end_matches('/');
     let client = rpc_client(base)?;
     let current_height = fetch_tip_height(&client, base)?;
-    let pkh_vec = base58_p2pkh_to_hash(&attestor_address)
-        .ok_or_else(|| "invalid attestor address".to_string())?;
+    let pkh_vec = base58_p2pkh_to_hash(&attestor_address).ok_or_else(|| "invalid attestor address".to_string())?;
     let mut pkh_arr = [0u8; 20];
     pkh_arr.copy_from_slice(&pkh_vec);
     let attestor_pkh_hex = hex::encode(pkh_arr);
     let path = wallet_path();
     let wallet = load_wallet(&path)?;
-    let slash_from = wallet
-        .keys
-        .first()
-        .map(|k| k.address.clone())
+    let slash_from = wallet.keys.first().map(|k| k.address.clone())
         .ok_or_else(|| "wallet has no addresses".to_string())?;
     let key = find_key(&wallet, &slash_from)
-        .ok_or_else(|| "no wallet key for slash sender".to_string())?
-        .clone();
+        .ok_or_else(|| "no wallet key for slash sender".to_string())?.clone();
     let payload = fetch_utxos(&client, base, &slash_from)?;
     let mut utxos = payload.utxos.clone();
     // Fix A: filter out pending-spent outpoints (ghost-tx prevention).
     let pending_spent = fetch_mempool_spent_by(&client, base, &slash_from);
     utxos.retain(|u| !pending_spent.contains(&(u.txid.clone(), u.index)));
     utxos.sort_by_key(|u| u.value);
-    let fee = estimate_tx_size(1, 2)
-        .saturating_mul(DEFAULT_FEE_PER_BYTE)
-        .max(10_000);
+    let fee = estimate_tx_size(1, 2).saturating_mul(DEFAULT_FEE_PER_BYTE).max(10_000);
     let mut selected = Vec::new();
     let mut total = 0u64;
     for utxo in utxos.iter() {
         let confirmations = current_height.saturating_sub(utxo.height);
-        if utxo.is_coinbase && confirmations < coinbase_maturity() {
-            continue;
-        }
+        if utxo.is_coinbase && confirmations < coinbase_maturity() { continue; }
         selected.push(utxo.clone());
         total = total.saturating_add(utxo.value);
-        if total >= fee {
-            break;
-        }
+        if total >= fee { break; }
     }
-    if total < fee {
-        return Err(format!(
-            "insufficient funds for slash tx ({} IRM needed)",
-            format_irm(fee)
-        ));
-    }
-    let from_pkh_vec =
-        base58_p2pkh_to_hash(&slash_from).ok_or_else(|| "invalid from address".to_string())?;
+    if total < fee { return Err(format!("insufficient funds for slash tx ({} IRM needed)", format_irm(fee))); }
+    let from_pkh_vec = base58_p2pkh_to_hash(&slash_from).ok_or_else(|| "invalid from address".to_string())?;
     let mut from_pkh_arr = [0u8; 20];
     from_pkh_arr.copy_from_slice(&from_pkh_vec);
     let priv_bytes = hex::decode(&key.privkey).map_err(|e| format!("{e}"))?;
-    let signing_key =
-        SigningKey::from_bytes(priv_bytes.as_slice().into()).map_err(|e| format!("{e}"))?;
+    let signing_key = SigningKey::from_bytes(priv_bytes.as_slice().into()).map_err(|e| format!("{e}"))?;
     let vk = signing_key.verifying_key();
     let pk_comp = vk.to_encoded_point(true);
     let pk_uncomp = vk.to_encoded_point(false);
-    let pub_bytes = if hash160(pk_comp.as_bytes()) == from_pkh_arr {
-        pk_comp.as_bytes().to_vec()
-    } else {
-        pk_uncomp.as_bytes().to_vec()
-    };
+    let pub_bytes = if hash160(pk_comp.as_bytes()) == from_pkh_arr { pk_comp.as_bytes().to_vec() }
+        else { pk_uncomp.as_bytes().to_vec() };
     let slash_script = build_slash_anchor_script(&attestor_pkh_hex, &agreement_hash);
     let change_script = p2pkh_script(&from_pkh_arr);
     let mut inputs: Vec<TxInput> = Vec::new();
     for utxo in &selected {
         let txid = hex_to_32(&utxo.txid)?;
-        inputs.push(TxInput {
-            prev_txid: txid,
-            prev_index: utxo.index,
-            script_sig: Vec::new(),
-            sequence: 0xffff_ffff,
-        });
+        inputs.push(TxInput { prev_txid: txid, prev_index: utxo.index, script_sig: Vec::new(), sequence: 0xffff_ffff });
     }
     let outputs = vec![
-        TxOutput {
-            value: 0,
-            script_pubkey: slash_script,
-        },
-        TxOutput {
-            value: total.saturating_sub(fee),
-            script_pubkey: change_script,
-        },
+        TxOutput { value: 0, script_pubkey: slash_script },
+        TxOutput { value: total.saturating_sub(fee), script_pubkey: change_script },
     ];
-    let mut tx = Transaction {
-        version: 1,
-        inputs,
-        outputs,
-        locktime: 0,
-    };
+    let mut tx = Transaction { version: 1, inputs, outputs, locktime: 0 };
     for _ in 0..2 {
         for (idx, utxo) in selected.iter().enumerate() {
             let script_pubkey = hex::decode(&utxo.script_pubkey).map_err(|e| format!("{e}"))?;
             let digest = signature_digest(&tx, idx, &script_pubkey);
-            let sig: Signature = signing_key
-                .sign_prehash(&digest)
-                .map_err(|e| format!("{e}"))?;
+            let sig: Signature = signing_key.sign_prehash(&digest).map_err(|e| format!("{e}"))?;
             let sig = sig.normalize_s().unwrap_or(sig);
             let mut sig_bytes = sig.to_der().as_bytes().to_vec();
             sig_bytes.push(0x01);
@@ -11720,9 +9936,7 @@ fn handle_attestor_slash(args: &[String]) -> Result<(), String> {
             script.extend_from_slice(&pub_bytes);
             tx.inputs[idx].script_sig = script;
         }
-        let actual_fee = (tx.serialize().len() as u64)
-            .saturating_mul(DEFAULT_FEE_PER_BYTE)
-            .max(10_000);
+        let actual_fee = (tx.serialize().len() as u64).saturating_mul(DEFAULT_FEE_PER_BYTE).max(10_000);
         tx.outputs[1].value = total.saturating_sub(actual_fee);
     }
     submit_tx(&client, base, &tx)?;
@@ -11755,10 +9969,7 @@ fn handle_proof_template_list(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--json" => { json_mode = true; i += 1; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
@@ -11792,9 +10003,7 @@ fn handle_proof_template_list(args: &[String]) -> Result<(), String> {
         println!("    Optional: reference_id (build/release ID), attributes.build_id, attributes.repo_url");
         println!();
         println!("  service_completion");
-        println!(
-            "    Service work completion. Required: attributes.started_at, attributes.completed_at"
-        );
+        println!("    Service work completion. Required: attributes.started_at, attributes.completed_at");
         println!("    Optional: reference_id (ticket/contract ID), attributes.service_name");
         println!();
         println!("  physical_delivery");
@@ -11816,31 +10025,16 @@ fn handle_proof_template_create(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--kind" => {
-                kind = Some(parse_required_string_flag(args, &mut i, "--kind")?);
-            }
-            "--agreement" => {
-                agreement_hash = Some(parse_required_string_flag(args, &mut i, "--agreement")?);
-            }
-            "--attested-by" => {
-                attested_by = Some(parse_required_string_flag(args, &mut i, "--attested-by")?);
-            }
-            "--reference-id" => {
-                reference_id = Some(parse_required_string_flag(args, &mut i, "--reference-id")?);
-            }
-            "--content-hash" => {
-                content_hash = Some(parse_required_string_flag(args, &mut i, "--content-hash")?);
-            }
-            "--out" => {
-                out_path = Some(parse_required_string_flag(args, &mut i, "--out")?);
-            }
+            "--kind" => { kind = Some(parse_required_string_flag(args, &mut i, "--kind")?); }
+            "--agreement" => { agreement_hash = Some(parse_required_string_flag(args, &mut i, "--agreement")?); }
+            "--attested-by" => { attested_by = Some(parse_required_string_flag(args, &mut i, "--attested-by")?); }
+            "--reference-id" => { reference_id = Some(parse_required_string_flag(args, &mut i, "--reference-id")?); }
+            "--content-hash" => { content_hash = Some(parse_required_string_flag(args, &mut i, "--content-hash")?); }
+            "--out" => { out_path = Some(parse_required_string_flag(args, &mut i, "--out")?); }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
-    let k = kind.ok_or_else(|| {
-        "--kind is required (software_delivery | service_completion | physical_delivery)"
-            .to_string()
-    })?;
+    let k = kind.ok_or_else(|| "--kind is required (software_delivery | service_completion | physical_delivery)".to_string())?;
     let hash = agreement_hash.ok_or_else(|| "--agreement is required".to_string())?;
     let att_by = attested_by.unwrap_or_else(|| "self".to_string());
     let now_secs = std::time::SystemTime::now()
@@ -11926,13 +10120,8 @@ fn handle_agreement_dispute(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--reason" => {
-                reason = Some(parse_required_string_flag(args, &mut i, "--reason")?);
-            }
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--reason" => { reason = Some(parse_required_string_flag(args, &mut i, "--reason")?); }
+            "--json" => { json_mode = true; i += 1; }
             other => {
                 if agreement_ref.is_none() && !other.starts_with("--") {
                     agreement_ref = Some(other.to_string());
@@ -11943,8 +10132,7 @@ fn handle_agreement_dispute(args: &[String]) -> Result<(), String> {
             }
         }
     }
-    let agreement_id =
-        agreement_ref.ok_or_else(|| "agreement hash or ID is required".to_string())?;
+    let agreement_id = agreement_ref.ok_or_else(|| "agreement hash or ID is required".to_string())?;
     let resolved = resolve_agreement_input(&agreement_id)?;
     let agreement = resolved.agreement;
     let agreement_hash = irium_node_rs::settlement::compute_agreement_hash_hex(&agreement)?;
@@ -11964,10 +10152,7 @@ fn handle_agreement_dispute(args: &[String]) -> Result<(), String> {
     std::fs::create_dir_all(&dir).map_err(|e| format!("create disputes dir: {}", e))?;
     let path = dispute_path(&agreement_hash);
     if path.exists() {
-        return Err(format!(
-            "dispute already open for agreement {}",
-            agreement_hash
-        ));
+        return Err(format!("dispute already open for agreement {}", agreement_hash));
     }
     let json = serde_json::to_string_pretty(&dispute).unwrap();
     std::fs::write(&path, &json).map_err(|e| format!("write dispute: {}", e))?;
@@ -11979,10 +10164,7 @@ fn handle_agreement_dispute(args: &[String]) -> Result<(), String> {
         if let Some(ref r) = agreement.resolver_reference {
             println!("resolver        {}", r);
             println!();
-            println!(
-                "tip  Share this dispute record with the resolver: {}",
-                path.display()
-            );
+            println!("tip  Share this dispute record with the resolver: {}", path.display());
         } else {
             println!();
             println!("note  No resolver is configured on this agreement.");
@@ -11999,21 +10181,14 @@ fn handle_agreement_dispute_list(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--json" => { json_mode = true; i += 1; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
     let dir = disputes_dir();
     if !dir.exists() {
         if json_mode {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({"disputes": [], "count": 0}))
-                    .unwrap()
-            );
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({"disputes": [], "count": 0})).unwrap());
         } else {
             println!("no disputes on record");
         }
@@ -12037,30 +10212,17 @@ fn handle_agreement_dispute_list(args: &[String]) -> Result<(), String> {
             serde_json::to_string_pretty(&serde_json::json!({
                 "disputes": disputes,
                 "count": disputes.len(),
-            }))
-            .unwrap()
+            })).unwrap()
         );
     } else if disputes.is_empty() {
         println!("no disputes on record");
     } else {
         println!("disputes ({}):", disputes.len());
         for d in &disputes {
-            let hash = d
-                .get("agreement_hash")
-                .and_then(|v| v.as_str())
-                .unwrap_or("?");
+            let hash = d.get("agreement_hash").and_then(|v| v.as_str()).unwrap_or("?");
             let status = d.get("status").and_then(|v| v.as_str()).unwrap_or("?");
             let reason = d.get("reason").and_then(|v| v.as_str()).unwrap_or("");
-            println!(
-                "  {} [{}]{}",
-                hash,
-                status,
-                if reason.is_empty() {
-                    "".to_string()
-                } else {
-                    format!(" — {}", reason)
-                }
-            );
+            println!("  {} [{}]{}", hash, status, if reason.is_empty() { "".to_string() } else { format!(" — {}", reason) });
         }
     }
     Ok(())
@@ -12216,11 +10378,7 @@ impl ReputationScore {
             _ => "Risk: HIGH",
         };
         let mut parts: Vec<String> = Vec::new();
-        parts.push(format!(
-            "{} trade{}",
-            self.total,
-            if self.total == 1 { "" } else { "s" }
-        ));
+        parts.push(format!("{} trade{}", self.total, if self.total == 1 { "" } else { "s" }));
         if let Some(cr) = self.success_rate() {
             parts.push(format!("{:.1}% completion", cr));
         }
@@ -12294,7 +10452,10 @@ fn compute_reputation(seller_addr: &str) -> ReputationScore {
                 if let Some(parties) = val.get("parties").and_then(|p| p.as_array()) {
                     for party in parties {
                         if party.get("role").and_then(|r| r.as_str()) == Some("seller")
-                            && party.get("address").and_then(|a| a.as_str()) == Some(seller_addr)
+                            && party
+                                .get("address")
+                                .and_then(|a| a.as_str())
+                                == Some(seller_addr)
                         {
                             total += 1;
                             break;
@@ -12324,11 +10485,18 @@ fn compute_reputation(seller_addr: &str) -> ReputationScore {
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(&data) {
                 if let Some(entry) = val.get(seller_addr) {
                     has_outcome_data = true;
-                    satisfied =
-                        entry.get("satisfied").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    failed = entry.get("failed").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    let timeout_count =
-                        entry.get("timeout").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    satisfied = entry
+                        .get("satisfied")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as usize;
+                    failed = entry
+                        .get("failed")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as usize;
+                    let timeout_count = entry
+                        .get("timeout")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0) as usize;
                     let unsatisfied_count = entry
                         .get("unsatisfied")
                         .and_then(|v| v.as_u64())
@@ -12359,25 +10527,13 @@ fn compute_reputation(seller_addr: &str) -> ReputationScore {
                     } else {
                         recent_failed
                     };
-                    recent_total = recent_satisfied
-                        + recent_failed
-                        + recent_timeout
-                        + recent_unsatisfied_count;
+                    recent_total = recent_satisfied + recent_failed
+                        + recent_timeout + recent_unsatisfied_count;
                     has_recent_data = recent_total > 0;
-                    dispute_count =
-                        entry.get("disputes").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    total_proof_response_secs = entry
-                        .get("total_proof_response_secs")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    proof_response_count = entry
-                        .get("proof_response_count")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0);
-                    self_trade_count = entry
-                        .get("self_trade_count")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as usize;
+                    dispute_count = entry.get("disputes").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    total_proof_response_secs = entry.get("total_proof_response_secs").and_then(|v| v.as_u64()).unwrap_or(0);
+                    proof_response_count = entry.get("proof_response_count").and_then(|v| v.as_u64()).unwrap_or(0);
+                    self_trade_count = entry.get("self_trade_count").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                 }
             }
         }
@@ -12487,8 +10643,9 @@ fn apply_chain_reputation(score: &mut ReputationScore, chain: &ChainReputation) 
     score.default_count =
         (chain.lifetime_dispute_loss + chain.lifetime_resolver_non_response) as usize;
     score.dispute_count = (chain.lifetime_dispute_win + chain.lifetime_dispute_loss) as usize;
-    let lifetime_total =
-        chain.lifetime_successful_trade + chain.lifetime_dispute_win + chain.lifetime_dispute_loss;
+    let lifetime_total = chain.lifetime_successful_trade
+        + chain.lifetime_dispute_win
+        + chain.lifetime_dispute_loss;
     if (lifetime_total as usize) > score.total {
         score.total = lifetime_total as usize;
     }
@@ -12561,10 +10718,7 @@ fn handle_reputation_show(args: &[String]) -> Result<(), String> {
     println!("Seller:           {}", resolved);
     println!("Total agreements: {}", rep.total);
     if rep.sybil_suppressed() && rep.total > 0 {
-        println!(
-            "Ranking:          not yet established (minimum {} agreements required)",
-            SYBIL_MIN_AGREEMENTS
-        );
+        println!("Ranking:          not yet established (minimum {} agreements required)", SYBIL_MIN_AGREEMENTS);
     }
     if rep.has_outcome_data {
         println!("Successful:       {}", rep.satisfied);
@@ -12592,10 +10746,7 @@ fn handle_reputation_show(args: &[String]) -> Result<(), String> {
         println!("Avg proof resp:   unknown");
     }
     if rep.self_trade_count > 0 {
-        println!(
-            "Self-trade flags: {} (WARNING: possible self-trading detected)",
-            rep.self_trade_count
-        );
+        println!("Self-trade flags: {} (WARNING: possible self-trading detected)", rep.self_trade_count);
     }
     println!("Risk:             {}", rep.risk_signal());
     println!();
@@ -12616,6 +10767,7 @@ fn handle_reputation_show(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+
 fn handle_reputation_record_outcome(args: &[String]) -> Result<(), String> {
     let mut seller: Option<String> = None;
     let mut outcome: Option<String> = None;
@@ -12625,41 +10777,22 @@ fn handle_reputation_record_outcome(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--seller" => {
-                seller = Some(parse_required_string_flag(args, &mut i, "--seller")?);
-            }
-            "--outcome" => {
-                outcome = Some(parse_required_string_flag(args, &mut i, "--outcome")?);
-            }
+            "--seller" => { seller = Some(parse_required_string_flag(args, &mut i, "--seller")?); }
+            "--outcome" => { outcome = Some(parse_required_string_flag(args, &mut i, "--outcome")?); }
             "--proof-response-secs" => {
                 let v = parse_required_string_flag(args, &mut i, "--proof-response-secs")?;
-                proof_response_secs = Some(
-                    v.parse::<u64>()
-                        .map_err(|_| "--proof-response-secs must be an integer".to_string())?,
-                );
+                proof_response_secs = Some(v.parse::<u64>().map_err(|_| "--proof-response-secs must be an integer".to_string())?);
             }
-            "--self-trade" => {
-                self_trade = true;
-                i += 1;
-            }
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--self-trade" => { self_trade = true; i += 1; }
+            "--json" => { json_mode = true; i += 1; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
     let seller_addr = seller.ok_or_else(|| "--seller is required".to_string())?;
-    let outcome_str = outcome
-        .ok_or_else(|| "--outcome is required (satisfied|failed|disputed|timeout)".to_string())?;
+    let outcome_str = outcome.ok_or_else(|| "--outcome is required (satisfied|failed|disputed|timeout)".to_string())?;
     match outcome_str.as_str() {
         "satisfied" | "failed" | "disputed" | "timeout" => {}
-        other => {
-            return Err(format!(
-                "invalid outcome '{}': use satisfied, failed, disputed, or timeout",
-                other
-            ))
-        }
+        other => return Err(format!("invalid outcome '{}': use satisfied, failed, disputed, or timeout", other)),
     }
 
     let dir = reputation_dir();
@@ -12673,9 +10806,7 @@ fn handle_reputation_record_outcome(args: &[String]) -> Result<(), String> {
     };
 
     {
-        let map = root
-            .as_object_mut()
-            .ok_or("outcomes.json is not an object")?;
+        let map = root.as_object_mut().ok_or("outcomes.json is not an object")?;
         let entry = map.entry(seller_addr.clone()).or_insert_with(|| serde_json::json!({
             "satisfied": 0u64, "failed": 0u64, "timeout": 0u64, "unsatisfied": 0u64,
             "disputes": 0u64, "total_proof_response_secs": 0u64, "proof_response_count": 0u64,
@@ -12683,9 +10814,7 @@ fn handle_reputation_record_outcome(args: &[String]) -> Result<(), String> {
             "recent_satisfied": 0u64, "recent_failed": 0u64, "recent_timeout": 0u64, "recent_unsatisfied": 0u64,
         }));
 
-        let get_u64 = |e: &serde_json::Value, k: &str| -> u64 {
-            e.get(k).and_then(|v| v.as_u64()).unwrap_or(0)
-        };
+        let get_u64 = |e: &serde_json::Value, k: &str| -> u64 { e.get(k).and_then(|v| v.as_u64()).unwrap_or(0) };
 
         let mut sat = get_u64(entry, "satisfied");
         let mut fail = get_u64(entry, "failed");
@@ -12699,23 +10828,10 @@ fn handle_reputation_record_outcome(args: &[String]) -> Result<(), String> {
         let mut r_tmo = get_u64(entry, "recent_timeout");
 
         match outcome_str.as_str() {
-            "satisfied" => {
-                sat += 1;
-                r_sat += 1;
-            }
-            "failed" => {
-                fail += 1;
-                r_fail += 1;
-            }
-            "disputed" => {
-                disputes += 1;
-                fail += 1;
-                r_fail += 1;
-            }
-            "timeout" => {
-                tmo += 1;
-                r_tmo += 1;
-            }
+            "satisfied" => { sat += 1; r_sat += 1; }
+            "failed" => { fail += 1; r_fail += 1; }
+            "disputed" => { disputes += 1; fail += 1; r_fail += 1; }
+            "timeout" => { tmo += 1; r_tmo += 1; }
             _ => {}
         }
         if let Some(secs) = proof_response_secs {
@@ -12729,13 +10845,9 @@ fn handle_reputation_record_outcome(args: &[String]) -> Result<(), String> {
         let r_total = r_sat + r_fail + r_tmo;
         if r_total > 10 {
             let excess = r_total - 10;
-            if r_tmo >= excess {
-                r_tmo -= excess;
-            } else if r_fail >= excess {
-                r_fail -= excess;
-            } else {
-                r_sat = r_sat.saturating_sub(excess);
-            }
+            if r_tmo >= excess { r_tmo -= excess; }
+            else if r_fail >= excess { r_fail -= excess; }
+            else { r_sat = r_sat.saturating_sub(excess); }
         }
 
         *entry = serde_json::json!({
@@ -12750,26 +10862,18 @@ fn handle_reputation_record_outcome(args: &[String]) -> Result<(), String> {
     std::fs::write(&path, &json_out).map_err(|e| format!("write outcomes: {}", e))?;
 
     if json_mode {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "seller": seller_addr, "outcome": outcome_str,
-                "proof_response_secs": proof_response_secs,
-                "self_trade": self_trade,
-            }))
-            .unwrap()
-        );
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "seller": seller_addr, "outcome": outcome_str,
+            "proof_response_secs": proof_response_secs,
+            "self_trade": self_trade,
+        })).unwrap());
     } else {
         println!("recorded  outcome={} seller={}", outcome_str, seller_addr);
         if let Some(secs) = proof_response_secs {
             println!("          proof_response_secs={}", secs);
         }
-        if self_trade {
-            println!("          WARNING: self-trade flag recorded");
-        }
-        if outcome_str == "disputed" {
-            println!("          dispute count incremented");
-        }
+        if self_trade { println!("          WARNING: self-trade flag recorded"); }
+        if outcome_str == "disputed" { println!("          dispute count incremented"); }
     }
     Ok(())
 }
@@ -12781,16 +10885,9 @@ fn handle_reputation_export(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--seller" => {
-                seller = Some(parse_required_string_flag(args, &mut i, "--seller")?);
-            }
-            "--out" => {
-                out_path = Some(parse_required_string_flag(args, &mut i, "--out")?);
-            }
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--seller" => { seller = Some(parse_required_string_flag(args, &mut i, "--seller")?); }
+            "--out" => { out_path = Some(parse_required_string_flag(args, &mut i, "--out")?); }
+            "--json" => { json_mode = true; i += 1; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
@@ -12869,30 +10966,18 @@ fn handle_reputation_import(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--file" => {
-                file_path = Some(parse_required_string_flag(args, &mut i, "--file")?);
-            }
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--file" => { file_path = Some(parse_required_string_flag(args, &mut i, "--file")?); }
+            "--json" => { json_mode = true; i += 1; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
     let fp = file_path.ok_or_else(|| "--file is required".to_string())?;
     let data = std::fs::read_to_string(&fp).map_err(|e| format!("read file: {}", e))?;
-    let val: serde_json::Value =
-        serde_json::from_str(&data).map_err(|e| format!("parse JSON: {}", e))?;
+    let val: serde_json::Value = serde_json::from_str(&data).map_err(|e| format!("parse JSON: {}", e))?;
 
-    let seller = val
-        .get("seller")
-        .and_then(|v| v.as_str())
-        .ok_or("missing seller field")?;
+    let seller = val.get("seller").and_then(|v| v.as_str()).ok_or("missing seller field")?;
     let integrity = val.get("integrity").ok_or("missing integrity block")?;
-    let stored_hash = integrity
-        .get("content_hash")
-        .and_then(|v| v.as_str())
-        .ok_or("missing content_hash")?;
+    let stored_hash = integrity.get("content_hash").and_then(|v| v.as_str()).ok_or("missing content_hash")?;
 
     let payload = serde_json::json!({
         "version": val.get("version").unwrap_or(&serde_json::json!("1")),
@@ -12919,46 +11004,26 @@ fn handle_reputation_import(args: &[String]) -> Result<(), String> {
     let verified = computed_hash == stored_hash;
 
     let summary = val.get("summary").and_then(|v| v.as_str()).unwrap_or("N/A");
-    let total = val
-        .get("total_agreements")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let total = val.get("total_agreements").and_then(|v| v.as_u64()).unwrap_or(0);
     let disputes_val = val.get("disputes").and_then(|v| v.as_u64()).unwrap_or(0);
-    let risk = val
-        .get("risk")
-        .and_then(|v| v.as_str())
-        .unwrap_or("unknown");
-    let sybil = val
-        .get("sybil_suppressed")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let risk = val.get("risk").and_then(|v| v.as_str()).unwrap_or("unknown");
+    let sybil = val.get("sybil_suppressed").and_then(|v| v.as_bool()).unwrap_or(false);
 
     if json_mode {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "seller": seller,
-                "verification": if verified { "ok" } else { "FAILED" },
-                "computed_hash": computed_hash,
-                "stored_hash": stored_hash,
-                "summary": summary,
-                "total_agreements": total,
-                "disputes": disputes_val,
-                "risk": risk,
-                "sybil_suppressed": sybil,
-            }))
-            .unwrap()
-        );
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "seller": seller,
+            "verification": if verified { "ok" } else { "FAILED" },
+            "computed_hash": computed_hash,
+            "stored_hash": stored_hash,
+            "summary": summary,
+            "total_agreements": total,
+            "disputes": disputes_val,
+            "risk": risk,
+            "sybil_suppressed": sybil,
+        })).unwrap());
     } else {
         println!("seller            {}", seller);
-        println!(
-            "verification      {}",
-            if verified {
-                "ok -- content hash matches"
-            } else {
-                "FAILED -- content hash mismatch, data may be tampered"
-            }
-        );
+        println!("verification      {}", if verified { "ok -- content hash matches" } else { "FAILED -- content hash mismatch, data may be tampered" });
         println!("summary           {}", summary);
         println!("total_agreements  {}", total);
         println!("disputes          {}", disputes_val);
@@ -12978,16 +11043,9 @@ fn handle_reputation_self_trade_check(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--seller" => {
-                seller = Some(parse_required_string_flag(args, &mut i, "--seller")?);
-            }
-            "--buyer" => {
-                buyer = Some(parse_required_string_flag(args, &mut i, "--buyer")?);
-            }
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--seller" => { seller = Some(parse_required_string_flag(args, &mut i, "--seller")?); }
+            "--buyer" => { buyer = Some(parse_required_string_flag(args, &mut i, "--buyer")?); }
+            "--json" => { json_mode = true; i += 1; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
@@ -13012,14 +11070,7 @@ fn handle_reputation_self_trade_check(args: &[String]) -> Result<(), String> {
         println!("buyer             {}", b);
         println!("resolved_seller   {}", resolved_s);
         println!("resolved_buyer    {}", resolved_b);
-        println!(
-            "self_trade        {}",
-            if detected {
-                "DETECTED -- seller and buyer are the same party"
-            } else {
-                "none detected"
-            }
-        );
+        println!("self_trade        {}", if detected { "DETECTED -- seller and buyer are the same party" } else { "none detected" });
     }
     Ok(())
 }
@@ -13099,7 +11150,9 @@ fn handle_feed_list(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-const BOOTSTRAP_FEEDS: &[&str] = &["https://api.iriumlabs.org/offers/feed"];
+const BOOTSTRAP_FEEDS: &[&str] = &[
+    "https://api.iriumlabs.org/offers/feed",
+];
 
 fn handle_feed_bootstrap(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {
@@ -13118,11 +11171,7 @@ fn handle_feed_bootstrap(args: &[String]) -> Result<(), String> {
     }
     if added > 0 {
         save_feeds_config(&feeds)?;
-        println!(
-            "Connected to {} public marketplace feed{}.",
-            added,
-            if added == 1 { "" } else { "s" }
-        );
+        println!("Connected to {} public marketplace feed{}.", added, if added == 1 { "" } else { "s" });
     } else if skipped > 0 {
         println!("Already connected to the public marketplace.");
     } else {
@@ -13175,7 +11224,9 @@ fn handle_offer_feed_prune(args: &[String]) -> Result<(), String> {
             skipped_non_open += 1;
             continue;
         }
-        if offer.created_at == 0 || now_secs.saturating_sub(offer.created_at) < threshold_secs {
+        if offer.created_at == 0
+            || now_secs.saturating_sub(offer.created_at) < threshold_secs
+        {
             continue;
         }
         candidates.push(offer);
@@ -13270,6 +11321,7 @@ fn handle_offer_feed_prune(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+
 // -- Phase F: seller-status ------------------------------------------------
 fn handle_seller_status(args: &[String]) -> Result<(), String> {
     let mut address: Option<String> = None;
@@ -13278,18 +11330,9 @@ fn handle_seller_status(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--address" => {
-                address = args.get(i + 1).cloned();
-                i += 2;
-            }
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
-            "--rpc" => {
-                _rpc_url = args.get(i + 1).cloned().unwrap_or_default();
-                i += 2;
-            }
+            "--address" => { address = args.get(i + 1).cloned(); i += 2; }
+            "--json" => { json_mode = true; i += 1; }
+            "--rpc" => { _rpc_url = args.get(i + 1).cloned().unwrap_or_default(); i += 2; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
@@ -13298,34 +11341,24 @@ fn handle_seller_status(args: &[String]) -> Result<(), String> {
         None => {
             let path = wallet_path();
             let wallet = load_wallet(&path).map_err(|e| format!("load wallet: {}", e))?;
-            wallet
-                .keys
-                .into_iter()
-                .next()
-                .map(|k| k.address)
+            wallet.keys.into_iter().next().map(|k| k.address)
                 .ok_or_else(|| "no addresses in wallet; use --address <addr>".to_string())?
         }
     };
-    let active_offers = load_all_offers()
-        .into_iter()
-        .filter(|o| o.seller_address == addr)
-        .count();
+    let active_offers = load_all_offers().into_iter().filter(|o| o.seller_address == addr).count();
     let raw_dir = imported_agreements_dir();
     let mut active_agreements: usize = 0;
     if raw_dir.exists() {
         if let Ok(entries) = std::fs::read_dir(&raw_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if !p.extension().map(|e| e == "json").unwrap_or(false) {
-                    continue;
-                }
+                if !p.extension().map(|e| e == "json").unwrap_or(false) { continue; }
                 if let Ok(data) = std::fs::read_to_string(&p) {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&data) {
                         if let Some(parties) = val.get("parties").and_then(|p| p.as_array()) {
                             for party in parties {
                                 if party.get("role").and_then(|r| r.as_str()) == Some("seller")
-                                    && party.get("address").and_then(|a| a.as_str())
-                                        == Some(addr.as_str())
+                                    && party.get("address").and_then(|a| a.as_str()) == Some(addr.as_str())
                                 {
                                     active_agreements += 1;
                                     break;
@@ -13345,12 +11378,8 @@ fn handle_seller_status(args: &[String]) -> Result<(), String> {
                 if let Some(entry) = val.get(&addr) {
                     let sat = entry.get("satisfied").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                     let fail = entry.get("failed").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    let timeout =
-                        entry.get("timeout").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
-                    let unsat = entry
-                        .get("unsatisfied")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(0) as usize;
+                    let timeout = entry.get("timeout").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
+                    let unsat = entry.get("unsatisfied").and_then(|v| v.as_u64()).unwrap_or(0) as usize;
                     completed = sat + fail + timeout + unsat;
                 }
             }
@@ -13359,17 +11388,13 @@ fn handle_seller_status(args: &[String]) -> Result<(), String> {
     let rep = compute_reputation(&addr);
     let summary = rep.display_summary_line();
     if json_mode {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "address": addr,
-                "active_offers": active_offers,
-                "active_agreements": active_agreements,
-                "completed": completed,
-                "reputation": summary,
-            }))
-            .unwrap()
-        );
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "address": addr,
+            "active_offers": active_offers,
+            "active_agreements": active_agreements,
+            "completed": completed,
+            "reputation": summary,
+        })).unwrap());
         return Ok(());
     }
     println!("{:<18}{}", "address", addr);
@@ -13388,18 +11413,9 @@ fn handle_buyer_status(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--address" => {
-                address = args.get(i + 1).cloned();
-                i += 2;
-            }
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
-            "--rpc" => {
-                rpc_url = args.get(i + 1).cloned().unwrap_or_default();
-                i += 2;
-            }
+            "--address" => { address = args.get(i + 1).cloned(); i += 2; }
+            "--json" => { json_mode = true; i += 1; }
+            "--rpc" => { rpc_url = args.get(i + 1).cloned().unwrap_or_default(); i += 2; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
@@ -13408,11 +11424,7 @@ fn handle_buyer_status(args: &[String]) -> Result<(), String> {
         None => {
             let path = wallet_path();
             let wallet = load_wallet(&path).map_err(|e| format!("load wallet: {}", e))?;
-            wallet
-                .keys
-                .into_iter()
-                .next()
-                .map(|k| k.address)
+            wallet.keys.into_iter().next().map(|k| k.address)
                 .ok_or_else(|| "no addresses in wallet; use --address <addr>".to_string())?
         }
     };
@@ -13422,17 +11434,14 @@ fn handle_buyer_status(args: &[String]) -> Result<(), String> {
         if let Ok(entries) = std::fs::read_dir(&raw_dir) {
             for entry in entries.flatten() {
                 let p = entry.path();
-                if !p.extension().map(|e| e == "json").unwrap_or(false) {
-                    continue;
-                }
+                if !p.extension().map(|e| e == "json").unwrap_or(false) { continue; }
                 if let Ok(data) = std::fs::read_to_string(&p) {
                     if let Ok(val) = serde_json::from_str::<serde_json::Value>(&data) {
                         if let Some(parties) = val.get("parties").and_then(|p| p.as_array()) {
                             for party in parties {
                                 let role = party.get("role").and_then(|r| r.as_str()).unwrap_or("");
                                 if (role == "buyer" || role == "payer")
-                                    && party.get("address").and_then(|a| a.as_str())
-                                        == Some(addr.as_str())
+                                    && party.get("address").and_then(|a| a.as_str()) == Some(addr.as_str())
                                 {
                                     active_agreements += 1;
                                     break;
@@ -13452,15 +11461,11 @@ fn handle_buyer_status(args: &[String]) -> Result<(), String> {
             Ok(c) => c,
             Err(_) => {
                 if json_mode {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "address": addr,
-                            "active_agreements": active_agreements,
-                            "proofs_submitted": null,
-                        }))
-                        .unwrap()
-                    );
+                    println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                        "address": addr,
+                        "active_agreements": active_agreements,
+                        "proofs_submitted": null,
+                    })).unwrap());
                 } else {
                     println!("{:<18}{}", "address", addr);
                     println!("{:<18}{}", "active_agreements", active_agreements);
@@ -13476,10 +11481,7 @@ fn handle_buyer_status(args: &[String]) -> Result<(), String> {
             limit: Some(1),
         };
         match rpc_post_json::<ListProofsRpcRequest, ListProofsRpcResponse>(
-            &client,
-            &rpc_url,
-            "/rpc/listproofs",
-            &req,
+            &client, &rpc_url, "/rpc/listproofs", &req,
         ) {
             Ok(resp) => Some(resp.total_count),
             Err(_) => None,
@@ -13492,15 +11494,11 @@ fn handle_buyer_status(args: &[String]) -> Result<(), String> {
             Some(n) => serde_json::json!(n),
             None => serde_json::json!(null),
         };
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "address": addr,
-                "active_agreements": active_agreements,
-                "proofs_submitted": ps_val,
-            }))
-            .unwrap()
-        );
+        println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+            "address": addr,
+            "active_agreements": active_agreements,
+            "proofs_submitted": ps_val,
+        })).unwrap());
         return Ok(());
     }
     println!("{:<18}{}", "address", addr);
@@ -13533,30 +11531,12 @@ fn handle_invoice_generate(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--recipient" => {
-                recipient = args.get(i + 1).cloned();
-                i += 2;
-            }
-            "--amount" => {
-                amount_str = args.get(i + 1).cloned();
-                i += 2;
-            }
-            "--reference" => {
-                reference = args.get(i + 1).cloned();
-                i += 2;
-            }
-            "--expires-blocks" => {
-                expires_blocks = args.get(i + 1).and_then(|v| v.parse::<u64>().ok());
-                i += 2;
-            }
-            "--out" => {
-                out_path = args.get(i + 1).cloned();
-                i += 2;
-            }
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--recipient" => { recipient = args.get(i + 1).cloned(); i += 2; }
+            "--amount" => { amount_str = args.get(i + 1).cloned(); i += 2; }
+            "--reference" => { reference = args.get(i + 1).cloned(); i += 2; }
+            "--expires-blocks" => { expires_blocks = args.get(i + 1).and_then(|v| v.parse::<u64>().ok()); i += 2; }
+            "--out" => { out_path = args.get(i + 1).cloned(); i += 2; }
+            "--json" => { json_mode = true; i += 1; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
@@ -13585,10 +11565,11 @@ fn handle_invoice_generate(args: &[String]) -> Result<(), String> {
         "expires_blocks": expires_blocks,
         "checksum": checksum,
     });
-    let invoice_json =
-        serde_json::to_string_pretty(&invoice).map_err(|e| format!("serialize invoice: {}", e))?;
+    let invoice_json = serde_json::to_string_pretty(&invoice)
+        .map_err(|e| format!("serialize invoice: {}", e))?;
     if let Some(ref path) = out_path {
-        std::fs::write(path, &invoice_json).map_err(|e| format!("write invoice file: {}", e))?;
+        std::fs::write(path, &invoice_json)
+            .map_err(|e| format!("write invoice file: {}", e))?;
     }
     if json_mode {
         println!("{}", invoice_json);
@@ -13600,10 +11581,7 @@ fn handle_invoice_generate(args: &[String]) -> Result<(), String> {
     println!("{:<12}{}", "reference", reference);
     println!("{:<12}{}", "checksum", checksum);
     if let Some(ref path) = out_path {
-        println!(
-            "{:<12}share this invoice or run irium-wallet invoice-import --file {}",
-            "next_step", path
-        );
+        println!("{:<12}share this invoice or run irium-wallet invoice-import --file {}", "next_step", path);
     } else {
         println!("{:<12}save with --out <file>, then share or run irium-wallet invoice-import --file <path>", "next_step");
     }
@@ -13617,48 +11595,29 @@ fn handle_invoice_import(args: &[String]) -> Result<(), String> {
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
-            "--file" => {
-                file_path = args.get(i + 1).cloned();
-                i += 2;
-            }
-            "--json" => {
-                json_mode = true;
-                i += 1;
-            }
+            "--file" => { file_path = args.get(i + 1).cloned(); i += 2; }
+            "--json" => { json_mode = true; i += 1; }
             other => return Err(format!("unknown argument: {}", other)),
         }
     }
     let file_path = file_path.ok_or_else(|| "--file is required".to_string())?;
-    let data =
-        std::fs::read_to_string(&file_path).map_err(|e| format!("read invoice file: {}", e))?;
-    let val: serde_json::Value =
-        serde_json::from_str(&data).map_err(|e| format!("parse invoice JSON: {}", e))?;
-    let version = val
-        .get("irium_invoice")
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    let data = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("read invoice file: {}", e))?;
+    let val: serde_json::Value = serde_json::from_str(&data)
+        .map_err(|e| format!("parse invoice JSON: {}", e))?;
+    let version = val.get("irium_invoice").and_then(|v| v.as_str()).unwrap_or("");
     if version != "1" {
         return Err(format!("unsupported invoice version: '{}'", version));
     }
-    let recipient = val
-        .get("recipient")
-        .and_then(|v| v.as_str())
+    let recipient = val.get("recipient").and_then(|v| v.as_str())
         .ok_or_else(|| "invoice missing recipient".to_string())?;
-    let amount_str = val
-        .get("amount_irm")
-        .and_then(|v| v.as_str())
+    let amount_str = val.get("amount_irm").and_then(|v| v.as_str())
         .ok_or_else(|| "invoice missing amount_irm".to_string())?;
-    let reference = val
-        .get("reference")
-        .and_then(|v| v.as_str())
+    let reference = val.get("reference").and_then(|v| v.as_str())
         .ok_or_else(|| "invoice missing reference".to_string())?;
-    let created_at = val
-        .get("created_at")
-        .and_then(|v| v.as_u64())
+    let created_at = val.get("created_at").and_then(|v| v.as_u64())
         .ok_or_else(|| "invoice missing created_at".to_string())?;
-    let stored_checksum = val
-        .get("checksum")
-        .and_then(|v| v.as_str())
+    let stored_checksum = val.get("checksum").and_then(|v| v.as_str())
         .ok_or_else(|| "invoice missing checksum".to_string())?;
     let canonical = format!(
         "recipient={}&amount_irm={}&reference={}&created_at={}",
@@ -13668,14 +11627,10 @@ fn handle_invoice_import(args: &[String]) -> Result<(), String> {
     let verified = expected == stored_checksum;
     if !verified {
         if json_mode {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "verification": "FAILED",
-                    "error": "checksum mismatch -- invoice may be tampered",
-                }))
-                .unwrap()
-            );
+            println!("{}", serde_json::to_string_pretty(&serde_json::json!({
+                "verification": "FAILED",
+                "error": "checksum mismatch -- invoice may be tampered",
+            })).unwrap());
         } else {
             eprintln!("verification FAILED -- invoice may be tampered");
         }
@@ -13698,10 +11653,7 @@ fn handle_invoice_import(args: &[String]) -> Result<(), String> {
     println!("{:<14}{} IRM", "amount", amount_str);
     println!("{:<14}{}", "reference", reference);
     println!("{:<14}ok -- checksum matches", "verification");
-    println!(
-        "{:<14}irium-wallet send <your_addr> {} {} [--rpc <url>]",
-        "next_step", recipient, amount_str
-    );
+    println!("{:<14}irium-wallet send <your_addr> {} {} [--rpc <url>]", "next_step", recipient, amount_str);
     Ok(())
 }
 
@@ -13742,11 +11694,7 @@ fn resolve_exporter_address(
     agreement: &AgreementObject,
     explicit: Option<&str>,
 ) -> Result<(String, String), String> {
-    let party_addrs: HashSet<&str> = agreement
-        .parties
-        .iter()
-        .map(|p| p.address.as_str())
-        .collect();
+    let party_addrs: HashSet<&str> = agreement.parties.iter().map(|p| p.address.as_str()).collect();
     if let Some(addr) = explicit {
         if !party_addrs.contains(addr) {
             let known: Vec<&String> = agreement.parties.iter().map(|p| &p.address).collect();
@@ -13756,10 +11704,7 @@ fn resolve_exporter_address(
             ));
         }
         let key = find_key(wallet, addr).ok_or_else(|| {
-            format!(
-                "--address {} is a party but no matching wallet key found",
-                addr
-            )
+            format!("--address {} is a party but no matching wallet key found", addr)
         })?;
         return Ok((key.address.clone(), key.pubkey.clone()));
     }
@@ -13874,11 +11819,8 @@ fn handle_agreement_export_receipt(args: &[String]) -> Result<(), String> {
     while i < args.len() {
         match args[i].as_str() {
             "--agreement-hash" => {
-                agreement_hash = Some(parse_required_string_flag(
-                    args,
-                    &mut i,
-                    "--agreement-hash",
-                )?);
+                agreement_hash =
+                    Some(parse_required_string_flag(args, &mut i, "--agreement-hash")?);
             }
             "--address" => {
                 explicit_address = Some(parse_required_string_flag(args, &mut i, "--address")?);
@@ -14116,7 +12058,8 @@ fn handle_agreement_export_receipt(args: &[String]) -> Result<(), String> {
     receipt.exporter_signature.payload_hash = hex::encode(digest);
 
     // 10. Self-verify (catches programmer mistakes before writing).
-    verify_escrow_receipt_signature(&receipt).map_err(|e| format!("self-verify failed: {e}"))?;
+    verify_escrow_receipt_signature(&receipt)
+        .map_err(|e| format!("self-verify failed: {e}"))?;
 
     // 11. Emit.
     let serialized = if pretty {
@@ -14155,8 +12098,9 @@ fn group_g_parse_required_milestone_id(args: &[String]) -> Result<String, String
             i += 1;
         }
     }
-    let mid = found
-        .ok_or_else(|| "--milestone-id is required for milestone-scoped commands".to_string())?;
+    let mid = found.ok_or_else(|| {
+        "--milestone-id is required for milestone-scoped commands".to_string()
+    })?;
     if mid.trim().is_empty() {
         return Err("--milestone-id must not be empty".to_string());
     }
@@ -14196,10 +12140,11 @@ fn handle_agreement_milestone_fund(args: &[String]) -> Result<(), String> {
                 if i + 1 >= rest.len() {
                     return Err("--fee-per-byte requires a value".to_string());
                 }
-                fee_per_byte =
-                    Some(rest[i + 1].parse::<u64>().map_err(|_| {
-                        "--fee-per-byte must be a non-negative integer".to_string()
-                    })?);
+                fee_per_byte = Some(
+                    rest[i + 1]
+                        .parse::<u64>()
+                        .map_err(|_| "--fee-per-byte must be a non-negative integer".to_string())?,
+                );
                 i += 2;
             }
             "--broadcast" => {
@@ -14227,11 +12172,7 @@ fn handle_agreement_milestone_fund(args: &[String]) -> Result<(), String> {
         .iter()
         .any(|m| m.milestone_id == milestone_id)
     {
-        let known: Vec<&String> = agreement
-            .milestones
-            .iter()
-            .map(|m| &m.milestone_id)
-            .collect();
+        let known: Vec<&String> = agreement.milestones.iter().map(|m| &m.milestone_id).collect();
         return Err(format!(
             "--milestone-id {} not found in agreement (milestones: {:?})",
             milestone_id, known
@@ -14306,11 +12247,7 @@ fn handle_agreement_milestone_fund(args: &[String]) -> Result<(), String> {
     println!("funding_txid    {}", resp.txid);
     println!(
         "broadcast       {}",
-        if broadcast {
-            "yes"
-        } else {
-            "no (--broadcast to send)"
-        }
+        if broadcast { "yes" } else { "no (--broadcast to send)" }
     );
     Ok(())
 }
@@ -14359,18 +12296,12 @@ fn handle_agreement_flag_non_response(args: &[String]) -> Result<(), String> {
     while i < args.len() {
         match args[i].as_str() {
             "--resolver" | "--resolver-address" => {
-                resolver_address = Some(parse_required_string_flag(
-                    args,
-                    &mut i,
-                    "--resolver-address",
-                )?);
+                resolver_address =
+                    Some(parse_required_string_flag(args, &mut i, "--resolver-address")?);
             }
             "--agreement-hash" => {
-                agreement_hash = Some(parse_required_string_flag(
-                    args,
-                    &mut i,
-                    "--agreement-hash",
-                )?);
+                agreement_hash =
+                    Some(parse_required_string_flag(args, &mut i, "--agreement-hash")?);
             }
             "--rpc" => {
                 rpc_url = parse_required_string_flag(args, &mut i, "--rpc")?;
@@ -14383,7 +12314,8 @@ fn handle_agreement_flag_non_response(args: &[String]) -> Result<(), String> {
         }
     }
     let resolver_address = resolver_address.ok_or_else(|| {
-        "--resolver-address is required (the resolver who missed the response window)".to_string()
+        "--resolver-address is required (the resolver who missed the response window)"
+            .to_string()
     })?;
     let agreement_hash = agreement_hash.ok_or_else(|| {
         "--agreement-hash is required (64 hex chars of the disputed agreement)".to_string()
@@ -14505,18 +12437,10 @@ fn handle_agreement_pack(args: &[String]) -> Result<(), String> {
                 limit: None,
             };
             rpc_post_json::<ListProofsRpcRequest, ListProofsRpcResponse>(
-                &client,
-                base,
-                "/rpc/listproofs",
-                &req,
+                &client, base, "/rpc/listproofs", &req,
             )
         }) {
-            Ok(resp) => Some(
-                resp.proofs
-                    .iter()
-                    .map(|p| serde_json::to_value(p).unwrap_or_default())
-                    .collect(),
-            ),
+            Ok(resp) => Some(resp.proofs.iter().map(|p| serde_json::to_value(p).unwrap_or_default()).collect()),
             _ => None,
         }
     } else {
@@ -16355,18 +14279,15 @@ fn submit_tx(client: &Client, base: &str, tx: &Transaction) -> Result<(), String
     let status = resp.status();
     if !status.is_success() {
         let body: serde_json::Value = resp.json().unwrap_or(serde_json::Value::Null);
-        let reason = body
-            .get("reason")
+        let reason = body.get("reason")
             .and_then(|v| v.as_str())
             .unwrap_or("unknown error");
         return Err(format!("submit tx failed: {} — {}", status, reason));
     }
-    let body: serde_json::Value = resp
-        .json()
+    let body: serde_json::Value = resp.json()
         .map_err(|e| format!("submit_tx parse error: {e}"))?;
     if body.get("accepted").and_then(|v| v.as_bool()) == Some(false) {
-        let reason = body
-            .get("reason")
+        let reason = body.get("reason")
             .and_then(|v| v.as_str())
             .unwrap_or("rejected by node");
         return Err(format!("transaction rejected: {}", reason));
@@ -16377,898 +14298,11 @@ fn submit_tx(client: &Client, base: &str, tx: &Transaction) -> Result<(), String
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn aproof_args(v: &[&str]) -> Vec<String> {
-        let mut o = vec!["poawx-assignment-proof".to_string()];
-        o.extend(v.iter().map(|s| s.to_string()));
-        o
-    }
-
-    fn aproof_v2_args(v: &[&str]) -> Vec<String> {
-        let mut o = vec!["poawx-assignment-proof-v2".to_string()];
-        o.extend(v.iter().map(|s| s.to_string()));
-        o
-    }
-
-    fn cadm_args(v: &[&str]) -> Vec<String> {
-        let mut o = vec!["poawx-candidate-admission".to_string()];
-        o.extend(v.iter().map(|s| s.to_string()));
-        o
-    }
-
-    fn puz_args(v: &[&str]) -> Vec<String> {
-        let mut o = vec!["poawx-puzzle-solve".to_string()];
-        o.extend(v.iter().map(|s| s.to_string()));
-        o
-    }
-
-    fn fvote_args(v: &[&str]) -> Vec<String> {
-        let mut o = vec!["poawx-finality-vote".to_string()];
-        o.extend(v.iter().map(|s| s.to_string()));
-        o
-    }
-
-    #[test]
-    fn phase21h_finality_vote_emit_no_secret_mainnet_off() {
-        let bh = "44".repeat(32);
-        let sec = "21".repeat(32);
-        let args = fvote_args(&[
-            "--network-id",
-            "1",
-            "--target-height",
-            "10",
-            "--block-hash",
-            bh.as_str(),
-            "--vote-type",
-            "commit",
-            "--secret-hex",
-            sec.as_str(),
-        ]);
-        let v = finality_vote_json(&args).expect("vote");
-        let js = serde_json::to_string(&v).unwrap();
-        assert!(js.contains("signature"));
-        assert!(js.contains("wire_hex"));
-        assert!(js.contains("member_pubkey"));
-        // signing key (secret-hex) must NEVER appear in the output.
-        assert!(
-            !js.contains(&"21".repeat(32)),
-            "secret key must not be echoed"
-        );
-        assert!(!js.to_lowercase().contains("private"));
-        assert!(!js.to_lowercase().contains("mnemonic"));
-        // wire_hex deserializes + verifies via the node lib.
-        let wire = hex::decode(v["wire_hex"].as_str().unwrap()).unwrap();
-        let nv = irium_node_rs::poawx_finality::FinalityVoteV1::deserialize(&wire).unwrap();
-        let mut bhb = [0u8; 32];
-        bhb.copy_from_slice(&hex::decode(&bh).unwrap());
-        assert!(nv.verify(1, 10, &bhb).is_ok(), "node verifies wallet vote");
-        // mainnet hard-off.
-        let m = fvote_args(&[
-            "--network-id",
-            "0",
-            "--target-height",
-            "10",
-            "--block-hash",
-            bh.as_str(),
-            "--secret-hex",
-            sec.as_str(),
-        ]);
-        assert!(finality_vote_json(&m).is_err(), "mainnet hard-off");
-        // Phase 21I: --submit / --node-rpc are accepted by the JSON builder (the
-        // command wrapper performs the optional loopback POST).
-        let withsub = fvote_args(&[
-            "--network-id",
-            "1",
-            "--target-height",
-            "10",
-            "--block-hash",
-            bh.as_str(),
-            "--secret-hex",
-            sec.as_str(),
-            "--submit",
-            "--node-rpc",
-            "http://127.0.0.1:1",
-        ]);
-        assert!(
-            finality_vote_json(&withsub).is_ok(),
-            "submit flags accepted"
-        );
-    }
-
-    fn cadmit_args(v: &[&str]) -> Vec<String> {
-        let mut o = vec!["poawx-committed-admission".to_string()];
-        o.extend(v.iter().map(|s| s.to_string()));
-        o
-    }
-
-    #[test]
-    fn phase22a_committed_admission_emit_no_secret_mainnet_off() {
-        let rt = "33".repeat(32);
-        let sd = "44".repeat(32);
-        let args = cadmit_args(&[
-            "--network-id",
-            "1",
-            "--target-height",
-            "11",
-            "--candidate-admission-root",
-            rt.as_str(),
-            "--candidate-count",
-            "3",
-            "--seed",
-            sd.as_str(),
-        ]);
-        let v = committed_admission_json(&args).expect("json");
-        let js = serde_json::to_string(&v).unwrap();
-        assert!(js.contains("candidate_admission_root"));
-        assert!(js.contains("wire_hex"));
-        assert!(!js.to_lowercase().contains("private"));
-        assert!(!js.to_lowercase().contains("mnemonic"));
-        assert!(!js.to_lowercase().contains("secret"));
-        // wire_hex deserializes + validates via the node lib (commit_height = target-1).
-        let wire = hex::decode(v["wire_hex"].as_str().unwrap()).unwrap();
-        let ca =
-            irium_node_rs::poawx_committed_admission::AdmissionCommitmentV1::deserialize(&wire)
-                .unwrap();
-        assert!(
-            ca.validate(1, 11).is_ok(),
-            "node validates wallet commitment"
-        );
-        assert_eq!(ca.commit_height, 10);
-        // mainnet hard-off.
-        let m = cadmit_args(&[
-            "--network-id",
-            "0",
-            "--target-height",
-            "11",
-            "--candidate-admission-root",
-            rt.as_str(),
-            "--candidate-count",
-            "3",
-            "--seed",
-            sd.as_str(),
-        ]);
-        assert!(committed_admission_json(&m).is_err(), "mainnet hard-off");
-    }
-
-    #[test]
-    fn phase21f_puzzle_challenge_and_solve_no_secret_mainnet_off() {
-        std::env::set_var("IRIUM_POAWX_PUZZLE_BITS", "4");
-        let sv = "aa".repeat(20);
-        let sd = "22".repeat(32);
-        let base = [
-            "--network-id",
-            "1",
-            "--target-height",
-            "10",
-            "--role",
-            "compute",
-            "--solver",
-            sv.as_str(),
-            "--seed",
-            sd.as_str(),
-        ];
-        // challenge JSON.
-        let ch = puzzle_challenge_json(&puz_args(&base)).expect("challenge");
-        let cs = serde_json::to_string(&ch).unwrap();
-        assert!(cs.contains("challenge_digest"));
-        assert!(cs.contains("mode_name"));
-        // solve JSON: valid + compact wire.
-        let so = puzzle_solve_json(&puz_args(&base)).expect("solve");
-        let ss = serde_json::to_string(&so).unwrap();
-        assert_eq!(so["valid"], serde_json::json!(true));
-        assert!(ss.contains("wire_hex"));
-        // no key material.
-        for s in [&cs, &ss] {
-            assert!(!s.to_lowercase().contains("private"));
-            assert!(!s.to_lowercase().contains("mnemonic"));
-            assert!(!s.to_lowercase().contains("secret"));
-        }
-        // mainnet hard-off.
-        let m = puz_args(&[
-            "--network-id",
-            "0",
-            "--target-height",
-            "10",
-            "--role",
-            "compute",
-            "--solver",
-            sv.as_str(),
-            "--seed",
-            sd.as_str(),
-        ]);
-        assert!(puzzle_solve_json(&m).is_err(), "mainnet hard-off");
-        std::env::remove_var("IRIUM_POAWX_PUZZLE_BITS");
-    }
-
-    #[test]
-    fn phase21e_candidate_admission_emit_json_no_secret_mainnet_off() {
-        let td = "11".repeat(32);
-        let sd = "22".repeat(32);
-        let sv = "aa".repeat(20);
-        let args = cadm_args(&[
-            "--network-id",
-            "1",
-            "--target-height",
-            "10",
-            "--role",
-            "compute",
-            "--solver",
-            &sv,
-            "--ticket-digest",
-            &td,
-            "--seed",
-            &sd,
-        ]);
-        let v = candidate_admission_json(&args).expect("json");
-        let s = serde_json::to_string(&v).unwrap();
-        assert!(s.contains("admission_digest"));
-        assert!(s.contains("wire_hex"));
-        assert!(s.contains("assignment_proof_digest"));
-        // no key material leaks.
-        assert!(!s.to_lowercase().contains("private"));
-        assert!(!s.to_lowercase().contains("mnemonic"));
-        assert!(!s.to_lowercase().contains("secret"));
-        // wire_hex deserializes via the node lib + validates.
-        let wire = hex::decode(v["wire_hex"].as_str().unwrap()).unwrap();
-        let adm = irium_node_rs::poawx_admission::CandidateAdmissionV1::deserialize(&wire).unwrap();
-        assert!(
-            adm.validate(1, 10).is_ok(),
-            "node validates wallet admission"
-        );
-        // mainnet hard-off.
-        let m = cadm_args(&[
-            "--network-id",
-            "0",
-            "--target-height",
-            "10",
-            "--role",
-            "compute",
-            "--solver",
-            &sv,
-            "--ticket-digest",
-            &td,
-            "--seed",
-            &sd,
-        ]);
-        assert!(candidate_admission_json(&m).is_err(), "mainnet hard-off");
-    }
-
-    #[test]
-    fn phase22d_assignment_proof_v2_emit_no_secret_mainnet_off() {
-        let td = "11".repeat(32);
-        let sd = "22".repeat(32);
-        let sv = "aa".repeat(20);
-        let sk = "07".repeat(32);
-        let args = aproof_v2_args(&[
-            "--network-id",
-            "1",
-            "--target-height",
-            "10",
-            "--role",
-            "compute",
-            "--solver",
-            &sv,
-            "--ticket-digest",
-            &td,
-            "--seed",
-            &sd,
-            "--secret-hex",
-            &sk,
-        ]);
-        let v = assignment_proof_v2_json(&args).expect("json");
-        let s = serde_json::to_string(&v).unwrap();
-        assert!(s.contains("vrf_output"), "has vrf output");
-        assert!(s.contains("vrf_proof"), "has vrf proof");
-        assert!(s.contains("assignment_score"), "has score");
-        // the emitted wire re-validates via the node lib.
-        let wire = hex::decode(v["wire_hex"].as_str().unwrap()).unwrap();
-        let proof = irium_node_rs::poawx_candidate::AssignmentProofV2::deserialize(&wire).unwrap();
-        proof
-            .validate(1, 10)
-            .expect("node re-validates emitted proof");
-        // the VRF secret must NOT leak (only the public key/output/proof are emitted).
-        assert!(!s.contains(&sk), "secret hex not echoed");
-        assert!(!s.to_lowercase().contains("private"));
-        assert!(!s.to_lowercase().contains("mnemonic"));
-        // mainnet hard-off (network_id 0) and missing-secret both error.
-        let m = aproof_v2_args(&[
-            "--network-id",
-            "0",
-            "--target-height",
-            "10",
-            "--role",
-            "compute",
-            "--solver",
-            &sv,
-            "--ticket-digest",
-            &td,
-            "--seed",
-            &sd,
-            "--secret-hex",
-            &sk,
-        ]);
-        assert!(assignment_proof_v2_json(&m).is_err(), "mainnet hard-off");
-        let n = aproof_v2_args(&[
-            "--network-id",
-            "1",
-            "--target-height",
-            "10",
-            "--role",
-            "compute",
-            "--solver",
-            &sv,
-            "--ticket-digest",
-            &td,
-            "--seed",
-            &sd,
-        ]);
-        assert!(
-            assignment_proof_v2_json(&n).is_err(),
-            "missing --secret-hex"
-        );
-    }
-
-    #[test]
-    fn phase22e_candidate_admission_v2_emit_and_submit() {
-        let td = "11".repeat(32);
-        let sd = "22".repeat(32);
-        let sv = "aa".repeat(20);
-        let sk = "07".repeat(32);
-        let base = |extra: &[&str]| -> Vec<String> {
-            let mut v = vec![
-                "--network-id",
-                "1",
-                "--target-height",
-                "10",
-                "--role",
-                "compute",
-                "--solver",
-                &sv,
-                "--ticket-digest",
-                &td,
-                "--seed",
-                &sd,
-            ];
-            v.extend_from_slice(extra);
-            cadm_args(&v)
-        };
-        // (1)+(2) with --secret-hex a true-VRF proof is bound and emitted in a
-        // candidate-admission-compatible JSON.
-        let v = candidate_admission_json(&base(&["--secret-hex", &sk])).expect("json");
-        let s = serde_json::to_string(&v).unwrap();
-        assert_eq!(v["true_vrf"], serde_json::json!(true), "true_vrf flagged");
-        assert!(s.contains("vrf_output"), "has vrf output");
-        assert!(s.contains("assignment_proof_v2"), "has v2 section");
-        // the wire decodes to a node admission carrying the V2 proof, and the proof
-        // verifies + binds to the candidate (output == candidate digest).
-        let wire = hex::decode(v["wire_hex"].as_str().unwrap()).unwrap();
-        let adm = irium_node_rs::poawx_admission::CandidateAdmissionV1::deserialize(&wire).unwrap();
-        let proof = adm.assignment_proof_v2.as_ref().expect("v2 bound");
-        proof.validate(1, 10).expect("v2 verifies");
-        assert_eq!(
-            proof.vrf_output, adm.candidate.assignment_proof_digest,
-            "output == candidate digest"
-        );
-        // (4) the VRF secret never leaks.
-        assert!(!s.contains(&sk), "secret hex not echoed");
-        assert!(!s.to_lowercase().contains("mnemonic"));
-        assert!(!s.to_lowercase().contains("private"));
-        // (3) loopback-submit flags are accepted by the JSON builder (skipped).
-        let vs = candidate_admission_json(&base(&[
-            "--secret-hex",
-            &sk,
-            "--submit",
-            "--node-rpc",
-            "http://127.0.0.1:1/",
-        ]))
-        .expect("submit-flags json");
-        assert!(
-            vs["wire_hex"].as_str().is_some(),
-            "wire_hex present with submit flags"
-        );
-        // (5) mainnet disabled.
-        let m = cadm_args(&[
-            "--network-id",
-            "0",
-            "--target-height",
-            "10",
-            "--role",
-            "compute",
-            "--solver",
-            &sv,
-            "--ticket-digest",
-            &td,
-            "--seed",
-            &sd,
-            "--secret-hex",
-            &sk,
-        ]);
-        assert!(candidate_admission_json(&m).is_err(), "mainnet hard-off");
-    }
-
-    #[test]
-    fn phase21d_assignment_proof_emit_json_no_secret_mainnet_off() {
-        let td = "11".repeat(32);
-        let sd = "22".repeat(32);
-        let sv = "aa".repeat(20);
-        let args = aproof_args(&[
-            "--network-id",
-            "1",
-            "--target-height",
-            "10",
-            "--role",
-            "compute",
-            "--solver",
-            &sv,
-            "--ticket-digest",
-            &td,
-            "--seed",
-            &sd,
-        ]);
-        let v = assignment_proof_json(&args).expect("json");
-        let s = serde_json::to_string(&v).unwrap();
-        assert!(s.contains("assignment_proof_digest"), "has digest");
-        assert!(s.contains("assignment_score"), "has score");
-        // no private key / seed-phrase material leaks.
-        assert!(!s.to_lowercase().contains("private"));
-        assert!(!s.to_lowercase().contains("mnemonic"));
-        assert!(!s.to_lowercase().contains("secret"));
-        // digest matches the node-lib recomputation (placeholder is deterministic).
-        let nd = irium_node_rs::poawx_candidate::compute_assignment_proof_digest(
-            1,
-            10,
-            irium_node_rs::poawx::ROLE_COMPUTE_CONTRIBUTOR,
-            &[0xAAu8; 20],
-            &[0x02u8; 33],
-            &[0x11u8; 32],
-            &[0x22u8; 32],
-        );
-        assert_eq!(v["assignment_proof_digest"], hex::encode(nd));
-        // mainnet hard-off (network_id 0).
-        let m = aproof_args(&[
-            "--network-id",
-            "0",
-            "--target-height",
-            "10",
-            "--role",
-            "compute",
-            "--solver",
-            &sv,
-            "--ticket-digest",
-            &td,
-            "--seed",
-            &sd,
-        ]);
-        assert!(assignment_proof_json(&m).is_err(), "mainnet hard-off");
-    }
     use irium_node_rs::settlement::{
         AgreementDeadlines, AgreementLifecycleState, AgreementParty, AgreementRefundCondition,
         AgreementReleaseCondition,
     };
     use std::sync::{Mutex, OnceLock};
-
-    #[test]
-    fn poawx_register_build_signed_delegation_verifies() {
-        use k256::ecdsa::{SigningKey, VerifyingKey};
-        let sk = SigningKey::from_slice(&[5u8; 32]).unwrap();
-        let vk = VerifyingKey::from(&sk);
-        let mut mp = [0u8; 33];
-        mp.copy_from_slice(vk.to_encoded_point(true).as_bytes());
-        let pool = [0x02u8; 33];
-
-        let d =
-            build_signed_delegation(&sk, pool, 1, "rig1", 1000, 0, [0u8; 20], [9u8; 32]).unwrap();
-        // Canonical type verifies its own signature.
-        assert!(d.verify_signature().is_ok());
-        assert_eq!(d.miner_pubkey, mp);
-        assert_eq!(d.pool_pubkey, pool);
-        assert_eq!(d.fee_bps, 0);
-        // miner_pkh == HASH160(pubkey) via the wallet's own hash160.
-        assert_eq!(d.miner_pkh(), hash160(&mp));
-        // worker_tag == SHA256("rig1").
-        let wt: [u8; 32] = {
-            use sha2::{Digest, Sha256};
-            let mut h = Sha256::new();
-            h.update(b"rig1");
-            h.finalize().into()
-        };
-        assert_eq!(d.worker_tag, wt);
-        // Non-zero fee with a zero fee_pkh is rejected.
-        assert!(
-            build_signed_delegation(&sk, pool, 1, "rig1", 1000, 100, [0u8; 20], [9u8; 32]).is_err()
-        );
-        // Non-zero fee on mainnet (network_id 0) is rejected.
-        assert!(
-            build_signed_delegation(&sk, pool, 0, "rig1", 1000, 100, [0xFEu8; 20], [9u8; 32])
-                .is_err()
-        );
-        // Fee over the 200 bps cap is rejected.
-        assert!(
-            build_signed_delegation(&sk, pool, 1, "rig1", 1000, 201, [0xFEu8; 20], [9u8; 32])
-                .is_err()
-        );
-        // Valid third-party fee (1..=200 + fee_pkh on a non-mainnet net) is accepted
-        // and binds the fee terms into the signature.
-        let dt = build_signed_delegation(&sk, pool, 1, "rig1", 1000, 200, [0xFEu8; 20], [9u8; 32])
-            .unwrap();
-        assert_eq!(dt.fee_bps, 200);
-        assert_eq!(dt.fee_pkh, [0xFEu8; 20]);
-        assert!(dt.verify_signature().is_ok());
-        // Mutating either fee term breaks the signature.
-        let mut m = dt.clone();
-        m.fee_bps = 100;
-        assert!(m.verify_signature().is_err());
-        let mut m = dt.clone();
-        m.fee_pkh[0] ^= 0xff;
-        assert!(m.verify_signature().is_err());
-    }
-
-    // Phase 19B: --emit-only offline delegation.
-
-    /// The `--emit-only` output is byte-identical to the online POST body, because
-    /// both call `delegation_post_body`. Proves the payload shape + no private key.
-    #[test]
-    fn poawx_emit_only_payload_matches_post_body() {
-        use k256::ecdsa::SigningKey;
-        let sk = SigningKey::from_slice(&[7u8; 32]).unwrap();
-        let pool = [0x02u8; 33];
-        let d =
-            build_signed_delegation(&sk, pool, 1, "rig1", 1000, 0, [0u8; 20], [9u8; 32]).unwrap();
-        let body = delegation_post_body(&d, "rig1");
-        // Exactly the three public fields the pool's POST /poawx/delegation reads.
-        assert_eq!(
-            body["delegation"].as_str().unwrap(),
-            hex::encode(d.serialize())
-        );
-        assert_eq!(body["worker"].as_str().unwrap(), "rig1");
-        assert_eq!(
-            body["miner_pkh"].as_str().unwrap(),
-            hex::encode(d.miner_pkh())
-        );
-        // Valid JSON; carries no private-key material.
-        let s = serde_json::to_string(&body).unwrap();
-        assert!(serde_json::from_str::<serde_json::Value>(&s).is_ok());
-        assert!(!s.contains("privkey"));
-        assert!(!s.contains(&hex::encode(sk.to_bytes())));
-    }
-
-    fn poawx_args(parts: &[&str]) -> Vec<String> {
-        std::iter::once("poawx-register".to_string())
-            .chain(parts.iter().map(|s| s.to_string()))
-            .collect()
-    }
-
-    /// `--emit-only` input validation (pure: no wallet, no network, no signing).
-    #[test]
-    fn poawx_emit_only_arg_validation() {
-        let pk = hex::encode([0x02u8; 33]); // well-formed 33-byte length, 66 hex
-
-        // Valid: resolves to the expected fields.
-        let a = parse_poawx_register_args(&poawx_args(&[
-            "--emit-only",
-            "--pool-pubkey",
-            &pk,
-            "--network-id",
-            "1",
-            "--addr",
-            "Pabc",
-            "--worker",
-            "w1",
-            "--expiry-height",
-            "1000",
-            "--fee-bps",
-            "0",
-        ]))
-        .unwrap();
-        let (ppk, nid, addr, worker, expiry, fee_bps, fee_pkh) =
-            resolve_emit_only_args(&a).unwrap();
-        assert_eq!(ppk, [0x02u8; 33]);
-        assert_eq!(nid, 1);
-        assert_eq!(addr, "Pabc");
-        assert_eq!(worker, "w1");
-        assert_eq!(expiry, 1000);
-        assert_eq!(fee_bps, 0);
-        assert_eq!(fee_pkh, [0u8; 20]);
-
-        // Each rejection case.
-        let cases: Vec<Vec<&str>> = vec![
-            // missing pool-pubkey
-            vec![
-                "--emit-only",
-                "--network-id",
-                "1",
-                "--addr",
-                "Pabc",
-                "--worker",
-                "w1",
-                "--expiry-height",
-                "1000",
-            ],
-            // missing network-id
-            vec![
-                "--emit-only",
-                "--pool-pubkey",
-                &pk,
-                "--addr",
-                "Pabc",
-                "--worker",
-                "w1",
-                "--expiry-height",
-                "1000",
-            ],
-            // missing worker
-            vec![
-                "--emit-only",
-                "--pool-pubkey",
-                &pk,
-                "--network-id",
-                "1",
-                "--addr",
-                "Pabc",
-                "--expiry-height",
-                "1000",
-            ],
-            // missing expiry
-            vec![
-                "--emit-only",
-                "--pool-pubkey",
-                &pk,
-                "--network-id",
-                "1",
-                "--addr",
-                "Pabc",
-                "--worker",
-                "w1",
-            ],
-            // fee_bps > 0
-            vec![
-                "--emit-only",
-                "--pool-pubkey",
-                &pk,
-                "--network-id",
-                "1",
-                "--addr",
-                "Pabc",
-                "--worker",
-                "w1",
-                "--expiry-height",
-                "1000",
-                "--fee-bps",
-                "1",
-            ],
-            // malformed pool-pubkey (bad hex)
-            vec![
-                "--emit-only",
-                "--pool-pubkey",
-                "zz",
-                "--network-id",
-                "1",
-                "--addr",
-                "Pabc",
-                "--worker",
-                "w1",
-                "--expiry-height",
-                "1000",
-            ],
-            // --pool together with --emit-only
-            vec![
-                "--emit-only",
-                "--pool",
-                "http://x",
-                "--pool-pubkey",
-                &pk,
-                "--network-id",
-                "1",
-                "--addr",
-                "Pabc",
-                "--worker",
-                "w1",
-                "--expiry-height",
-                "1000",
-            ],
-        ];
-        for c in cases {
-            let a = parse_poawx_register_args(&poawx_args(&c)).unwrap();
-            assert!(
-                resolve_emit_only_args(&a).is_err(),
-                "expected rejection for args: {c:?}"
-            );
-        }
-
-        // malformed pool-pubkey (wrong length) — separate, needs an owned String.
-        let short = hex::encode([0x02u8; 10]);
-        let a = parse_poawx_register_args(&poawx_args(&[
-            "--emit-only",
-            "--pool-pubkey",
-            &short,
-            "--network-id",
-            "1",
-            "--addr",
-            "Pabc",
-            "--worker",
-            "w1",
-            "--expiry-height",
-            "1000",
-        ]))
-        .unwrap();
-        assert!(resolve_emit_only_args(&a).is_err());
-    }
-
-    /// Phase 20 Step 4: third-party fee flag resolution (pure; no network/wallet).
-    #[test]
-    fn poawx_third_party_fee_arg_resolution() {
-        let pk = hex::encode([0x02u8; 33]);
-        let fee_addr = "ab".repeat(20); // 40-hex pkh
-        let emit = |extra: &[&str]| -> Vec<String> {
-            let mut v = vec![
-                "--emit-only",
-                "--pool-pubkey",
-                &pk,
-                "--network-id",
-                "1",
-                "--addr",
-                "Pabc",
-                "--worker",
-                "w1",
-                "--expiry-height",
-                "1000",
-            ];
-            v.extend_from_slice(extra);
-            poawx_args(&v)
-        };
-
-        // Valid third-party fee (1 bps).
-        let a = parse_poawx_register_args(&emit(&[
-            "--third-party-pool",
-            "--fee-bps",
-            "1",
-            "--fee-pkh",
-            &fee_addr,
-        ]))
-        .unwrap();
-        let (_p, _n, _addr, _w, _e, fee_bps, fee_pkh) = resolve_emit_only_args(&a).unwrap();
-        assert_eq!(fee_bps, 1);
-        assert_eq!(hex::encode(fee_pkh), fee_addr);
-
-        // Valid third-party fee at the cap (200 bps).
-        let a = parse_poawx_register_args(&emit(&[
-            "--third-party-pool",
-            "--fee-bps",
-            "200",
-            "--fee-pkh",
-            &fee_addr,
-        ]))
-        .unwrap();
-        assert_eq!(resolve_emit_only_args(&a).unwrap().5, 200);
-
-        // fee > 0 WITHOUT --third-party-pool rejects.
-        let a = parse_poawx_register_args(&emit(&["--fee-bps", "100", "--fee-pkh", &fee_addr]))
-            .unwrap();
-        assert!(resolve_emit_only_args(&a).is_err());
-
-        // fee > 0 WITHOUT --fee-pkh rejects.
-        let a =
-            parse_poawx_register_args(&emit(&["--third-party-pool", "--fee-bps", "100"])).unwrap();
-        assert!(resolve_emit_only_args(&a).is_err());
-
-        // fee 201 (over cap) rejects.
-        let a = parse_poawx_register_args(&emit(&[
-            "--third-party-pool",
-            "--fee-bps",
-            "201",
-            "--fee-pkh",
-            &fee_addr,
-        ]))
-        .unwrap();
-        assert!(resolve_emit_only_args(&a).is_err());
-
-        // malformed fee_pkh rejects.
-        let a = parse_poawx_register_args(&emit(&[
-            "--third-party-pool",
-            "--fee-bps",
-            "100",
-            "--fee-pkh",
-            "not-a-pkh",
-        ]))
-        .unwrap();
-        assert!(resolve_emit_only_args(&a).is_err());
-
-        // --fee-pkh with fee 0 rejects (inconsistent).
-        let a = parse_poawx_register_args(&emit(&["--fee-pkh", &fee_addr])).unwrap();
-        assert!(resolve_emit_only_args(&a).is_err());
-    }
-
-    /// The emit-only payload object has EXACTLY the three public fields the pool
-    /// endpoint reads — no extra fields can leak (structural no-secret guarantee).
-    #[test]
-    fn poawx_emit_only_payload_has_exact_keys() {
-        use k256::ecdsa::SigningKey;
-        let sk = SigningKey::from_slice(&[11u8; 32]).unwrap();
-        let d = build_signed_delegation(&sk, [0x02u8; 33], 1, "w1", 1000, 0, [0u8; 20], [3u8; 32])
-            .unwrap();
-        let body = delegation_post_body(&d, "w1");
-        let obj = body.as_object().expect("payload is a JSON object");
-        let mut keys: Vec<&str> = obj.keys().map(|s| s.as_str()).collect();
-        keys.sort_unstable();
-        assert_eq!(keys, vec!["delegation", "miner_pkh", "worker"]);
-    }
-
-    /// Online-path arg validation (pure: no network). Guards against regressions in
-    /// the online `poawx-register` flag handling extracted into `resolve_online_args`.
-    #[test]
-    fn poawx_online_args_validation() {
-        // Valid online form: parses as non-emit-only and resolves.
-        let a = parse_poawx_register_args(&poawx_args(&[
-            "--pool",
-            "http://127.0.0.1:39713",
-            "--addr",
-            "Pabc",
-            "--worker",
-            "w1",
-            "--expiry-height",
-            "1000",
-        ]))
-        .unwrap();
-        assert!(!a.emit_only);
-        assert_eq!(a.pool.as_deref(), Some("http://127.0.0.1:39713"));
-        assert!(a.pool_pubkey_hex.is_none() && a.network_id.is_none());
-        let (pool, addr, worker, fee, fee_pkh, expiry) = resolve_online_args(&a).unwrap();
-        assert_eq!(pool, "http://127.0.0.1:39713");
-        assert_eq!(addr, "Pabc");
-        assert_eq!(worker, "w1");
-        assert_eq!(fee, 0);
-        assert_eq!(fee_pkh, [0u8; 20]);
-        assert_eq!(expiry, 1000);
-
-        // Rejections (each must fail closed).
-        let bad: Vec<Vec<&str>> = vec![
-            // emit-only-only flags in online mode
-            vec![
-                "--pool",
-                "http://x",
-                "--pool-pubkey",
-                "02",
-                "--addr",
-                "Pabc",
-                "--expiry-height",
-                "1000",
-            ],
-            vec![
-                "--pool",
-                "http://x",
-                "--network-id",
-                "1",
-                "--addr",
-                "Pabc",
-                "--expiry-height",
-                "1000",
-            ],
-            // non-zero fee
-            vec![
-                "--pool",
-                "http://x",
-                "--addr",
-                "Pabc",
-                "--expiry-height",
-                "1000",
-                "--fee-bps",
-                "1",
-            ],
-            // missing pool
-            vec!["--addr", "Pabc", "--expiry-height", "1000"],
-            // missing addr
-            vec!["--pool", "http://x", "--expiry-height", "1000"],
-            // missing expiry
-            vec!["--pool", "http://x", "--addr", "Pabc"],
-        ];
-        for c in bad {
-            let a = parse_poawx_register_args(&poawx_args(&c)).unwrap();
-            assert!(
-                resolve_online_args(&a).is_err(),
-                "expected online rejection for args: {c:?}"
-            );
-        }
-    }
 
     fn test_guard() -> std::sync::MutexGuard<'static, ()> {
         static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -23063,7 +20097,10 @@ found true"
     fn offer_show_rejects_invalid_offer_id() {
         // validate_offer_id fires before load_offer; no filesystem setup required
         for bad_id in &["../evil", "abc/def", "test..id", "bad id", "id#123"] {
-            let result = handle_offer_show(&["--offer".to_string(), bad_id.to_string()]);
+            let result = handle_offer_show(&[
+                "--offer".to_string(),
+                bad_id.to_string(),
+            ]);
             assert!(result.is_err(), "expected error for id: {}", bad_id);
             let err = result.unwrap_err();
             assert!(
@@ -23126,7 +20163,10 @@ found true"
         // Valid IDs must clear validate_offer_id and reach load_offer
         // (which returns "not found" since no files exist — not "invalid characters")
         for good_id in &["offer-123", "flow_test_001", "A1B2C3"] {
-            let result = handle_offer_show(&["--offer".to_string(), good_id.to_string()]);
+            let result = handle_offer_show(&[
+                "--offer".to_string(),
+                good_id.to_string(),
+            ]);
             let err = result.unwrap_err();
             assert!(
                 err.contains("not found") && !err.contains("invalid characters"),
@@ -23165,7 +20205,7 @@ found true"
             taken_at_height: None,
             source: None,
             seller_pubkey: None,
-            template_type: None,
+                    template_type: None,
             milestone_count: None,
         };
         let summary = render_offer_summary(&offer);
@@ -23209,7 +20249,7 @@ found true"
             taken_at_height: None,
             source: None,
             seller_pubkey: None,
-            template_type: None,
+                    template_type: None,
             milestone_count: None,
         };
         let path = save_offer(&offer).unwrap();
@@ -23250,7 +20290,7 @@ found true"
                 taken_at_height: None,
                 source: None,
                 seller_pubkey: None,
-                template_type: None,
+                            template_type: None,
                 milestone_count: None,
             };
             save_offer(&o).unwrap();
@@ -23289,7 +20329,7 @@ found true"
             taken_at_height: None,
             source: None,
             seller_pubkey: None,
-            template_type: None,
+                    template_type: None,
             milestone_count: None,
         };
         save_offer(&offer).unwrap();
@@ -23359,7 +20399,7 @@ found true"
             taken_at_height: None,
             source: None,
             seller_pubkey: None,
-            template_type: None,
+                    template_type: None,
             milestone_count: None,
         };
         let summary = render_offer_summary(&offer);
@@ -23392,7 +20432,7 @@ found true"
             taken_at_height: None,
             source: Some("local".to_string()),
             seller_pubkey: None,
-            template_type: None,
+                    template_type: None,
             milestone_count: None,
         };
         save_offer(&offer).unwrap();
@@ -23602,7 +20642,7 @@ found true"
                 taken_at_height: None,
                 source: Some(src_val.to_string()),
                 seller_pubkey: None,
-                template_type: None,
+                            template_type: None,
                 milestone_count: None,
             };
             save_offer(&o).unwrap();
@@ -23637,7 +20677,7 @@ found true"
                 taken_at_height: None,
                 source: Some(src_val.to_string()),
                 seller_pubkey: None,
-                template_type: None,
+                            template_type: None,
                 milestone_count: None,
             };
             save_offer(&o).unwrap();
@@ -23647,6 +20687,7 @@ found true"
         std::fs::remove_dir_all(&dir).ok();
         assert!(result.is_ok());
     }
+
 
     // ================================================================
     // Offer Discovery Layer tests
@@ -23700,16 +20741,16 @@ found true"
         taken_offer.status = "taken".to_string();
         save_offer(&taken_offer).unwrap();
         let out = dir.join("feed.json");
-        let result = handle_offer_feed_export(&["--out".to_string(), out.display().to_string()]);
+        let result = handle_offer_feed_export(&[
+            "--out".to_string(),
+            out.display().to_string(),
+        ]);
         env::remove_var("IRIUM_OFFERS_DIR");
         assert!(result.is_ok());
         let feed_json = std::fs::read_to_string(&out).unwrap();
         let feed: serde_json::Value = serde_json::from_str(&feed_json).unwrap();
         assert_eq!(feed["count"].as_u64().unwrap(), 1);
-        assert_eq!(
-            feed["offers"][0]["offer_id"].as_str().unwrap(),
-            "feed-open-1"
-        );
+        assert_eq!(feed["offers"][0]["offer_id"].as_str().unwrap(), "feed-open-1");
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -23749,7 +20790,10 @@ found true"
         offer.taken_at = Some(999);
         save_offer(&offer).unwrap();
         let out = dir.join("feed-strip.json");
-        let result = handle_offer_feed_export(&["--out".to_string(), out.display().to_string()]);
+        let result = handle_offer_feed_export(&[
+            "--out".to_string(),
+            out.display().to_string(),
+        ]);
         env::remove_var("IRIUM_OFFERS_DIR");
         assert!(result.is_ok());
         let feed: serde_json::Value =
@@ -23830,18 +20874,8 @@ found true"
         let dir = temp_offers_dir("src-remote-filter");
         std::fs::create_dir_all(&dir).unwrap();
         env::set_var("IRIUM_OFFERS_DIR", dir.display().to_string());
-        save_offer(&make_open_offer(
-            "rem-1",
-            Some("remote:http://node-a/feed"),
-            None,
-        ))
-        .unwrap();
-        save_offer(&make_open_offer(
-            "rem-2",
-            Some("remote:http://node-b/feed"),
-            None,
-        ))
-        .unwrap();
+        save_offer(&make_open_offer("rem-1", Some("remote:http://node-a/feed"), None)).unwrap();
+        save_offer(&make_open_offer("rem-2", Some("remote:http://node-b/feed"), None)).unwrap();
         save_offer(&make_open_offer("loc-1", None, None)).unwrap();
         let result = handle_offer_list(&["--source".to_string(), "remote".to_string()]);
         env::remove_var("IRIUM_OFFERS_DIR");
@@ -23857,12 +20891,7 @@ found true"
         env::set_var("IRIUM_OFFERS_DIR", dir.display().to_string());
         save_offer(&make_open_offer("all-1", None, None)).unwrap();
         save_offer(&make_open_offer("all-2", Some("imported"), None)).unwrap();
-        save_offer(&make_open_offer(
-            "all-3",
-            Some("remote:http://x/feed"),
-            None,
-        ))
-        .unwrap();
+        save_offer(&make_open_offer("all-3", Some("remote:http://x/feed"), None)).unwrap();
         let result = handle_offer_list(&["--source".to_string(), "all".to_string()]);
         env::remove_var("IRIUM_OFFERS_DIR");
         std::fs::remove_dir_all(&dir).ok();
@@ -23959,9 +20988,7 @@ found true"
     fn offer_list_limit_invalid_returns_error() {
         let result = handle_offer_list(&["--limit".to_string(), "abc".to_string()]);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("--limit must be a positive integer"));
+        assert!(result.unwrap_err().contains("--limit must be a positive integer"));
     }
 
     #[test]
@@ -23992,7 +21019,10 @@ found true"
         let mut cash_offer = make_open_offer("pay-2", None, None);
         cash_offer.payment_method = "cash".to_string();
         save_offer(&cash_offer).unwrap();
-        let result = handle_offer_list(&["--payment".to_string(), "bank-transfer".to_string()]);
+        let result = handle_offer_list(&[
+            "--payment".to_string(),
+            "bank-transfer".to_string(),
+        ]);
         env::remove_var("IRIUM_OFFERS_DIR");
         std::fs::remove_dir_all(&dir).ok();
         assert!(result.is_ok());
@@ -24041,16 +21071,11 @@ found true"
         o.amount_irm = 200_000_000;
         save_offer(&o).unwrap();
         let result = handle_offer_list(&[
-            "--payment".to_string(),
-            "bank-transfer".to_string(),
-            "--min-amount".to_string(),
-            "1".to_string(),
-            "--max-amount".to_string(),
-            "100".to_string(),
-            "--sort".to_string(),
-            "amount".to_string(),
-            "--limit".to_string(),
-            "5".to_string(),
+            "--payment".to_string(), "bank-transfer".to_string(),
+            "--min-amount".to_string(), "1".to_string(),
+            "--max-amount".to_string(), "100".to_string(),
+            "--sort".to_string(), "amount".to_string(),
+            "--limit".to_string(), "5".to_string(),
         ]);
         env::remove_var("IRIUM_OFFERS_DIR");
         std::fs::remove_dir_all(&dir).ok();
@@ -24135,19 +21160,13 @@ found true"
         imported.created_at = 1;
         save_offer(&imported).unwrap();
         // Remote open old offer: SHOULD be pruned
-        let mut remote_old = make_open_offer(
-            "prune-remote-old",
-            Some("remote:http://x.example/feed"),
-            None,
-        );
+        let mut remote_old =
+            make_open_offer("prune-remote-old", Some("remote:http://x.example/feed"), None);
         remote_old.created_at = 1;
         save_offer(&remote_old).unwrap();
         // Remote taken offer: must NOT be pruned
-        let mut remote_taken = make_open_offer(
-            "prune-remote-taken",
-            Some("remote:http://x.example/feed"),
-            None,
-        );
+        let mut remote_taken =
+            make_open_offer("prune-remote-taken", Some("remote:http://x.example/feed"), None);
         remote_taken.created_at = 1;
         remote_taken.status = "taken".to_string();
         save_offer(&remote_taken).unwrap();
@@ -24192,12 +21211,17 @@ found true"
 
     #[test]
     fn offer_feed_prune_invalid_days_returns_error() {
-        let result = handle_offer_feed_prune(&["--older-than-days".to_string(), "abc".to_string()]);
+        let result = handle_offer_feed_prune(&[
+            "--older-than-days".to_string(),
+            "abc".to_string(),
+        ]);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
             .contains("--older-than-days must be a positive integer"));
     }
+
+
 
     // ── reputation layer tests ──────────────────────────────────────────────
 
@@ -24435,9 +21459,9 @@ found true"
     fn reputation_show_requires_seller_arg() {
         let result = handle_reputation_show(&[]);
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .contains("seller address or pubkey is required"),);
+        assert!(
+            result.unwrap_err().contains("seller address or pubkey is required"),
+        );
     }
     #[test]
     fn resolve_seller_address_compressed_pubkey_found() {
@@ -24458,8 +21482,7 @@ found true"
         std::fs::write(
             dir.join("rep-pk-test-001.json"),
             serde_json::to_string(&offer).unwrap(),
-        )
-        .unwrap();
+        ).unwrap();
         env::set_var("IRIUM_OFFERS_DIR", dir.display().to_string());
         let resolved = resolve_seller_address(
             "03e918af472e63de044c983df9f09bae57d4c78a70998d5d5fded408672886f868",
@@ -24475,7 +21498,8 @@ found true"
         let dir = temp_offers_dir("rep-resolve-pk-unknown");
         std::fs::create_dir_all(&dir).unwrap();
         env::set_var("IRIUM_OFFERS_DIR", dir.display().to_string());
-        let unknown_pk = "02aabbccddee11223344556677889900aabbccddee11223344556677889900aabbcc";
+        let unknown_pk =
+            "02aabbccddee11223344556677889900aabbccddee11223344556677889900aabbcc";
         let resolved = resolve_seller_address(unknown_pk);
         env::remove_var("IRIUM_OFFERS_DIR");
         std::fs::remove_dir_all(&dir).ok();
@@ -24612,11 +21636,7 @@ found true"
                 "unsatisfied": 1
             }
         });
-        std::fs::write(
-            rep_dir.join("outcomes.json"),
-            serde_json::to_string(&outcomes).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(rep_dir.join("outcomes.json"), serde_json::to_string(&outcomes).unwrap()).unwrap();
         env::set_var("IRIUM_DATA_DIR", tmp.display().to_string());
         let rep = compute_reputation("QTestSellerTU");
         env::remove_var("IRIUM_DATA_DIR");
@@ -24642,11 +21662,7 @@ found true"
                 "failed": 2
             }
         });
-        std::fs::write(
-            rep_dir.join("outcomes.json"),
-            serde_json::to_string(&outcomes).unwrap(),
-        )
-        .unwrap();
+        std::fs::write(rep_dir.join("outcomes.json"), serde_json::to_string(&outcomes).unwrap()).unwrap();
         env::set_var("IRIUM_DATA_DIR", tmp.display().to_string());
         let rep = compute_reputation("QTestSellerFB");
         env::remove_var("IRIUM_DATA_DIR");
@@ -24763,8 +21779,7 @@ found true"
         std::fs::write(
             rep_dir.join("outcomes.json"),
             serde_json::to_string(&outcomes).unwrap(),
-        )
-        .unwrap();
+        ).unwrap();
         env::set_var("IRIUM_DATA_DIR", tmp.display().to_string());
         let rep = compute_reputation("QTestRecentSeller");
         env::remove_var("IRIUM_DATA_DIR");
@@ -24891,10 +21906,8 @@ found true"
         // two valid http:// URLs that are unreachable; verify the command
         // returns Ok (per-feed errors do not abort the full run)
         let result = handle_offer_feed_fetch(&[
-            "--url".to_string(),
-            "http://localhost:1/feed".to_string(),
-            "--url".to_string(),
-            "http://localhost:2/feed".to_string(),
+            "--url".to_string(), "http://localhost:1/feed".to_string(),
+            "--url".to_string(), "http://localhost:2/feed".to_string(),
         ]);
         env::remove_var("IRIUM_OFFERS_DIR");
         std::fs::remove_dir_all(&dir).ok();
@@ -24912,10 +21925,8 @@ found true"
     #[test]
     fn offer_feed_fetch_invalid_scheme_in_multi_returns_error() {
         let result = handle_offer_feed_fetch(&[
-            "--url".to_string(),
-            "http://good.example/feed".to_string(),
-            "--url".to_string(),
-            "ftp://bad.example/feed".to_string(),
+            "--url".to_string(), "http://good.example/feed".to_string(),
+            "--url".to_string(), "ftp://bad.example/feed".to_string(),
         ]);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("invalid URL"));
@@ -25332,10 +22343,7 @@ found true"
         );
         assert_eq!(policy.required_proofs.len(), 1);
         assert_eq!(policy.required_proofs[0].proof_type, "payment_received");
-        assert_eq!(
-            policy.required_proofs[0].requirement_id,
-            "req-payment-received"
-        );
+        assert_eq!(policy.required_proofs[0].requirement_id, "req-payment-received");
         assert_eq!(policy.attestors.len(), 1);
         assert_eq!(policy.attestors[0].attestor_id, "seller-attestor");
         assert_eq!(policy.no_response_rules.len(), 1);
@@ -25376,10 +22384,7 @@ found true"
         assert_eq!(policy.required_proofs.len(), 1);
         assert_eq!(policy.required_proofs[0].proof_type, "milestone_delivered");
         assert_eq!(policy.required_proofs[0].requirement_id, "req-milestone-m2");
-        assert_eq!(
-            policy.required_proofs[0].milestone_id.as_deref(),
-            Some("m2")
-        );
+        assert_eq!(policy.required_proofs[0].milestone_id.as_deref(), Some("m2"));
         assert!(matches!(
             policy.required_proofs[0].resolution,
             ProofResolution::MilestoneRelease
@@ -25395,30 +22400,19 @@ found true"
     #[test]
     fn group_e_build_template_policy_otc_returns_one_payment_received_policy() {
         let agr = group_e_make_agreement(AgreementTemplateType::OtcSettlement, vec![]);
-        let result = build_template_policy(
-            &agr,
-            &group_e_test_agreement_hash(),
-            group_e_test_pubkey(),
-            5000,
-        );
+        let result =
+            build_template_policy(&agr, &group_e_test_agreement_hash(), group_e_test_pubkey(), 5000);
         let policies = result.expect("OTC must produce a policy");
         assert_eq!(policies.len(), 1);
         assert_eq!(policies[0].policy_id, "pol-agr-test-1");
-        assert_eq!(
-            policies[0].required_proofs[0].proof_type,
-            "payment_received"
-        );
+        assert_eq!(policies[0].required_proofs[0].proof_type, "payment_received");
     }
 
     #[test]
     fn group_e_build_template_policy_freelance_returns_one_work_completed_policy() {
         let agr = group_e_make_agreement(AgreementTemplateType::SimpleReleaseRefund, vec![]);
-        let result = build_template_policy(
-            &agr,
-            &group_e_test_agreement_hash(),
-            group_e_test_pubkey(),
-            6000,
-        );
+        let result =
+            build_template_policy(&agr, &group_e_test_agreement_hash(), group_e_test_pubkey(), 6000);
         let policies = result.expect("freelance must produce a policy");
         assert_eq!(policies.len(), 1);
         assert_eq!(policies[0].policy_id, "pol-agr-test-1");
@@ -25461,12 +22455,8 @@ found true"
             },
         ];
         let agr = group_e_make_agreement(AgreementTemplateType::MilestoneSettlement, milestones);
-        let result = build_template_policy(
-            &agr,
-            &group_e_test_agreement_hash(),
-            group_e_test_pubkey(),
-            9999,
-        );
+        let result =
+            build_template_policy(&agr, &group_e_test_agreement_hash(), group_e_test_pubkey(), 9999);
         let policies = result.expect("milestone must produce policies");
         assert_eq!(policies.len(), 3);
         let ids: std::collections::HashSet<String> =
@@ -25487,12 +22477,8 @@ found true"
     #[test]
     fn group_e_build_template_policy_deposit_returns_none() {
         let agr = group_e_make_agreement(AgreementTemplateType::RefundableDeposit, vec![]);
-        let result = build_template_policy(
-            &agr,
-            &group_e_test_agreement_hash(),
-            group_e_test_pubkey(),
-            5000,
-        );
+        let result =
+            build_template_policy(&agr, &group_e_test_agreement_hash(), group_e_test_pubkey(), 5000);
         assert!(result.is_none(), "deposit must NOT auto-build a policy");
     }
 
@@ -25635,7 +22621,8 @@ found true"
             }],
         };
         let agr = group_f_make_agreement_with_parties();
-        let result = resolve_exporter_address(&wallet, &agr, Some("Qnotaparty"));
+        let result =
+            resolve_exporter_address(&wallet, &agr, Some("Qnotaparty"));
         assert!(result.is_err(), "non-party address must be rejected");
         assert!(
             result.unwrap_err().contains("not a party"),
@@ -25746,11 +22733,7 @@ found true"
 
     #[test]
     fn group_g_parse_required_milestone_id_rejects_missing_flag() {
-        let args = vec![
-            "--broadcast".to_string(),
-            "--rpc".to_string(),
-            "x".to_string(),
-        ];
+        let args = vec!["--broadcast".to_string(), "--rpc".to_string(), "x".to_string()];
         let err = group_g_parse_required_milestone_id(&args).unwrap_err();
         assert!(
             err.contains("required"),
@@ -25994,7 +22977,10 @@ found true"
 
     #[test]
     fn group_h2_flag_non_response_requires_resolver_address() {
-        let args = vec!["--agreement-hash".to_string(), "ab".repeat(32)];
+        let args = vec![
+            "--agreement-hash".to_string(),
+            "ab".repeat(32),
+        ];
         let err = handle_agreement_flag_non_response(&args).unwrap_err();
         assert!(
             err.contains("--resolver-address is required"),
@@ -26004,7 +22990,10 @@ found true"
 
     #[test]
     fn group_h2_flag_non_response_requires_agreement_hash() {
-        let args = vec!["--resolver-address".to_string(), "Qresolver".to_string()];
+        let args = vec![
+            "--resolver-address".to_string(),
+            "Qresolver".to_string(),
+        ];
         let err = handle_agreement_flag_non_response(&args).unwrap_err();
         assert!(
             err.contains("--agreement-hash is required"),
@@ -26059,7 +23048,10 @@ found true"
 
     #[test]
     fn group_h2_flag_non_response_unknown_flag_rejected() {
-        let args = vec!["--bogus".to_string(), "x".to_string()];
+        let args = vec![
+            "--bogus".to_string(),
+            "x".to_string(),
+        ];
         let err = handle_agreement_flag_non_response(&args).unwrap_err();
         assert!(
             err.contains("unknown argument"),
@@ -26107,8 +23099,9 @@ found true"
             },
         };
         let d1 = escrow_receipt_signing_digest(&make_receipt("", "")).unwrap();
-        let d2 = escrow_receipt_signing_digest(&make_receipt(&"ff".repeat(32), &"ee".repeat(32)))
-            .unwrap();
+        let d2 =
+            escrow_receipt_signing_digest(&make_receipt(&"ff".repeat(32), &"ee".repeat(32)))
+                .unwrap();
         assert_eq!(
             d1, d2,
             "signing digest must be independent of signature / payload_hash fields"
@@ -26138,7 +23131,7 @@ found true"
             seller_pubkey: Some(
                 "03aabbccdd112233445566778899aabbccdd112233445566778899aabbccdd112233".to_string(),
             ),
-            template_type: None,
+                    template_type: None,
             milestone_count: None,
         };
         let json = serde_json::to_string(&offer).unwrap();
@@ -26178,7 +23171,7 @@ found true"
             seller_pubkey: Some(
                 "03aabbccdd112233445566778899aabbccdd112233445566778899aabbccdd112233".to_string(),
             ),
-            template_type: None,
+                    template_type: None,
             milestone_count: None,
         };
         save_offer(&offer).unwrap();
@@ -26402,7 +23395,11 @@ fn handle_watch(args: &[String]) -> Result<(), String> {
     rt.block_on(watch_loop(rpc_url, ws_url, auto_release))
 }
 
-async fn watch_loop(rpc_url: String, ws_url: String, auto_release: bool) -> Result<(), String> {
+async fn watch_loop(
+    rpc_url: String,
+    ws_url: String,
+    auto_release: bool,
+) -> Result<(), String> {
     use futures_util::{SinkExt, StreamExt};
     use tokio_tungstenite::tungstenite::Message;
     // GROUP E (Q2): release attempts run in background tasks because
@@ -26437,7 +23434,10 @@ async fn watch_loop(rpc_url: String, ws_url: String, auto_release: bool) -> Resu
                     let Ok(val) = serde_json::from_str::<serde_json::Value>(&t) else {
                         continue;
                     };
-                    let event_type = val.get("type").and_then(|v| v.as_str()).unwrap_or("");
+                    let event_type = val
+                        .get("type")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
                     if event_type == "agreement.satisfied" && auto_release {
                         let agreement_hash = val
                             .get("data")
@@ -26463,9 +23463,17 @@ async fn watch_loop(rpc_url: String, ws_url: String, auto_release: bool) -> Resu
                         let rpc_url_clone = rpc_url.clone();
                         let in_flight_clone = in_flight.clone();
                         tokio::spawn(async move {
-                            match try_auto_release(&agreement_hash_owned, &rpc_url_clone).await {
+                            match try_auto_release(
+                                &agreement_hash_owned,
+                                &rpc_url_clone,
+                            )
+                            .await
+                            {
                                 Ok(_) => {
-                                    eprintln!("[watch] auto-released {}", agreement_hash_owned);
+                                    eprintln!(
+                                        "[watch] auto-released {}",
+                                        agreement_hash_owned
+                                    );
                                     update_offer_settled_for(&agreement_hash_owned);
                                     // Keep in in_flight forever to dedupe replay events.
                                 }
@@ -26498,7 +23506,10 @@ async fn watch_loop(rpc_url: String, ws_url: String, auto_release: bool) -> Resu
     }
 }
 
-async fn try_auto_release(agreement_hash: &str, rpc_url: &str) -> Result<(), String> {
+async fn try_auto_release(
+    agreement_hash: &str,
+    rpc_url: &str,
+) -> Result<(), String> {
     // Look up the agreement locally so we can extract agreement_id and
     // creation_time for preimage recovery.
     let agreement = load_local_agreement_by_hash(agreement_hash)?;
@@ -26632,7 +23643,9 @@ fn recover_preimage(agreement_id: &str, creation_time: u64) -> Option<String> {
 /// whose top-level agreement_hash field matches. Returns Err if the
 /// agreement isn't on this machine — peer-created agreements we have
 /// no local copy of are silently skipped by the caller.
-fn load_local_agreement_by_hash(agreement_hash: &str) -> Result<serde_json::Value, String> {
+fn load_local_agreement_by_hash(
+    agreement_hash: &str,
+) -> Result<serde_json::Value, String> {
     let candidates = [
         irium_data_dir().join("agreements"),
         imported_agreements_dir(),
@@ -26771,18 +23784,12 @@ fn main() {
             if bip32 {
                 let mnemonic = match Mnemonic::generate(24) {
                     Ok(m) => m,
-                    Err(e) => {
-                        eprintln!("Failed to generate mnemonic: {}", e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { eprintln!("Failed to generate mnemonic: {}", e); std::process::exit(1); }
                 };
                 let seed_bytes = mnemonic.to_seed("");
                 let secret = match bip32_derive_irium(&seed_bytes, 0) {
                     Ok(v) => v,
-                    Err(e) => {
-                        eprintln!("BIP32 derivation failed: {}", e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { eprintln!("BIP32 derivation failed: {}", e); std::process::exit(1); }
                 };
                 let key = wallet_key_from_secret(&secret, true);
                 let wallet = WalletFile {
@@ -26805,10 +23812,7 @@ fn main() {
                 let seed_hex = generate_seed_hex();
                 let secret = match derive_secret_from_seed_hex(&seed_hex, 0) {
                     Ok(v) => v,
-                    Err(e) => {
-                        eprintln!("Failed to derive key: {}", e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { eprintln!("Failed to derive key: {}", e); std::process::exit(1); }
                 };
                 let key = wallet_key_from_secret(&secret, true);
                 let wallet = WalletFile {
@@ -26835,10 +23839,7 @@ fn main() {
             let phrase = args[1..].join(" ");
             let mnemonic = match Mnemonic::parse(&phrase) {
                 Ok(m) => m,
-                Err(e) => {
-                    eprintln!("Invalid mnemonic: {}", e);
-                    std::process::exit(1);
-                }
+                Err(e) => { eprintln!("Invalid mnemonic: {}", e); std::process::exit(1); }
             };
             let path = wallet_path();
             if path.exists() {
@@ -26848,10 +23849,7 @@ fn main() {
             let seed_bytes = mnemonic.to_seed("");
             let secret = match bip32_derive_irium(&seed_bytes, 0) {
                 Ok(v) => v,
-                Err(e) => {
-                    eprintln!("BIP32 derivation failed: {}", e);
-                    std::process::exit(1);
-                }
+                Err(e) => { eprintln!("BIP32 derivation failed: {}", e); std::process::exit(1); }
             };
             let key = wallet_key_from_secret(&secret, true);
             let wallet = WalletFile {
@@ -26883,17 +23881,11 @@ fn main() {
                 let index = wallet.next_index;
                 let seed_bytes = match hex::decode(bip32_seed) {
                     Ok(b) => b,
-                    Err(e) => {
-                        eprintln!("Failed to decode BIP32 seed: {}", e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { eprintln!("Failed to decode BIP32 seed: {}", e); std::process::exit(1); }
                 };
                 let secret = match bip32_derive_irium(&seed_bytes, index) {
                     Ok(v) => v,
-                    Err(e) => {
-                        eprintln!("Failed BIP32 derivation: {}", e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { eprintln!("Failed BIP32 derivation: {}", e); std::process::exit(1); }
                 };
                 wallet.next_index = wallet.next_index.saturating_add(1);
                 wallet_key_from_secret(&secret, true)
@@ -27062,9 +24054,7 @@ fn main() {
             let phrase = match wallet.mnemonic {
                 Some(m) => m,
                 None => {
-                    eprintln!(
-                        "No mnemonic stored in wallet (custom-derivation or key-only wallet)"
-                    );
+                    eprintln!("No mnemonic stored in wallet (custom-derivation or key-only wallet)");
                     std::process::exit(1);
                 }
             };
@@ -27074,14 +24064,8 @@ fn main() {
                     std::process::exit(1);
                 }
             }
-            if let Err(e) = fs::write(
-                &out,
-                format!(
-                    "{}
-",
-                    phrase
-                ),
-            ) {
+            if let Err(e) = fs::write(&out, format!("{}
+", phrase)) {
                 eprintln!("Failed to write mnemonic file: {}", e);
                 std::process::exit(1);
             }
@@ -27248,72 +24232,6 @@ fn main() {
                     eprintln!("Invalid address or checksum");
                     std::process::exit(1);
                 }
-            }
-        }
-        "poawx-register" => {
-            if let Err(e) = cmd_poawx_register(&args) {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        "poawx-role-precommit" => {
-            if let Err(e) = cmd_poawx_role_emit(&args, false) {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        "poawx-role-reveal" => {
-            if let Err(e) = cmd_poawx_role_emit(&args, true) {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        "poawx-ticket-proof" => {
-            if let Err(e) = cmd_poawx_ticket_emit(&args) {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        "poawx-assignment-proof" => {
-            if let Err(e) = cmd_poawx_assignment_emit(&args) {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        "poawx-assignment-proof-v2" => {
-            if let Err(e) = cmd_poawx_assignment_v2_emit(&args) {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        "poawx-candidate-admission" => {
-            if let Err(e) = cmd_poawx_candidate_admission_emit(&args) {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        "poawx-puzzle-challenge" => {
-            if let Err(e) = cmd_poawx_puzzle_challenge(&args) {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        "poawx-puzzle-solve" => {
-            if let Err(e) = cmd_poawx_puzzle_solve(&args) {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        "poawx-finality-vote" => {
-            if let Err(e) = cmd_poawx_finality_vote(&args) {
-                eprintln!("{e}");
-                std::process::exit(1);
-            }
-        }
-        "poawx-committed-admission" => {
-            if let Err(e) = cmd_poawx_committed_admission(&args) {
-                eprintln!("{e}");
-                std::process::exit(1);
             }
         }
         "qr" => {
@@ -27650,11 +24568,7 @@ fn main() {
             }
         }
         "agreement-bundle-verify-signatures" => {
-            if args.len() != 3 {
-                if args.len() == 4 && args[2] == "--bundle" {
-                    args[3] == "--json";
-                }
-            }
+            if args.len() != 3 { if args.len() == 4 && args[2] == "--bundle" { args[3] == "--json"; } }
             let mut bundle_reference = None::<String>;
             let mut json_mode = false;
             let mut i = 1;
@@ -27698,10 +24612,7 @@ fn main() {
             // Phase F: business settlement templates -- output JSON scaffold and exit.
             match args[1].as_str() {
                 "escrow_on_delivery" => {
-                    let ts = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
+                    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
                     let scaffold = serde_json::json!({
                         "template": "escrow_on_delivery",
                         "description": "Funds locked in escrow until delivery proof is received.",
@@ -27717,10 +24628,7 @@ fn main() {
                     std::process::exit(0);
                 }
                 "recurring_payment" => {
-                    let ts = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
+                    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
                     let scaffold = serde_json::json!({
                         "template": "recurring_payment",
                         "description": "Periodic payment structure. Each interval triggers a milestone release.",
@@ -27740,10 +24648,7 @@ fn main() {
                     std::process::exit(0);
                 }
                 "partial_release" => {
-                    let ts = SystemTime::now()
-                        .duration_since(UNIX_EPOCH)
-                        .unwrap_or_default()
-                        .as_secs();
+                    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
                     let scaffold = serde_json::json!({
                         "template": "partial_release",
                         "description": "Incremental fund release. Each milestone releases a fraction of total escrow.",
@@ -28191,32 +25096,21 @@ fn main() {
             let json_mode = args.iter().any(|a| a == "--json");
             let agreement = match load_agreement_json_from_path(Path::new(&args[1])) {
                 Ok(a) => a,
-                Err(e) => {
-                    eprintln!("{}", e);
-                    std::process::exit(1);
-                }
+                Err(e) => { eprintln!("{}", e); std::process::exit(1); }
             };
             match save_private_agreement(&agreement) {
                 Ok(path) => {
                     if json_mode {
-                        let hash =
-                            irium_node_rs::settlement::compute_agreement_hash_hex(&agreement)
-                                .unwrap_or_default();
-                        println!(
-                            "{}",
-                            serde_json::to_string_pretty(&json!({
-                                "stored": true, "path": path, "agreement_hash": hash
-                            }))
-                            .unwrap()
-                        );
+                        let hash = irium_node_rs::settlement::compute_agreement_hash_hex(&agreement)
+                            .unwrap_or_default();
+                        println!("{}", serde_json::to_string_pretty(&json!({
+                            "stored": true, "path": path, "agreement_hash": hash
+                        })).unwrap());
                     } else {
                         println!("stored privately: {}", path);
                     }
                 }
-                Err(e) => {
-                    eprintln!("{}", e);
-                    std::process::exit(1);
-                }
+                Err(e) => { eprintln!("{}", e); std::process::exit(1); }
             }
         }
         "agreement-share" => {
@@ -28226,40 +25120,28 @@ fn main() {
             }
             let hash = args[1].clone();
             let recipient_pubkey_hex = args[2].clone();
-            let out_path: Option<String> = args
-                .windows(2)
+            let out_path: Option<String> = args.windows(2)
                 .find(|w| w[0] == "--out")
                 .map(|w| w[1].clone());
             let json_mode = args.iter().any(|a| a == "--json");
             let agreement = match load_private_agreement_by_hash(&hash) {
                 Ok(a) => a,
-                Err(e) => {
-                    eprintln!("{}", e);
-                    std::process::exit(1);
-                }
+                Err(e) => { eprintln!("{}", e); std::process::exit(1); }
             };
             let plaintext = serde_json::to_vec(&agreement).unwrap();
             let blob = match ecies_encrypt_agreement(&plaintext, &recipient_pubkey_hex) {
                 Ok(b) => b,
-                Err(e) => {
-                    eprintln!("encrypt: {}", e);
-                    std::process::exit(1);
-                }
+                Err(e) => { eprintln!("encrypt: {}", e); std::process::exit(1); }
             };
             if let Some(ref p) = out_path {
                 if let Err(e) = fs::write(p, &blob) {
-                    eprintln!("write: {}", e);
-                    std::process::exit(1);
+                    eprintln!("write: {}", e); std::process::exit(1);
                 }
                 if json_mode {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&json!({
-                            "written": p, "agreement_hash": hash,
-                            "recipient_pubkey": recipient_pubkey_hex
-                        }))
-                        .unwrap()
-                    );
+                    println!("{}", serde_json::to_string_pretty(&json!({
+                        "written": p, "agreement_hash": hash,
+                        "recipient_pubkey": recipient_pubkey_hex
+                    })).unwrap());
                 } else {
                     println!("encrypted blob written to {}", p);
                 }
@@ -28278,43 +25160,23 @@ fn main() {
             let mut i = 2;
             while i < args.len() {
                 match args[i].as_str() {
-                    "--wallet" => {
-                        wallet_path = args.get(i + 1).cloned();
-                        i += 2;
-                    }
-                    "--store-private" => {
-                        store_private = true;
-                        i += 1;
-                    }
-                    "--json" => {
-                        i += 1;
-                    }
-                    other => {
-                        eprintln!("unknown argument {}", other);
-                        std::process::exit(1);
-                    }
+                    "--wallet" => { wallet_path = args.get(i + 1).cloned(); i += 2; }
+                    "--store-private" => { store_private = true; i += 1; }
+                    "--json" => { i += 1; }
+                    other => { eprintln!("unknown argument {}", other); std::process::exit(1); }
                 }
             }
             let wallet_path = match wallet_path.or_else(|| std::env::var("IRIUM_WALLET").ok()) {
                 Some(p) => p,
-                None => {
-                    eprintln!("--wallet <wallet_file> required");
-                    std::process::exit(1);
-                }
+                None => { eprintln!("--wallet <wallet_file> required"); std::process::exit(1); }
             };
             let blob_json = match fs::read_to_string(&args[1]) {
                 Ok(s) => s,
-                Err(e) => {
-                    eprintln!("read blob: {}", e);
-                    std::process::exit(1);
-                }
+                Err(e) => { eprintln!("read blob: {}", e); std::process::exit(1); }
             };
             let wallet = match load_wallet(Path::new(&wallet_path)) {
                 Ok(w) => w,
-                Err(e) => {
-                    eprintln!("{}", e);
-                    std::process::exit(1);
-                }
+                Err(e) => { eprintln!("{}", e); std::process::exit(1); }
             };
             let mut decrypted: Option<Vec<u8>> = None;
             for key in &wallet.keys {
@@ -28329,25 +25191,16 @@ fn main() {
             }
             let plain = match decrypted {
                 Some(b) => b,
-                None => {
-                    eprintln!("decryption failed: no wallet key matched");
-                    std::process::exit(1);
-                }
+                None => { eprintln!("decryption failed: no wallet key matched"); std::process::exit(1); }
             };
             let agreement: AgreementObject = match serde_json::from_slice(&plain) {
                 Ok(a) => a,
-                Err(e) => {
-                    eprintln!("parse decrypted agreement: {}", e);
-                    std::process::exit(1);
-                }
+                Err(e) => { eprintln!("parse decrypted agreement: {}", e); std::process::exit(1); }
             };
             if store_private {
                 match save_private_agreement(&agreement) {
                     Ok(p) => eprintln!("[private] stored: {}", p),
-                    Err(e) => {
-                        eprintln!("store private: {}", e);
-                        std::process::exit(1);
-                    }
+                    Err(e) => { eprintln!("store private: {}", e); std::process::exit(1); }
                 }
             }
             if json_mode {
@@ -30982,12 +27835,7 @@ Specify --refund-deadline-height <height> or ensure the agreement is saved local
                 std::process::exit(1);
             });
             // Warn if any attestors are unbonded
-            warn_unbonded_attestors(
-                &attestors
-                    .iter()
-                    .map(|a| a.pubkey_hex.clone())
-                    .collect::<Vec<_>>(),
-            );
+            warn_unbonded_attestors(&attestors.iter().map(|a| a.pubkey_hex.clone()).collect::<Vec<_>>());
             let req = BuildOtcTemplateRpcRequest {
                 policy_id,
                 agreement_hash,
@@ -32240,643 +29088,247 @@ Specify --refund-deadline-height <height> or ensure the agreement is saved local
             while i < args.len() {
                 match args[i].as_str() {
                     "--m" => {
-                        if i + 1 >= args.len() {
-                            eprintln!("Missing --m");
-                            std::process::exit(1);
-                        }
-                        m_val = Some(args[i + 1].parse::<u8>().unwrap_or_else(|_| {
-                            eprintln!("--m must be 1-8");
-                            std::process::exit(1);
-                        }));
+                        if i + 1 >= args.len() { eprintln!("Missing --m"); std::process::exit(1); }
+                        m_val = Some(args[i + 1].parse::<u8>().unwrap_or_else(|_| { eprintln!("--m must be 1-8"); std::process::exit(1); }));
                         i += 2;
                     }
                     "--pubkeys" => {
                         i += 1;
-                        while i < args.len() && !args[i].starts_with("--") {
-                            pubkeys_hex.push(args[i].clone());
-                            i += 1;
-                        }
+                        while i < args.len() && !args[i].starts_with("--") { pubkeys_hex.push(args[i].clone()); i += 1; }
                     }
-                    _ => {
-                        eprintln!("Unknown flag: {}", args[i]);
-                        std::process::exit(1);
-                    }
+                    _ => { eprintln!("Unknown flag: {}", args[i]); std::process::exit(1); }
                 }
             }
-            let m = m_val.unwrap_or_else(|| {
-                eprintln!("--m required");
-                std::process::exit(1);
-            });
-            if pubkeys_hex.is_empty() {
-                eprintln!("--pubkeys required");
-                std::process::exit(1);
-            }
-            if m == 0 || m as usize > pubkeys_hex.len() {
-                eprintln!("m must be 1..N");
-                std::process::exit(1);
-            }
+            let m = m_val.unwrap_or_else(|| { eprintln!("--m required"); std::process::exit(1); });
+            if pubkeys_hex.is_empty() { eprintln!("--pubkeys required"); std::process::exit(1); }
+            if m == 0 || m as usize > pubkeys_hex.len() { eprintln!("m must be 1..N"); std::process::exit(1); }
             let mut pubkeys: Vec<[u8; 33]> = Vec::new();
             for ph in &pubkeys_hex {
-                let raw = hex::decode(ph).unwrap_or_else(|_| {
-                    eprintln!("Invalid pubkey hex: {}", ph);
-                    std::process::exit(1);
-                });
-                if raw.len() != 33 {
-                    eprintln!("Pubkey must be 33 bytes: {}", ph);
-                    std::process::exit(1);
-                }
-                let mut pk = [0u8; 33];
-                pk.copy_from_slice(&raw);
-                pubkeys.push(pk);
+                let raw = hex::decode(ph).unwrap_or_else(|_| { eprintln!("Invalid pubkey hex: {}", ph); std::process::exit(1); });
+                if raw.len() != 33 { eprintln!("Pubkey must be 33 bytes: {}", ph); std::process::exit(1); }
+                let mut pk = [0u8; 33]; pk.copy_from_slice(&raw); pubkeys.push(pk);
             }
             let addr = multisig_address_encode(m, &pubkeys);
             println!("Multisig address ({}-of-{}): {}", m, pubkeys.len(), addr);
-            for (i, ph) in pubkeys_hex.iter().enumerate() {
-                println!("  [{}] {}", i, ph);
-            }
+            for (i, ph) in pubkeys_hex.iter().enumerate() { println!("  [{}] {}", i, ph); }
         }
         "multisig-send" => {
-            if args.len() < 2 {
-                eprintln!("usage: multisig-send <amount> --from <addr> --to <multisig-addr> --timeout-height <h>");
-                std::process::exit(1);
-            }
-            let amount = parse_irm(&args[1]).unwrap_or_else(|e| {
-                eprintln!("Invalid amount: {}", e);
-                std::process::exit(1);
-            });
-            let mut from_addr = String::new();
-            let mut to_addr = String::new();
-            let mut timeout_height: Option<u64> = None;
-            let mut agreement_hash = [0u8; 32];
-            let mut fee_override: Option<u64> = None;
-            let mut rpc_url = default_rpc_url();
+            if args.len() < 2 { eprintln!("usage: multisig-send <amount> --from <addr> --to <multisig-addr> --timeout-height <h>"); std::process::exit(1); }
+            let amount = parse_irm(&args[1]).unwrap_or_else(|e| { eprintln!("Invalid amount: {}", e); std::process::exit(1); });
+            let mut from_addr = String::new(); let mut to_addr = String::new(); let mut timeout_height: Option<u64> = None;
+            let mut agreement_hash = [0u8; 32]; let mut fee_override: Option<u64> = None; let mut rpc_url = default_rpc_url();
             let mut i = 2;
             while i < args.len() {
                 match args[i].as_str() {
-                    "--from" => {
-                        from_addr = args.get(i + 1).cloned().unwrap_or_default();
-                        i += 2;
-                    }
-                    "--to" => {
-                        to_addr = args.get(i + 1).cloned().unwrap_or_default();
-                        i += 2;
-                    }
-                    "--timeout-height" => {
-                        timeout_height = args.get(i + 1).and_then(|v| v.parse().ok());
-                        i += 2;
-                    }
+                    "--from" => { from_addr = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
+                    "--to" => { to_addr = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
+                    "--timeout-height" => { timeout_height = args.get(i+1).and_then(|v| v.parse().ok()); i += 2; }
                     "--agreement-hash" => {
-                        if let Some(h) = args.get(i + 1).and_then(|s| hex::decode(s).ok()) {
-                            if h.len() == 32 {
-                                agreement_hash.copy_from_slice(&h);
-                            }
+                        if let Some(h) = args.get(i+1).and_then(|s| hex::decode(s).ok()) {
+                            if h.len() == 32 { agreement_hash.copy_from_slice(&h); }
                         }
                         i += 2;
                     }
-                    "--fee" => {
-                        fee_override = args.get(i + 1).and_then(|v| parse_irm(v).ok());
-                        i += 2;
-                    }
-                    "--rpc" => {
-                        rpc_url = args.get(i + 1).cloned().unwrap_or_default();
-                        i += 2;
-                    }
-                    _ => {
-                        eprintln!("Unknown flag: {}", args[i]);
-                        std::process::exit(1);
-                    }
+                    "--fee" => { fee_override = args.get(i+1).and_then(|v| parse_irm(v).ok()); i += 2; }
+                    "--rpc" => { rpc_url = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
+                    _ => { eprintln!("Unknown flag: {}", args[i]); std::process::exit(1); }
                 }
             }
-            if from_addr.is_empty() {
-                eprintln!("--from required");
-                std::process::exit(1);
-            }
-            if to_addr.is_empty() {
-                eprintln!("--to required");
-                std::process::exit(1);
-            }
-            let timeout_h = timeout_height.unwrap_or_else(|| {
-                eprintln!("--timeout-height required");
-                std::process::exit(1);
-            });
-            let (m, pubkeys) = multisig_address_decode(&to_addr).unwrap_or_else(|| {
-                eprintln!("Invalid multisig address: {}", to_addr);
-                std::process::exit(1);
-            });
-            let from_pkh_vec = base58_p2pkh_to_hash(&from_addr).unwrap_or_else(|| {
-                eprintln!("Invalid --from");
-                std::process::exit(1);
-            });
-            let mut from_pkh_arr = [0u8; 20];
-            from_pkh_arr.copy_from_slice(&from_pkh_vec);
+            if from_addr.is_empty() { eprintln!("--from required"); std::process::exit(1); }
+            if to_addr.is_empty() { eprintln!("--to required"); std::process::exit(1); }
+            let timeout_h = timeout_height.unwrap_or_else(|| { eprintln!("--timeout-height required"); std::process::exit(1); });
+            let (m, pubkeys) = multisig_address_decode(&to_addr).unwrap_or_else(|| { eprintln!("Invalid multisig address: {}", to_addr); std::process::exit(1); });
+            let from_pkh_vec = base58_p2pkh_to_hash(&from_addr).unwrap_or_else(|| { eprintln!("Invalid --from"); std::process::exit(1); });
+            let mut from_pkh_arr = [0u8; 20]; from_pkh_arr.copy_from_slice(&from_pkh_vec);
             let mpso = multisig_build_mpso_output(m, &pubkeys, &pubkeys, timeout_h, agreement_hash);
             let mpso_script = encode_mpso_script(&mpso);
             let wpath = wallet_path();
-            let wallet = load_wallet(&wpath).unwrap_or_else(|e| {
-                eprintln!("Load wallet: {}", e);
-                std::process::exit(1);
-            });
-            let key = find_key(&wallet, &from_addr)
-                .unwrap_or_else(|| {
-                    eprintln!("Address not in wallet");
-                    std::process::exit(1);
-                })
-                .clone();
+            let wallet = load_wallet(&wpath).unwrap_or_else(|e| { eprintln!("Load wallet: {}", e); std::process::exit(1); });
+            let key = find_key(&wallet, &from_addr).unwrap_or_else(|| { eprintln!("Address not in wallet"); std::process::exit(1); }).clone();
             let base = rpc_url.trim_end_matches('/');
-            let client = rpc_client(base).unwrap_or_else(|e| {
-                eprintln!("HTTP client: {}", e);
-                std::process::exit(1);
-            });
-            let payload = fetch_utxos(&client, base, &from_addr).unwrap_or_else(|e| {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            });
+            let client = rpc_client(base).unwrap_or_else(|e| { eprintln!("HTTP client: {}", e); std::process::exit(1); });
+            let payload = fetch_utxos(&client, base, &from_addr).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
             let mut utxos = payload.utxos.clone();
             // Fix A: ghost-tx prevention via pending-UTXO filter.
             let pending_spent_mp = fetch_mempool_spent_by(&client, base, &from_addr);
             utxos.retain(|u| !pending_spent_mp.contains(&(u.txid.clone(), u.index)));
             utxos.sort_by_key(|u| u.value);
             let mut fee_per_byte = DEFAULT_FEE_PER_BYTE;
-            if fee_override.is_none() {
-                if let Ok(est) = fetch_fee_estimate(&client, base) {
-                    let ef = est.min_fee_per_byte.ceil() as u64;
-                    if ef > fee_per_byte {
-                        fee_per_byte = ef;
-                    }
-                }
-            }
-            let mut selected = Vec::new();
-            let mut total = 0u64;
-            let mut fee = fee_override.unwrap_or(0);
+            if fee_override.is_none() { if let Ok(est) = fetch_fee_estimate(&client, base) { let ef = est.min_fee_per_byte.ceil() as u64; if ef > fee_per_byte { fee_per_byte = ef; } } }
+            let mut selected = Vec::new(); let mut total = 0u64; let mut fee = fee_override.unwrap_or(0);
             for utxo in &utxos {
                 let confs = payload.height.saturating_sub(utxo.height);
-                if utxo.is_coinbase && confs < coinbase_maturity() {
-                    continue;
-                }
-                selected.push(utxo.clone());
-                total = total.saturating_add(utxo.value);
-                if fee_override.is_none() {
-                    fee = estimate_tx_size(selected.len(), 2).saturating_mul(fee_per_byte);
-                }
-                if total >= amount.saturating_add(fee) {
-                    break;
-                }
+                if utxo.is_coinbase && confs < coinbase_maturity() { continue; }
+                selected.push(utxo.clone()); total = total.saturating_add(utxo.value);
+                if fee_override.is_none() { fee = estimate_tx_size(selected.len(), 2).saturating_mul(fee_per_byte); }
+                if total >= amount.saturating_add(fee) { break; }
             }
-            if total < amount.saturating_add(fee) {
-                eprintln!("Insufficient funds");
-                std::process::exit(1);
-            }
-            let priv_bytes = hex::decode(&key.privkey).unwrap_or_else(|_| {
-                eprintln!("Invalid privkey");
-                std::process::exit(1);
-            });
-            let signing_key =
-                SigningKey::from_bytes(priv_bytes.as_slice().into()).unwrap_or_else(|e| {
-                    eprintln!("SigningKey: {}", e);
-                    std::process::exit(1);
-                });
-            let pub_bytes = signing_key
-                .verifying_key()
-                .to_encoded_point(true)
-                .as_bytes()
-                .to_vec();
+            if total < amount.saturating_add(fee) { eprintln!("Insufficient funds"); std::process::exit(1); }
+            let priv_bytes = hex::decode(&key.privkey).unwrap_or_else(|_| { eprintln!("Invalid privkey"); std::process::exit(1); });
+            let signing_key = SigningKey::from_bytes(priv_bytes.as_slice().into()).unwrap_or_else(|e| { eprintln!("SigningKey: {}", e); std::process::exit(1); });
+            let pub_bytes = signing_key.verifying_key().to_encoded_point(true).as_bytes().to_vec();
             let change_script = p2pkh_script(&from_pkh_arr);
-            let inputs: Vec<TxInput> = selected
-                .iter()
-                .map(|u| {
-                    let mut raw = hex::decode(&u.txid).unwrap_or_default();
-                    raw.resize(32, 0);
-                    let mut prev = [0u8; 32];
-                    prev.copy_from_slice(&raw);
-                    TxInput {
-                        prev_txid: prev,
-                        prev_index: u.index,
-                        script_sig: Vec::new(),
-                        sequence: 0xffff_ffff,
-                    }
-                })
-                .collect();
+            let inputs: Vec<TxInput> = selected.iter().map(|u| {
+                let mut raw = hex::decode(&u.txid).unwrap_or_default(); raw.resize(32, 0);
+                let mut prev = [0u8; 32]; prev.copy_from_slice(&raw);
+                TxInput { prev_txid: prev, prev_index: u.index, script_sig: Vec::new(), sequence: 0xffff_ffff }
+            }).collect();
             let mut change = total.saturating_sub(amount).saturating_sub(fee);
-            let mut outputs = vec![TxOutput {
-                value: amount,
-                script_pubkey: mpso_script,
-            }];
-            if change > 0 {
-                outputs.push(TxOutput {
-                    value: change,
-                    script_pubkey: change_script.clone(),
-                });
-            }
-            let mut tx = Transaction {
-                version: 1,
-                inputs,
-                outputs,
-                locktime: 0,
-            };
+            let mut outputs = vec![TxOutput { value: amount, script_pubkey: mpso_script }];
+            if change > 0 { outputs.push(TxOutput { value: change, script_pubkey: change_script.clone() }); }
+            let mut tx = Transaction { version: 1, inputs, outputs, locktime: 0 };
             for _ in 0..2 {
                 for (idx, utxo) in selected.iter().enumerate() {
                     let sp = hex::decode(&utxo.script_pubkey).unwrap_or_default();
                     let digest = signature_digest(&tx, idx, &sp);
                     let sig: Signature = signing_key.sign_prehash(&digest).unwrap();
                     let sig = sig.normalize_s().unwrap_or(sig);
-                    let mut sb = sig.to_der().as_bytes().to_vec();
-                    sb.push(0x01);
-                    let mut sc = Vec::new();
-                    sc.push(sb.len() as u8);
-                    sc.extend(&sb);
-                    sc.push(pub_bytes.len() as u8);
-                    sc.extend(&pub_bytes);
+                    let mut sb = sig.to_der().as_bytes().to_vec(); sb.push(0x01);
+                    let mut sc = Vec::new(); sc.push(sb.len() as u8); sc.extend(&sb); sc.push(pub_bytes.len() as u8); sc.extend(&pub_bytes);
                     tx.inputs[idx].script_sig = sc;
                 }
-                if fee_override.is_some() {
-                    break;
-                }
+                if fee_override.is_some() { break; }
                 let needed = (tx.serialize().len() as u64).saturating_mul(fee_per_byte);
-                if needed > fee {
-                    let extra = needed - fee;
-                    if change >= extra {
-                        fee = needed;
-                        change -= extra;
-                        if tx.outputs.len() > 1 {
-                            tx.outputs[1].value = change;
-                        }
-                        continue;
-                    } else {
-                        eprintln!("Insufficient funds for fee");
-                        std::process::exit(1);
-                    }
-                }
+                if needed > fee { let extra = needed - fee; if change >= extra { fee = needed; change -= extra; if tx.outputs.len() > 1 { tx.outputs[1].value = change; } continue; } else { eprintln!("Insufficient funds for fee"); std::process::exit(1); } }
                 break;
             }
-            if let Err(e) = submit_tx(&client, base, &tx) {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
+            if let Err(e) = submit_tx(&client, base, &tx) { eprintln!("{}", e); std::process::exit(1); }
             println!("txid {}", hex::encode(tx.txid()));
             println!("Sent {} satoshis to multisig {}", amount, to_addr);
         }
         "multisig-spend-build" => {
-            let mut spend_txid = String::new();
-            let mut spend_vout: u32 = 0;
-            let mut spend_value: u64 = 0;
-            let mut spend_to = String::new();
-            let mut spend_script = String::new();
-            let mut spend_fee: u64 = 500;
-            let mut spend_path = "claim".to_string();
+            let mut spend_txid = String::new(); let mut spend_vout: u32 = 0; let mut spend_value: u64 = 0;
+            let mut spend_to = String::new(); let mut spend_script = String::new(); let mut spend_fee: u64 = 500; let mut spend_path = "claim".to_string();
             let mut i = 1;
             while i < args.len() {
                 match args[i].as_str() {
-                    "--txid" => {
-                        spend_txid = args.get(i + 1).cloned().unwrap_or_default();
-                        i += 2;
-                    }
-                    "--vout" => {
-                        spend_vout = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(0);
-                        i += 2;
-                    }
-                    "--value" => {
-                        spend_value = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(0);
-                        i += 2;
-                    }
-                    "--to" => {
-                        spend_to = args.get(i + 1).cloned().unwrap_or_default();
-                        i += 2;
-                    }
-                    "--script-pubkey" => {
-                        spend_script = args.get(i + 1).cloned().unwrap_or_default();
-                        i += 2;
-                    }
-                    "--fee" => {
-                        spend_fee = args.get(i + 1).and_then(|v| v.parse().ok()).unwrap_or(500);
-                        i += 2;
-                    }
-                    "--path" => {
-                        spend_path = args.get(i + 1).cloned().unwrap_or("claim".to_string());
-                        i += 2;
-                    }
-                    _ => {
-                        eprintln!("Unknown flag: {}", args[i]);
-                        std::process::exit(1);
-                    }
+                    "--txid" => { spend_txid = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
+                    "--vout" => { spend_vout = args.get(i+1).and_then(|v| v.parse().ok()).unwrap_or(0); i += 2; }
+                    "--value" => { spend_value = args.get(i+1).and_then(|v| v.parse().ok()).unwrap_or(0); i += 2; }
+                    "--to" => { spend_to = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
+                    "--script-pubkey" => { spend_script = args.get(i+1).cloned().unwrap_or_default(); i += 2; }
+                    "--fee" => { spend_fee = args.get(i+1).and_then(|v| v.parse().ok()).unwrap_or(500); i += 2; }
+                    "--path" => { spend_path = args.get(i+1).cloned().unwrap_or("claim".to_string()); i += 2; }
+                    _ => { eprintln!("Unknown flag: {}", args[i]); std::process::exit(1); }
                 }
             }
-            if spend_txid.is_empty()
-                || spend_to.is_empty()
-                || spend_script.is_empty()
-                || spend_value == 0
-            {
-                eprintln!("Required: --txid --vout --value --to --script-pubkey");
-                std::process::exit(1);
+            if spend_txid.is_empty() || spend_to.is_empty() || spend_script.is_empty() || spend_value == 0 {
+                eprintln!("Required: --txid --vout --value --to --script-pubkey"); std::process::exit(1);
             }
-            let to_pkh = base58_p2pkh_to_hash(&spend_to).unwrap_or_else(|| {
-                eprintln!("Invalid --to");
-                std::process::exit(1);
-            });
-            let mut to_arr = [0u8; 20];
-            to_arr.copy_from_slice(&to_pkh);
-            let mpso = multisig_script_to_mpso(&spend_script).unwrap_or_else(|e| {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            });
-            let tb = hex::decode(&spend_txid).unwrap_or_else(|_| {
-                eprintln!("Invalid txid");
-                std::process::exit(1);
-            });
+            let to_pkh = base58_p2pkh_to_hash(&spend_to).unwrap_or_else(|| { eprintln!("Invalid --to"); std::process::exit(1); });
+            let mut to_arr = [0u8; 20]; to_arr.copy_from_slice(&to_pkh);
+            let mpso = multisig_script_to_mpso(&spend_script).unwrap_or_else(|e| { eprintln!("{}", e); std::process::exit(1); });
+            let tb = hex::decode(&spend_txid).unwrap_or_else(|_| { eprintln!("Invalid txid"); std::process::exit(1); });
             // txid is already in display-byte order (matching txid() output); no reversal needed
-            let mut prev_txid = [0u8; 32];
-            prev_txid.copy_from_slice(&tb);
+            let mut prev_txid = [0u8; 32]; prev_txid.copy_from_slice(&tb);
             let out_value = spend_value.saturating_sub(spend_fee);
             let tx = Transaction {
                 version: 1,
-                inputs: vec![TxInput {
-                    prev_txid,
-                    prev_index: spend_vout,
-                    script_sig: Vec::new(),
-                    sequence: 0xffff_ffff,
-                }],
-                outputs: vec![TxOutput {
-                    value: out_value,
-                    script_pubkey: p2pkh_script(&to_arr),
-                }],
+                inputs: vec![TxInput { prev_txid, prev_index: spend_vout, script_sig: Vec::new(), sequence: 0xffff_ffff }],
+                outputs: vec![TxOutput { value: out_value, script_pubkey: p2pkh_script(&to_arr) }],
                 locktime: 0,
             };
             let claim_pks: Vec<String> = mpso.claim_pubkeys.iter().map(hex::encode).collect();
             let refund_pks: Vec<String> = mpso.refund_pubkeys.iter().map(hex::encode).collect();
             let partial = MultisigPartialTx {
-                version: 1,
-                tx_hex: hex::encode(tx.serialize()),
+                version: 1, tx_hex: hex::encode(tx.serialize()),
                 inputs: vec![MultisigInputMeta {
-                    index: 0,
-                    script_pubkey: spend_script,
+                    index: 0, script_pubkey: spend_script,
                     timeout_height: mpso.timeout_height,
-                    m: if spend_path == "refund" {
-                        mpso.refund_m
-                    } else {
-                        mpso.claim_m
-                    },
-                    claim_pubkeys: claim_pks,
-                    refund_pubkeys: refund_pks,
-                    path: spend_path,
-                    sigs: std::collections::HashMap::new(),
+                    m: if spend_path == "refund" { mpso.refund_m } else { mpso.claim_m },
+                    claim_pubkeys: claim_pks, refund_pubkeys: refund_pks,
+                    path: spend_path, sigs: std::collections::HashMap::new(),
                 }],
             };
             println!("{}", serde_json::to_string_pretty(&partial).unwrap());
         }
         "multisig-sign" => {
-            if args.len() < 2 {
-                eprintln!("usage: multisig-sign <partial.json> --wallet <addr>");
-                std::process::exit(1);
-            }
-            let partial_path = &args[1];
-            let mut wallet_addr = String::new();
+            if args.len() < 2 { eprintln!("usage: multisig-sign <partial.json> --wallet <addr>"); std::process::exit(1); }
+            let partial_path = &args[1]; let mut wallet_addr = String::new();
             let mut i = 2;
-            while i < args.len() {
-                if args[i] == "--wallet" && i + 1 < args.len() {
-                    wallet_addr = args[i + 1].clone();
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
-            if wallet_addr.is_empty() {
-                eprintln!("--wallet required");
-                std::process::exit(1);
-            }
-            let partial_json = std::fs::read_to_string(partial_path).unwrap_or_else(|e| {
-                eprintln!("Read {}: {}", partial_path, e);
-                std::process::exit(1);
-            });
-            let mut partial: MultisigPartialTx = serde_json::from_str(&partial_json)
-                .unwrap_or_else(|e| {
-                    eprintln!("Parse partial tx: {}", e);
-                    std::process::exit(1);
-                });
-            let tx_bytes = hex::decode(&partial.tx_hex).unwrap_or_else(|_| {
-                eprintln!("Invalid tx_hex");
-                std::process::exit(1);
-            });
-            let tx = decode_full_tx(&tx_bytes).unwrap_or_else(|e| {
-                eprintln!("Decode tx: {}", e);
-                std::process::exit(1);
-            });
+            while i < args.len() { if args[i] == "--wallet" && i+1 < args.len() { wallet_addr = args[i+1].clone(); i += 2; } else { i += 1; } }
+            if wallet_addr.is_empty() { eprintln!("--wallet required"); std::process::exit(1); }
+            let partial_json = std::fs::read_to_string(partial_path).unwrap_or_else(|e| { eprintln!("Read {}: {}", partial_path, e); std::process::exit(1); });
+            let mut partial: MultisigPartialTx = serde_json::from_str(&partial_json).unwrap_or_else(|e| { eprintln!("Parse partial tx: {}", e); std::process::exit(1); });
+            let tx_bytes = hex::decode(&partial.tx_hex).unwrap_or_else(|_| { eprintln!("Invalid tx_hex"); std::process::exit(1); });
+            let tx = decode_full_tx(&tx_bytes).unwrap_or_else(|e| { eprintln!("Decode tx: {}", e); std::process::exit(1); });
             let wpath = wallet_path();
-            let wdata = load_wallet(&wpath).unwrap_or_else(|e| {
-                eprintln!("Load wallet: {}", e);
-                std::process::exit(1);
-            });
-            let key = find_key(&wdata, &wallet_addr)
-                .unwrap_or_else(|| {
-                    eprintln!("Address not in wallet: {}", wallet_addr);
-                    std::process::exit(1);
-                })
-                .clone();
-            let priv_bytes = hex::decode(&key.privkey).unwrap_or_else(|_| {
-                eprintln!("Invalid privkey");
-                std::process::exit(1);
-            });
-            let signing_key =
-                SigningKey::from_bytes(priv_bytes.as_slice().into()).unwrap_or_else(|e| {
-                    eprintln!("SigningKey: {}", e);
-                    std::process::exit(1);
-                });
-            let pubkey_hex = hex::encode(
-                signing_key
-                    .verifying_key()
-                    .to_encoded_point(true)
-                    .as_bytes(),
-            );
+            let wdata = load_wallet(&wpath).unwrap_or_else(|e| { eprintln!("Load wallet: {}", e); std::process::exit(1); });
+            let key = find_key(&wdata, &wallet_addr).unwrap_or_else(|| { eprintln!("Address not in wallet: {}", wallet_addr); std::process::exit(1); }).clone();
+            let priv_bytes = hex::decode(&key.privkey).unwrap_or_else(|_| { eprintln!("Invalid privkey"); std::process::exit(1); });
+            let signing_key = SigningKey::from_bytes(priv_bytes.as_slice().into()).unwrap_or_else(|e| { eprintln!("SigningKey: {}", e); std::process::exit(1); });
+            let pubkey_hex = hex::encode(signing_key.verifying_key().to_encoded_point(true).as_bytes());
             let mut signed = 0usize;
             for inp in partial.inputs.iter_mut() {
-                let sp = hex::decode(&inp.script_pubkey).unwrap_or_else(|_| {
-                    eprintln!("Invalid script_pubkey");
-                    std::process::exit(1);
-                });
-                let relevant = if inp.path == "refund" {
-                    &inp.refund_pubkeys
-                } else {
-                    &inp.claim_pubkeys
-                };
-                if !relevant.contains(&pubkey_hex) {
-                    eprintln!(
-                        "Pubkey not in input {} {} keys, skipping",
-                        inp.index, inp.path
-                    );
-                    continue;
-                }
+                let sp = hex::decode(&inp.script_pubkey).unwrap_or_else(|_| { eprintln!("Invalid script_pubkey"); std::process::exit(1); });
+                let relevant = if inp.path == "refund" { &inp.refund_pubkeys } else { &inp.claim_pubkeys };
+                if !relevant.contains(&pubkey_hex) { eprintln!("Pubkey not in input {} {} keys, skipping", inp.index, inp.path); continue; }
                 let digest = signature_digest(&tx, inp.index, &sp);
                 let sig: Signature = signing_key.sign_prehash(&digest).unwrap();
                 let sig = sig.normalize_s().unwrap_or(sig);
-                let mut sb = sig.to_der().as_bytes().to_vec();
-                sb.push(0x01);
+                let mut sb = sig.to_der().as_bytes().to_vec(); sb.push(0x01);
                 inp.sigs.insert(pubkey_hex.clone(), hex::encode(&sb));
                 signed += 1;
                 eprintln!("Signed input {} ({} path)", inp.index, inp.path);
             }
-            if signed == 0 {
-                eprintln!("Warning: no inputs signed");
-            }
+            if signed == 0 { eprintln!("Warning: no inputs signed"); }
             println!("{}", serde_json::to_string_pretty(&partial).unwrap());
         }
         "multisig-combine" => {
-            if args.len() < 2 {
-                eprintln!(
-                    "usage: multisig-combine <partial1.json> [partial2.json ...] [--out <file>]"
-                );
-                std::process::exit(1);
-            }
-            let mut files: Vec<String> = Vec::new();
-            let mut out_file: Option<String> = None;
+            if args.len() < 2 { eprintln!("usage: multisig-combine <partial1.json> [partial2.json ...] [--out <file>]"); std::process::exit(1); }
+            let mut files: Vec<String> = Vec::new(); let mut out_file: Option<String> = None;
             let mut i = 1;
-            while i < args.len() {
-                if args[i] == "--out" && i + 1 < args.len() {
-                    out_file = Some(args[i + 1].clone());
-                    i += 2;
-                } else {
-                    files.push(args[i].clone());
-                    i += 1;
-                }
-            }
-            if files.is_empty() {
-                eprintln!("No partial files");
-                std::process::exit(1);
-            }
-            let fj = std::fs::read_to_string(&files[0]).unwrap_or_else(|e| {
-                eprintln!("Read {}: {}", files[0], e);
-                std::process::exit(1);
-            });
-            let mut combined: MultisigPartialTx = serde_json::from_str(&fj).unwrap_or_else(|e| {
-                eprintln!("Parse: {}", e);
-                std::process::exit(1);
-            });
+            while i < args.len() { if args[i] == "--out" && i+1 < args.len() { out_file = Some(args[i+1].clone()); i += 2; } else { files.push(args[i].clone()); i += 1; } }
+            if files.is_empty() { eprintln!("No partial files"); std::process::exit(1); }
+            let fj = std::fs::read_to_string(&files[0]).unwrap_or_else(|e| { eprintln!("Read {}: {}", files[0], e); std::process::exit(1); });
+            let mut combined: MultisigPartialTx = serde_json::from_str(&fj).unwrap_or_else(|e| { eprintln!("Parse: {}", e); std::process::exit(1); });
             for f in &files[1..] {
-                let j = std::fs::read_to_string(f).unwrap_or_else(|e| {
-                    eprintln!("Read {}: {}", f, e);
-                    std::process::exit(1);
-                });
-                let p: MultisigPartialTx = serde_json::from_str(&j).unwrap_or_else(|e| {
-                    eprintln!("Parse: {}", e);
-                    std::process::exit(1);
-                });
-                if p.tx_hex != combined.tx_hex {
-                    eprintln!("Error: {} different tx_hex", f);
-                    std::process::exit(1);
-                }
+                let j = std::fs::read_to_string(f).unwrap_or_else(|e| { eprintln!("Read {}: {}", f, e); std::process::exit(1); });
+                let p: MultisigPartialTx = serde_json::from_str(&j).unwrap_or_else(|e| { eprintln!("Parse: {}", e); std::process::exit(1); });
+                if p.tx_hex != combined.tx_hex { eprintln!("Error: {} different tx_hex", f); std::process::exit(1); }
                 for (fi, pi) in p.inputs.iter().enumerate() {
-                    if fi < combined.inputs.len() {
-                        for (pk, sig) in &pi.sigs {
-                            combined.inputs[fi].sigs.insert(pk.clone(), sig.clone());
-                        }
-                    }
+                    if fi < combined.inputs.len() { for (pk, sig) in &pi.sigs { combined.inputs[fi].sigs.insert(pk.clone(), sig.clone()); } }
                 }
             }
-            let tx_bytes = hex::decode(&combined.tx_hex).unwrap_or_else(|_| {
-                eprintln!("Invalid tx_hex");
-                std::process::exit(1);
-            });
-            let mut tx = decode_full_tx(&tx_bytes).unwrap_or_else(|e| {
-                eprintln!("Decode tx: {}", e);
-                std::process::exit(1);
-            });
+            let tx_bytes = hex::decode(&combined.tx_hex).unwrap_or_else(|_| { eprintln!("Invalid tx_hex"); std::process::exit(1); });
+            let mut tx = decode_full_tx(&tx_bytes).unwrap_or_else(|e| { eprintln!("Decode tx: {}", e); std::process::exit(1); });
             for im in &combined.inputs {
-                let relevant = if im.path == "refund" {
-                    &im.refund_pubkeys
-                } else {
-                    &im.claim_pubkeys
-                };
+                let relevant = if im.path == "refund" { &im.refund_pubkeys } else { &im.claim_pubkeys };
                 let m = im.m as usize;
-                let mut ordered: Vec<Vec<u8>> = Vec::new();
-                let mut bitmap: u8 = 0;
-                let mut count = 0usize;
+                let mut ordered: Vec<Vec<u8>> = Vec::new(); let mut bitmap: u8 = 0; let mut count = 0usize;
                 for (bi, pk) in relevant.iter().enumerate() {
-                    if count >= m {
-                        break;
-                    }
+                    if count >= m { break; }
                     if let Some(sh) = im.sigs.get(pk) {
                         ordered.push(hex::decode(sh).unwrap_or_default());
-                        if bi < 8 {
-                            bitmap |= 1u8 << bi;
-                        }
+                        if bi < 8 { bitmap |= 1u8 << bi; }
                         count += 1;
                     }
                 }
-                if ordered.len() < m {
-                    eprintln!(
-                        "Input {}: need {} sigs, have {}",
-                        im.index,
-                        m,
-                        ordered.len()
-                    );
-                    std::process::exit(1);
-                }
+                if ordered.len() < m { eprintln!("Input {}: need {} sigs, have {}", im.index, m, ordered.len()); std::process::exit(1); }
                 let witness = if im.path == "refund" {
-                    encode_mpso_refund_witness(bitmap, &ordered).unwrap_or_else(|| {
-                        eprintln!("Encode refund witness failed");
-                        std::process::exit(1);
-                    })
+                    encode_mpso_refund_witness(bitmap, &ordered).unwrap_or_else(|| { eprintln!("Encode refund witness failed"); std::process::exit(1); })
                 } else {
-                    encode_mpso_claim_witness(bitmap, &ordered, None).unwrap_or_else(|| {
-                        eprintln!("Encode claim witness failed");
-                        std::process::exit(1);
-                    })
+                    encode_mpso_claim_witness(bitmap, &ordered, None).unwrap_or_else(|| { eprintln!("Encode claim witness failed"); std::process::exit(1); })
                 };
-                if im.index < tx.inputs.len() {
-                    tx.inputs[im.index].script_sig = witness;
-                }
+                if im.index < tx.inputs.len() { tx.inputs[im.index].script_sig = witness; }
             }
             let final_hex = hex::encode(tx.serialize());
-            if let Some(p) = &out_file {
-                std::fs::write(p, &final_hex).unwrap_or_else(|e| {
-                    eprintln!("Write {}: {}", p, e);
-                    std::process::exit(1);
-                });
-                eprintln!("Written to {}", p);
-            }
+            if let Some(p) = &out_file { std::fs::write(p, &final_hex).unwrap_or_else(|e| { eprintln!("Write {}: {}", p, e); std::process::exit(1); }); eprintln!("Written to {}", p); }
             println!("{}", final_hex);
         }
         "multisig-broadcast" => {
-            if args.len() < 2 {
-                eprintln!("usage: multisig-broadcast <txhex|file> [--rpc <url>]");
-                std::process::exit(1);
-            }
-            let input = &args[1];
-            let mut rpc_url = default_rpc_url();
+            if args.len() < 2 { eprintln!("usage: multisig-broadcast <txhex|file> [--rpc <url>]"); std::process::exit(1); }
+            let input = &args[1]; let mut rpc_url = default_rpc_url();
             let mut i = 2;
-            while i < args.len() {
-                if args[i] == "--rpc" && i + 1 < args.len() {
-                    rpc_url = args[i + 1].clone();
-                    i += 2;
-                } else {
-                    i += 1;
-                }
-            }
+            while i < args.len() { if args[i] == "--rpc" && i+1 < args.len() { rpc_url = args[i+1].clone(); i += 2; } else { i += 1; } }
             let tx_hex = if std::path::Path::new(input.as_str()).exists() {
-                std::fs::read_to_string(input)
-                    .unwrap_or_else(|e| {
-                        eprintln!("Read {}: {}", input, e);
-                        std::process::exit(1);
-                    })
-                    .trim()
-                    .to_string()
-            } else {
-                input.clone()
-            };
-            let tx_bytes = hex::decode(&tx_hex).unwrap_or_else(|_| {
-                eprintln!("Invalid tx hex");
-                std::process::exit(1);
-            });
-            let tx = decode_full_tx(&tx_bytes).unwrap_or_else(|e| {
-                eprintln!("Decode tx: {}", e);
-                std::process::exit(1);
-            });
+                std::fs::read_to_string(input).unwrap_or_else(|e| { eprintln!("Read {}: {}", input, e); std::process::exit(1); }).trim().to_string()
+            } else { input.clone() };
+            let tx_bytes = hex::decode(&tx_hex).unwrap_or_else(|_| { eprintln!("Invalid tx hex"); std::process::exit(1); });
+            let tx = decode_full_tx(&tx_bytes).unwrap_or_else(|e| { eprintln!("Decode tx: {}", e); std::process::exit(1); });
             let base = rpc_url.trim_end_matches('/');
-            let client = rpc_client(base).unwrap_or_else(|e| {
-                eprintln!("HTTP client: {}", e);
-                std::process::exit(1);
-            });
-            if let Err(e) = submit_tx(&client, base, &tx) {
-                eprintln!("{}", e);
-                std::process::exit(1);
-            }
+            let client = rpc_client(base).unwrap_or_else(|e| { eprintln!("HTTP client: {}", e); std::process::exit(1); });
+            if let Err(e) = submit_tx(&client, base, &tx) { eprintln!("{}", e); std::process::exit(1); }
             println!("txid {}", hex::encode(tx.txid()));
         }
         _ => {
@@ -32886,6 +29338,7 @@ Specify --refund-deadline-height <height> or ensure the agreement is saved local
     }
     // ============================================================
 }
+
 
 // ============================================================================
 // Stage 3.4: Dispute and Resolver Wallet CLI Commands
@@ -33030,8 +29483,7 @@ fn handle_agreement_dispute_raise(args: &[String]) -> Result<(), String> {
     let agreement = load_agreement(&ag_ref)?;
     let agreement_hash = irium_node_rs::settlement::compute_agreement_hash_hex(&agreement)?;
     let (signer_address, pubkey_hex, signing_key) = signing_key_from_raw(&key_str)?;
-    let evidence_bytes =
-        std::fs::read(&evidence_path).map_err(|e| format!("read evidence: {e}"))?;
+    let evidence_bytes = std::fs::read(&evidence_path).map_err(|e| format!("read evidence: {e}"))?;
     let evidence_hash = hex::encode(Sha256::digest(&evidence_bytes));
 
     let mut dispute = DisputeRaise {
@@ -33088,11 +29540,7 @@ fn handle_agreement_dispute_respond(args: &[String]) -> Result<(), String> {
                 agreement_ref = Some(parse_required_string_flag(args, &mut i, "--agreement")?);
             }
             "--submitter-party" => {
-                submitter_party = Some(parse_required_string_flag(
-                    args,
-                    &mut i,
-                    "--submitter-party",
-                )?);
+                submitter_party = Some(parse_required_string_flag(args, &mut i, "--submitter-party")?);
             }
             "--evidence-file" => {
                 evidence_file = Some(parse_required_string_flag(args, &mut i, "--evidence-file")?);
@@ -33125,8 +29573,7 @@ fn handle_agreement_dispute_respond(args: &[String]) -> Result<(), String> {
     let agreement = load_agreement(&ag_ref)?;
     let agreement_hash = irium_node_rs::settlement::compute_agreement_hash_hex(&agreement)?;
     let (signer_address, pubkey_hex, signing_key) = signing_key_from_raw(&key_str)?;
-    let evidence_bytes =
-        std::fs::read(&evidence_path).map_err(|e| format!("read evidence: {e}"))?;
+    let evidence_bytes = std::fs::read(&evidence_path).map_err(|e| format!("read evidence: {e}"))?;
     let evidence_hash = hex::encode(Sha256::digest(&evidence_bytes));
     let evidence_payload_b64 = hex::encode(&evidence_bytes);
 
@@ -33142,16 +29589,12 @@ fn handle_agreement_dispute_respond(args: &[String]) -> Result<(), String> {
         message,
         signature: s34_build_signed_envelope(&pubkey_hex, &signer_address, &agreement_hash),
     };
-    let bytes =
-        dispute_evidence_canonical_bytes(&evidence).map_err(|e| format!("canonical: {e}"))?;
+    let bytes = dispute_evidence_canonical_bytes(&evidence).map_err(|e| format!("canonical: {e}"))?;
     evidence.signature.signature = s34_ecdsa_sign(&signing_key, &bytes)?;
 
     let base = rpc_url.trim_end_matches('/');
     let client = rpc_client(base)?;
-    let req = DisputeEvidenceRpcReq {
-        evidence,
-        agreement,
-    };
+    let req = DisputeEvidenceRpcReq { evidence, agreement };
     let resp: DisputeEvidenceRpcResp = rpc_post_json(&client, base, "/rpc/disputeevidence", &req)?;
     if json_mode {
         println!(
@@ -33228,16 +29671,12 @@ fn handle_agreement_dispute_resolve(args: &[String]) -> Result<(), String> {
         message: msg,
         signature: s34_build_signed_envelope(&pubkey_hex, &resolver_address, &agreement_hash),
     };
-    let bytes =
-        dispute_resolution_canonical_bytes(&resolution).map_err(|e| format!("canonical: {e}"))?;
+    let bytes = dispute_resolution_canonical_bytes(&resolution).map_err(|e| format!("canonical: {e}"))?;
     resolution.signature.signature = s34_ecdsa_sign(&signing_key, &bytes)?;
 
     let base = rpc_url.trim_end_matches('/');
     let client = rpc_client(base)?;
-    let req = ResolveDisputeRpcReq {
-        resolution,
-        agreement,
-    };
+    let req = ResolveDisputeRpcReq { resolution, agreement };
     let resp: ResolveDisputeRpcResp = rpc_post_json(&client, base, "/rpc/resolvedispute", &req)?;
     if json_mode {
         println!(
@@ -33308,15 +29747,13 @@ fn handle_resolver_register(args: &[String]) -> Result<(), String> {
         fee_bps_self_quoted: fee_bps,
         signature: s34_build_signed_envelope(&pubkey_hex, &resolver_address, ""),
     };
-    let bytes =
-        resolver_registration_canonical_bytes(&reg).map_err(|e| format!("canonical: {e}"))?;
+    let bytes = resolver_registration_canonical_bytes(&reg).map_err(|e| format!("canonical: {e}"))?;
     reg.signature.signature = s34_ecdsa_sign(&signing_key, &bytes)?;
 
     let base = rpc_url.trim_end_matches('/');
     let client = rpc_client(base)?;
     let req = RegisterResolverRpcReq { registration: reg };
-    let resp: RegisterResolverRpcResp =
-        rpc_post_json(&client, base, "/rpc/registerresolver", &req)?;
+    let resp: RegisterResolverRpcResp = rpc_post_json(&client, base, "/rpc/registerresolver", &req)?;
     if json_mode {
         println!(
             "{}",
@@ -33377,18 +29814,13 @@ fn handle_resolver_list(args: &[String]) -> Result<(), String> {
         url.push('?');
         url.push_str(&q.join("&"));
     }
-    let resp = client
-        .get(&url)
-        .send()
-        .map_err(|e| format!("GET /resolvers/list: {e}"))?;
+    let resp = client.get(&url).send().map_err(|e| format!("GET /resolvers/list: {e}"))?;
     if !resp.status().is_success() {
         let status = resp.status();
         let body = resp.text().unwrap_or_default();
         return Err(format!("/resolvers/list: {} {}", status, body));
     }
-    let parsed: ResolversListRpcResp = resp
-        .json()
-        .map_err(|e| format!("parse /resolvers/list: {e}"))?;
+    let parsed: ResolversListRpcResp = resp.json().map_err(|e| format!("parse /resolvers/list: {e}"))?;
     if json_mode {
         let v = serde_json::json!({
             "resolvers": parsed.resolvers.iter().map(|r| serde_json::json!({
@@ -33411,9 +29843,7 @@ fn handle_resolver_list(args: &[String]) -> Result<(), String> {
                 "  {}  height={}  fee_bps={}  name={}",
                 r.resolver_address,
                 r.registered_at_height,
-                r.fee_bps_self_quoted
-                    .map(|n| n.to_string())
-                    .unwrap_or_else(|| "-".to_string()),
+                r.fee_bps_self_quoted.map(|n| n.to_string()).unwrap_or_else(|| "-".to_string()),
                 r.display_name.as_deref().unwrap_or("-")
             );
         }
@@ -33424,6 +29854,8 @@ fn handle_resolver_list(args: &[String]) -> Result<(), String> {
     }
     Ok(())
 }
+
+
 
 // ============================================================================
 // Stage 3.4.1: agreement-dispute-show + agreement-dispute-reresolve
@@ -33451,7 +29883,8 @@ fn handle_agreement_dispute_show(args: &[String]) -> Result<(), String> {
     }
     let ag_ref = agreement_ref.ok_or_else(|| "--agreement required".to_string())?;
     let agreement = load_agreement(&ag_ref)?;
-    let agreement_hash = irium_node_rs::settlement::compute_agreement_hash_hex(&agreement)?;
+    let agreement_hash =
+        irium_node_rs::settlement::compute_agreement_hash_hex(&agreement)?;
     let base = rpc_url.trim_end_matches('/');
     let client = rpc_client(base)?;
     let url = format!(
@@ -33478,7 +29911,10 @@ fn handle_agreement_dispute_show(args: &[String]) -> Result<(), String> {
         println!("{}", serde_json::to_string_pretty(&body).unwrap());
         return Ok(());
     }
-    let found = body.get("found").and_then(|v| v.as_bool()).unwrap_or(false);
+    let found = body
+        .get("found")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
     if !found {
         println!("no dispute on record for agreement {}", agreement_hash);
         return Ok(());
@@ -33500,10 +29936,7 @@ fn handle_agreement_dispute_show(args: &[String]) -> Result<(), String> {
     if let Some(t) = state.get("raise_anchor_txid").and_then(|v| v.as_str()) {
         println!("raise_anchor_txid   {}", t);
     }
-    if let Some(h) = state
-        .get("raise_anchored_at_height")
-        .and_then(|v| v.as_u64())
-    {
+    if let Some(h) = state.get("raise_anchored_at_height").and_then(|v| v.as_u64()) {
         println!("raise_anchored_at   block {}", h);
     }
     if let Some(ev) = state.get("evidence").and_then(|v| v.as_array()) {
@@ -33529,10 +29962,14 @@ fn handle_agreement_dispute_show(args: &[String]) -> Result<(), String> {
     }
     if let Some(nom) = state.get("reresolve_nomination") {
         if !nom.is_null() {
-            if let Some(np) = nom.get("new_primary_resolver").and_then(|v| v.as_str()) {
+            if let Some(np) =
+                nom.get("new_primary_resolver").and_then(|v| v.as_str())
+            {
                 println!("reresolve_primary   {}", np);
             }
-            if let Some(nf) = nom.get("new_fallback_resolver").and_then(|v| v.as_str()) {
+            if let Some(nf) =
+                nom.get("new_fallback_resolver").and_then(|v| v.as_str())
+            {
                 println!("reresolve_fallback  {}", nf);
             }
         }

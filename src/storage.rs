@@ -1,9 +1,9 @@
-use std::io::Write;
 use std::sync::{
     atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     mpsc::{sync_channel, SyncSender, TrySendError},
     Mutex, OnceLock,
 };
+use std::io::Write;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{
@@ -376,27 +376,6 @@ struct JsonHeader {
 }
 
 #[derive(Serialize)]
-struct JsonPoawxReceipt {
-    height: u64,
-    lane: String,
-    worker_pkh: String,
-    worker_pubkey: String,
-    worker_sig: String,
-    solution: String,
-    commitment_nonce: String,
-    /// Phase 18B: hex of the 226-byte serialized `Delegation` for a mode-1
-    /// (delegated) receipt. `skip_serializing_if` keeps mode-0 persisted JSON
-    /// byte-identical (the field is absent for direct receipts).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    delegation: String,
-    /// Phase 20: hex of the serialized `Phase20ReceiptExt` when present.
-    /// `skip_serializing_if` keeps pre-Phase-20 persisted JSON byte-identical
-    /// (the field is absent for receipts without an extension).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    phase20_ext: String,
-}
-
-#[derive(Serialize)]
 struct JsonBlock {
     height: u64,
     header: JsonHeader,
@@ -407,8 +386,6 @@ struct JsonBlock {
     miner_address: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     submit_source: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    poawx_receipts: Option<Vec<JsonPoawxReceipt>>,
 }
 
 #[cfg(unix)]
@@ -453,13 +430,7 @@ fn normalize_under(base: &Path, input: &Path) -> Option<PathBuf> {
     let base_depth = base.components().count();
     for comp in input.components() {
         match comp {
-            // On Windows an absolute path's first component is the disk/UNC
-            // Prefix (e.g. `C:`); it is part of a legitimate absolute path, not a
-            // traversal element, so keep it. (On Unix this arm never matches, so
-            // behaviour there is unchanged.) The `starts_with(&home)` check in the
-            // caller still enforces that the resolved path is under HOME, so a
-            // different drive/UNC root cannot escape.
-            Component::Prefix(p) => out.push(p.as_os_str()),
+            Component::Prefix(_) => return None,
             Component::RootDir => out.push(Path::new("/")),
             Component::CurDir => {}
             Component::ParentDir => {
@@ -474,58 +445,16 @@ fn normalize_under(base: &Path, input: &Path) -> Option<PathBuf> {
     Some(out)
 }
 
-/// Phase 24C: resolve an explicit storage-dir env var, distinguishing UNSET from
-/// SET-BUT-INVALID so callers can FAIL CLOSED instead of silently falling back to
-/// the default `~/.irium` (which, on a host that also runs mainnet, is the mainnet
-/// live block store -- see the Phase 24B incident).
-/// - `Ok(None)`       => the var is UNSET (caller may use its default).
-/// - `Ok(Some(path))` => set to a path that resolves UNDER $HOME.
-/// - `Err(msg)`       => set to a path that does NOT resolve under $HOME (e.g. /tmp);
-///                       callers MUST fail closed and never fall back to ~/.irium.
-pub fn resolve_configured_dir(var: &str) -> Result<Option<PathBuf>, String> {
-    let home = os_home_dir();
-    let raw = match env::var_os(var) {
-        Some(r) => r,
-        None => return Ok(None),
-    };
-    let candidate = PathBuf::from(&raw);
-    match normalize_under(&home, &candidate) {
-        Some(normalized) if normalized.starts_with(&home) => Ok(Some(normalized)),
-        _ => Err(format!(
-            "{var} is set to {:?} which does not resolve under HOME ({:?}); refusing \
-             to fall back to the default ~/.irium. Set {var} to an explicit path under \
-             {:?}, or unset it to use the default.",
-            candidate, home, home
-        )),
-    }
-}
-
-/// Validate every explicit storage-dir env var up front. Call at startup BEFORE any
-/// storage access so the node exits with a clear error rather than silently falling
-/// back to `~/.irium` when an explicit path is invalid. `Ok(())` when all set vars
-/// resolve under $HOME (or are unset); `Err` names the first offending var + path.
-pub fn validate_storage_env() -> Result<(), String> {
-    for var in [
-        "IRIUM_DATA_DIR",
-        "IRIUM_BLOCKS_DIR",
-        "IRIUM_STATE_DIR",
-        "IRIUM_BOOTSTRAP_DIR",
-    ] {
-        resolve_configured_dir(var)?;
-    }
-    Ok(())
-}
-
-/// Internal resolver used by the dir accessors. Preserves the `Option` contract
-/// (None => use default) for UNSET vars, but FAILS CLOSED (process exit) when an
-/// explicit var is invalid -- it must never silently fall back to ~/.irium.
 fn configured_dir(var: &str) -> Option<PathBuf> {
-    match resolve_configured_dir(var) {
-        Ok(opt) => opt,
-        Err(msg) => {
-            eprintln!("[fatal][storage] {msg}");
-            std::process::exit(78); // EX_CONFIG: fail closed, never fall back
-        }
+    let home = os_home_dir();
+
+    let raw = env::var_os(var)?;
+    let candidate = PathBuf::from(raw);
+    let normalized = normalize_under(&home, &candidate)?;
+    if normalized.starts_with(&home) {
+        Some(normalized)
+    } else {
+        None
     }
 }
 
@@ -539,15 +468,6 @@ pub fn blocks_dir() -> PathBuf {
 
 pub fn state_dir() -> PathBuf {
     configured_dir("IRIUM_STATE_DIR").unwrap_or_else(|| runtime_root_dir().join("state"))
-}
-
-/// Phase 26D: on-disk snapshot of the validated candidate-admission cache.
-/// Lives in the node's data root (NOT the state dir) so it survives a
-/// "delete only state, keep blocks" resync as well as a same-storage restart.
-/// Never the production default / `/tmp` (it follows the configured isolated
-/// `IRIUM_DATA_DIR`, same as every other runtime path).
-pub fn candidate_admissions_file() -> PathBuf {
-    runtime_root_dir().join("candidate_admissions.dat")
 }
 
 pub fn bootstrap_dir() -> PathBuf {
@@ -579,7 +499,10 @@ pub fn ensure_runtime_dirs() -> std::io::Result<(PathBuf, PathBuf)> {
                 continue;
             }
             if name.starts_with("orphaned_") {
-                let is_dir = entry.file_type().map(|ft| ft.is_dir()).unwrap_or(false);
+                let is_dir = entry
+                    .file_type()
+                    .map(|ft| ft.is_dir())
+                    .unwrap_or(false);
                 if !is_dir {
                     continue;
                 }
@@ -848,41 +771,9 @@ fn write_block_json_sync(height: u64, block: &Block) -> std::io::Result<()> {
             .iter()
             .map(|tx| hex::encode(tx.serialize()))
             .collect(),
-        auxpow_hex: block
-            .auxpow
-            .as_ref()
-            .map(|ap| hex::encode(crate::auxpow::serialize(ap))),
+        auxpow_hex: block.auxpow.as_ref().map(|ap| hex::encode(crate::auxpow::serialize(ap))),
         miner_address: miner_address_from_block(block),
         submit_source: None,
-        poawx_receipts: block.poawx_receipts.as_ref().map(|recs| {
-            recs.iter()
-                .map(|r| JsonPoawxReceipt {
-                    height: r.height,
-                    lane: std::str::from_utf8(&[r.lane]).unwrap_or("?").to_string(),
-                    worker_pkh: hex::encode(r.worker_pkh),
-                    worker_pubkey: hex::encode(r.worker_pubkey),
-                    worker_sig: hex::encode(r.worker_sig),
-                    solution: hex::encode(r.solution),
-                    commitment_nonce: hex::encode(r.commitment_nonce),
-                    // Phase 18B: persist the delegation for mode-1 receipts so a
-                    // P2P-accepted delegated block survives a restart. Empty for
-                    // mode-0 (and omitted from JSON via skip_serializing_if).
-                    delegation: r
-                        .delegation
-                        .as_ref()
-                        .map(|d| hex::encode(d.serialize()))
-                        .unwrap_or_default(),
-                    // Phase 20: persist the production extension when present so a
-                    // P2P-accepted Phase 20 block survives a restart. Empty/omitted
-                    // for receipts without an extension.
-                    phase20_ext: r
-                        .phase20_ext
-                        .as_ref()
-                        .map(|e| hex::encode(e.serialize()))
-                        .unwrap_or_default(),
-                })
-                .collect()
-        }),
     };
 
     let json = serde_json::to_string_pretty(&jb)?;
@@ -1029,70 +920,5 @@ mod storage_security_tests {
 
         std::env::remove_var("IRIUM_BLOCKS_DIR");
         let _ = fs::remove_dir_all(&base);
-    }
-
-    // ── Phase 24C: storage isolation fail-closed (no fs touched; path logic only) ──
-    #[test]
-    fn phase24c_resolve_configured_dir_unset_invalid_valid() {
-        let _g = env_lock().lock().unwrap();
-        let home = os_home_dir();
-        for var in ["IRIUM_DATA_DIR", "IRIUM_BLOCKS_DIR", "IRIUM_STATE_DIR"] {
-            std::env::remove_var(var);
-            // (1/2/3) unset => Ok(None) (default permitted).
-            assert_eq!(resolve_configured_dir(var), Ok(None), "unset {var}");
-            // explicit /tmp (not under HOME) => Err, NO fallback.
-            std::env::set_var(var, "/tmp/irium-p24c-invalid");
-            let r = resolve_configured_dir(var);
-            assert!(r.is_err(), "/tmp must be rejected for {var}");
-            assert!(r.unwrap_err().contains(var), "error names {var}");
-            // (5) explicit HOME-rooted => Ok(Some(exact)).
-            let good = home.join(format!(".irium-p24c-{var}"));
-            std::env::set_var(var, &good);
-            assert_eq!(
-                resolve_configured_dir(var),
-                Ok(Some(good.clone())),
-                "home-rooted {var}"
-            );
-            std::env::remove_var(var);
-        }
-    }
-
-    #[test]
-    fn phase24c_validate_storage_env_fail_closed() {
-        let _g = env_lock().lock().unwrap();
-        for var in [
-            "IRIUM_DATA_DIR",
-            "IRIUM_BLOCKS_DIR",
-            "IRIUM_STATE_DIR",
-            "IRIUM_BOOTSTRAP_DIR",
-        ] {
-            std::env::remove_var(var);
-        }
-        // (4) all unset => Ok (default behavior preserved).
-        assert!(validate_storage_env().is_ok(), "all unset ok");
-        // explicit invalid /tmp on any var => Err naming it.
-        std::env::set_var("IRIUM_BLOCKS_DIR", "/tmp/irium-p24c-bad");
-        let e = validate_storage_env();
-        assert!(
-            e.is_err() && e.unwrap_err().contains("IRIUM_BLOCKS_DIR"),
-            "invalid blocks dir rejected"
-        );
-        // HOME-rooted explicit => Ok.
-        std::env::set_var("IRIUM_BLOCKS_DIR", os_home_dir().join(".irium-p24c-ok"));
-        assert!(validate_storage_env().is_ok(), "home-rooted ok");
-        std::env::remove_var("IRIUM_BLOCKS_DIR");
-    }
-
-    #[test]
-    fn phase24c_default_preserved_when_unset() {
-        // (9) regression: with env unset, dirs resolve to the ~/.irium default
-        // (path computation only; does not create or touch ~/.irium).
-        let _g = env_lock().lock().unwrap();
-        for var in ["IRIUM_DATA_DIR", "IRIUM_BLOCKS_DIR", "IRIUM_STATE_DIR"] {
-            std::env::remove_var(var);
-        }
-        let irium = os_home_dir().join(".irium");
-        assert_eq!(blocks_dir(), irium.join("blocks"));
-        assert_eq!(state_dir(), irium.join("state"));
     }
 }

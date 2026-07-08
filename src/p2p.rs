@@ -431,27 +431,6 @@ fn stateless_block_precheck(block: &Block, height: u64) -> Result<(), String> {
             return Err("merkle precheck failed".to_string());
         }
     }
-    // C-1: when IRIUM_POAWX_MODE=active and IRIUM_POAWX_ACTIVATION_HEIGHT is set,
-    // every non-genesis block at or above that height must carry a well-formed irx1
-    // OP_RETURN commitment in its coinbase.  Mainnet is always exempt.
-    if let Some(act_h) = std::env::var("IRIUM_POAWX_ACTIVATION_HEIGHT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-    {
-        let poawx_active = std::env::var("IRIUM_POAWX_MODE")
-            .map(|v| v.trim() == "active")
-            .unwrap_or(false);
-        let is_non_mainnet =
-            crate::activation::network_kind_from_env() != crate::activation::NetworkKind::Mainnet;
-        if poawx_active && is_non_mainnet && height >= act_h {
-            if !crate::poawx::block_has_irx1_commitment(block) {
-                return Err(format!(
-                    "poawx: block at height {} missing irx1 coinbase commitment (active from height {})",
-                    height, act_h
-                ));
-            }
-        }
-    }
     Ok(())
 }
 
@@ -1593,7 +1572,8 @@ fn verify_peer_checkpoint(
     Ok(())
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
+#[derive(Default)]
 struct PeerSyncState {
     height: Option<u64>,
     tip: Option<[u8; 32]>,
@@ -1627,6 +1607,7 @@ struct PeerSyncState {
     // on a stale fork.
     last_applied_height: u64,
 }
+
 
 #[derive(Clone)]
 struct OrphanHeaderEntry {
@@ -1733,10 +1714,7 @@ fn store_orphan_header(header: BlockHeader) -> (usize, bool) {
         .unwrap_or_else(|e| e.into_inner());
     prune_orphan_headers_locked(&mut guard);
     let entries = guard.entry(header.prev_hash).or_default();
-    if entries
-        .iter()
-        .any(|e| e.header.hash_for_height(0) == header_hash)
-    {
+    if entries.iter().any(|e| e.header.hash_for_height(0) == header_hash) {
         return (orphan_headers_count_locked(&guard), false);
     }
     entries.push(OrphanHeaderEntry {
@@ -1853,7 +1831,9 @@ fn rewinded_getblocks_request(chain: &ChainState, peer_height: u64) -> Option<([
     }
     .min(tip_height);
     let start_height = tip_height.saturating_sub(rewind);
-    let count = peer_height.saturating_sub(start_height).min(max) as u32;
+    let count = peer_height
+        .saturating_sub(start_height)
+        .min(max) as u32;
     if count == 0 {
         return None;
     }
@@ -2037,15 +2017,15 @@ async fn maybe_request_sync(
             MAX_BLOCKS_PER_REQUEST,
         )
         .await
-    {
-        let get_blocks = GetBlocksPayload {
-            start_hash: start_hash.to_vec(),
-            count: MAX_BLOCKS_PER_REQUEST,
-        };
-        if let Ok(msg) = get_blocks.to_message() {
-            let _ = send_message(writer, msg, addr).await;
+        {
+            let get_blocks = GetBlocksPayload {
+                start_hash: start_hash.to_vec(),
+                count: MAX_BLOCKS_PER_REQUEST,
+            };
+            if let Ok(msg) = get_blocks.to_message() {
+                let _ = send_message(writer, msg, addr).await;
+            }
         }
-    }
 }
 
 async fn maybe_request_headers_fallback(
@@ -2188,75 +2168,6 @@ async fn request_orphan_headers(
         let guard = peer_state.lock().await;
         guard.height.unwrap_or(local_height.saturating_add(1))
     };
-
-    // === Fix GAP A/B (gated behind fork_choice_hardening; mainnet hard-off; off => the legacy
-    // recovery below runs unchanged). Adoptability-aware orphan recovery: fetch a shallow
-    // competing sibling's BODIES (GetBlocks; GetData is tx-only), request headers for a legit
-    // ahead-peer whose ancestors we lack, and refuse to chase / storm-restart from genesis for
-    // a foreign chain forking below the reorg cap (sync-hijack prevention), preserving honest
-    // orphans during a flood. ===
-    if crate::poawx_proposer::fork_choice_hardening_active(local_height) {
-        // GAP B2: under an orphan storm, prune ONLY un-adoptable (foreign/deep) orphans; keep
-        // shallow honest-sibling orphans and do NOT restart header-sync from genesis.
-        if note_orphan_and_check_storm().await {
-            let pruned = chain
-                .as_ref()
-                .and_then(|c| c.lock().ok().map(|mut g| g.prune_unadoptable_orphans()))
-                .unwrap_or(0);
-            P2PNode::log_event(
-                "warn",
-                "sync",
-                format!(
-                    "orphan storm: pruned {} un-adoptable orphans (honest/shallow kept)",
-                    pruned
-                ),
-            );
-        }
-        let class = chain
-            .as_ref()
-            .and_then(|c| c.lock().ok().map(|g| g.orphan_branch_class(prev_hash)));
-        match class {
-            Some(crate::chain::OrphanClass::Adoptable { anchor, count }) => {
-                // GAP B1: fetch the competing sibling branch BODIES (rate-limited).
-                if sync_request_allowed_for(sync_requests, addr.ip(), local_height, peer_height)
-                    .await
-                {
-                    let get_blocks = GetBlocksPayload {
-                        start_hash: anchor.to_vec(),
-                        count: count.min(MAX_BLOCKS_PER_REQUEST),
-                    };
-                    if let Ok(msg) = get_blocks.to_message() {
-                        let _ = send_message(writer, msg, addr).await;
-                    }
-                    peer_state.lock().await.last_headers_request = Some(Instant::now());
-                }
-            }
-            Some(crate::chain::OrphanClass::NeedHeaders) | None => {
-                // Legitimate catch-up: ancestors unknown -> header-first sync.
-                if sync_request_allowed_for(sync_requests, addr.ip(), local_height, peer_height)
-                    .await
-                {
-                    let get_headers = GetHeadersPayload {
-                        start_hash: vec![0u8; 32],
-                        count: MAX_HEADERS_PER_REQUEST,
-                    };
-                    if let Ok(msg) = get_headers.to_message() {
-                        let _ = send_message(writer, msg, addr).await;
-                    }
-                    let mut guard = peer_state.lock().await;
-                    guard.last_headers_request = Some(Instant::now());
-                    guard.last_headers_start = Some([0u8; 32]);
-                    guard.headers_inflight = true;
-                }
-            }
-            Some(crate::chain::OrphanClass::Foreign) => {
-                // GAP A: foreign chain forking below the reorg cap -> score the peer down; do
-                // NOT chase it and do NOT restart header-sync from genesis.
-                peer_mark_header_event(addr.ip(), false, 1).await;
-            }
-        }
-        return;
-    }
 
     if prev_hash != [0u8; 32] && !prev_known {
         let prev = hex::encode(prev_hash);
@@ -2572,11 +2483,13 @@ fn record_discovered_feed(url: &str) {
             .ok()
             .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
             .and_then(|v| {
-                v.get("feeds").and_then(|f| f.as_array()).map(|arr| {
-                    arr.iter()
-                        .filter_map(|e| e.as_str().map(|s| s.to_string()))
-                        .collect()
-                })
+                v.get("feeds")
+                    .and_then(|f| f.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|e| e.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
             })
             .unwrap_or_default()
     } else {
@@ -3491,10 +3404,7 @@ impl P2PNode {
     }
 
     pub async fn flush_peers_to_runtime(&self) {
-        self.peers_directory
-            .lock()
-            .await
-            .refresh_seedlist_with_policy();
+        self.peers_directory.lock().await.refresh_seedlist_with_policy();
     }
 
     /// Broadcast a raw serialized block to all currently known peers.
@@ -4122,56 +4032,6 @@ impl P2PNode {
     pub async fn broadcast_offer(&self, offer_json: &str) {
         let payload = crate::protocol::OfferBroadcastPayload {
             offer_json: offer_json.as_bytes().to_vec(),
-        };
-        let serialized = payload.to_message().serialize();
-        let _ = broadcast_raw(&self.peers, &serialized).await;
-    }
-
-    /// Phase 20 Step 6D: broadcast a PoAW-X role-precommit gossip envelope to all
-    /// peers (best-effort flood; receivers run the role-gossip cache's
-    /// validate/dedupe before re-broadcasting). Testnet/devnet only — callers gate
-    /// on `poawx_gossip::role_gossip_enabled()` (mainnet hard-off).
-    pub async fn broadcast_role_precommit(&self, gossip_json: &[u8]) {
-        let payload = crate::protocol::PoawxRolePrecommitPayload {
-            gossip_json: gossip_json.to_vec(),
-        };
-        let serialized = payload.to_message().serialize();
-        let _ = broadcast_raw(&self.peers, &serialized).await;
-    }
-
-    /// Phase 20 Step 6D: broadcast a PoAW-X role-reveal gossip envelope to all peers.
-    pub async fn broadcast_role_reveal(&self, gossip_json: &[u8]) {
-        let payload = crate::protocol::PoawxRoleRevealPayload {
-            gossip_json: gossip_json.to_vec(),
-        };
-        let serialized = payload.to_message().serialize();
-        let _ = broadcast_raw(&self.peers, &serialized).await;
-    }
-
-    /// Phase 21E: broadcast a PoAW-X candidate-admission (canonical wire bytes)
-    /// to all peers (best-effort flood; receivers validate/dedupe before
-    /// re-broadcast). Testnet/devnet only; mainnet hard-off via the gate.
-    pub async fn broadcast_candidate_admission(&self, admission_bytes: &[u8]) {
-        let payload = crate::protocol::PoawxCandidateAdmissionPayload {
-            admission_bytes: admission_bytes.to_vec(),
-        };
-        let serialized = payload.to_message().serialize();
-        let _ = broadcast_raw(&self.peers, &serialized).await;
-    }
-
-    /// Phase 21I: broadcast a PoAW-X finality vote (canonical wire bytes) to all
-    /// peers; receivers validate the signature + dedupe before re-broadcast.
-    pub async fn broadcast_finality_vote(&self, vote_bytes: &[u8]) {
-        let payload = crate::protocol::PoawxFinalityVotePayload {
-            vote_bytes: vote_bytes.to_vec(),
-        };
-        let serialized = payload.to_message().serialize();
-        let _ = broadcast_raw(&self.peers, &serialized).await;
-    }
-
-    pub async fn broadcast_proposer_registration(&self, reg_bytes: &[u8]) {
-        let payload = crate::protocol::PoawxProposerRegistrationPayload {
-            reg_bytes: reg_bytes.to_vec(),
         };
         let serialized = payload.to_message().serialize();
         let _ = broadcast_raw(&self.peers, &serialized).await;
@@ -4937,17 +4797,10 @@ impl P2PNode {
                             {
                                 let to_push: Vec<String> = {
                                     let d = dir.lock().await;
-                                    d.peers()
-                                        .iter()
-                                        .filter(|p| p.dialable)
-                                        .take(MAX_ADDR_PUSH)
-                                        .map(|p| p.multiaddr.clone())
-                                        .collect()
+                                    d.peers().iter().filter(|p| p.dialable).take(MAX_ADDR_PUSH).map(|p| p.multiaddr.clone()).collect()
                                 };
                                 if !to_push.is_empty() {
-                                    if let Ok(push_msg) =
-                                        (PeersPayload { peers: to_push }).to_message()
-                                    {
+                                    if let Ok(push_msg) = (PeersPayload { peers: to_push }).to_message() {
                                         send_message_detached(&writer, push_msg, addr);
                                     }
                                 }
@@ -5102,13 +4955,9 @@ impl P2PNode {
                                             payload.height.saturating_add(1) as usize
                                         };
                                         let mut headers = Vec::new();
-                                        for (i, block) in
-                                            guard.chain.iter().skip(start).take(32).enumerate()
-                                        {
+                                        for (i, block) in guard.chain.iter().skip(start).take(32).enumerate() {
                                             let h = (start + i) as u64;
-                                            headers.extend_from_slice(
-                                                &block.header.serialize_for_height(h),
-                                            );
+                                            headers.extend_from_slice(&block.header.serialize_for_height(h));
                                         }
                                         headers
                                     };
@@ -5183,17 +5032,6 @@ impl P2PNode {
                                                     end_h
                                                 ),
                                             );
-                                        // Phase 26E: send historical admissions for the pushed
-                                        // heights before the block bodies (fresh-sync support;
-                                        // no-op on mainnet; bounded).
-                                        let p26e_fw = Arc::downgrade(&fallback_writer);
-                                        send_historical_admissions(
-                                            &p26e_fw,
-                                            fallback_addr,
-                                            start_height,
-                                            blocks.len(),
-                                        )
-                                        .await;
                                         for block_data in blocks {
                                             let msg = BlockPayload { block_data }.to_message();
                                             let _ =
@@ -5291,16 +5129,10 @@ impl P2PNode {
                     MessageType::Peers => {
                         if let Ok(list) = PeersPayload::from_message(&msg) {
                             let source = format!("/ip4/{}/tcp/{}", addr.ip(), addr.port());
-                            let filtered: Vec<String> = list
-                                .peers
-                                .into_iter()
+                            let filtered: Vec<String> = list.peers.into_iter()
                                 .filter(|p| {
                                     if let Some(port_str) = p.split("/tcp/").nth(1) {
-                                        port_str
-                                            .trim()
-                                            .parse::<u16>()
-                                            .map(|port| port != 0)
-                                            .unwrap_or(true)
+                                        port_str.trim().parse::<u16>().map(|port| port != 0).unwrap_or(true)
                                     } else if let Ok(sa) = p.parse::<std::net::SocketAddr>() {
                                         sa.port() != 0
                                     } else {
@@ -5326,33 +5158,24 @@ impl P2PNode {
                                         target.copy_from_slice(&payload.start_hash);
                                         start_hash_non_zero = target.iter().any(|b| *b != 0);
                                         if start_hash_non_zero {
-                                            // Fix #12: O(1) height-index lookup instead of an O(chain) scan, so a peer
-                                            // spraying random/missing start hashes cannot pin the chain lock with full
-                                            // scans (CPU-DoS). Verify the indexed block is on the active chain.
-                                            if let Some(&hpos) = guard.heights.get(&target) {
-                                                if (hpos as usize) < guard.chain.len()
-                                                    && guard.chain[hpos as usize].header.hash_for_height(hpos) == target
-                                                {
-                                                    start_idx = (hpos as usize).saturating_add(1);
-                                                    start_found = true;
-                                                }
+                                            if let Some((pos, _)) = guard
+                                                .chain
+                                                .iter()
+                                                .enumerate()
+                                                .find(|(idx, b)| b.header.hash_for_height(*idx as u64) == target)
+                                            {
+                                                start_idx = pos.saturating_add(1);
+                                                start_found = true;
                                             }
                                         }
                                     }
                                     let count = payload.count.min(MAX_HEADERS_PER_REQUEST) as usize;
                                     let mut bytes = Vec::new();
                                     if !start_hash_non_zero || start_found {
-                                        for (i, block) in guard
-                                            .chain
-                                            .iter()
-                                            .skip(start_idx)
-                                            .take(count)
-                                            .enumerate()
+                                        for (i, block) in guard.chain.iter().skip(start_idx).take(count).enumerate()
                                         {
                                             let h = (start_idx + i) as u64;
-                                            bytes.extend_from_slice(
-                                                &block.header.serialize_for_height(h),
-                                            );
+                                            bytes.extend_from_slice(&block.header.serialize_for_height(h));
                                         }
                                     }
                                     bytes
@@ -5399,26 +5222,6 @@ impl P2PNode {
                                                     ),
                                                 );
                                             }
-                                        }
-                                        // Fix #13 (audit-gated): solicit the announcing peer's chain via a
-                                        // genesis-locator GetHeaders so a competing sibling fork can be
-                                        // fetched + resolved, instead of only dropping the announcement.
-                                        // send_message_detached does not await (peer_state guard not held
-                                        // across an await); rate-limited via last_headers_request. Off => drop.
-                                        let lh = chain_for_sync
-                                            .as_ref()
-                                            .and_then(|c| c.lock().ok().map(|g| g.tip_height()))
-                                            .unwrap_or(0);
-                                        if crate::poawx_proposer::audit_hardening_active(lh) {
-                                            let gh = GetHeadersPayload {
-                                                start_hash: vec![0u8; 32],
-                                                count: MAX_HEADERS_PER_REQUEST,
-                                            };
-                                            if let Ok(m) = gh.to_message() {
-                                                send_message_detached(&writer, m, addr);
-                                            }
-                                            state.last_headers_request = Some(now);
-                                            state.headers_inflight = true;
                                         }
                                         continue;
                                     }
@@ -5704,14 +5507,6 @@ impl P2PNode {
                                     let mut state = peer_state.lock().await;
                                     state.height = Some(peer_height);
                                     state.last_bad_headers = None;
-                                    // Phase 31 sibling-fork recovery (gated): keep the peer tip fresh so an
-                                    // equal-height competing fork is seen as a tip mismatch and fetched at
-                                    // shallow depth (before it can exceed the reorg cap). Mainnet hard-off.
-                                    if let Some(__lh) = last_header_hash {
-                                        if crate::poawx_proposer::fork_choice_hardening_active(local_height) {
-                                            state.tip = Some(__lh);
-                                        }
-                                    }
                                 }
                                 clear_header_reject_streak(addr.ip()).await;
                                 let multiaddr = format!("/ip4/{}/tcp/{}", addr.ip(), addr.port());
@@ -5764,15 +5559,10 @@ impl P2PNode {
 
                                 let request = {
                                     let guard = chain_arc.lock().unwrap_or_else(|e| e.into_inner());
-                                    let __best_adoptable = if crate::poawx_proposer::fork_choice_hardening_active(guard.tip_height()) {
-                                        guard.best_adoptable_header_if_better()
-                                    } else {
-                                        guard.best_header_if_better()
-                                    };
-                                    if let Some(best) = __best_adoptable {
-                                        if let Some(path) = guard.header_path_to_known(
-                                            best.header.hash_for_height(best.height),
-                                        ) {
+                                    if let Some(best) = guard.best_header_if_better() {
+                                        if let Some(path) =
+                                            guard.header_path_to_known(best.header.hash_for_height(best.height))
+                                        {
                                             if let Some(first_hash) = path.first() {
                                                 let mut start_hash = guard
                                                     .headers
@@ -5792,9 +5582,7 @@ impl P2PNode {
                                                         guard
                                                             .chain
                                                             .last()
-                                                            .map(|b| {
-                                                                b.header.hash_for_height(tip_h)
-                                                            })
+                                                            .map(|b| b.header.hash_for_height(tip_h))
                                                             .unwrap_or([0u8; 32])
                                                     });
                                                 }
@@ -5812,8 +5600,8 @@ impl P2PNode {
                                                 None
                                             }
                                         } else {
-                                            rewinded_getblocks_request(&guard, peer_height).or_else(
-                                                || {
+                                            rewinded_getblocks_request(&guard, peer_height)
+                                                .or_else(|| {
                                                     let tip_h = guard.tip_height();
                                                     let start_hash = guard
                                                         .chain
@@ -5823,15 +5611,13 @@ impl P2PNode {
                                                     let count = std::cmp::min(
                                                         best.height.saturating_sub(tip_h) as usize,
                                                         MAX_BLOCKS_PER_REQUEST as usize,
-                                                    )
-                                                        as u32;
+                                                    ) as u32;
                                                     if count > 0 {
                                                         Some((start_hash, count))
                                                     } else {
                                                         None
                                                     }
-                                                },
-                                            )
+                                                })
                                         }
                                     } else if peer_height > guard.tip_height() {
                                         rewinded_getblocks_request(&guard, peer_height)
@@ -5962,23 +5748,19 @@ impl P2PNode {
                                         if start_hash.len() == 32 {
                                             let mut target = [0u8; 32];
                                             target.copy_from_slice(&start_hash);
-                                            if let Some((pos, _)) =
-                                                guard.chain.iter().enumerate().find(|(idx, b)| {
-                                                    b.header.hash_for_height(*idx as u64) == target
-                                                })
+                                            if let Some((pos, _)) = guard
+                                                .chain
+                                                .iter()
+                                                .enumerate()
+                                                .find(|(idx, b)| b.header.hash_for_height(*idx as u64) == target)
                                             {
                                                 start_idx = pos + 1;
                                                 matched_pos = Some(pos);
                                             }
                                         }
 
-                                        // IBD-sync fix (Fix 2): unknown start hash => fall back to
-                                        // serving from the genesis-child so the client re-anchors
-                                        // instead of dead-ending. Treated as a genesis locator
-                                        // (rate-limited below) via matched_pos = Some(0).
                                         if matched_pos.is_none() && !is_zero {
-                                            start_idx = if guard.chain.len() > 1 { 1 } else { 0 };
-                                            matched_pos = Some(0);
+                                            return (matched_pos, Vec::new(), 0u64);
                                         }
 
                                         let mut blocks = Vec::new();
@@ -6043,18 +5825,6 @@ impl P2PNode {
                                     }
                                 }
 
-                                // Phase 26E: send the historical candidate admissions for the
-                                // served heights BEFORE the block bodies, so a fresh/wiped peer
-                                // can populate its admission cache and pass the UNCHANGED
-                                // phase21e gate (no-op on mainnet; bounded).
-                                send_historical_admissions(
-                                    &writer_weak,
-                                    addr2,
-                                    start_height,
-                                    blocks.len(),
-                                )
-                                .await;
-
                                 for block_data in blocks {
                                     let Some(writer) = writer_weak.upgrade() else {
                                         break;
@@ -6074,18 +5844,13 @@ impl P2PNode {
                                 let decode_started = Instant::now();
                                 // Peek prev_hash → look up parent → derive
                                 // block_height before height-aware deserialize.
-                                let prev_peek = match crate::block::BlockHeader::peek_prev_hash(
-                                    &payload.block_data,
-                                ) {
+                                let prev_peek = match crate::block::BlockHeader::peek_prev_hash(&payload.block_data) {
                                     Ok(p) => p,
                                     Err(_) => {
                                         P2PNode::log_event(
                                             "warn",
                                             "chain",
-                                            format!(
-                                                "P2P {}: block payload too short to peek prev_hash",
-                                                addr
-                                            ),
+                                            format!("P2P {}: block payload too short to peek prev_hash", addr),
                                         );
                                         continue;
                                     }
@@ -6094,26 +5859,22 @@ impl P2PNode {
                                     let guard = chain_arc.lock().unwrap_or_else(|e| e.into_inner());
                                     if prev_peek == [0u8; 32] {
                                         0
-                                    } else if let Some(h) =
-                                        guard.heights.get(&prev_peek).copied().or_else(|| {
-                                            guard.headers.get(&prev_peek).map(|hw| hw.height)
-                                        })
+                                    } else if let Some(h) = guard
+                                        .heights
+                                        .get(&prev_peek)
+                                        .copied()
+                                        .or_else(|| guard.headers.get(&prev_peek).map(|hw| hw.height))
                                     {
                                         h + 1
                                     } else {
                                         0
                                     }
                                 };
-                                match Block::deserialize_for_height(
-                                    &payload.block_data,
-                                    block_height,
-                                ) {
+                                match Block::deserialize_for_height(&payload.block_data, block_height) {
                                     Ok((block, _)) => {
                                         let decode_ms = decode_started.elapsed().as_millis();
                                         let precheck_started = Instant::now();
-                                        if let Err(e) =
-                                            stateless_block_precheck(&block, block_height)
-                                        {
+                                        if let Err(e) = stateless_block_precheck(&block, block_height) {
                                             P2PNode::log_event(
                                                 "warn",
                                                 "chain",
@@ -6278,21 +6039,6 @@ impl P2PNode {
                                                 new_height.saturating_sub(1),
                                             );
                                         }
-                                        // Phase 31 sibling-fork recovery (gated): record the peer's
-                                        // just-delivered tip from gossip so an equal-height competing
-                                        // fork is detected as a tip mismatch on the next sync tick and
-                                        // fetched at shallow depth. Mainnet hard-off (no refresh when off).
-                                        {
-                                            let local_h = chain_for_sync
-                                                .as_ref()
-                                                .and_then(|c| c.lock().ok().map(|g| g.tip_height()))
-                                                .unwrap_or(0);
-                                            if crate::poawx_proposer::fork_choice_hardening_active(local_h)
-                                                && block_height >= local_h
-                                            {
-                                                peer_state.lock().await.tip = Some(bhash);
-                                            }
-                                        }
                                         maybe_request_sync(
                                             &writer,
                                             addr,
@@ -6347,7 +6093,8 @@ impl P2PNode {
                                                         continue;
                                                     }
                                                 };
-                                                let priority = classify_tx_priority(&tx, &guard);
+                                                let priority =
+                                                    classify_tx_priority(&tx, &guard);
                                                 (fee, priority)
                                             };
                                             let relay_addr = {
@@ -6562,9 +6309,7 @@ impl P2PNode {
                         }
                     }
                     MessageType::OfferTakeNotification => {
-                        if let Ok(otn) =
-                            crate::protocol::OfferTakeNotificationPayload::from_message(&msg)
-                        {
+                        if let Ok(otn) = crate::protocol::OfferTakeNotificationPayload::from_message(&msg) {
                             if let Ok(json) = String::from_utf8(otn.take_json) {
                                 let mut inbox = offer_take_inbox_outbound.lock().await;
                                 inbox.push(json);
@@ -6578,9 +6323,7 @@ impl P2PNode {
                                 addr,
                                 &seen_offer_ids_outbound,
                                 &offer_rate_limit_outbound,
-                            )
-                            .await
-                            {
+                            ).await {
                                 {
                                     let mut inbox = offer_broadcast_inbox_outbound.lock().await;
                                     inbox.push(json.clone());
@@ -6593,111 +6336,8 @@ impl P2PNode {
                             }
                         }
                     }
-                    // Phase 20 Step 6D: ingest role-gossip into the node cache;
-                    // rebroadcast only newly-accepted payloads (mirror of the
-                    // OfferBroadcast flood). Gated + mainnet-hard-off via
-                    // role_gossip_enabled(); malformed payloads are dropped, never
-                    // rebroadcast. No consensus effect (Step 6A is block-driven).
-                    MessageType::PoawxRolePrecommit => {
-                        if crate::poawx_gossip::role_gossip_enabled() {
-                            if let Ok(p) =
-                                crate::protocol::PoawxRolePrecommitPayload::from_message(&msg)
-                            {
-                                if crate::poawx_gossip::global_cache()
-                                    .ingest_precommit_bytes(&p.gossip_json)
-                                    .should_rebroadcast()
-                                {
-                                    let bytes = crate::protocol::PoawxRolePrecommitPayload {
-                                        gossip_json: p.gossip_json,
-                                    }
-                                    .to_message()
-                                    .serialize();
-                                    let _ = broadcast_raw(&peers_vec, &bytes).await;
-                                }
-                            }
-                        }
-                    }
-                    MessageType::PoawxRoleReveal => {
-                        if crate::poawx_gossip::role_gossip_enabled() {
-                            if let Ok(p) =
-                                crate::protocol::PoawxRoleRevealPayload::from_message(&msg)
-                            {
-                                if crate::poawx_gossip::global_cache()
-                                    .ingest_reveal_bytes(&p.gossip_json)
-                                    .should_rebroadcast()
-                                {
-                                    let bytes = crate::protocol::PoawxRoleRevealPayload {
-                                        gossip_json: p.gossip_json,
-                                    }
-                                    .to_message()
-                                    .serialize();
-                                    let _ = broadcast_raw(&peers_vec, &bytes).await;
-                                }
-                            }
-                        }
-                    }
-                    MessageType::PoawxCandidateAdmission => {
-                        if crate::poawx_admission::candidate_admission_gossip_enabled() {
-                            if let Ok(p) =
-                                crate::protocol::PoawxCandidateAdmissionPayload::from_message(&msg)
-                            {
-                                if crate::poawx_admission::admission_rate_allowed(addr.ip())
-                                    && crate::poawx_admission::global_admission_cache()
-                                        .ingest_bytes(&p.admission_bytes)
-                                        .should_rebroadcast()
-                                {
-                                    let bytes = crate::protocol::PoawxCandidateAdmissionPayload {
-                                        admission_bytes: p.admission_bytes,
-                                    }
-                                    .to_message()
-                                    .serialize();
-                                    let _ = broadcast_raw(&peers_vec, &bytes).await;
-                                }
-                            }
-                        }
-                    }
-                    MessageType::PoawxFinalityVote => {
-                        if crate::poawx_finality::finality_gossip_enabled() {
-                            if let Ok(p) =
-                                crate::protocol::PoawxFinalityVotePayload::from_message(&msg)
-                            {
-                                if crate::poawx_finality::global_finality_vote_cache()
-                                    .ingest_bytes(&p.vote_bytes)
-                                    .should_rebroadcast()
-                                {
-                                    let bytes = crate::protocol::PoawxFinalityVotePayload {
-                                        vote_bytes: p.vote_bytes,
-                                    }
-                                    .to_message()
-                                    .serialize();
-                                    let _ = broadcast_raw(&peers_vec, &bytes).await;
-                                }
-                            }
-                        }
-                    }
-                    MessageType::PoawxProposerRegistration => {
-                        if crate::poawx_proposer::proposer_registration_gossip_enabled() {
-                            if let Ok(p) =
-                                crate::protocol::PoawxProposerRegistrationPayload::from_message(&msg)
-                            {
-                                if crate::poawx_proposer::global_proposer_reg_pool()
-                                    .ingest_bytes(&p.reg_bytes)
-                                    .should_rebroadcast()
-                                {
-                                    let bytes = crate::protocol::PoawxProposerRegistrationPayload {
-                                        reg_bytes: p.reg_bytes,
-                                    }
-                                    .to_message()
-                                    .serialize();
-                                    let _ = broadcast_raw(&peers_vec, &bytes).await;
-                                }
-                            }
-                        }
-                    }
                     MessageType::DisputeRaisedNotification => {
-                        if let Ok(p) =
-                            crate::protocol::DisputeRaisedNotificationPayload::from_message(&msg)
-                        {
+                        if let Ok(p) = crate::protocol::DisputeRaisedNotificationPayload::from_message(&msg) {
                             if let Ok(json) = String::from_utf8(p.json) {
                                 let mut inbox = dispute_raised_inbox_outbound.lock().await;
                                 inbox.push(json);
@@ -6705,9 +6345,7 @@ impl P2PNode {
                         }
                     }
                     MessageType::DisputeEvidenceNotification => {
-                        if let Ok(p) =
-                            crate::protocol::DisputeEvidenceNotificationPayload::from_message(&msg)
-                        {
+                        if let Ok(p) = crate::protocol::DisputeEvidenceNotificationPayload::from_message(&msg) {
                             if let Ok(json) = String::from_utf8(p.json) {
                                 let mut inbox = dispute_evidence_inbox_outbound.lock().await;
                                 inbox.push(json);
@@ -6715,9 +6353,7 @@ impl P2PNode {
                         }
                     }
                     MessageType::DisputeResolvedNotification => {
-                        if let Ok(p) =
-                            crate::protocol::DisputeResolvedNotificationPayload::from_message(&msg)
-                        {
+                        if let Ok(p) = crate::protocol::DisputeResolvedNotificationPayload::from_message(&msg) {
                             if let Ok(json) = String::from_utf8(p.json) {
                                 let mut inbox = dispute_resolved_inbox_outbound.lock().await;
                                 inbox.push(json);
@@ -6725,9 +6361,7 @@ impl P2PNode {
                         }
                     }
                     MessageType::DisputeEscalatedNotification => {
-                        if let Ok(p) =
-                            crate::protocol::DisputeEscalatedNotificationPayload::from_message(&msg)
-                        {
+                        if let Ok(p) = crate::protocol::DisputeEscalatedNotificationPayload::from_message(&msg) {
                             if let Ok(json) = String::from_utf8(p.json) {
                                 let mut inbox = dispute_escalated_inbox_outbound.lock().await;
                                 inbox.push(json);
@@ -6832,45 +6466,6 @@ async fn send_message(
         Ok(Ok(())) => Ok(()),
         Ok(Err(e)) => Err(format!("failed to send to {}: {}", peer, e)),
         Err(_) => Err(format!("failed to send to {}: write timeout", peer)),
-    }
-}
-
-/// Phase 26E: send the historical candidate admissions for the served block
-/// range `[start_height, start_height + block_count)` to a syncing peer, so a
-/// fresh / wiped node can populate its admission cache and pass the UNCHANGED
-/// phase21e gate. Admissions are public, already-validated data; the receiver
-/// re-validates each via the normal ingest path (`ingest_bytes`). Bounded
-/// (anti-spam) and a no-op when there are no admissions (e.g. mainnet hard-off).
-/// Sent BEFORE the matching block bodies so the receiver's cache is populated
-/// before it connects those blocks.
-async fn send_historical_admissions(
-    writer_weak: &std::sync::Weak<Mutex<OwnedWriteHalf>>,
-    peer: SocketAddr,
-    start_height: u64,
-    block_count: usize,
-) {
-    if block_count == 0 {
-        return;
-    }
-    let cache = crate::poawx_admission::global_admission_cache();
-    let end = start_height + block_count as u64;
-    let cap = block_count.saturating_mul(16);
-    let mut sent = 0usize;
-    for h in start_height..end {
-        for adm in cache.admissions_for_height(h) {
-            if sent >= cap {
-                return;
-            }
-            let Some(writer) = writer_weak.upgrade() else {
-                return;
-            };
-            let msg = crate::protocol::PoawxCandidateAdmissionPayload {
-                admission_bytes: adm.serialize(),
-            }
-            .to_message();
-            let _ = send_message(&writer, msg, peer).await;
-            sent += 1;
-        }
     }
 }
 
@@ -7466,7 +7061,9 @@ async fn handle_incoming_with_sybil(
                         .external_endpoint
                         .as_deref()
                         .and_then(dialable_multiaddr_from_advertised)
-                        .unwrap_or_else(|| format!("/ip4/{}/tcp/{}", addr.ip(), advertised_port));
+                        .unwrap_or_else(|| {
+                            format!("/ip4/{}/tcp/{}", addr.ip(), advertised_port)
+                        });
                     {
                         let mut dir = directory.lock().await;
                         dir.register_connection(
@@ -7542,12 +7139,7 @@ async fn handle_incoming_with_sybil(
                     {
                         let to_push: Vec<String> = {
                             let d = directory.lock().await;
-                            d.peers()
-                                .iter()
-                                .filter(|p| p.dialable)
-                                .take(MAX_ADDR_PUSH)
-                                .map(|p| p.multiaddr.clone())
-                                .collect()
+                            d.peers().iter().filter(|p| p.dialable).take(MAX_ADDR_PUSH).map(|p| p.multiaddr.clone()).collect()
                         };
                         if !to_push.is_empty() {
                             if let Ok(push_msg) = (PeersPayload { peers: to_push }).to_message() {
@@ -7696,12 +7288,9 @@ async fn handle_incoming_with_sybil(
                                     payload.height.saturating_add(1) as usize
                                 };
                                 let mut headers = Vec::new();
-                                for (i, block) in
-                                    guard.chain.iter().skip(start).take(32).enumerate()
-                                {
+                                for (i, block) in guard.chain.iter().skip(start).take(32).enumerate() {
                                     let h = (start + i) as u64;
-                                    headers
-                                        .extend_from_slice(&block.header.serialize_for_height(h));
+                                    headers.extend_from_slice(&block.header.serialize_for_height(h));
                                 }
                                 headers
                             };
@@ -7773,16 +7362,6 @@ async fn handle_incoming_with_sybil(
                                     end_h
                                 ),
                                 );
-                                // Phase 26E: send historical admissions for the pushed heights
-                                // before the block bodies (fresh-sync support; no-op on mainnet).
-                                let p26e_fw = Arc::downgrade(&fallback_writer);
-                                send_historical_admissions(
-                                    &p26e_fw,
-                                    fallback_addr,
-                                    start_height,
-                                    blocks.len(),
-                                )
-                                .await;
                                 for block_data in blocks {
                                     let msg = BlockPayload { block_data }.to_message();
                                     let _ =
@@ -7881,16 +7460,10 @@ async fn handle_incoming_with_sybil(
             MessageType::Peers => {
                 if let Ok(list) = PeersPayload::from_message(&msg) {
                     let source = format!("/ip4/{}/tcp/{}", addr.ip(), addr.port());
-                    let filtered: Vec<String> = list
-                        .peers
-                        .into_iter()
+                    let filtered: Vec<String> = list.peers.into_iter()
                         .filter(|p| {
                             if let Some(port_str) = p.split("/tcp/").nth(1) {
-                                port_str
-                                    .trim()
-                                    .parse::<u16>()
-                                    .map(|port| port != 0)
-                                    .unwrap_or(true)
+                                port_str.trim().parse::<u16>().map(|port| port != 0).unwrap_or(true)
                             } else if let Ok(sa) = p.parse::<std::net::SocketAddr>() {
                                 sa.port() != 0
                             } else {
@@ -7925,29 +7498,23 @@ async fn handle_incoming_with_sybil(
                                     target.copy_from_slice(&start_hash);
                                     start_hash_non_zero = target.iter().any(|b| *b != 0);
                                     if start_hash_non_zero {
-                                        // Fix #12: O(1) height-index lookup instead of an O(chain) scan, so a peer
-                                        // spraying random/missing start hashes cannot pin the chain lock with full
-                                        // scans (CPU-DoS). Verify the indexed block is on the active chain.
-                                        if let Some(&hpos) = guard.heights.get(&target) {
-                                            if (hpos as usize) < guard.chain.len()
-                                                && guard.chain[hpos as usize].header.hash_for_height(hpos) == target
-                                            {
-                                                start_idx = (hpos as usize).saturating_add(1);
-                                                start_found = true;
-                                            }
+                                        if let Some((pos, _)) = guard
+                                            .chain
+                                            .iter()
+                                            .enumerate()
+                                            .find(|(idx, b)| b.header.hash_for_height(*idx as u64) == target)
+                                        {
+                                            start_idx = pos.saturating_add(1);
+                                            start_found = true;
                                         }
                                     }
                                 }
                                 let count = count.min(MAX_HEADERS_PER_REQUEST) as usize;
                                 let mut bytes = Vec::new();
                                 if !start_hash_non_zero || start_found {
-                                    for (i, block) in
-                                        guard.chain.iter().skip(start_idx).take(count).enumerate()
-                                    {
+                                    for (i, block) in guard.chain.iter().skip(start_idx).take(count).enumerate() {
                                         let h = (start_idx + i) as u64;
-                                        bytes.extend_from_slice(
-                                            &block.header.serialize_for_height(h),
-                                        );
+                                        bytes.extend_from_slice(&block.header.serialize_for_height(h));
                                     }
                                 }
                                 bytes
@@ -8307,14 +7874,6 @@ async fn handle_incoming_with_sybil(
                                 let mut state = peer_state2.lock().await;
                                 state.height = Some(peer_height);
                                 state.last_bad_headers = None;
-                                // Phase 31 sibling-fork recovery (gated): keep the peer tip fresh so an
-                                // equal-height competing fork is seen as a tip mismatch and fetched at
-                                // shallow depth (before it can exceed the reorg cap). Mainnet hard-off.
-                                if let Some(__lh) = last_header_hash {
-                                    if crate::poawx_proposer::fork_choice_hardening_active(local_height) {
-                                        state.tip = Some(__lh);
-                                    }
-                                }
                             }
                             clear_header_reject_streak(addr2.ip()).await;
                             let multiaddr = format!("/ip4/{}/tcp/{}", addr2.ip(), addr2.port());
@@ -8374,15 +7933,10 @@ async fn handle_incoming_with_sybil(
                             let request = {
                                 let guard =
                                     chain_arc_for_tip.lock().unwrap_or_else(|e| e.into_inner());
-                                let __best_adoptable = if crate::poawx_proposer::fork_choice_hardening_active(guard.tip_height()) {
-                                    guard.best_adoptable_header_if_better()
-                                } else {
-                                    guard.best_header_if_better()
-                                };
-                                if let Some(best) = __best_adoptable {
-                                    if let Some(path) = guard.header_path_to_known(
-                                        best.header.hash_for_height(best.height),
-                                    ) {
+                                if let Some(best) = guard.best_header_if_better() {
+                                    if let Some(path) =
+                                        guard.header_path_to_known(best.header.hash_for_height(best.height))
+                                    {
                                         if let Some(first_hash) = path.first() {
                                             let mut start_hash = guard
                                                 .headers
@@ -8392,19 +7946,19 @@ async fn handle_incoming_with_sybil(
                                             if start_hash != [0u8; 32]
                                                 && !guard.heights.contains_key(&start_hash)
                                             {
-                                                start_hash =
-                                                    rewinded_getblocks_request(&guard, peer_height)
-                                                        .map(|(hash, _)| hash)
-                                                        .unwrap_or_else(|| {
-                                                            let tip_h = guard.tip_height();
-                                                            guard
-                                                                .chain
-                                                                .last()
-                                                                .map(|b| {
-                                                                    b.header.hash_for_height(tip_h)
-                                                                })
-                                                                .unwrap_or([0u8; 32])
-                                                        });
+                                                start_hash = rewinded_getblocks_request(
+                                                    &guard,
+                                                    peer_height,
+                                                )
+                                                .map(|(hash, _)| hash)
+                                                .unwrap_or_else(|| {
+                                                    let tip_h = guard.tip_height();
+                                                    guard
+                                                        .chain
+                                                        .last()
+                                                        .map(|b| b.header.hash_for_height(tip_h))
+                                                        .unwrap_or([0u8; 32])
+                                                });
                                             }
                                             let count = std::cmp::min(
                                                 path.len(),
@@ -8420,8 +7974,8 @@ async fn handle_incoming_with_sybil(
                                             None
                                         }
                                     } else {
-                                        rewinded_getblocks_request(&guard, peer_height).or_else(
-                                            || {
+                                        rewinded_getblocks_request(&guard, peer_height)
+                                            .or_else(|| {
                                                 let tip_h = guard.tip_height();
                                                 let start_hash = guard
                                                     .chain
@@ -8431,15 +7985,13 @@ async fn handle_incoming_with_sybil(
                                                 let count = std::cmp::min(
                                                     best.height.saturating_sub(tip_h) as usize,
                                                     MAX_BLOCKS_PER_REQUEST as usize,
-                                                )
-                                                    as u32;
+                                                ) as u32;
                                                 if count > 0 {
                                                     Some((start_hash, count))
                                                 } else {
                                                     None
                                                 }
-                                            },
-                                        )
+                                            })
                                     }
                                 } else if peer_height > guard.tip_height() {
                                     rewinded_getblocks_request(&guard, peer_height)
@@ -8575,22 +8127,15 @@ async fn handle_incoming_with_sybil(
                                     let mut target = [0u8; 32];
                                     target.copy_from_slice(&start_hash);
                                     if let Some((pos, _)) =
-                                        guard.chain.iter().enumerate().find(|(idx, b)| {
-                                            b.header.hash_for_height(*idx as u64) == target
-                                        })
+                                        guard.chain.iter().enumerate().find(|(idx, b)| b.header.hash_for_height(*idx as u64) == target)
                                     {
                                         start_idx = pos + 1;
                                         matched_pos = Some(pos);
                                     }
                                 }
 
-                                // IBD-sync fix (Fix 2): unknown start hash => fall back to serving
-                                // from the genesis-child so the client re-anchors instead of
-                                // dead-ending. Treated as a genesis locator (rate-limited below)
-                                // via matched_pos = Some(0).
                                 if matched_pos.is_none() && !is_zero {
-                                    start_idx = if guard.chain.len() > 1 { 1 } else { 0 };
-                                    matched_pos = Some(0);
+                                    return (matched_pos, Vec::new(), 0u64);
                                 }
 
                                 let mut blocks = Vec::new();
@@ -8650,11 +8195,6 @@ async fn handle_incoming_with_sybil(
                             }
                         }
 
-                        // Phase 26E: send historical admissions for the served heights
-                        // before the block bodies (fresh-sync; no-op on mainnet; bounded).
-                        send_historical_admissions(&writer_weak, addr2, start_height, blocks.len())
-                            .await;
-
                         for block_data in blocks {
                             let Some(writer) = writer_weak.upgrade() else {
                                 break;
@@ -8675,8 +8215,6 @@ async fn handle_incoming_with_sybil(
                         let mempool2 = mempool.clone();
                         let directory2 = directory.clone();
                         let reputation2 = reputation.clone();
-                        let peer_state_blk = peer_state.clone();
-                        let chain_blk = chain_arc.clone();
 
                         let permit = match inbound_bulk_queue().acquire_owned().await {
                             Ok(p) => p,
@@ -8690,9 +8228,7 @@ async fn handle_incoming_with_sybil(
 
                             // Peek prev_hash → look up parent → derive
                             // block_height before height-aware deserialize.
-                            let prev_peek = match crate::block::BlockHeader::peek_prev_hash(
-                                &payload.block_data,
-                            ) {
+                            let prev_peek = match crate::block::BlockHeader::peek_prev_hash(&payload.block_data) {
                                 Ok(p) => p,
                                 Err(e) => {
                                     P2PNode::log_event(
@@ -8712,20 +8248,18 @@ async fn handle_incoming_with_sybil(
                                 let guard = chain_arc2.lock().unwrap_or_else(|e| e.into_inner());
                                 if prev_peek == [0u8; 32] {
                                     0
-                                } else if let Some(h) =
-                                    guard.heights.get(&prev_peek).copied().or_else(|| {
-                                        guard.headers.get(&prev_peek).map(|hw| hw.height)
-                                    })
+                                } else if let Some(h) = guard
+                                    .heights
+                                    .get(&prev_peek)
+                                    .copied()
+                                    .or_else(|| guard.headers.get(&prev_peek).map(|hw| hw.height))
                                 {
                                     h + 1
                                 } else {
                                     0
                                 }
                             };
-                            let block = match Block::deserialize_for_height(
-                                &payload.block_data,
-                                block_height,
-                            ) {
+                            let block = match Block::deserialize_for_height(&payload.block_data, block_height) {
                                 Ok((b, _)) => b,
                                 Err(e) => {
                                     P2PNode::log_event(
@@ -8775,8 +8309,9 @@ async fn handle_incoming_with_sybil(
                                             // lock is held: txid match first,
                                             // then drop double-spend conflicts.
                                             if let Some(ref mem) = mempool2 {
-                                                let mut mem_guard =
-                                                    mem.lock().unwrap_or_else(|e| e.into_inner());
+                                                let mut mem_guard = mem
+                                                    .lock()
+                                                    .unwrap_or_else(|e| e.into_inner());
                                                 for tx in block.transactions.iter().skip(1) {
                                                     mem_guard.remove(&tx.txid());
                                                 }
@@ -8825,23 +8360,6 @@ async fn handle_incoming_with_sybil(
                                 };
                             drop(permit_guard);
                             let connect_ms = connect_started.elapsed().as_millis();
-
-                            // Fix #3 (audit-gated): the INBOUND block-gossip path now refreshes
-                            // the peer tip too (the outbound path did this in v0.1.9; this closes
-                            // the missing direction). An equal-height competing fork delivered via
-                            // an inbound connection is then seen as a tip mismatch by the periodic
-                            // maybe_request_sync and fetched at shallow depth. Mainnet hard-off.
-                            {
-                                let local_h = chain_blk
-                                    .lock()
-                                    .unwrap_or_else(|e| e.into_inner())
-                                    .tip_height();
-                                if crate::poawx_proposer::audit_hardening_active(local_h)
-                                    && block_height >= local_h
-                                {
-                                    peer_state_blk.lock().await.tip = Some(bhash);
-                                }
-                            }
 
                             for (height, b) in persist_blocks {
                                 let h = b.header.hash_for_height(height);
@@ -9072,9 +8590,7 @@ async fn handle_incoming_with_sybil(
                         addr,
                         &seen_offer_ids,
                         &offer_rate_limit,
-                    )
-                    .await
-                    {
+                    ).await {
                         {
                             let mut inbox = offer_broadcast_inbox.lock().await;
                             inbox.push(json.clone());
@@ -9087,101 +8603,8 @@ async fn handle_incoming_with_sybil(
                     }
                 }
             }
-            // Phase 20 Step 6D: ingest role-gossip into the node cache; rebroadcast
-            // only newly-accepted payloads (mirror of OfferBroadcast). Gated +
-            // mainnet-hard-off; malformed dropped; no consensus effect.
-            MessageType::PoawxRolePrecommit => {
-                if crate::poawx_gossip::role_gossip_enabled() {
-                    if let Ok(p) = crate::protocol::PoawxRolePrecommitPayload::from_message(&msg) {
-                        if crate::poawx_gossip::global_cache()
-                            .ingest_precommit_bytes(&p.gossip_json)
-                            .should_rebroadcast()
-                        {
-                            let bytes = crate::protocol::PoawxRolePrecommitPayload {
-                                gossip_json: p.gossip_json,
-                            }
-                            .to_message()
-                            .serialize();
-                            let _ = broadcast_raw(&peers, &bytes).await;
-                        }
-                    }
-                }
-            }
-            MessageType::PoawxRoleReveal => {
-                if crate::poawx_gossip::role_gossip_enabled() {
-                    if let Ok(p) = crate::protocol::PoawxRoleRevealPayload::from_message(&msg) {
-                        if crate::poawx_gossip::global_cache()
-                            .ingest_reveal_bytes(&p.gossip_json)
-                            .should_rebroadcast()
-                        {
-                            let bytes = crate::protocol::PoawxRoleRevealPayload {
-                                gossip_json: p.gossip_json,
-                            }
-                            .to_message()
-                            .serialize();
-                            let _ = broadcast_raw(&peers, &bytes).await;
-                        }
-                    }
-                }
-            }
-            MessageType::PoawxCandidateAdmission => {
-                if crate::poawx_admission::candidate_admission_gossip_enabled() {
-                    if let Ok(p) =
-                        crate::protocol::PoawxCandidateAdmissionPayload::from_message(&msg)
-                    {
-                        if crate::poawx_admission::global_admission_cache()
-                            .ingest_bytes(&p.admission_bytes)
-                            .should_rebroadcast()
-                        {
-                            let bytes = crate::protocol::PoawxCandidateAdmissionPayload {
-                                admission_bytes: p.admission_bytes,
-                            }
-                            .to_message()
-                            .serialize();
-                            let _ = broadcast_raw(&peers, &bytes).await;
-                        }
-                    }
-                }
-            }
-            MessageType::PoawxFinalityVote => {
-                if crate::poawx_finality::finality_gossip_enabled() {
-                    if let Ok(p) = crate::protocol::PoawxFinalityVotePayload::from_message(&msg) {
-                        if crate::poawx_finality::global_finality_vote_cache()
-                            .ingest_bytes(&p.vote_bytes)
-                            .should_rebroadcast()
-                        {
-                            let bytes = crate::protocol::PoawxFinalityVotePayload {
-                                vote_bytes: p.vote_bytes,
-                            }
-                            .to_message()
-                            .serialize();
-                            let _ = broadcast_raw(&peers, &bytes).await;
-                        }
-                    }
-                }
-            }
-            MessageType::PoawxProposerRegistration => {
-                if crate::poawx_proposer::proposer_registration_gossip_enabled() {
-                    if let Ok(p) =
-                        crate::protocol::PoawxProposerRegistrationPayload::from_message(&msg)
-                    {
-                        if crate::poawx_proposer::global_proposer_reg_pool()
-                            .ingest_bytes(&p.reg_bytes)
-                            .should_rebroadcast()
-                        {
-                            let bytes = crate::protocol::PoawxProposerRegistrationPayload {
-                                reg_bytes: p.reg_bytes,
-                            }
-                            .to_message()
-                            .serialize();
-                            let _ = broadcast_raw(&peers, &bytes).await;
-                        }
-                    }
-                }
-            }
             MessageType::DisputeRaisedNotification => {
-                if let Ok(p) = crate::protocol::DisputeRaisedNotificationPayload::from_message(&msg)
-                {
+                if let Ok(p) = crate::protocol::DisputeRaisedNotificationPayload::from_message(&msg) {
                     if let Ok(json) = String::from_utf8(p.json) {
                         let mut inbox = dispute_raised_inbox.lock().await;
                         inbox.push(json);
@@ -9189,9 +8612,7 @@ async fn handle_incoming_with_sybil(
                 }
             }
             MessageType::DisputeEvidenceNotification => {
-                if let Ok(p) =
-                    crate::protocol::DisputeEvidenceNotificationPayload::from_message(&msg)
-                {
+                if let Ok(p) = crate::protocol::DisputeEvidenceNotificationPayload::from_message(&msg) {
                     if let Ok(json) = String::from_utf8(p.json) {
                         let mut inbox = dispute_evidence_inbox.lock().await;
                         inbox.push(json);
@@ -9199,9 +8620,7 @@ async fn handle_incoming_with_sybil(
                 }
             }
             MessageType::DisputeResolvedNotification => {
-                if let Ok(p) =
-                    crate::protocol::DisputeResolvedNotificationPayload::from_message(&msg)
-                {
+                if let Ok(p) = crate::protocol::DisputeResolvedNotificationPayload::from_message(&msg) {
                     if let Ok(json) = String::from_utf8(p.json) {
                         let mut inbox = dispute_resolved_inbox.lock().await;
                         inbox.push(json);
@@ -9209,9 +8628,7 @@ async fn handle_incoming_with_sybil(
                 }
             }
             MessageType::DisputeEscalatedNotification => {
-                if let Ok(p) =
-                    crate::protocol::DisputeEscalatedNotificationPayload::from_message(&msg)
-                {
+                if let Ok(p) = crate::protocol::DisputeEscalatedNotificationPayload::from_message(&msg) {
                     if let Ok(json) = String::from_utf8(p.json) {
                         let mut inbox = dispute_escalated_inbox.lock().await;
                         inbox.push(json);
@@ -9612,10 +9029,7 @@ mod tests {
             dialable_multiaddr_from_advertised("198.51.100.7:1234"),
             None
         );
-        assert_eq!(
-            dialable_multiaddr_from_advertised("203.0.113.9:38291"),
-            None
-        );
+        assert_eq!(dialable_multiaddr_from_advertised("203.0.113.9:38291"), None);
     }
 
     #[test]

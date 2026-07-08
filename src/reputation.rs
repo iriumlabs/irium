@@ -411,28 +411,16 @@ mod tests {
         assert_eq!(rep.score, 15);
         // Default (no env set, or value 20): banned.
         std::env::remove_var("IRIUM_REPUTATION_BAN_SCORE_THRESHOLD");
-        assert!(
-            rep.is_banned(),
-            "score 15 must be banned at default threshold 20"
-        );
+        assert!(rep.is_banned(), "score 15 must be banned at default threshold 20");
         // Operator sets a relaxed threshold: not banned anymore.
         std::env::set_var("IRIUM_REPUTATION_BAN_SCORE_THRESHOLD", "10");
-        assert!(
-            !rep.is_banned(),
-            "score 15 must NOT be banned at threshold 10"
-        );
+        assert!(!rep.is_banned(), "score 15 must NOT be banned at threshold 10");
         // Clamp test: out-of-range high value gets clamped to 100.
         std::env::set_var("IRIUM_REPUTATION_BAN_SCORE_THRESHOLD", "9999");
-        assert!(
-            rep.is_banned(),
-            "out-of-range high clamps to 100, score 15 still banned"
-        );
+        assert!(rep.is_banned(), "out-of-range high clamps to 100, score 15 still banned");
         // Clamp test: out-of-range low value gets clamped to -100.
         std::env::set_var("IRIUM_REPUTATION_BAN_SCORE_THRESHOLD", "-9999");
-        assert!(
-            !rep.is_banned(),
-            "out-of-range low clamps to -100, score 15 not banned"
-        );
+        assert!(!rep.is_banned(), "out-of-range low clamps to -100, score 15 not banned");
         std::env::remove_var("IRIUM_REPUTATION_BAN_SCORE_THRESHOLD");
     }
 
@@ -485,10 +473,7 @@ mod tests {
         };
         mgr.load();
         let rep = mgr.get_reputation("1.2.3.4");
-        assert_eq!(
-            rep.dial_failures, 0,
-            "missing dial_failures must default to 0"
-        );
+        assert_eq!(rep.dial_failures, 0, "missing dial_failures must default to 0");
         assert_eq!(rep.failed_connections, 1);
         let _ = std::fs::remove_file(&tmp);
     }

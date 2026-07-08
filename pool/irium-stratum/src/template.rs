@@ -33,58 +33,6 @@ pub struct GetBlockTemplate {
     /// still produces a valid template.
     #[serde(default)]
     pub coinbase_extra_outputs: Vec<CoinbaseExtraOutput>,
-    /// Phase 10-D: PoAW-X mode string ("active" or "").
-    #[serde(default)]
-    pub poawx_mode: String,
-    /// Phase 10-D: pending puzzle receipts from /poawx/receipt.
-    #[serde(default)]
-    pub poawx_pending_receipts: Vec<PoawxPendingReceipt>,
-    #[serde(default)]
-    pub poawx_reg_activations: Vec<String>,
-    #[serde(default)]
-    pub poawx_reg_announces: Vec<String>,
-    /// Phase 10-D: hex receipts_root computed by iriumd.
-    #[serde(default)]
-    pub receipts_root: String,
-}
-
-/// Phase 10-D: per-worker puzzle receipt as stored in iriumd pending list.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct PoawxPendingReceipt {
-    pub height: u64,
-    pub lane: String,
-    pub worker_pkh: String,
-    pub solution: String,
-    pub commitment_nonce: String,
-    #[serde(default)]
-    pub worker_pubkey: String,
-    #[serde(default)]
-    pub worker_sig: String,
-    /// Phase 18B: hex of the canonical 226-byte `Delegation` for a mode-1
-    /// (delegated) receipt. Empty => mode-0 (direct). `skip_serializing_if`
-    /// keeps mode-0 submit JSON byte-identical.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub delegation: String,
-    /// Phase 20: hex of the canonical `Phase20ReceiptExt` for a production block
-    /// after activation. Empty => no extension (pre-activation / legacy), which
-    /// keeps the submit JSON byte-identical to Phase 18/19. Matches the node's
-    /// `PoawxPendingReceipt.phase20_ext` field so the node round-trips it.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub phase20_ext: String,
-}
-
-/// Phase 18B: response of the node's `GET /poawx/assignment`. The pool uses this
-/// as the single source of truth for the deterministic per-block puzzle context
-/// (the node derives it exactly as consensus expects).
-#[derive(Debug, Clone, serde::Deserialize)]
-pub struct PoawxAssignment {
-    /// Current chain tip height. The next block (the one being mined) is
-    /// `height + 1`, which is the height a produced receipt must carry.
-    pub height: u64,
-    pub seed: String,
-    pub commitment_nonce: String,
-    pub puzzle_difficulty: u32,
-    pub lane: String,
 }
 
 #[derive(Clone)]

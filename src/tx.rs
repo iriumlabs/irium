@@ -335,10 +335,7 @@ pub enum LtcSwapOrderWitness {
         pubkey: Vec<u8>,
         irm_timeout_height: u64,
     },
-    Cancel {
-        sig: Vec<u8>,
-        pubkey: Vec<u8>,
-    },
+    Cancel { sig: Vec<u8>, pubkey: Vec<u8> },
     ExpireSweep,
 }
 
@@ -845,7 +842,8 @@ pub fn parse_htlc_btc_swap_witness(script_sig: &[u8]) -> Option<HtlcBtcSwapWitne
             if off + 2 > script_sig.len() {
                 return None;
             }
-            let branch_len = u16::from_le_bytes(script_sig[off..off + 2].try_into().ok()?) as usize;
+            let branch_len =
+                u16::from_le_bytes(script_sig[off..off + 2].try_into().ok()?) as usize;
             off += 2;
             if branch_len > 32 {
                 // Bitcoin Merkle proofs above depth 32 are nonsensical (would
@@ -865,7 +863,8 @@ pub fn parse_htlc_btc_swap_witness(script_sig: &[u8]) -> Option<HtlcBtcSwapWitne
             if off + 4 > script_sig.len() {
                 return None;
             }
-            let btc_merkle_index = u32::from_le_bytes(script_sig[off..off + 4].try_into().ok()?);
+            let btc_merkle_index =
+                u32::from_le_bytes(script_sig[off..off + 4].try_into().ok()?);
             off += 4;
             let tx_len = read_varint_at(script_sig, &mut off)? as usize;
             if tx_len == 0 || tx_len > 1_000_000 || off + tx_len != script_sig.len() {
@@ -1063,7 +1062,8 @@ pub fn parse_htlc_ltc_swap_witness(script_sig: &[u8]) -> Option<HtlcLtcSwapWitne
             if off + 2 > script_sig.len() {
                 return None;
             }
-            let branch_len = u16::from_le_bytes(script_sig[off..off + 2].try_into().ok()?) as usize;
+            let branch_len =
+                u16::from_le_bytes(script_sig[off..off + 2].try_into().ok()?) as usize;
             off += 2;
             if branch_len > 32 {
                 return None;
@@ -1081,7 +1081,8 @@ pub fn parse_htlc_ltc_swap_witness(script_sig: &[u8]) -> Option<HtlcLtcSwapWitne
             if off + 4 > script_sig.len() {
                 return None;
             }
-            let ltc_merkle_index = u32::from_le_bytes(script_sig[off..off + 4].try_into().ok()?);
+            let ltc_merkle_index =
+                u32::from_le_bytes(script_sig[off..off + 4].try_into().ok()?);
             off += 4;
             let tx_len = read_varint_at(script_sig, &mut off)? as usize;
             if tx_len == 0 || tx_len > 1_000_000 || off + tx_len != script_sig.len() {
@@ -2305,7 +2306,8 @@ mod tests {
 
     #[test]
     fn swap_order_fill_buy_witness_roundtrip() {
-        let w = encode_swap_order_fill_buy_witness(&[9, 9], &[0x02; 33], 222_222).expect("encode");
+        let w =
+            encode_swap_order_fill_buy_witness(&[9, 9], &[0x02; 33], 222_222).expect("encode");
         match parse_swap_order_witness(&w, SWAP_ORDER_DIRECTION_BUY).expect("parse") {
             SwapOrderWitness::FillBuy {
                 sig,
@@ -2543,10 +2545,12 @@ mod tests {
 
     #[test]
     fn ltc_swap_order_dispatches_through_output_encumbrance() {
-        let sell =
-            encode_ltc_swap_order_script(&sample_ltc_swap_order(LTC_SWAP_ORDER_DIRECTION_SELL));
-        let buy =
-            encode_ltc_swap_order_script(&sample_ltc_swap_order(LTC_SWAP_ORDER_DIRECTION_BUY));
+        let sell = encode_ltc_swap_order_script(&sample_ltc_swap_order(
+            LTC_SWAP_ORDER_DIRECTION_SELL,
+        ));
+        let buy = encode_ltc_swap_order_script(&sample_ltc_swap_order(
+            LTC_SWAP_ORDER_DIRECTION_BUY,
+        ));
         match parse_output_encumbrance(&sell) {
             OutputEncumbrance::LtcSwapOrder(o) => {
                 assert_eq!(o.direction, LTC_SWAP_ORDER_DIRECTION_SELL)
@@ -2563,16 +2567,18 @@ mod tests {
 
     #[test]
     fn ltc_swap_order_rejects_wrong_tag() {
-        let mut s =
-            encode_ltc_swap_order_script(&sample_ltc_swap_order(LTC_SWAP_ORDER_DIRECTION_SELL));
+        let mut s = encode_ltc_swap_order_script(&sample_ltc_swap_order(
+            LTC_SWAP_ORDER_DIRECTION_SELL,
+        ));
         s[0] = SWAP_ORDER_V1_TAG;
         assert!(parse_ltc_swap_order_script(&s).is_none());
     }
 
     #[test]
     fn ltc_swap_order_rejects_wrong_direction() {
-        let mut s =
-            encode_ltc_swap_order_script(&sample_ltc_swap_order(LTC_SWAP_ORDER_DIRECTION_SELL));
+        let mut s = encode_ltc_swap_order_script(&sample_ltc_swap_order(
+            LTC_SWAP_ORDER_DIRECTION_SELL,
+        ));
         s[2] = 0x07;
         assert!(parse_ltc_swap_order_script(&s).is_none());
     }

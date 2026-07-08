@@ -77,31 +77,6 @@ before block 22,888 is mined; older nodes will fork off.
 
 ---
 
-## PoAW-X (block 50,000): miners run a full node
-
-At **block height 50,000**, Irium mainnet activates **PoAW-X**. From that height, **producing a
-valid block requires a full `iriumd` node** — a pool/stratum connection alone is no longer
-sufficient, because each block must carry a verifiable VRF proposer assignment and role receipts that
-only a full node can build and validate.
-
-What changes for miners at block 50,000:
-
-- **Run a full node.** Install and run `iriumd` v1.9.119 or later.
-- **Mine against your node.** Run the bundled miner with the PoAW-X flag:
-
-  ```
-  irium-miner --poawx
-  ```
-
-  The miner requests the current role assignment from your node, performs the role work, and submits
-  role receipts; your node assembles and validates the block.
-- **Rewards are split by role** — proposer 55% / compute 22% / verify 13% / support 10%. A solo
-  miner fills all four roles and receives the full reward.
-- **Pool operators** must run a full node and move workers to the full-node flow before block 50,000.
-
-Upgrade before block 50,000 — older miners/nodes will reject post-activation blocks. Full guide:
-[POAWX.md](POAWX.md).
-
 ## Pool endpoints (official pool)
 
 `pool.iriumlabs.org` is the DNS hostname for the official Irium pool.
@@ -292,44 +267,6 @@ See [SOLO_STRATUM.md](SOLO_STRATUM.md) for the solo-mining bridge
 configuration in detail.
 
 ---
-
-## Solo PoAW-X proposer mining (`irium-miner --poawx`)
-
-After the block-50,000 PoAW-X activation, an independent miner can mine solo as
-its own proposer with `irium-miner --poawx` — no pool required. This path is open
-to anyone and works end-to-end:
-
-- **Registration is fully automatic — there is no manual step.** On startup,
-  `irium-miner --poawx` submits a signed proposer registration on its own. It
-  grinds the required Sybil proof-of-work and signs with your key internally, so
-  "connect and mine" is genuinely all that is required. (You do not run a separate
-  registration command or RPC.)
-- **VRF proposer selection runs automatically.** Once eligible, the miner proves
-  its VRF over the committee seed at each height and builds only when it is
-  selected as the proposer.
-- **Block building and submission are functional** against a live mainnet node
-  (via `poawx_submit_extended`). The block-build logic runs continuously in
-  production, and the submit endpoint accepts blocks on mainnet today — so a solo
-  miner that solves the work will land its block.
-
-**The only real constraint is competitive hashpower.** PoAW-X still requires
-solving the chain proof-of-work (SHA-256d) at mainnet difficulty. That needs
-GPU/ASIC-class hardware. A **CPU-only miner will register and attempt, but will
-not win blocks** against the pooled ASIC/GPU hashrate — each build attempt simply
-fails to find a nonce meeting the mainnet target in the CPU's time budget. This is
-ordinary proof-of-work economics, **not** a fairness limitation or an access
-barrier: the chain is open to any miner who brings adequate hashpower, exactly
-like any PoW network. With a GPU/ASIC, point it at your own node and mine solo;
-if you are CPU-only, mine to a pool instead (see above) so your hashrate is
-aggregated.
-
-**Expect a short eligibility delay after first registration — this is by design.**
-A newly registered proposer key becomes eligible only after its registration has
-aged past the **16-block freeze depth** (`FREEZE_DEPTH = 16`). Eligibility is
-frozen at `H − 16` so that a seed revealed at `H − 1` cannot be used to register a
-winning key after the fact. This is a deliberate anti-grinding consensus rule,
-**not a bug**: your miner registers, waits roughly 16–32 blocks, then becomes
-eligible automatically with no further action.
 
 ## Verifying a miner is producing blocks
 

@@ -81,35 +81,6 @@ pub enum MessageType {
     /// party can't flood the network with fake offers attributed to
     /// other sellers.
     OfferBroadcast = 25,
-    /// Gossip: PoAW-X role precommit (testnet/devnet fairness role protocol,
-    /// Step 6C). Payload: UTF-8 JSON of the versioned precommit gossip envelope
-    /// (network_id, target_height, role_id, solver_pkh, commitment_hash) —
-    /// NEVER the secret/nonce. Pure gossip with NO consensus effect: the
-    /// hidden-precommit commitment-root enforcement (Step 6A) is driven by block
-    /// contents, not by receipt of this message, so a node that never sees one
-    /// is not penalised beyond the already-enforced missing-precommit rule.
-    /// Mainnet nodes never enable the role protocol and drop these via the
-    /// receive-side `_ => {}` catch-all; older peers map the unknown byte to
-    /// `Unknown` and drop it too — safe on a mixed-version network.
-    PoawxRolePrecommit = 26,
-    /// Gossip: PoAW-X role reveal (Step 6C). Payload: UTF-8 JSON of the versioned
-    /// reveal gossip envelope (adds secret/nonce + lane/claim fields so a
-    /// receiver can reconstruct the commitment and validate the claim). Same
-    /// drop-safe forward-compat rules as `PoawxRolePrecommit`.
-    PoawxRoleReveal = 27,
-    /// Gossip: PoAW-X candidate admission (Phase 21E). Payload: canonical
-    /// `CandidateAdmissionV1` wire bytes (opaque here; the node admission cache
-    /// validates + stores). Same drop-safe forward-compat rules as the role
-    /// gossip types; mainnet/older peers drop it via the receive-side catch-all.
-    PoawxCandidateAdmission = 28,
-    /// Gossip: PoAW-X finality vote (Phase 21I). Payload: canonical
-    /// `FinalityVoteV1` wire bytes (opaque here; the node finality-vote cache
-    /// validates the member signature + stores). Drop-safe forward-compat.
-    PoawxFinalityVote = 29,
-    /// Gossip: PoAW-X proposer key registration (Phase 31R). Payload: canonical
-    /// `ProposerRegistrationV1` wire bytes (opaque; the node pool light-validates +
-    /// stores; full anchor-bound validation at block inclusion). Drop-safe.
-    PoawxProposerRegistration = 30,
     Disconnect = 99,
 }
 
@@ -145,11 +116,6 @@ impl TryFrom<u8> for MessageType {
             23 => DisputeResolvedNotification,
             24 => DisputeEscalatedNotification,
             25 => OfferBroadcast,
-            26 => PoawxRolePrecommit,
-            27 => PoawxRoleReveal,
-            28 => PoawxCandidateAdmission,
-            29 => PoawxFinalityVote,
-            30 => PoawxProposerRegistration,
             99 => Disconnect,
             other => return Err(format!("Unknown message type: {}", other)),
         };
@@ -201,7 +167,8 @@ impl Message {
         // Unknown message is silently dropped while the peer stays
         // connected. Lets newer peers introduce additional MessageType
         // variants without forcing a coordinated upgrade.
-        let msg_type = MessageType::try_from(msg_type_byte).unwrap_or(MessageType::Unknown);
+        let msg_type = MessageType::try_from(msg_type_byte)
+            .unwrap_or(MessageType::Unknown);
         Ok(Message { msg_type, payload })
     }
 }
@@ -224,7 +191,7 @@ pub struct HandshakePayload {
     pub tip_hash: Option<String>,
     #[serde(default)]
     pub capabilities: Option<Vec<String>>,
-    /// Optional URL of this node's marketplace offer feed (e.g. http://host:port/offers/feed).
+/// Optional URL of this node's marketplace offer feed (e.g. http://host:port/offers/feed).
     /// Propagated via P2P handshake so peers can discover feeds without manual configuration.
     #[serde(default)]
     pub marketplace_feed: Option<String>,
@@ -310,6 +277,7 @@ impl OfferTakeNotificationPayload {
         })
     }
 }
+
 
 impl PingPayload {
     pub fn to_message(&self) -> Message {
@@ -724,6 +692,7 @@ impl DisconnectPayload {
     }
 }
 
+
 /// Gossip payload for a raised dispute. Raw JSON bytes of a DisputeRaise.
 pub struct DisputeRaisedNotificationPayload {
     pub json: Vec<u8>,
@@ -845,182 +814,14 @@ impl OfferBroadcastPayload {
     }
 }
 
-/// Wire payload for `MessageType::PoawxRolePrecommit` (Step 6C). UTF-8 JSON of
-/// the versioned role-precommit gossip envelope. Opaque bytes at this framing
-/// layer (same pattern as `OfferBroadcast`/`ProofGossip`); the testnet/devnet
-/// role-gossip engine (pool side) owns the inner shape, versioning, validation
-/// and store. NEVER carries secret/nonce — only the commitment hash.
-pub struct PoawxRolePrecommitPayload {
-    pub gossip_json: Vec<u8>,
-}
-
-impl PoawxRolePrecommitPayload {
-    pub fn to_message(&self) -> Message {
-        Message {
-            msg_type: MessageType::PoawxRolePrecommit,
-            payload: self.gossip_json.clone(),
-        }
-    }
-
-    pub fn from_message(msg: &Message) -> Result<Self, String> {
-        if msg.msg_type != MessageType::PoawxRolePrecommit {
-            return Err("Not a poawx role precommit".to_string());
-        }
-        Ok(PoawxRolePrecommitPayload {
-            gossip_json: msg.payload.clone(),
-        })
-    }
-}
-
-/// Wire payload for `MessageType::PoawxRoleReveal` (Step 6C). UTF-8 JSON of the
-/// versioned role-reveal gossip envelope (carries secret/nonce + lane/claim
-/// fields). Opaque bytes here; the pool-side role-gossip engine validates the
-/// commitment binding and the role claim before storing.
-pub struct PoawxRoleRevealPayload {
-    pub gossip_json: Vec<u8>,
-}
-
-impl PoawxRoleRevealPayload {
-    pub fn to_message(&self) -> Message {
-        Message {
-            msg_type: MessageType::PoawxRoleReveal,
-            payload: self.gossip_json.clone(),
-        }
-    }
-
-    pub fn from_message(msg: &Message) -> Result<Self, String> {
-        if msg.msg_type != MessageType::PoawxRoleReveal {
-            return Err("Not a poawx role reveal".to_string());
-        }
-        Ok(PoawxRoleRevealPayload {
-            gossip_json: msg.payload.clone(),
-        })
-    }
-}
-
-/// Wire payload for `MessageType::PoawxCandidateAdmission` (Phase 21E). Opaque
-/// bytes here (same pattern as the role-gossip payloads); the node candidate
-/// admission cache owns validation + storage + the rebroadcast decision.
-pub struct PoawxCandidateAdmissionPayload {
-    pub admission_bytes: Vec<u8>,
-}
-
-impl PoawxCandidateAdmissionPayload {
-    pub fn to_message(&self) -> Message {
-        Message {
-            msg_type: MessageType::PoawxCandidateAdmission,
-            payload: self.admission_bytes.clone(),
-        }
-    }
-
-    pub fn from_message(msg: &Message) -> Result<Self, String> {
-        if msg.msg_type != MessageType::PoawxCandidateAdmission {
-            return Err("Not a poawx candidate admission".to_string());
-        }
-        Ok(PoawxCandidateAdmissionPayload {
-            admission_bytes: msg.payload.clone(),
-        })
-    }
-}
-
-/// Wire payload for `MessageType::PoawxProposerRegistration` (Phase 31R). Opaque bytes
-/// (same pattern as the admission/vote payloads); the node pool light-validates + stores.
-pub struct PoawxProposerRegistrationPayload {
-    pub reg_bytes: Vec<u8>,
-}
-
-impl PoawxProposerRegistrationPayload {
-    pub fn to_message(&self) -> Message {
-        Message {
-            msg_type: MessageType::PoawxProposerRegistration,
-            payload: self.reg_bytes.clone(),
-        }
-    }
-
-    pub fn from_message(msg: &Message) -> Result<Self, String> {
-        if msg.msg_type != MessageType::PoawxProposerRegistration {
-            return Err("Not a poawx proposer registration".to_string());
-        }
-        Ok(PoawxProposerRegistrationPayload {
-            reg_bytes: msg.payload.clone(),
-        })
-    }
-}
-
-/// Wire payload for `MessageType::PoawxFinalityVote` (Phase 21I). Opaque bytes
-/// here (same pattern as the admission/role gossip payloads); the node
-/// finality-vote cache validates the secp256k1 signature + stores.
-pub struct PoawxFinalityVotePayload {
-    pub vote_bytes: Vec<u8>,
-}
-
-impl PoawxFinalityVotePayload {
-    pub fn to_message(&self) -> Message {
-        Message {
-            msg_type: MessageType::PoawxFinalityVote,
-            payload: self.vote_bytes.clone(),
-        }
-    }
-
-    pub fn from_message(msg: &Message) -> Result<Self, String> {
-        if msg.msg_type != MessageType::PoawxFinalityVote {
-            return Err("Not a poawx finality vote".to_string());
-        }
-        Ok(PoawxFinalityVotePayload {
-            vote_bytes: msg.payload.clone(),
-        })
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn message_type_try_from_candidate_admission_28() {
-        assert_eq!(
-            MessageType::try_from(28u8).unwrap(),
-            MessageType::PoawxCandidateAdmission
-        );
-        let m = PoawxCandidateAdmissionPayload {
-            admission_bytes: vec![1, 2, 3],
-        }
-        .to_message();
-        assert_eq!(m.msg_type, MessageType::PoawxCandidateAdmission);
-        assert_eq!(
-            PoawxCandidateAdmissionPayload::from_message(&m)
-                .unwrap()
-                .admission_bytes,
-            vec![1, 2, 3]
-        );
-    }
-
-    #[test]
-    fn message_type_try_from_finality_vote_29() {
-        assert_eq!(
-            MessageType::try_from(29u8).unwrap(),
-            MessageType::PoawxFinalityVote
-        );
-        let m = PoawxFinalityVotePayload {
-            vote_bytes: vec![9, 8, 7],
-        }
-        .to_message();
-        assert_eq!(m.msg_type, MessageType::PoawxFinalityVote);
-        assert_eq!(
-            PoawxFinalityVotePayload::from_message(&m)
-                .unwrap()
-                .vote_bytes,
-            vec![9, 8, 7]
-        );
-    }
-
-    #[test]
     fn message_type_try_from_offer_broadcast_25() {
         // Forward-compat: byte 25 maps to OfferBroadcast.
-        assert_eq!(
-            MessageType::try_from(25u8).unwrap(),
-            MessageType::OfferBroadcast
-        );
+        assert_eq!(MessageType::try_from(25u8).unwrap(), MessageType::OfferBroadcast);
     }
 
     #[test]
@@ -1033,9 +834,7 @@ mod tests {
     #[test]
     fn offer_broadcast_payload_roundtrip() {
         let json = br#"{"id":"abc","status":"open","amount_sats":1000}"#.to_vec();
-        let payload = OfferBroadcastPayload {
-            offer_json: json.clone(),
-        };
+        let payload = OfferBroadcastPayload { offer_json: json.clone() };
         let msg = payload.to_message();
         assert_eq!(msg.msg_type, MessageType::OfferBroadcast);
         assert_eq!(msg.payload, json);
@@ -1048,10 +847,7 @@ mod tests {
     fn offer_broadcast_payload_rejects_wrong_message_type() {
         // from_message must refuse a message tagged with a different variant —
         // protects callers that match on msg_type before dispatching.
-        let msg = Message {
-            msg_type: MessageType::Tx,
-            payload: vec![1, 2, 3],
-        };
+        let msg = Message { msg_type: MessageType::Tx, payload: vec![1, 2, 3] };
         assert!(OfferBroadcastPayload::from_message(&msg).is_err());
     }
 
@@ -1060,84 +856,11 @@ mod tests {
         // End-to-end: payload → Message → serialized bytes → deserialized
         // Message → parsed payload. Catches breakage in the framing layer.
         let json = br#"{"id":"x","status":"open"}"#.to_vec();
-        let msg = OfferBroadcastPayload {
-            offer_json: json.clone(),
-        }
-        .to_message();
+        let msg = OfferBroadcastPayload { offer_json: json.clone() }.to_message();
         let bytes = msg.serialize();
         let parsed_msg = Message::deserialize(&bytes).expect("deserialize ok");
         assert_eq!(parsed_msg.msg_type, MessageType::OfferBroadcast);
         let parsed_payload = OfferBroadcastPayload::from_message(&parsed_msg).expect("parse ok");
         assert_eq!(parsed_payload.offer_json, json);
-    }
-
-    // ── Step 6C: PoAW-X role gossip wire envelope ────────────────────────────
-
-    #[test]
-    fn message_type_try_from_role_gossip_26_27() {
-        // Forward-compat: bytes 26/27 now map to the role-gossip variants; a byte
-        // we still don't know (200) returns an error (the read loop wraps with
-        // .unwrap_or(Unknown) for graceful drop — old/unknown behavior unchanged).
-        assert_eq!(
-            MessageType::try_from(26u8).unwrap(),
-            MessageType::PoawxRolePrecommit
-        );
-        assert_eq!(
-            MessageType::try_from(27u8).unwrap(),
-            MessageType::PoawxRoleReveal
-        );
-        assert!(MessageType::try_from(200u8).is_err());
-    }
-
-    #[test]
-    fn poawx_role_precommit_payload_roundtrip_and_wire() {
-        let json = br#"{"gossip_version":1,"precommit":{"network_id":1}}"#.to_vec();
-        let payload = PoawxRolePrecommitPayload {
-            gossip_json: json.clone(),
-        };
-        let msg = payload.to_message();
-        assert_eq!(msg.msg_type, MessageType::PoawxRolePrecommit);
-        // struct round-trip
-        let parsed = PoawxRolePrecommitPayload::from_message(&msg).expect("parse ok");
-        assert_eq!(parsed.gossip_json, json);
-        // wire round-trip through the framing layer
-        let bytes = msg.serialize();
-        let parsed_msg = Message::deserialize(&bytes).expect("deserialize ok");
-        assert_eq!(parsed_msg.msg_type, MessageType::PoawxRolePrecommit);
-        assert_eq!(
-            PoawxRolePrecommitPayload::from_message(&parsed_msg)
-                .unwrap()
-                .gossip_json,
-            json
-        );
-    }
-
-    #[test]
-    fn poawx_role_reveal_payload_roundtrip_and_wire() {
-        let json = br#"{"gossip_version":1,"reveal":{"network_id":1}}"#.to_vec();
-        let msg = PoawxRoleRevealPayload {
-            gossip_json: json.clone(),
-        }
-        .to_message();
-        assert_eq!(msg.msg_type, MessageType::PoawxRoleReveal);
-        let bytes = msg.serialize();
-        let parsed_msg = Message::deserialize(&bytes).expect("deserialize ok");
-        assert_eq!(parsed_msg.msg_type, MessageType::PoawxRoleReveal);
-        assert_eq!(
-            PoawxRoleRevealPayload::from_message(&parsed_msg)
-                .unwrap()
-                .gossip_json,
-            json
-        );
-    }
-
-    #[test]
-    fn poawx_role_payloads_reject_wrong_message_type() {
-        let msg = Message {
-            msg_type: MessageType::Tx,
-            payload: vec![1, 2, 3],
-        };
-        assert!(PoawxRolePrecommitPayload::from_message(&msg).is_err());
-        assert!(PoawxRoleRevealPayload::from_message(&msg).is_err());
     }
 }

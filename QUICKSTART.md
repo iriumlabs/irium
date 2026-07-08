@@ -64,25 +64,6 @@ correct chain.
 
 ---
 
-## Important — block 50,000 PoAW-X activation
-
-At **block 50,000**, Irium mainnet activates **PoAW-X** (VRF-selected block proposers, a
-55/22/13/10 multi-role reward split, and anti-domination). **Upgrade to iriumd v1.9.119 or later
-before block 50,000** — older nodes will reject post-activation blocks. From block 50,000, **mining
-needs a full iriumd node**: run `iriumd`, then run `irium-miner --poawx` against it — a pool
-connection alone is no longer sufficient. Full guide: [docs/POAWX.md](docs/POAWX.md).
-
-## Important — one-time re-validation on first start with v1.9.119
-
-The first time **v1.9.119** starts on a node that already has chain history, it performs a **one-time re-validation** of its stored chain. While this runs (usually a few minutes), your node may briefly show a **lower block height and then climb back** to the network tip. **This is normal and expected.**
-
-- It happens **once**, on the first start after upgrading — later restarts are fast.
-- **No data is lost.** Balances and wallets are unaffected; the node rejoins consensus automatically once it catches up.
-- Larger or older nodes take longer to re-validate. **Let it finish — do not stop the node while it is catching up.**
-- This does not change PoAW-X activation, which remains height-gated at block 50,000.
-
-*(A later release will remove this one-time step so upgrades resume instantly.)*
-
 ## Two paths
 
 You can use Irium in one of two ways. Pick whichever you prefer — they manage the same wallet and the same chain:

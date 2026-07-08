@@ -49,8 +49,8 @@ impl AttestorBondStore {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).ok();
         }
-        let s =
-            serde_json::to_string_pretty(self).map_err(|e| format!("serialize bond store: {e}"))?;
+        let s = serde_json::to_string_pretty(self)
+            .map_err(|e| format!("serialize bond store: {e}"))?;
         fs::write(path, s).map_err(|e| format!("write bond store: {e}"))
     }
 
@@ -63,9 +63,7 @@ impl AttestorBondStore {
     }
 
     pub fn find_by_pkh(&self, pkh_hex: &str) -> Option<&AttestorBondRecord> {
-        self.bonds
-            .iter()
-            .find(|b| b.pkh_hex.eq_ignore_ascii_case(pkh_hex))
+        self.bonds.iter().find(|b| b.pkh_hex.eq_ignore_ascii_case(pkh_hex))
     }
 }
 
@@ -86,11 +84,7 @@ pub fn build_withdraw_anchor_script(pkh_hex: &str) -> Vec<u8> {
 /// Payload format: slash1:<attestor_pkh_hex_40>:<agreement_hash_hex_64>
 pub fn build_slash_anchor_script(attestor_pkh_hex: &str, agreement_hash_hex: &str) -> Vec<u8> {
     opreturn_script(
-        format!(
-            "{}{}:{}",
-            SLASH_ANCHOR_PREFIX, attestor_pkh_hex, agreement_hash_hex
-        )
-        .as_bytes(),
+        format!("{}{}:{}", SLASH_ANCHOR_PREFIX, attestor_pkh_hex, agreement_hash_hex).as_bytes(),
     )
 }
 
@@ -140,9 +134,7 @@ pub fn parse_withdraw_anchor(script: &[u8]) -> Option<String> {
 
 pub fn bond_store_path() -> PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home)
-        .join(".irium")
-        .join("attestor-bonds.json")
+    PathBuf::from(home).join(".irium").join("attestor-bonds.json")
 }
 
 #[cfg(test)]

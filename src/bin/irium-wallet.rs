@@ -3379,9 +3379,10 @@ fn signer_material_from_wallet(address: &str) -> Result<(WalletKey, SigningKey),
 /// OFFICIAL pool fee is 0% (`fee_bps == 0`, zero `fee_pkh`). Phase 20 Step 4: a
 /// third-party fee (`fee_bps` in 1..=200 with a non-zero `fee_pkh`) is supported
 /// on non-mainnet networks; the fee terms are bound into the miner's signature.
-fn build_signed_delegation(
+fn build_signed_delegation_with_proposer(
     signing_key: &SigningKey,
     pool_pubkey: [u8; 33],
+    proposer_pubkey: [u8; 33],
     network_id: u8,
     worker: &str,
     expiry_height: u64,
@@ -3431,9 +3432,8 @@ fn build_signed_delegation(
         fee_bps,
         fee_pkh,
         deleg_nonce,
-        // Stage D Step 1: v2 wire field. A real custodial proposer key is wired
-        // into the wallet CLI in a later step; zero placeholder for now.
-        proposer_pubkey: [0u8; 33],
+        // Stage D v2: the pool's custodial proposer key (zero => legacy receipt-only).
+        proposer_pubkey,
         delegation_sig: [0u8; 64],
     };
     let sig: Signature = signing_key
@@ -3441,6 +3441,51 @@ fn build_signed_delegation(
         .map_err(|e| format!("sign delegation: {e}"))?;
     d.delegation_sig.copy_from_slice(&sig.to_bytes());
     Ok(d)
+}
+
+/// Back-compat wrapper: bind a zero proposer key (receipt-path only / legacy tests).
+/// The Stage D v2 signup path calls build_signed_delegation_with_proposer with the
+/// pool's advertised proposer key.
+#[allow(clippy::too_many_arguments)]
+fn build_signed_delegation(
+    signing_key: &SigningKey,
+    pool_pubkey: [u8; 33],
+    network_id: u8,
+    worker: &str,
+    expiry_height: u64,
+    fee_bps: u16,
+    fee_pkh: [u8; 20],
+    deleg_nonce: [u8; 32],
+) -> Result<irium_node_rs::poawx::Delegation, String> {
+    build_signed_delegation_with_proposer(
+        signing_key,
+        pool_pubkey,
+        [0u8; 33],
+        network_id,
+        worker,
+        expiry_height,
+        fee_bps,
+        fee_pkh,
+        deleg_nonce,
+    )
+}
+
+/// Resolve an optional `--proposer-pubkey` hex (66 chars / 33 bytes); None => zero
+/// (legacy / receipt-only). Online mode reads this from /poawx/pool-identity instead.
+fn resolve_proposer_pubkey(hex_opt: &Option<String>) -> Result<[u8; 33], String> {
+    match hex_opt {
+        None => Ok([0u8; 33]),
+        Some(h) => {
+            let b = hex::decode(h.trim())
+                .map_err(|_| "--proposer-pubkey invalid hex".to_string())?;
+            if b.len() != 33 {
+                return Err("--proposer-pubkey must be 33 bytes (66 hex)".to_string());
+            }
+            let mut o = [0u8; 33];
+            o.copy_from_slice(&b);
+            Ok(o)
+        }
+    }
 }
 
 fn next_flag_value(args: &[String], i: &mut usize) -> Result<String, String> {
@@ -3481,6 +3526,9 @@ struct PoawxRegisterArgs {
     third_party_pool: bool,
     /// Phase 20 Step 4: third-party fee recipient (base58 address or 40-hex pkh).
     fee_pkh: Option<String>,
+    /// Stage D v2: optional custodial proposer pubkey to bind (emit-only mode;
+    /// online mode reads it from /poawx/pool-identity).
+    proposer_pubkey_hex: Option<String>,
 }
 
 /// Resolve a `--fee-pkh` argument: a 40-char hex (20-byte) pkh, or a base58 P2PKH
@@ -3517,6 +3565,7 @@ fn parse_poawx_register_args(args: &[String]) -> Result<PoawxRegisterArgs, Strin
         fee_bps: 0,
         third_party_pool: false,
         fee_pkh: None,
+        proposer_pubkey_hex: None,
     };
     let mut i = 1usize;
     while i < args.len() {
@@ -3553,6 +3602,9 @@ fn parse_poawx_register_args(args: &[String]) -> Result<PoawxRegisterArgs, Strin
                 i += 1;
             }
             "--fee-pkh" => a.fee_pkh = Some(next_flag_value(args, &mut i)?),
+            "--proposer-pubkey" => {
+                a.proposer_pubkey_hex = Some(next_flag_value(args, &mut i)?)
+            }
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -4766,11 +4818,13 @@ fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
         let (pool_pubkey, network_id, addr, worker, expiry, fee_bps, fee_pkh) =
             resolve_emit_only_args(&a)?;
         let (_key, signing_key) = signer_material_from_wallet(&addr)?;
+        let proposer_pubkey = resolve_proposer_pubkey(&a.proposer_pubkey_hex)?;
         let mut nonce = [0u8; 32];
         OsRng.fill_bytes(&mut nonce);
-        let d = build_signed_delegation(
+        let d = build_signed_delegation_with_proposer(
             &signing_key,
             pool_pubkey,
+            proposer_pubkey,
             network_id,
             &worker,
             expiry,
@@ -4865,13 +4919,33 @@ fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
     let mut pool_pubkey = [0u8; 33];
     pool_pubkey.copy_from_slice(&pool_pubkey_bytes);
 
+    // Stage D v2: bind the pool's advertised custodial proposer key so the delegation
+    // authorizes real delegated block production. Legacy pools that don't advertise one
+    // => zero proposer (receipt-path only), with a clear note.
+    let proposer_pubkey = match id.get("proposer_pubkey").and_then(|v| v.as_str()) {
+        Some(h) => {
+            let b = hex::decode(h).map_err(|_| "pool proposer_pubkey invalid hex".to_string())?;
+            if b.len() != 33 {
+                return Err("pool proposer_pubkey must be 33 bytes".to_string());
+            }
+            let mut o = [0u8; 33];
+            o.copy_from_slice(&b);
+            o
+        }
+        None => {
+            eprintln!("[register] note: pool did not advertise a proposer_pubkey; binding zero (receipt-path only, not delegated block production)");
+            [0u8; 33]
+        }
+    };
+
     // 2. Sign delegation with the wallet key (in memory only).
     let (_key, signing_key) = signer_material_from_wallet(&addr)?;
     let mut nonce = [0u8; 32];
     OsRng.fill_bytes(&mut nonce);
-    let d = build_signed_delegation(
+    let d = build_signed_delegation_with_proposer(
         &signing_key,
         pool_pubkey,
+        proposer_pubkey,
         network_id,
         &worker,
         expiry,
@@ -27255,6 +27329,22 @@ fn main() {
         }
         "poawx-register" => {
             if let Err(e) = cmd_poawx_register(&args) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        "delegate-pool" => {
+            // Friendly alias for poawx-register: `delegate-pool <address> --pool <url>
+            // --worker <name> --expiry-height <N> [flags]`. Translates the positional
+            // <address> into --addr and reuses the exact register flow.
+            if args.len() < 2 || args[1].starts_with("--") {
+                eprintln!("usage: irium-wallet delegate-pool <address> --pool <url> --worker <name> --expiry-height <N>");
+                std::process::exit(1);
+            }
+            let mut translated =
+                vec!["poawx-register".to_string(), "--addr".to_string(), args[1].clone()];
+            translated.extend_from_slice(&args[2..]);
+            if let Err(e) = cmd_poawx_register(&translated) {
                 eprintln!("{e}");
                 std::process::exit(1);
             }

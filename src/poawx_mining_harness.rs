@@ -288,6 +288,47 @@ impl AllGatesIdentities {
         })
     }
 
+    /// Multi-participant identities (role-attribution Phase 4): three GENUINELY DISTINCT
+    /// contributor participants, each proving its role with its OWN key so that the role
+    /// solver_pkh == hash160(assignment_public_key) -- satisfying the new contributor-role
+    /// binding rule. The worker plays PRIMARY; the SUPPORT participant is the finality
+    /// member (support_solver == hash160(member pubkey), as the committee requires).
+    pub fn multi_participant(
+        worker_secret: &[u8; 32],
+        compute_secret: &[u8; 32],
+        verify_secret: &[u8; 32],
+        support_secret: &[u8; 32],
+    ) -> Result<Self, String> {
+        let sk_of = |b: &[u8; 32]| SigningKey::from_bytes(b.into())
+            .map_err(|_| "multi: bad key".to_string());
+        let pkh_of = |b: &[u8; 32]| -> Result<[u8; 20], String> {
+            let sk = sk_of(b)?;
+            let pt = sk.verifying_key().to_encoded_point(true);
+            Ok(hash160(pt.as_bytes()))
+        };
+        let derive = |tag: &[u8]| -> [u8; 32] {
+            let mut h = Sha256::new();
+            h.update(b"IRIUM_POAWX_MULTI_ASSIGN_V1");
+            h.update(tag);
+            h.update(worker_secret);
+            h.finalize().into()
+        };
+        Ok(Self {
+            worker_sk: sk_of(worker_secret)?,
+            member_sk: sk_of(support_secret)?,
+            compute_solver: pkh_of(compute_secret)?,
+            verify_solver: pkh_of(verify_secret)?,
+            support_solver: pkh_of(support_secret)?,
+            compute_assign: *compute_secret,
+            verify_assign: *verify_secret,
+            support_assign: *support_secret,
+            claim_seed: derive(b"claim"),
+            worker_pkh_override: None,
+            delegation: None,
+            revocations: None,
+        })
+    }
+
     /// Delegated (mode-1) identities for Stage D Step 5 (C1 custodial-proposer model).
     /// The pool DELEGATE key plays worker-signer + all three roles + finality member
     /// (the pool does the PoAW-X role work the ASIC can't); the receipt `worker_pkh`
@@ -405,6 +446,43 @@ pub fn build_solo_poawx_block(
 /// blocks at `height >= 2` validate once the multi-source gate is active. For the
 /// genesis-parent case pass `([0u8; 32], [0u8; 32])`. Mainnet-hard-off.
 #[allow(clippy::too_many_arguments)]
+/// Role-attribution Phase 4: build a mined all-gates block whose three contributor roles
+/// are performed by three DISTINCT participant keys (each role solver == hash160 of its own
+/// VRF key), so the block is valid under the active contributor-role binding rule.
+#[allow(clippy::too_many_arguments)]
+pub fn build_multi_participant_poawx_block_with_parent(
+    worker_secret: &[u8; 32],
+    compute_secret: &[u8; 32],
+    verify_secret: &[u8; 32],
+    support_secret: &[u8; 32],
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+    parent_seed_components: ([u8; 32], [u8; 32]),
+) -> Result<AllGatesProof, String> {
+    build_all_gates_block_with(
+        &AllGatesIdentities::multi_participant(
+            worker_secret, compute_secret, verify_secret, support_secret,
+        )?,
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+        parent_seed_components,
+        None,
+        None,
+        None,
+        None,
+    )
+}
+
 pub fn build_solo_poawx_block_with_parent(
     miner_secret: &[u8; 32],
     network_id: u8,

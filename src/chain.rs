@@ -11484,6 +11484,176 @@ mod tests {
     }
 
     #[test]
+    fn phase4_multi_participant_distinct_role_payouts_connect_block() {
+        // Role-attribution Phase 4 final proof: with the contributor-role binding rule
+        // ACTIVE, a full all-gates block whose COMPUTE/VERIFY/SUPPORT roles are performed by
+        // three GENUINELY DISTINCT participants (each solver == hash160 of its own VRF key) is
+        // accepted by connect_block, and the coinbase pays each role to its distinct
+        // participant. A solo block (roles fused to one identity) is rejected under the rule.
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::seed_components_from_block;
+        use crate::poawx_mining_harness::build_multi_participant_poawx_block_with_parent;
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            // THE NEW RULE, ACTIVE (rig/devnet gate low; mainnet stays off).
+            ("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        let worker = [0x4Du8; 32];
+        let compute = [0xC0u8; 32];
+        let verify = [0xBEu8; 32];
+        let support = [0x5Fu8; 32];
+        let compute_pkh = pkh_of(&skf(&compute));
+        let verify_pkh = pkh_of(&skf(&verify));
+        let support_pkh = pkh_of(&skf(&support));
+        let worker_pkh = pkh_of(&skf(&worker));
+        // 3 role participants + worker are all distinct.
+        assert!(
+            [compute_pkh, verify_pkh, support_pkh, worker_pkh]
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == 4,
+            "participants distinct"
+        );
+
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let cache = global_admission_cache();
+
+        let mut prev = genesis_hash;
+        let mut parent_prev: Option<[u8; 32]> = None;
+        for h in 1..=3u64 {
+            let pc = seed_components_from_block(st.chain.last());
+            let bits = st.target_for_height(h).bits;
+            let proof = build_multi_participant_poawx_block_with_parent(
+                &worker, &compute, &verify, &support, net, h, prev, parent_prev, bits,
+                genesis.header.time + h as u32, 1, pc,
+            )
+            .unwrap_or_else(|e| panic!("build multi H{h}: {e}"));
+            cache.clear();
+            cache.set_tip(h);
+            for adm in &proof.admissions {
+                let _ = cache.ingest_bytes(adm);
+            }
+            let cb = proof.block.transactions[0].clone();
+            let (blk_prev, blk_hash) = (prev, proof.block_hash);
+            st.connect_block(proof.block)
+                .unwrap_or_else(|e| panic!("connect multi H{h} (contributor rule active): {e}"));
+            if h == 1 {
+                // coinbase: [irx1, PRIMARY->worker, COMPUTE->compute, VERIFY->verify, SUPPORT->support]
+                assert_eq!(cb.outputs[2].script_pubkey, crate::tx::p2pkh_script(&compute_pkh), "COMPUTE -> its participant");
+                assert_eq!(cb.outputs[3].script_pubkey, crate::tx::p2pkh_script(&verify_pkh), "VERIFY -> its participant");
+                assert_eq!(cb.outputs[4].script_pubkey, crate::tx::p2pkh_script(&support_pkh), "SUPPORT -> its participant");
+                assert_eq!(cb.outputs[1].script_pubkey, crate::tx::p2pkh_script(&worker_pkh), "PRIMARY -> worker");
+            }
+            parent_prev = Some(blk_prev);
+            prev = blk_hash;
+        }
+        assert_eq!(
+            st.tip_height(),
+            3,
+            "multi-participant all-gates chain accepted by connect_block under the active rule"
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn phase4_contributor_binding_rejects_mismatched_solver() {
+        // Isolated proof of the rule at AssignmentProofV2::validate (dominance/ordering cannot
+        // preempt it here): solver_pkh must == hash160(assignment_public_key) for a contributor
+        // role when the binding is active; mismatch is rejected, a matched solver is accepted,
+        // and with the gate OFF the former exemption still lets a mismatch through.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let secret = [0x77u8; 32];
+        let apk = {
+            let sk = k256::ecdsa::SigningKey::from_bytes((&secret).into()).unwrap();
+            let pt = sk.verifying_key().to_encoded_point(true);
+            let mut a = [0u8; 33];
+            a.copy_from_slice(pt.as_bytes());
+            a
+        };
+        let good_solver = hash160(&apk);
+        let bad_solver = [0x99u8; 20];
+        let seed = [0x11u8; 32];
+        let ticket = [0x22u8; 32];
+        let role = crate::poawx::ROLE_COMPUTE_CONTRIBUTOR;
+        let mk = |solver: [u8; 20]| {
+            crate::poawx_candidate::AssignmentProofV2::prove(&secret, net, 5, role, solver, ticket, seed)
+                .unwrap()
+        };
+        // gate OFF -> contributor exemption preserved: a mismatched solver validates.
+        std::env::remove_var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT");
+        assert!(
+            mk(bad_solver).validate(net, 5).is_ok(),
+            "gate off: contributor exemption holds"
+        );
+        // gate ON -> mismatched solver rejected; matched solver accepted.
+        std::env::set_var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1");
+        let e = mk(bad_solver)
+            .validate(net, 5)
+            .expect_err("gate on: mismatched contributor solver must be rejected");
+        assert!(
+            e.contains("contributor solver pkh not derived from vrf key"),
+            "expected contributor-binding rejection, got: {e}"
+        );
+        assert!(
+            mk(good_solver).validate(net, 5).is_ok(),
+            "gate on: matched contributor solver accepted"
+        );
+        std::env::remove_var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
     fn miner_uses_node_gate_flags_over_local_env() {
         // Option A regression for rodb2008\'s "missing precommit_root": the harness must
         // build per the NODE-supplied gate flags, not its own env. Here the LOCAL env has

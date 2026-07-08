@@ -11287,6 +11287,192 @@ mod tests {
     }
 
     #[test]
+    fn stage_d_delegated_all_gates_connect_block_pays_miner() {
+        // Stage D Step 5 Milestone A: the DELEGATED (mode-1) builder produces a block the
+        // full connect_block accepts under all gates INCLUDING proposer-VRF (Step 3
+        // delegated branch) and delegation-revocation-clean (Step 4), and the coinbase
+        // PRIMARY pays the MINER's payout pkh -- NOT the pool delegate. The custodial
+        // proposer key (pool-held) proves; the delegate key signs + does role work; the
+        // miner's own payout address receives the block reward (the "no central wallet"
+        // property, proven deterministically in-process before any live rig run).
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_delegated_poawx_block_with_proposer, build_solo_poawx_block_with_parent,
+            ProposerCtx,
+        };
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            // proposer-VRF active from h2 (so solo h1 skips it, delegated h2 exercises it).
+            ("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "2"),
+            ("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1"),
+            // delegation (mode-1) active.
+            ("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+
+        let skf = |s: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(s.into()).unwrap();
+
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let cache = global_admission_cache();
+
+        // ---- h1: solo block (proposer-VRF not yet active at h1) ----
+        let solo_secret = [0x4Du8; 32];
+        let pc1 = seed_components_from_block(st.chain.last());
+        let bits1 = st.target_for_height(1).bits;
+        let p1 = build_solo_poawx_block_with_parent(
+            &solo_secret, net, 1, genesis_hash, None, bits1, genesis.header.time + 1, 1, pc1,
+        )
+        .expect("build h1");
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &p1.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let h1_hash = p1.block_hash;
+        st.connect_block(p1.block).expect("connect h1");
+
+        // ---- three distinct pool-held/miner keys; register the custodial proposer key
+        //      at height 0 so it is frozen-eligible at h2 (FREEZE_DEPTH=2) ----
+        let custodial_secret = [0xA1u8; 32];
+        let delegate_secret = [0xB2u8; 32];
+        let payout_secret = [0xC3u8; 32];
+        let custodial_pubkey = pubkey33(&skf(&custodial_secret));
+        let delegate_pubkey = pubkey33(&skf(&delegate_secret));
+        let payout_pubkey = pubkey33(&skf(&payout_secret));
+        let payout_pkh = pkh_of(&skf(&payout_secret));
+        let delegate_pkh = pkh_of(&skf(&delegate_secret));
+        st.proposer_registry
+            .register(custodial_pubkey, hash160(&custodial_pubkey), 0);
+        assert_eq!(st.proposer_registry.eligible_count(2), 1, "custodial key eligible at h2");
+
+        // ---- miner-signed Delegation v2 (payout key signs; binds proposer+pool+payout) ----
+        let mut d = crate::poawx::Delegation {
+            deleg_version: 2,
+            network_id: net,
+            miner_pubkey: payout_pubkey,
+            pool_pubkey: delegate_pubkey,
+            worker_tag: [0u8; 32],
+            expiry_height: 1_000_000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [0x5Du8; 32],
+            proposer_pubkey: custodial_pubkey,
+            delegation_sig: [0u8; 64],
+        };
+        {
+            use k256::ecdsa::signature::hazmat::PrehashSigner;
+            let sig: k256::ecdsa::Signature =
+                skf(&payout_secret).sign_prehash(&d.message_hash()).unwrap();
+            d.delegation_sig.copy_from_slice(&sig.to_bytes());
+        }
+        d.verify_signature().expect("delegation self-verifies");
+
+        // ---- custodial proposer proof for h2 (seed == the node's resolver) ----
+        let seed2 = expected_epoch_seed(2, h1_hash, st.chain.last());
+        let proof = crate::poawx_candidate::AssignmentProofV2::prove_self_solver(
+            &custodial_secret, net, 2, crate::poawx_proposer::ROLE_PROPOSER, [0u8; 32], seed2,
+        )
+        .expect("custodial proposer proof");
+        let priority = crate::poawx_proposer::proposer_priority(&proof.vrf_output);
+        let n = st.proposer_registry.eligible_count(2);
+        let round = (0..=8u32)
+            .find(|r| crate::poawx_proposer::is_selected(priority, n, *r))
+            .expect("custodial proposer selected at some round");
+        let ctx = ProposerCtx {
+            assignment: crate::poawx::ProposerAssignmentV1 { round, proof },
+        };
+
+        // ---- h2: DELEGATED block ----
+        let pc2 = seed_components_from_block(st.chain.last());
+        let bits2 = st.target_for_height(2).bits;
+        let p2 = build_delegated_poawx_block_with_proposer(
+            &delegate_secret, d.clone(), net, 2, h1_hash, Some(genesis_hash), bits2,
+            genesis.header.time + 2, 1, pc2, &st.dominance, None, Some(&ctx), None,
+        )
+        .expect("build delegated h2");
+
+        // the built receipt is mode-1 and already pays the miner (not the delegate).
+        let r = &p2.block.poawx_receipts.as_ref().unwrap()[0];
+        assert!(r.delegation.is_some(), "h2 receipt is delegated");
+        assert_eq!(r.worker_pkh, payout_pkh, "receipt worker_pkh == miner payout pkh");
+        assert_ne!(r.worker_pkh, delegate_pkh, "receipt worker_pkh != delegate pkh");
+
+        cache.clear();
+        cache.set_tip(2);
+        for adm in &p2.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let coinbase = p2.block.transactions[0].clone();
+        st.connect_block(p2.block)
+            .expect("connect_block accepts the delegated all-gates block");
+        assert_eq!(st.tip_height(), 2, "tip advanced to the delegated block");
+
+        // ---- decode the on-chain coinbase: PRIMARY -> miner, roles -> delegate ----
+        let primary_script = crate::tx::p2pkh_script(&payout_pkh);
+        let delegate_script = crate::tx::p2pkh_script(&delegate_pkh);
+        assert_eq!(
+            coinbase.outputs[1].script_pubkey, primary_script,
+            "PRIMARY coinbase output pays the miner payout pkh"
+        );
+        assert!(coinbase.outputs[1].value > 0, "PRIMARY output has value");
+        for i in 2..=4usize {
+            assert_eq!(
+                coinbase.outputs[i].script_pubkey, delegate_script,
+                "role output {i} pays the pool delegate (it did the role work)"
+            );
+        }
+        assert_ne!(payout_pkh, delegate_pkh, "no central wallet: miner != delegate");
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
     fn miner_uses_node_gate_flags_over_local_env() {
         // Option A regression for rodb2008\'s "missing precommit_root": the harness must
         // build per the NODE-supplied gate flags, not its own env. Here the LOCAL env has

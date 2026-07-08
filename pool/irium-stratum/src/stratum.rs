@@ -6662,6 +6662,7 @@ mod tests {
             fee_bps: 0,
             fee_pkh: [0u8; 20],
             deleg_nonce: [7u8; 32],
+            proposer_pubkey: delegate.pubkey(),
             delegation_sig: [0u8; 64],
         };
         let sig: Signature = miner.sign_prehash(&d.message_hash()).unwrap();
@@ -6945,6 +6946,7 @@ mod tests {
                 fee_bps: 0,
                 fee_pkh: [0u8; 20],
                 deleg_nonce: [7u8; 32],
+                proposer_pubkey: delegate.pubkey(),
                 delegation_sig: [0u8; 64],
             };
             let sig: Signature = miner.sign_prehash(&d.message_hash()).unwrap();

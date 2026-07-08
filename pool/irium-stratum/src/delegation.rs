@@ -6427,6 +6427,7 @@ mod tests {
             assert_eq!(built.role_reward.support_contributor_pkh, spk);
             // build node ext w/ valid claims for the derived solvers + the exact coinbase.
             let ext = Phase20ReceiptExt {
+                delegation_revocations: None,
                 role_reward: RoleReward {
                     compute_contributor_pkh: cpk,
                     verify_contributor_pkh: vpk,
@@ -6613,6 +6614,7 @@ mod tests {
             }
         };
         let ext = Phase20ReceiptExt {
+            delegation_revocations: None,
             role_reward: RoleReward {
                 compute_contributor_pkh: cpk,
                 verify_contributor_pkh: vpk,

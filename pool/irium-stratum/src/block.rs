@@ -428,6 +428,7 @@ mod tests {
         };
         // realistic node-side ext (non-empty), serialized -> hex for the pending side.
         let ext = irium_node_rs::poawx::Phase20ReceiptExt {
+            delegation_revocations: None,
             role_reward: irium_node_rs::poawx::RoleReward {
                 compute_contributor_pkh: [0xC1u8; 20],
                 verify_contributor_pkh: [0xC2u8; 20],
@@ -505,6 +506,7 @@ mod tests {
         use irium_node_rs::poawx::{irx1_root_from_block_receipts_audit, PoawxBlockReceipt};
         let height = 50_123u64; // >= mainnet activation
         let ext = irium_node_rs::poawx::Phase20ReceiptExt {
+            delegation_revocations: None,
             role_reward: irium_node_rs::poawx::RoleReward {
                 compute_contributor_pkh: [0xC1u8; 20],
                 verify_contributor_pkh: [0xC2u8; 20],

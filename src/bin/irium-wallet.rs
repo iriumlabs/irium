@@ -3379,6 +3379,24 @@ fn signer_material_from_wallet(address: &str) -> Result<(WalletKey, SigningKey),
 /// OFFICIAL pool fee is 0% (`fee_bps == 0`, zero `fee_pkh`). Phase 20 Step 4: a
 /// third-party fee (`fee_bps` in 1..=200 with a non-zero `fee_pkh`) is supported
 /// on non-mainnet networks; the fee terms are bound into the miner's signature.
+/// Resolve the signing key: prefer the raw secret in IRIUM_POAWX_DELEGATION_SECRET_HEX (set
+/// by the Irium Core app, which derives it from the unlocked wallet and passes it via env to
+/// this sidecar), else load it from the plaintext wallet file for `address`. Lets the app
+/// reuse the delegate-pool / revoke-delegation flows without a shared wallet file.
+fn resolve_signing_key(address: &str) -> Result<(Option<WalletKey>, SigningKey), String> {
+    if let Ok(hex_s) = std::env::var("IRIUM_POAWX_DELEGATION_SECRET_HEX") {
+        let b = hex::decode(hex_s.trim())
+            .map_err(|_| "IRIUM_POAWX_DELEGATION_SECRET_HEX invalid hex".to_string())?;
+        if b.len() != 32 {
+            return Err("IRIUM_POAWX_DELEGATION_SECRET_HEX must be 32 bytes (64 hex)".to_string());
+        }
+        let sk = SigningKey::from_slice(&b).map_err(|e| format!("bad delegation secret: {e}"))?;
+        return Ok((None, sk));
+    }
+    let (k, sk) = signer_material_from_wallet(address)?;
+    Ok((Some(k), sk))
+}
+
 fn build_signed_delegation_with_proposer(
     signing_key: &SigningKey,
     pool_pubkey: [u8; 33],
@@ -4817,7 +4835,7 @@ fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
     if a.emit_only {
         let (pool_pubkey, network_id, addr, worker, expiry, fee_bps, fee_pkh) =
             resolve_emit_only_args(&a)?;
-        let (_key, signing_key) = signer_material_from_wallet(&addr)?;
+        let (_key, signing_key) = resolve_signing_key(&addr)?;
         let proposer_pubkey = resolve_proposer_pubkey(&a.proposer_pubkey_hex)?;
         let mut nonce = [0u8; 32];
         OsRng.fill_bytes(&mut nonce);
@@ -4940,7 +4958,7 @@ fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
     };
 
     // 2. Sign delegation with the wallet key (in memory only).
-    let (_key, signing_key) = signer_material_from_wallet(&addr)?;
+    let (_key, signing_key) = resolve_signing_key(&addr)?;
     let mut nonce = [0u8; 32];
     OsRng.fill_bytes(&mut nonce);
     let d = build_signed_delegation_with_proposer(
@@ -5024,7 +5042,7 @@ fn cmd_revoke_delegation(args: &[String]) -> Result<(), String> {
     deleg_nonce.copy_from_slice(&nb);
 
     // Load the payout key (the delegation's signer = the revocation authority) and sign.
-    let (_key, signing_key) = signer_material_from_wallet(&addr)?;
+    let (_key, signing_key) = resolve_signing_key(&addr)?;
     let secret: [u8; 32] = signing_key.to_bytes().into();
     let rec = irium_node_rs::poawx::DelegationRevocationV1::build_signed(
         &secret,

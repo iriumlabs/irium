@@ -229,6 +229,19 @@ pub struct AllGatesIdentities {
     /// Base entropy for the deterministic per-(height,role) hidden-precommit claim
     /// secret/nonce. Identity-bound so H-1 commit and H reveal derive identically.
     pub claim_seed: [u8; 32],
+    /// Stage D Step 5 (delegated/mode-1): when Some, the receipt `worker_pkh` (the
+    /// PRIMARY payout) is this value (the miner's payout pkh) instead of
+    /// hash160(worker_sk pubkey). None => solo/dev (worker == payee).
+    pub worker_pkh_override: Option<[u8; 20]>,
+    /// Stage D Step 5 (delegated/mode-1): the miner-signed Delegation v2 to embed in
+    /// the receipt. None => solo/dev (mode-0). When Some, `worker_sk` is the pool
+    /// delegate key (signs the receipt + does role work) and the proposer proof is
+    /// bound to `delegation.proposer_pubkey` rather than to `worker_pkh`.
+    pub delegation: Option<crate::poawx::Delegation>,
+    /// Stage D Step 5 Milestone F: optional delegation-revocation records to embed in
+    /// the block's RVK1 ext section (a producer revoking miners' delegations on-chain).
+    /// None for solo/dev and for delegated blocks that carry no revocation.
+    pub revocations: Option<Vec<crate::poawx::DelegationRevocationV1>>,
 }
 
 impl AllGatesIdentities {
@@ -250,6 +263,9 @@ impl AllGatesIdentities {
             verify_assign: [8u8; 32],
             support_assign: [9u8; 32],
             claim_seed: [0x2Au8; 32],
+            worker_pkh_override: None,
+            delegation: None,
+            revocations: None,
         })
     }
 
@@ -281,6 +297,103 @@ impl AllGatesIdentities {
             verify_assign: derive(b"verify"),
             support_assign: derive(b"support"),
             claim_seed: derive(b"claim"),
+            worker_pkh_override: None,
+            delegation: None,
+            revocations: None,
+        })
+    }
+
+    /// Multi-participant identities (role-attribution Phase 4): three GENUINELY DISTINCT
+    /// contributor participants, each proving its role with its OWN key so that the role
+    /// solver_pkh == hash160(assignment_public_key) -- satisfying the new contributor-role
+    /// binding rule. The worker plays PRIMARY; the SUPPORT participant is the finality
+    /// member (support_solver == hash160(member pubkey), as the committee requires).
+    pub fn multi_participant(
+        worker_secret: &[u8; 32],
+        compute_secret: &[u8; 32],
+        verify_secret: &[u8; 32],
+        support_secret: &[u8; 32],
+    ) -> Result<Self, String> {
+        let sk_of = |b: &[u8; 32]| SigningKey::from_bytes(b.into())
+            .map_err(|_| "multi: bad key".to_string());
+        let pkh_of = |b: &[u8; 32]| -> Result<[u8; 20], String> {
+            let sk = sk_of(b)?;
+            let pt = sk.verifying_key().to_encoded_point(true);
+            Ok(hash160(pt.as_bytes()))
+        };
+        let derive = |tag: &[u8]| -> [u8; 32] {
+            let mut h = Sha256::new();
+            h.update(b"IRIUM_POAWX_MULTI_ASSIGN_V1");
+            h.update(tag);
+            h.update(worker_secret);
+            h.finalize().into()
+        };
+        Ok(Self {
+            worker_sk: sk_of(worker_secret)?,
+            member_sk: sk_of(support_secret)?,
+            compute_solver: pkh_of(compute_secret)?,
+            verify_solver: pkh_of(verify_secret)?,
+            support_solver: pkh_of(support_secret)?,
+            compute_assign: *compute_secret,
+            verify_assign: *verify_secret,
+            support_assign: *support_secret,
+            claim_seed: derive(b"claim"),
+            worker_pkh_override: None,
+            delegation: None,
+            revocations: None,
+        })
+    }
+
+    /// Delegated (mode-1) identities for Stage D Step 5 (C1 custodial-proposer model).
+    /// The pool DELEGATE key plays worker-signer + all three roles + finality member
+    /// (the pool does the PoAW-X role work the ASIC can't); the receipt `worker_pkh`
+    /// (PRIMARY payout) is overridden to the miner's payout pkh from the delegation, so
+    /// the block reward is paid DIRECTLY to the miner. The custodial proposer proof is
+    /// supplied separately via `ProposerCtx`; here we only carry the delegation (whose
+    /// `proposer_pubkey` the builder binds the proof to). `delegation.pool_pubkey` MUST
+    /// equal the delegate key so the node's mode-1 verifier accepts the signer.
+    pub fn delegated(
+        delegate_secret: &[u8; 32],
+        delegation: crate::poawx::Delegation,
+        revocations: Vec<crate::poawx::DelegationRevocationV1>,
+    ) -> Result<Self, String> {
+        let sk = SigningKey::from_bytes(delegate_secret.into())
+            .map_err(|_| "delegated: bad delegate key".to_string())?;
+        let pub_pt = sk.verifying_key().to_encoded_point(true);
+        let mut delegate_pubkey = [0u8; 33];
+        delegate_pubkey.copy_from_slice(pub_pt.as_bytes());
+        if delegate_pubkey != delegation.pool_pubkey {
+            return Err(
+                "delegated: delegate key does not match delegation.pool_pubkey".to_string(),
+            );
+        }
+        let pkh = hash160(&delegate_pubkey);
+        let derive = |tag: &[u8]| -> [u8; 32] {
+            let mut h = Sha256::new();
+            h.update(b"IRIUM_POAWX_DELEGATED_ASSIGN_V1");
+            h.update(tag);
+            h.update(delegate_secret);
+            h.finalize().into()
+        };
+        let member_sk = SigningKey::from_bytes(delegate_secret.into())
+            .map_err(|_| "delegated: bad delegate key".to_string())?;
+        Ok(Self {
+            worker_sk: sk,
+            member_sk,
+            compute_solver: pkh,
+            verify_solver: pkh,
+            support_solver: pkh,
+            compute_assign: derive(b"compute"),
+            verify_assign: derive(b"verify"),
+            support_assign: derive(b"support"),
+            claim_seed: derive(b"claim"),
+            worker_pkh_override: Some(delegation.miner_pkh()),
+            delegation: Some(delegation),
+            revocations: if revocations.is_empty() {
+                None
+            } else {
+                Some(revocations)
+            },
         })
     }
 }
@@ -350,6 +463,44 @@ pub fn build_solo_poawx_block(
 /// blocks at `height >= 2` validate once the multi-source gate is active. For the
 /// genesis-parent case pass `([0u8; 32], [0u8; 32])`. Mainnet-hard-off.
 #[allow(clippy::too_many_arguments)]
+/// Role-attribution Phase 4: build a mined all-gates block whose three contributor roles
+/// are performed by three DISTINCT participant keys (each role solver == hash160 of its own
+/// VRF key), so the block is valid under the active contributor-role binding rule.
+#[allow(clippy::too_many_arguments)]
+pub fn build_multi_participant_poawx_block_with_parent(
+    worker_secret: &[u8; 32],
+    compute_secret: &[u8; 32],
+    verify_secret: &[u8; 32],
+    support_secret: &[u8; 32],
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+    parent_seed_components: ([u8; 32], [u8; 32]),
+) -> Result<AllGatesProof, String> {
+    build_all_gates_block_with(
+        &AllGatesIdentities::multi_participant(
+            worker_secret, compute_secret, verify_secret, support_secret,
+        )?,
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+        parent_seed_components,
+        None,
+        None,
+        None,
+        None,
+        &default_cpu_nonce_solver,
+    )
+}
+
 pub fn build_solo_poawx_block_with_parent(
     miner_secret: &[u8; 32],
     network_id: u8,
@@ -420,6 +571,47 @@ pub fn build_solo_poawx_block_with_parent_and_dominance(
 /// belongs to the worker and binds it into the receipt. `None` => no proposer
 /// assignment (identical to the non-proposer builder).
 #[allow(clippy::too_many_arguments)]
+/// Stage D Step 5: build a mined all-gates DELEGATED (mode-1) block. The pool holds
+/// `delegate_secret` (== delegation.pool_pubkey) and supplies the miner-signed
+/// `delegation`; the custodial proposer proof is passed via `proposer_ctx`. The result
+/// is a receipt the node's mode-1 submit verifier + Step-3 delegated proposer branch
+/// accept, whose coinbase PRIMARY pays the miner's payout pkh directly.
+#[allow(clippy::too_many_arguments)]
+pub fn build_delegated_poawx_block_with_proposer(
+    delegate_secret: &[u8; 32],
+    delegation: crate::poawx::Delegation,
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+    parent_seed_components: ([u8; 32], [u8; 32]),
+    dominance: &PersistentDominance,
+    node_gates: Option<&NodeGateFlags>,
+    proposer_ctx: Option<&ProposerCtx>,
+    registration_section: Option<&crate::poawx::ProposerRegistrationSection>,
+    revocations: Vec<crate::poawx::DelegationRevocationV1>,
+) -> Result<AllGatesProof, String> {
+    build_all_gates_block_with(
+        &AllGatesIdentities::delegated(delegate_secret, delegation, revocations)?,
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+        parent_seed_components,
+        Some(dominance),
+        node_gates,
+        proposer_ctx,
+        registration_section,
+        &default_cpu_nonce_solver,
+    )
+}
+
 pub fn build_solo_poawx_block_with_proposer(
     miner_secret: &[u8; 32],
     network_id: u8,
@@ -556,7 +748,10 @@ fn build_all_gates_block_with(
     let worker_sk = &ids.worker_sk;
     let worker_pubkey_pt = worker_sk.verifying_key().to_encoded_point(true);
     let worker_pubkey_bytes = worker_pubkey_pt.as_bytes();
-    let worker_pkh = hash160(worker_pubkey_bytes);
+    let worker_pkh = match ids.worker_pkh_override {
+        Some(p) => p,
+        None => hash160(worker_pubkey_bytes),
+    };
     let member_sk = &ids.member_sk;
     let compute_solver = ids.compute_solver;
     let verify_solver = ids.verify_solver;
@@ -826,10 +1021,28 @@ fn build_all_gates_block_with(
     let proposer_assignment: Option<crate::poawx::ProposerAssignmentV1> = match proposer_ctx {
         None => None,
         Some(ctx) => {
-            if hash160(&ctx.assignment.proof.assignment_public_key) != worker_pkh {
-                return Err(
-                    "proposer: assignment vrf key does not match worker identity".to_string(),
-                );
+            match &ids.delegation {
+                Some(d) => {
+                    // Delegated (mode-1): the proposer proof is made with the miner's
+                    // custodial proposer key, which the miner authorised in the delegation.
+                    // worker_pkh is the miner PAYOUT (not the proposer key), so bind the
+                    // proof to proposer_pubkey -- exactly what chain.rs validate_block_proposer
+                    // checks in its delegated branch (Step 3).
+                    if d.proposer_pubkey != ctx.assignment.proof.assignment_public_key {
+                        return Err(
+                            "proposer: assignment vrf key does not match delegated proposer key"
+                                .to_string(),
+                        );
+                    }
+                }
+                None => {
+                    if hash160(&ctx.assignment.proof.assignment_public_key) != worker_pkh {
+                        return Err(
+                            "proposer: assignment vrf key does not match worker identity"
+                                .to_string(),
+                        );
+                    }
+                }
             }
             Some(ctx.assignment.clone())
         }
@@ -867,6 +1080,7 @@ fn build_all_gates_block_with(
         fraud_proofs: None,
         proposer_assignment,
         proposer_registrations,
+        delegation_revocations: ids.revocations.clone(),
     };
 
     // Worker receipt: real receipt PoW solution + signed challenge (mode-0).
@@ -927,7 +1141,7 @@ fn build_all_gates_block_with(
         worker_sig,
         solution,
         commitment_nonce: r_nonce,
-        delegation: None,
+        delegation: ids.delegation.clone(),
         phase20_ext: Some(ext.clone()),
     };
 

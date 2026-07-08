@@ -3431,6 +3431,9 @@ fn build_signed_delegation(
         fee_bps,
         fee_pkh,
         deleg_nonce,
+        // Stage D Step 1: v2 wire field. A real custodial proposer key is wired
+        // into the wallet CLI in a later step; zero placeholder for now.
+        proposer_pubkey: [0u8; 33],
         delegation_sig: [0u8; 64],
     };
     let sig: Signature = signing_key

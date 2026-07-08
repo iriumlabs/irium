@@ -859,6 +859,7 @@ mod fix2a_boundary_tests {
             fee_bps: 0,
             fee_pkh: [0u8; 20],
             deleg_nonce: [0x77u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let sig: k256::ecdsa::Signature = sk.sign_prehash(&d.message_hash()).unwrap();
@@ -991,6 +992,7 @@ mod fix2a_boundary_tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let mut r = make_receipt(7);
         r.phase20_ext = Some(ext);

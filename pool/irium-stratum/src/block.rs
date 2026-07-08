@@ -695,6 +695,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let worker_pkh = [0xabu8; 20];
         let sol = [0x01u8; 8];

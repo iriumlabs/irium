@@ -27991,6 +27991,7 @@ mod tests {
             fee_bps,
             fee_pkh: [0u8; 20],
             deleg_nonce: [0x5au8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let sig: k256::ecdsa::Signature = miner.sign_prehash(&d.message_hash()).unwrap();
@@ -29208,6 +29209,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let pubk = "02".to_string() + &"cd".repeat(32);
         let r = PoawxPendingReceipt {
@@ -30275,6 +30277,7 @@ mod tests {
             fee_bps: 0,
             fee_pkh: [0u8; 20],
             deleg_nonce: [0xd4u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0xe5u8; 64],
         }
     }
@@ -30554,6 +30557,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let mut r = make_test_block_receipt_c(90, b'A', 7);
         r.phase20_ext = Some(ext.clone());

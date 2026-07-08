@@ -45,12 +45,24 @@ pub struct Delegation {
     pub fee_bps: u16,
     pub fee_pkh: [u8; 20],
     pub deleg_nonce: [u8; 32],
+    /// v2 only: mirror of the consensus proposer key (see node `Delegation`).
+    pub proposer_pubkey: [u8; 33],
     pub delegation_sig: [u8; 64],
 }
 
 impl Delegation {
-    pub const VERSION: u8 = 1;
-    pub const WIRE_SIZE: usize = 1 + 1 + 33 + 33 + 32 + 8 + 2 + 20 + 32 + 64; // 226
+    pub const VERSION: u8 = 2;
+    pub const WIRE_SIZE_V1: usize = 1 + 1 + 33 + 33 + 32 + 8 + 2 + 20 + 32 + 64; // 226
+    pub const WIRE_SIZE_V2: usize = Self::WIRE_SIZE_V1 + 33; // 259
+    pub const WIRE_SIZE: usize = Self::WIRE_SIZE_V2; // "current" = v2
+
+    pub fn wire_len(&self) -> usize {
+        if self.deleg_version >= 2 {
+            Self::WIRE_SIZE_V2
+        } else {
+            Self::WIRE_SIZE_V1
+        }
+    }
 
     pub fn serialize(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(Self::WIRE_SIZE);
@@ -63,21 +75,37 @@ impl Delegation {
         out.extend_from_slice(&self.fee_bps.to_le_bytes());
         out.extend_from_slice(&self.fee_pkh);
         out.extend_from_slice(&self.deleg_nonce);
+        if self.deleg_version >= 2 {
+            out.extend_from_slice(&self.proposer_pubkey);
+        }
         out.extend_from_slice(&self.delegation_sig);
         out
     }
 
     pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
-        if raw.len() < Self::WIRE_SIZE {
+        if raw.len() < Self::WIRE_SIZE_V1 {
             return Err(format!(
                 "delegation too short: {} < {}",
                 raw.len(),
-                Self::WIRE_SIZE
+                Self::WIRE_SIZE_V1
             ));
         }
         let mut off = 0usize;
         let deleg_version = raw[off];
         off += 1;
+        let expected = if deleg_version >= 2 {
+            Self::WIRE_SIZE_V2
+        } else {
+            Self::WIRE_SIZE_V1
+        };
+        if raw.len() < expected {
+            return Err(format!(
+                "delegation too short: {} < {} (v{})",
+                raw.len(),
+                expected,
+                deleg_version
+            ));
+        }
         let network_id = raw[off];
         off += 1;
         let mut miner_pubkey = [0u8; 33];
@@ -100,6 +128,11 @@ impl Delegation {
         let mut deleg_nonce = [0u8; 32];
         deleg_nonce.copy_from_slice(&raw[off..off + 32]);
         off += 32;
+        let mut proposer_pubkey = [0u8; 33];
+        if deleg_version >= 2 {
+            proposer_pubkey.copy_from_slice(&raw[off..off + 33]);
+            off += 33;
+        }
         let mut delegation_sig = [0u8; 64];
         delegation_sig.copy_from_slice(&raw[off..off + 64]);
         Ok(Self {
@@ -112,6 +145,7 @@ impl Delegation {
             fee_bps,
             fee_pkh,
             deleg_nonce,
+            proposer_pubkey,
             delegation_sig,
         })
     }
@@ -129,6 +163,9 @@ impl Delegation {
         h.update(self.fee_bps.to_le_bytes());
         h.update(self.fee_pkh);
         h.update(self.deleg_nonce);
+        if self.deleg_version >= 2 {
+            h.update(self.proposer_pubkey);
+        }
         h.finalize().into()
     }
 
@@ -590,6 +627,15 @@ pub struct AssignmentContext {
     pub lane: String,
 }
 
+fn decode33(s: &str) -> Option<[u8; 33]> {
+    let b = hex::decode(s.trim()).ok()?;
+    if b.len() != 33 {
+        return None;
+    }
+    let mut o = [0u8; 33];
+    o.copy_from_slice(&b);
+    Some(o)
+}
 fn decode32(s: &str) -> Option<[u8; 32]> {
     let b = hex::decode(s).ok()?;
     if b.len() != 32 {
@@ -1130,8 +1176,7 @@ pub fn mirror_compute_sybil_digest(
     let mut h = Sha256::new();
     h.update(SYBIL_WORK_DOMAIN);
     h.update([network_id]);
-    // Fix B/C parity: bind sybil work to the target block's prev_hash exactly as
-    // the node's compute_sybil_digest does (same position: right after network_id).
+    // Fix B/C parity with the node: bind sybil work to the target block prev_hash.
     h.update(prev_hash);
     h.update(miner_pkh);
     h.update(epoch.to_le_bytes());
@@ -1217,6 +1262,56 @@ impl TicketProofMirror {
         out.push(self.penalty_status);
         out.extend_from_slice(&self.ticket_digest);
         out
+    }
+
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        if raw.len() != TICKET_PROOF_WIRE {
+            return Err(format!(
+                "ticket proof mirror: wrong length {} (want {})",
+                raw.len(),
+                TICKET_PROOF_WIRE
+            ));
+        }
+        let mut o = 0usize;
+        let network_id = raw[o];
+        o += 1;
+        let target_height = u64::from_le_bytes(raw[o..o + 8].try_into().unwrap());
+        o += 8;
+        let role_id = raw[o];
+        o += 1;
+        let mut miner_pkh = [0u8; 20];
+        miner_pkh.copy_from_slice(&raw[o..o + 20]);
+        o += 20;
+        let epoch = u64::from_le_bytes(raw[o..o + 8].try_into().unwrap());
+        o += 8;
+        let expiry_height = u64::from_le_bytes(raw[o..o + 8].try_into().unwrap());
+        o += 8;
+        let mut assignment_public_key = [0u8; 33];
+        assignment_public_key.copy_from_slice(&raw[o..o + 33]);
+        o += 33;
+        let mut sybil_work_nonce = [0u8; 32];
+        sybil_work_nonce.copy_from_slice(&raw[o..o + 32]);
+        o += 32;
+        let mut sybil_work_digest = [0u8; 32];
+        sybil_work_digest.copy_from_slice(&raw[o..o + 32]);
+        o += 32;
+        let penalty_status = raw[o];
+        o += 1;
+        let mut ticket_digest = [0u8; 32];
+        ticket_digest.copy_from_slice(&raw[o..o + 32]);
+        Ok(Self {
+            network_id,
+            target_height,
+            role_id,
+            miner_pkh,
+            epoch,
+            expiry_height,
+            assignment_public_key,
+            sybil_work_nonce,
+            sybil_work_digest,
+            penalty_status,
+            ticket_digest,
+        })
     }
 }
 
@@ -2432,6 +2527,25 @@ impl PuzzleSolutionMirror {
         o[9..41].copy_from_slice(&self.proof_digest);
         o
     }
+
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        if raw.len() != PUZZLE_SOLUTION_WIRE {
+            return Err(format!(
+                "puzzle solution mirror: wrong length {} (want {})",
+                raw.len(),
+                PUZZLE_SOLUTION_WIRE
+            ));
+        }
+        let mode = raw[0];
+        let nonce = u64::from_le_bytes(raw[1..9].try_into().unwrap());
+        let mut proof_digest = [0u8; 32];
+        proof_digest.copy_from_slice(&raw[9..41]);
+        Ok(Self {
+            mode,
+            nonce,
+            proof_digest,
+        })
+    }
 }
 
 fn pz_leading_zero_bits(d: &[u8; 32]) -> u32 {
@@ -3294,6 +3408,15 @@ pub struct RoleRevealDto {
     pub nonce: String,
     pub commitment_hash: String,
     pub claim_digest: String,
+    /// Phase 3 payout-bound role-work bundle (optional; empty => legacy claim-only).
+    #[serde(default)]
+    pub assignment_public_key: String,
+    #[serde(default)]
+    pub assignment_proof: String,
+    #[serde(default)]
+    pub ticket_proof: String,
+    #[serde(default)]
+    pub puzzle_solution: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3322,6 +3445,14 @@ pub struct ValidatedReveal {
     pub network_id: u8,
     pub target_height: u64,
     pub claim: PoawxRoleClaimMirror,
+    /// Phase 3: the participant's payout-bound role-work proofs. `assignment_public_key`
+    /// is Some iff a bundle was supplied AND hash160(it) == claim.solver_pkh was verified
+    /// on ingest (the Phase 1 structural binding). The node verifies the full ECVRF at
+    /// connect_block; the pool only enforces the hash binding + carries the proofs.
+    pub assignment_public_key: Option<[u8; 33]>,
+    pub assignment_proof: Vec<u8>,
+    pub ticket_proof: Vec<u8>,
+    pub puzzle_solution: Vec<u8>,
 }
 
 impl RolePrecommitDto {
@@ -3373,6 +3504,38 @@ impl RoleRevealDto {
         if role_precommit_commitment(&secret, &nonce) != commitment_hash {
             return Err("role reveal: commitment_hash != H(secret||nonce)".to_string());
         }
+        // Phase 3: optional payout-bound role-work bundle. Enforce the Phase 1 structural
+        // binding at ingest: hash160(assignment_public_key) MUST equal claim.solver_pkh, so
+        // a reveal can only attribute a role to the key that will prove it. A distinct
+        // participant proving with its own payout key passes; a producer naming an address
+        // it does not hold the proving key for is rejected here (the node then verifies the
+        // full ECVRF at connect_block).
+        let (assignment_public_key, assignment_proof, ticket_proof, puzzle_solution) =
+            if self.assignment_public_key.trim().is_empty() {
+                (None, Vec::new(), Vec::new(), Vec::new())
+            } else {
+                let apk =
+                    decode33(&self.assignment_public_key).ok_or("role reveal: bad assignment_public_key")?;
+                let a_pkh = {
+                    let rip = ripemd::Ripemd160::digest(Sha256::digest(apk));
+                    let mut o = [0u8; 20];
+                    o.copy_from_slice(&rip);
+                    o
+                };
+                if a_pkh != solver_pkh {
+                    return Err(
+                        "role reveal: assignment_public_key does not hash to solver_pkh (Phase 1 binding)"
+                            .to_string(),
+                    );
+                }
+                let ap = hex::decode(self.assignment_proof.trim())
+                    .map_err(|_| "role reveal: bad assignment_proof hex".to_string())?;
+                let tp = hex::decode(self.ticket_proof.trim())
+                    .map_err(|_| "role reveal: bad ticket_proof hex".to_string())?;
+                let ps = hex::decode(self.puzzle_solution.trim())
+                    .map_err(|_| "role reveal: bad puzzle_solution hex".to_string())?;
+                (Some(apk), ap, tp, ps)
+            };
         Ok(ValidatedReveal {
             network_id: self.network_id,
             target_height: self.target_height,
@@ -3385,6 +3548,10 @@ impl RoleRevealDto {
                 claim_digest,
                 commitment_hash: Some(commitment_hash),
             },
+            assignment_public_key,
+            assignment_proof,
+            ticket_proof,
+            puzzle_solution,
         })
     }
 }
@@ -3507,6 +3674,51 @@ impl RoleProtocolStore {
         }
         Some([picked[0].clone(), picked[1].clone(), picked[2].clone()])
     }
+
+    /// Phase 3 M2: per role, among the collected BUNDLED reveals (those carrying a
+    /// payout-bound assignment proof), select the winner by genuine self-VRF score
+    /// (first 8 bytes LE of the assignment proof's vrf_output) -- the un-grindable
+    /// competition. The pool admits all valid submissions and simply picks the highest
+    /// score; it never assigns a role itself. Returns the 3 winners (compute/verify/
+    /// support) or None if any role has no bundled submission.
+    pub fn best_bundled_reveals(&self, target_height: u64) -> Option<[ValidatedReveal; 3]> {
+        let roles = [
+            ROLE_COMPUTE_CONTRIBUTOR,
+            ROLE_VERIFY_CONTRIBUTOR,
+            ROLE_SUPPORT_CONTRIBUTOR,
+        ];
+        let g = self.reveals.lock().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<ValidatedReveal> = Vec::with_capacity(3);
+        for r in roles {
+            let lo = (target_height, r, [0u8; 20]);
+            let hi = (target_height, r, [0xffu8; 20]);
+            let mut best: Option<(u64, [u8; 32], ValidatedReveal)> = None;
+            for (_k, rv) in g.range(lo..=hi) {
+                if rv.assignment_public_key.is_none() {
+                    continue; // Phase 1: only payout-bound submissions compete
+                }
+                let proof = match AssignmentProofV2Mirror::deserialize(&rv.assignment_proof) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+                let mut sb = [0u8; 8];
+                sb.copy_from_slice(&proof.vrf_output[0..8]);
+                let score = u64::from_le_bytes(sb);
+                // highest score wins; deterministic tie-break by full vrf_output then solver.
+                let better = match &best {
+                    None => true,
+                    Some((bs, bo, _)) => {
+                        score > *bs || (score == *bs && proof.vrf_output < *bo)
+                    }
+                };
+                if better {
+                    best = Some((score, proof.vrf_output, rv.clone()));
+                }
+            }
+            out.push(best?.2);
+        }
+        Some([out[0].clone(), out[1].clone(), out[2].clone()])
+    }
 }
 
 /// Build the Phase 20 reveal-side extension at block `height` from COLLECTED role
@@ -3515,6 +3727,83 @@ impl RoleProtocolStore {
 /// unless the role protocol is enabled and BOTH this height's reveals and the next
 /// height's precommits are present. Mainnet hard-off. `fee` layers the (validated)
 /// third-party fee terms; None/invalid => official 0%.
+fn pool_hash160(b: &[u8]) -> [u8; 20] {
+    let mut o = [0u8; 20];
+    o.copy_from_slice(&ripemd::Ripemd160::digest(Sha256::digest(b)));
+    o
+}
+
+/// Phase 3 M2: build the reveal-side ext from GENUINELY DISTINCT participants' collected
+/// role-work bundles. Each role's reward is routed to the winning participant's own
+/// solver pkh, and the participant's OWN assignment / ticket / puzzle proofs are attached
+/// (not pool-synthesized). The winner per role is chosen by `best_bundled_reveals`
+/// (self-VRF competition). The Phase 1 binding (solver_pkh == hash160(assignment_public_key)
+/// == the assignment proof's own solver) is re-verified here; the node verifies the full
+/// ECVRF at connect_block. Mainnet hard-off.
+pub fn build_collected_bundle_ext(
+    store: &RoleProtocolStore,
+    network_id: u8,
+    height: u64,
+    fee: Option<(u16, [u8; 20])>,
+    prev_hash: &[u8; 32],
+) -> Option<Phase20ReceiptExtMirror> {
+    let _ = prev_hash;
+    if network_id == 0 || !role_protocol_enabled() {
+        return None;
+    }
+    let winners = store.best_bundled_reveals(height)?;
+    let next_root = store.precommit_root_for(height + 1)?;
+    let mut assigns: Vec<AssignmentProofV2Mirror> = Vec::with_capacity(3);
+    let mut tickets: Vec<TicketProofMirror> = Vec::with_capacity(3);
+    let mut puzzles: Vec<PuzzleSolutionMirror> = Vec::with_capacity(3);
+    for w in &winners {
+        let apk = w.assignment_public_key?;
+        let a = AssignmentProofV2Mirror::deserialize(&w.assignment_proof).ok()?;
+        // Phase 1 binding, re-verified on the collected proof.
+        if pool_hash160(&apk) != w.claim.solver_pkh
+            || a.solver_pkh != w.claim.solver_pkh
+            || a.assignment_public_key != apk
+        {
+            return None;
+        }
+        // Phase 4: full attachment -- the participant's own ticket + puzzle proofs.
+        let t = TicketProofMirror::deserialize(&w.ticket_proof).ok()?;
+        let p = PuzzleSolutionMirror::deserialize(&w.puzzle_solution).ok()?;
+        // ticket must bind to the same participant identity as the reward.
+        if t.miner_pkh != w.claim.solver_pkh {
+            return None;
+        }
+        assigns.push(a);
+        tickets.push(t);
+        puzzles.push(p);
+    }
+    let (fee_bps, fee_pkh) = match fee {
+        Some((b, p)) if b >= 1 && b <= THIRD_PARTY_FEE_CAP_BPS && p != [0u8; 20] => (b, p),
+        _ => (0u16, [0u8; 20]),
+    };
+    let role_reward = RoleRewardMirror {
+        compute_contributor_pkh: winners[0].claim.solver_pkh,
+        verify_contributor_pkh: winners[1].claim.solver_pkh,
+        support_contributor_pkh: winners[2].claim.solver_pkh,
+    };
+    Some(Phase20ReceiptExtMirror {
+        role_reward,
+        compute_claim: winners[0].claim.clone(),
+        verify_claim: winners[1].claim.clone(),
+        support_claim: winners[2].claim.clone(),
+        fee_bps,
+        fee_pkh,
+        precommit_root: Some(next_root),
+        role_ticket_proofs: Some([tickets[0].clone(), tickets[1].clone(), tickets[2].clone()]),
+        role_dominance_weights: None,
+        candidate_set: None,
+        role_puzzle_proofs: Some([puzzles[0].clone(), puzzles[1].clone(), puzzles[2].clone()]),
+        finality_proof: None,
+        committed_admission: None,
+        role_assignment_v2: Some([assigns[0].clone(), assigns[1].clone(), assigns[2].clone()]),
+    })
+}
+
 pub fn build_collected_phase20_ext(
     store: &RoleProtocolStore,
     network_id: u8,
@@ -4517,6 +4806,7 @@ mod tests {
             fee_bps,
             fee_pkh: [0u8; 20],
             deleg_nonce: [7u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let sig: Signature = miner.sign_prehash(&d.message_hash()).unwrap();
@@ -4544,6 +4834,7 @@ mod tests {
             fee_bps,
             fee_pkh,
             deleg_nonce: [7u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let sig: Signature = miner.sign_prehash(&d.message_hash()).unwrap();
@@ -4577,6 +4868,7 @@ mod tests {
             fee_bps: fields.6,
             fee_pkh: fields.7,
             deleg_nonce: fields.8,
+            proposer_pubkey: [0u8; 33],
             delegation_sig: fields.9,
         };
         let mir = Delegation {
@@ -4589,10 +4881,13 @@ mod tests {
             fee_bps: fields.6,
             fee_pkh: fields.7,
             deleg_nonce: fields.8,
+            proposer_pubkey: [0u8; 33],
             delegation_sig: fields.9,
         };
-        assert_eq!(Delegation::WIRE_SIZE, 226);
-        assert_eq!(irium_node_rs::poawx::Delegation::WIRE_SIZE, 226);
+        assert_eq!(Delegation::WIRE_SIZE_V1, 226);
+        assert_eq!(irium_node_rs::poawx::Delegation::WIRE_SIZE_V1, 226);
+        assert_eq!(Delegation::WIRE_SIZE, 259);
+        assert_eq!(irium_node_rs::poawx::Delegation::WIRE_SIZE, 259);
         assert_eq!(canon.serialize(), mir.serialize(), "serialize parity");
         assert_eq!(canon.serialize().len(), 226);
         assert_eq!(
@@ -4622,6 +4917,7 @@ mod tests {
             fee_bps: 0,
             fee_pkh: [0u8; 20],
             deleg_nonce: [4u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let sig: Signature = miner.sign_prehash(&canon.message_hash()).unwrap();
@@ -4659,6 +4955,7 @@ mod tests {
             fee_bps: 0,
             fee_pkh: [0u8; 20],
             deleg_nonce: [0u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let expected = {
@@ -5262,6 +5559,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         assert_eq!(
             ext.serialize(),
@@ -5686,6 +5984,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         assert_eq!(pe.serialize(), ne.serialize(), "ext AVR2 wire parity");
         assert_eq!(pe.digest(), ne.digest(), "ext AVR2 digest parity");
@@ -7230,7 +7529,246 @@ mod tests {
             nonce: hex::encode(nonce),
             commitment_hash: hex::encode(role_precommit_commitment(&secret, &nonce)),
             claim_digest: hex::encode(cd),
+            assignment_public_key: String::new(),
+            assignment_proof: String::new(),
+            ticket_proof: String::new(),
+            puzzle_solution: String::new(),
         }
+    }
+
+    #[test]
+    #[ignore] // rig integration test: reads REAL worker bundles from IRIUM_M3_DIR
+    fn phase3_m3_real_worker_bundles_collection_and_attribution() {
+        // End-to-end with GENUINE Phase-2 worker output: feed real bundles through the
+        // actual collection path (validate -> store -> best_bundled_reveals). Confirms the
+        // pool collects, validates the Phase-1 payout bindings on real proofs, and
+        // attributes each role to its rightful distinct real participant.
+        let dir = std::env::var("IRIUM_M3_DIR").unwrap_or_else(|_| "/home/irium/tmp/m3".to_string());
+        let load = |name: &str| -> serde_json::Value {
+            serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{name}.json")).expect("read bundle"),
+            )
+            .expect("bundle json")
+        };
+        let pkh_of = |b: &serde_json::Value| -> [u8; 20] {
+            let mut o = [0u8; 20];
+            o.copy_from_slice(&hex::decode(b["solver_pkh"].as_str().unwrap()).unwrap());
+            o
+        };
+        let score_of = |b: &serde_json::Value| -> u64 {
+            let ap = AssignmentProofV2Mirror::deserialize(
+                &hex::decode(b["assignment_proof"].as_str().unwrap()).unwrap(),
+            )
+            .unwrap();
+            let mut s = [0u8; 8];
+            s.copy_from_slice(&ap.vrf_output[0..8]);
+            u64::from_le_bytes(s)
+        };
+        let feed = |store: &RoleProtocolStore, b: &serde_json::Value| {
+            let g = |k: &str| b[k].as_str().unwrap().to_string();
+            let claim = &b["claim"];
+            let cg = |k: &str| claim[k].as_str().unwrap().to_string();
+            let net = b["network_id"].as_u64().unwrap() as u8;
+            let h = b["target_height"].as_u64().unwrap();
+            let role = b["role_id"].as_u64().unwrap() as u8;
+            let pre = RolePrecommitDto {
+                network_id: net,
+                target_height: h,
+                role_id: role,
+                solver_pkh: g("solver_pkh"),
+                commitment_hash: cg("commitment_hash"),
+                worker: String::new(),
+            };
+            store
+                .add_precommit(pre.validate(net).expect("real precommit valid"))
+                .expect("add precommit");
+            let dto = RoleRevealDto {
+                network_id: net,
+                target_height: h,
+                role_id: role,
+                lane_id: claim["lane_id"].as_u64().unwrap() as u8,
+                solver_pkh: g("solver_pkh"),
+                secret: cg("secret"),
+                nonce: cg("nonce"),
+                commitment_hash: cg("commitment_hash"),
+                claim_digest: cg("claim_digest"),
+                assignment_public_key: g("assignment_public_key"),
+                assignment_proof: g("assignment_proof"),
+                ticket_proof: g("ticket_proof"),
+                puzzle_solution: g("puzzle_solution"),
+            };
+            // validate ENFORCES the Phase 1 binding on the REAL bundle.
+            let v = dto.validate(net).expect("real bundle passes the Phase 1 binding");
+            assert!(v.assignment_public_key.is_some(), "real bundle carries payout-bound proof");
+            store.add_reveal(v).expect("add reveal");
+        };
+        let (ca, cb, vf, sp) = (load("compute_A"), load("compute_B"), load("verify_1"), load("support_1"));
+        let store = RoleProtocolStore::new();
+        for x in [&ca, &cb, &vf, &sp] {
+            feed(&store, x);
+        }
+        let h = ca["target_height"].as_u64().unwrap();
+        let w = store.best_bundled_reveals(h).expect("collected winners from real bundles");
+        // distinct attribution: verify + support go to their own workers
+        assert_eq!(w[1].claim.solver_pkh, pkh_of(&vf), "VERIFY attributed to its worker");
+        assert_eq!(w[2].claim.solver_pkh, pkh_of(&sp), "SUPPORT attributed to its worker");
+        // best_for_role: the COMPUTE winner is the higher-self-VRF-score real competitor
+        let (sa, sb) = (score_of(&ca), score_of(&cb));
+        let win_score = {
+            let ap = AssignmentProofV2Mirror::deserialize(&w[0].assignment_proof).unwrap();
+            let mut s = [0u8; 8];
+            s.copy_from_slice(&ap.vrf_output[0..8]);
+            u64::from_le_bytes(s)
+        };
+        assert_eq!(win_score, sa.max(sb), "COMPUTE winner has the higher self-VRF score");
+        assert!(
+            w[0].claim.solver_pkh == pkh_of(&ca) || w[0].claim.solver_pkh == pkh_of(&cb),
+            "COMPUTE winner is one of the two real competitors"
+        );
+        println!(
+            "[m3] REAL bundles: compute A={} B={} -> winner score {} pkh {}; verify {}; support {}",
+            sa, sb, win_score, hex::encode(w[0].claim.solver_pkh),
+            hex::encode(w[1].claim.solver_pkh), hex::encode(w[2].claim.solver_pkh)
+        );
+    }
+
+    #[test]
+    fn phase4_mirror_ticket_puzzle_deserialize_roundtrip() {
+        // Phase 4 M2: the new mirror deserializers are exact inverses of serialize.
+        let t = TicketProofMirror::new(
+            2, 10, [0x33u8; 32], ROLE_COMPUTE_CONTRIBUTOR, [0x44u8; 20], 10, 100_010,
+            [0x02u8; 33], [0x55u8; 32], 0,
+        );
+        assert_eq!(TicketProofMirror::deserialize(&t.serialize()).unwrap(), t);
+        assert!(TicketProofMirror::deserialize(&t.serialize()[..175]).is_err());
+        let pz = PuzzleSolutionMirror { mode: 3, nonce: 12_345, proof_digest: [0x66u8; 32] };
+        assert_eq!(PuzzleSolutionMirror::deserialize(&pz.serialize()).unwrap(), pz);
+    }
+
+    #[test]
+    fn phase3_m2_distinct_attribution_and_best_for_role() {
+        // Distinct participants each win their role; when two compete for one role, the
+        // higher genuine self-VRF score wins (best_for_role). Attribution routes to the
+        // winning participant. The pool admits all valid submissions and picks the best.
+        let net = 2u8;
+        let h = 40u64;
+        let store = RoleProtocolStore::new();
+        let mk = |role: u8, apk: [u8; 33], vrf0: u8| -> [u8; 20] {
+            let pkh = {
+                let rip = ripemd::Ripemd160::digest(Sha256::digest(apk));
+                let mut o = [0u8; 20];
+                o.copy_from_slice(&rip);
+                o
+            };
+            let secret = [role ^ vrf0; 32];
+            let nonce = [role.wrapping_add(vrf0); 32];
+            let commitment = role_precommit_commitment(&secret, &nonce);
+            let mut vrf_output = [0u8; 32];
+            vrf_output[0] = vrf0;
+            let proof = AssignmentProofV2Mirror {
+                version: 2,
+                network_id: net,
+                target_height: h,
+                role_id: role,
+                solver_pkh: pkh,
+                assignment_public_key: apk,
+                ticket_digest: [0u8; 32],
+                seed: [0u8; 32],
+                vrf_output,
+                vrf_proof: [0u8; VRF_PROOF_WIRE],
+                digest: [0u8; 32],
+            };
+            store
+                .add_precommit(ValidatedPrecommit {
+                    network_id: net,
+                    target_height: h,
+                    role_id: role,
+                    solver_pkh: pkh,
+                    commitment_hash: commitment,
+                })
+                .unwrap();
+            let dto = RoleRevealDto {
+                network_id: net,
+                target_height: h,
+                role_id: role,
+                lane_id: 0,
+                solver_pkh: hex::encode(pkh),
+                secret: hex::encode(secret),
+                nonce: hex::encode(nonce),
+                commitment_hash: hex::encode(commitment),
+                claim_digest: hex::encode([0u8; 32]),
+                assignment_public_key: hex::encode(apk),
+                assignment_proof: hex::encode(proof.serialize()),
+                ticket_proof: hex::encode([1u8; 4]),
+                puzzle_solution: hex::encode([2u8; 4]),
+            };
+            store.add_reveal(dto.validate(net).unwrap()).unwrap();
+            pkh
+        };
+        // COMPUTE: two competitors -- higher VRF score (0xff) must beat lower (0x10).
+        let pkh_hi = mk(ROLE_COMPUTE_CONTRIBUTOR, [0x02u8; 33], 0xff);
+        let pkh_lo = mk(ROLE_COMPUTE_CONTRIBUTOR, [0x03u8; 33], 0x10);
+        let pkh_v = mk(ROLE_VERIFY_CONTRIBUTOR, [0x04u8; 33], 0x80);
+        let pkh_s = mk(ROLE_SUPPORT_CONTRIBUTOR, [0x05u8; 33], 0x80);
+        assert_ne!(pkh_hi, pkh_lo);
+        let w = store.best_bundled_reveals(h).expect("winners");
+        assert_eq!(w[0].claim.solver_pkh, pkh_hi, "COMPUTE winner = higher self-VRF score");
+        assert_eq!(w[1].claim.solver_pkh, pkh_v, "VERIFY -> its distinct participant");
+        assert_eq!(w[2].claim.solver_pkh, pkh_s, "SUPPORT -> its distinct participant");
+        for wr in &w {
+            assert!(wr.assignment_public_key.is_some(), "winner carries payout-bound proof");
+        }
+    }
+
+    #[test]
+    fn phase3_reveal_bundle_enforces_payout_binding() {
+        // A payout-bound bundle whose assignment_public_key hashes to solver_pkh is
+        // accepted and carries the proofs; one that does not is rejected (the Phase 1
+        // structural binding, enforced at pool ingest); a legacy claim-only reveal still works.
+        let net = 2u8;
+        let secret = [0x11u8; 32];
+        let nonce = [0x22u8; 32];
+        let commitment = role_precommit_commitment(&secret, &nonce);
+        let apk = [0x02u8; 33];
+        let pkh = {
+            let rip = ripemd::Ripemd160::digest(Sha256::digest(apk));
+            let mut o = [0u8; 20];
+            o.copy_from_slice(&rip);
+            o
+        };
+        let mk = |apk_hex: &str, solver: [u8; 20]| RoleRevealDto {
+            network_id: net,
+            target_height: 10,
+            role_id: ROLE_COMPUTE_CONTRIBUTOR,
+            lane_id: 0,
+            solver_pkh: hex::encode(solver),
+            secret: hex::encode(secret),
+            nonce: hex::encode(nonce),
+            commitment_hash: hex::encode(commitment),
+            claim_digest: hex::encode([0u8; 32]),
+            assignment_public_key: apk_hex.to_string(),
+            assignment_proof: hex::encode([1u8; 8]),
+            ticket_proof: hex::encode([2u8; 8]),
+            puzzle_solution: hex::encode([3u8; 8]),
+        };
+        // matching binding -> accepted, carries the proofs
+        let v = mk(&hex::encode(apk), pkh).validate(net).expect("matching bundle accepted");
+        assert_eq!(v.assignment_public_key, Some(apk));
+        assert_eq!(v.assignment_proof.len(), 8);
+        assert_eq!(v.ticket_proof.len(), 8);
+        assert_eq!(v.puzzle_solution.len(), 8);
+        // mismatched solver (apk does not hash to it) -> rejected with the Phase 1 binding error
+        let e = mk(&hex::encode(apk), [0x99u8; 20])
+            .validate(net)
+            .expect_err("mismatched binding must be rejected");
+        assert!(e.contains("Phase 1 binding"), "got: {e}");
+        // legacy claim-only (empty bundle) still accepted, no proofs carried
+        let mut legacy = mk("", pkh);
+        legacy.assignment_proof = String::new();
+        legacy.ticket_proof = String::new();
+        legacy.puzzle_solution = String::new();
+        let lv = legacy.validate(net).expect("legacy claim-only accepted");
+        assert!(lv.assignment_public_key.is_none());
     }
 
     #[test]
@@ -8234,6 +8772,7 @@ mod tests {
     #[test]
     fn phase21b_pool_ticket_mirror_and_ext_parity() {
         let net = 1u8;
+        let prev = [0x55u8; 32];
         let solver = [0xC7u8; 20];
         let apk = [0x02u8; 33];
         let nonce = [0x44u8; 32];

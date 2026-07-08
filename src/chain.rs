@@ -1851,6 +1851,17 @@ impl ChainState {
                 if pr.solver_pkh != cand.solver_pkh {
                     return Err("phase22d: v2 proof wrong solver".to_string());
                 }
+                // Option A (defence-in-depth, mirrors the proposer's two-site binding):
+                // once the contributor-role binding is active, the contributor solver must be
+                // hash160 of its own VRF key. AssignmentProofV2::validate enforces the same;
+                // this rejects at the block validator too. Gate off => no-op.
+                if crate::poawx_proposer::contributor_role_binding_active(height)
+                    && pr.solver_pkh != hash160(&pr.assignment_public_key)
+                {
+                    return Err(
+                        "phase22d: contributor solver pkh not derived from vrf key".to_string(),
+                    );
+                }
                 if pr.ticket_digest != cand.ticket_digest {
                     return Err("phase22d: v2 proof wrong ticket digest".to_string());
                 }

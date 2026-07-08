@@ -4598,6 +4598,78 @@ async fn handle_conn(mut stream: TcpStream, ctx: Arc<ServerCtx>) {
                 respond(&mut stream, 200, "OK", &v).await
             }
         },
+        ("GET", "/poawx/delegation-status") => {
+            // Step D: report whether a miner (by payout pkh) has delegations on file, with
+            // each worker's expiry_height and deleg_nonce (the latter lets the app populate
+            // the revoke flow). Loopback-only; 503 on mainnet like the rest of the server.
+            let store = match &ctx.producer {
+                Some(p) => &p.store,
+                None => {
+                    respond(
+                        &mut stream,
+                        503,
+                        "Service Unavailable",
+                        &serde_json::json!({"error":"delegation unavailable on mainnet"}),
+                    )
+                    .await;
+                    return;
+                }
+            };
+            let query = path.split('?').nth(1).unwrap_or("");
+            let miner_pkh = query
+                .split('&')
+                .find_map(|kv| {
+                    let mut it = kv.splitn(2, '=');
+                    if it.next() == Some("miner_pkh") {
+                        it.next()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or("")
+                .to_string();
+            if miner_pkh.len() != 40 || hex::decode(&miner_pkh).is_err() {
+                respond(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    &serde_json::json!({"error":"miner_pkh query param required (40 hex)"}),
+                )
+                .await;
+                return;
+            }
+            let entries: Vec<serde_json::Value> = store
+                .all_active(0)
+                .into_iter()
+                .filter(|d| d.miner_pkh.eq_ignore_ascii_case(&miner_pkh))
+                .map(|d| {
+                    // deleg_nonce lives at wire offset 130..162 of the delegation.
+                    let nonce = hex::decode(&d.delegation_hex)
+                        .ok()
+                        .filter(|b| b.len() >= 162)
+                        .map(|b| hex::encode(&b[130..162]))
+                        .unwrap_or_default();
+                    serde_json::json!({
+                        "worker": d.worker,
+                        "expiry_height": d.expiry_height,
+                        "network_id": d.network_id,
+                        "status": d.status,
+                        "deleg_nonce": nonce,
+                    })
+                })
+                .collect();
+            respond(
+                &mut stream,
+                200,
+                "OK",
+                &serde_json::json!({
+                    "miner_pkh": miner_pkh,
+                    "delegated": !entries.is_empty(),
+                    "delegations": entries,
+                }),
+            )
+            .await;
+        }
         ("POST", "/poawx/delegation") => {
             let (key, store) = match &ctx.producer {
                 Some(p) => (&p.key, &p.store),
@@ -4873,6 +4945,40 @@ mod tests {
         )
         .expect("proposer-bound delegation accepted by verify_and_store");
         assert_eq!(stored.miner_pkh, hex::encode(d.miner_pkh()), "stored under miner pkh");
+
+        // Step D: GET /poawx/delegation-status reports the miner as delegated + the nonce.
+        let miner_pkh_hex = hex::encode(d.miner_pkh());
+        let st: serde_json::Value = client
+            .get(format!(
+                "http://{bind}/poawx/delegation-status?miner_pkh={miner_pkh_hex}"
+            ))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(st["delegated"].as_bool(), Some(true), "status: delegated");
+        let entry = &st["delegations"][0];
+        assert_eq!(entry["expiry_height"].as_u64(), Some(10_000_000));
+        assert_eq!(
+            entry["deleg_nonce"].as_str().unwrap_or(""),
+            hex::encode([7u8; 32]),
+            "status returns the deleg_nonce for revoke"
+        );
+        // an unrelated pkh is not delegated.
+        let none: serde_json::Value = client
+            .get(format!(
+                "http://{bind}/poawx/delegation-status?miner_pkh={}",
+                hex::encode([0x99u8; 20])
+            ))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(none["delegated"].as_bool(), Some(false), "unrelated pkh not delegated");
 
         for k in [
             "IRIUM_NETWORK",

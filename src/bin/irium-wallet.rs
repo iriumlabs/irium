@@ -4851,8 +4851,9 @@ fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
             "official fee_bps 0".to_string()
         };
         eprintln!(
-            "[emit-only] signed delegation for miner_pkh {} (worker {worker}, expiry {expiry}, {fee_note}); no network used. Send the JSON above to the operator to POST to the loopback-only /poawx/delegation endpoint.",
-            hex::encode(d.miner_pkh())
+            "[emit-only] signed delegation for miner_pkh {} (worker {worker}, expiry {expiry}, deleg_nonce {}, {fee_note}); no network used. Send the JSON above to the operator to POST to the loopback-only /poawx/delegation endpoint. Keep the deleg_nonce -- you need it to revoke later.",
+            hex::encode(d.miner_pkh()),
+            hex::encode(d.deleg_nonce)
         );
         return Ok(());
     }
@@ -4974,11 +4975,77 @@ fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
     let status = resp.status();
     let text = resp.text().unwrap_or_default();
     if status.is_success() {
-        println!("delegation registered (miner_pkh {miner_pkh_hex}, worker {worker}, expiry {expiry}): {text}");
+        println!("delegation registered (miner_pkh {miner_pkh_hex}, worker {worker}, expiry {expiry}, deleg_nonce {}): {text}", hex::encode(nonce));
+        eprintln!("[register] keep this deleg_nonce -- you need it to revoke later: irium-wallet revoke-delegation --addr <addr> --deleg-nonce {} --network-id {network_id}", hex::encode(nonce));
         Ok(())
     } else {
         Err(format!("delegation rejected (HTTP {status}): {text}"))
     }
+}
+
+/// `revoke-delegation`: sign a Stage D DelegationRevocationV1 with the wallet's payout key
+/// to cancel a previously-signed pool delegation. GENERATE AND HAND OFF: revocation is
+/// on-chain only right now (no pool submit endpoint), so this prints the signed 130-byte
+/// revocation hex plus plain guidance; the operator embeds it on-chain, and it takes effect
+/// once included in a block -- not instantly like signup.
+fn cmd_revoke_delegation(args: &[String]) -> Result<(), String> {
+    let mut addr: Option<String> = None;
+    let mut nonce_hex: Option<String> = None;
+    let mut network_id: Option<u8> = None;
+    let mut i = 1usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--addr" => addr = Some(next_flag_value(args, &mut i)?),
+            "--deleg-nonce" => nonce_hex = Some(next_flag_value(args, &mut i)?),
+            "--network-id" => {
+                network_id = Some(
+                    next_flag_value(args, &mut i)?
+                        .parse()
+                        .map_err(|_| "invalid --network-id".to_string())?,
+                )
+            }
+            other => return Err(format!("unknown flag {other}")),
+        }
+    }
+    let addr = addr.ok_or("revoke-delegation requires --addr <address>")?;
+    let network_id = network_id
+        .ok_or("revoke-delegation requires --network-id <id> (must match the delegation's network)")?;
+    if network_id == 0 {
+        return Err("delegation revocation is not available on mainnet (network_id 0)".to_string());
+    }
+    let nonce_hex = nonce_hex.ok_or(
+        "revoke-delegation requires --deleg-nonce <64hex> (the deleg_nonce printed at signup)",
+    )?;
+    let nb = hex::decode(nonce_hex.trim()).map_err(|_| "--deleg-nonce invalid hex".to_string())?;
+    if nb.len() != 32 {
+        return Err("--deleg-nonce must be 32 bytes (64 hex)".to_string());
+    }
+    let mut deleg_nonce = [0u8; 32];
+    deleg_nonce.copy_from_slice(&nb);
+
+    // Load the payout key (the delegation's signer = the revocation authority) and sign.
+    let (_key, signing_key) = signer_material_from_wallet(&addr)?;
+    let secret: [u8; 32] = signing_key.to_bytes().into();
+    let rec = irium_node_rs::poawx::DelegationRevocationV1::build_signed(
+        &secret,
+        network_id,
+        deleg_nonce,
+    )
+    .map_err(|e| format!("build revocation: {e}"))?;
+    rec.validate(network_id)
+        .map_err(|e| format!("self-verify revocation failed before emit: {e}"))?;
+
+    // stdout: ONLY the hex (pipe/save friendly). stderr: plain-language hand-off guidance.
+    println!("{}", hex::encode(rec.serialize()));
+    eprintln!(
+        "[revoke] signed delegation-revocation for address {addr} (deleg_nonce {}).",
+        hex::encode(deleg_nonce)
+    );
+    eprintln!("[revoke] Revocation is ON-CHAIN ONLY right now -- there is no instant pool submit endpoint.");
+    eprintln!("[revoke] Hand the hex above to the pool operator to embed on-chain (IRIUM_POAWX_REVOKE_HEX).");
+    eprintln!("[revoke] It takes effect once included in a block, NOT instantly. After that the network stops");
+    eprintln!("[revoke] paying delegated rewards for this delegation and you fall back to the pool's off-chain fair tracking.");
+    Ok(())
 }
 
 fn sign_target_hash(
@@ -27345,6 +27412,12 @@ fn main() {
                 vec!["poawx-register".to_string(), "--addr".to_string(), args[1].clone()];
             translated.extend_from_slice(&args[2..]);
             if let Err(e) = cmd_poawx_register(&translated) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        "revoke-delegation" => {
+            if let Err(e) = cmd_revoke_delegation(&args) {
                 eprintln!("{e}");
                 std::process::exit(1);
             }

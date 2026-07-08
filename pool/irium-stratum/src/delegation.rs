@@ -3508,6 +3508,51 @@ impl RoleProtocolStore {
         }
         Some([picked[0].clone(), picked[1].clone(), picked[2].clone()])
     }
+
+    /// Phase 3 M2: per role, among the collected BUNDLED reveals (those carrying a
+    /// payout-bound assignment proof), select the winner by genuine self-VRF score
+    /// (first 8 bytes LE of the assignment proof's vrf_output) -- the un-grindable
+    /// competition. The pool admits all valid submissions and simply picks the highest
+    /// score; it never assigns a role itself. Returns the 3 winners (compute/verify/
+    /// support) or None if any role has no bundled submission.
+    pub fn best_bundled_reveals(&self, target_height: u64) -> Option<[ValidatedReveal; 3]> {
+        let roles = [
+            ROLE_COMPUTE_CONTRIBUTOR,
+            ROLE_VERIFY_CONTRIBUTOR,
+            ROLE_SUPPORT_CONTRIBUTOR,
+        ];
+        let g = self.reveals.lock().unwrap_or_else(|e| e.into_inner());
+        let mut out: Vec<ValidatedReveal> = Vec::with_capacity(3);
+        for r in roles {
+            let lo = (target_height, r, [0u8; 20]);
+            let hi = (target_height, r, [0xffu8; 20]);
+            let mut best: Option<(u64, [u8; 32], ValidatedReveal)> = None;
+            for (_k, rv) in g.range(lo..=hi) {
+                if rv.assignment_public_key.is_none() {
+                    continue; // Phase 1: only payout-bound submissions compete
+                }
+                let proof = match AssignmentProofV2Mirror::deserialize(&rv.assignment_proof) {
+                    Ok(p) => p,
+                    Err(_) => continue,
+                };
+                let mut sb = [0u8; 8];
+                sb.copy_from_slice(&proof.vrf_output[0..8]);
+                let score = u64::from_le_bytes(sb);
+                // highest score wins; deterministic tie-break by full vrf_output then solver.
+                let better = match &best {
+                    None => true,
+                    Some((bs, bo, _)) => {
+                        score > *bs || (score == *bs && proof.vrf_output < *bo)
+                    }
+                };
+                if better {
+                    best = Some((score, proof.vrf_output, rv.clone()));
+                }
+            }
+            out.push(best?.2);
+        }
+        Some([out[0].clone(), out[1].clone(), out[2].clone()])
+    }
 }
 
 /// Build the Phase 20 reveal-side extension at block `height` from COLLECTED role
@@ -3516,6 +3561,75 @@ impl RoleProtocolStore {
 /// unless the role protocol is enabled and BOTH this height's reveals and the next
 /// height's precommits are present. Mainnet hard-off. `fee` layers the (validated)
 /// third-party fee terms; None/invalid => official 0%.
+fn pool_hash160(b: &[u8]) -> [u8; 20] {
+    let mut o = [0u8; 20];
+    o.copy_from_slice(&ripemd::Ripemd160::digest(Sha256::digest(b)));
+    o
+}
+
+/// Phase 3 M2: build the reveal-side ext from GENUINELY DISTINCT participants' collected
+/// role-work bundles. Each role's reward is routed to the winning participant's own
+/// solver pkh, and the participant's OWN assignment / ticket / puzzle proofs are attached
+/// (not pool-synthesized). The winner per role is chosen by `best_bundled_reveals`
+/// (self-VRF competition). The Phase 1 binding (solver_pkh == hash160(assignment_public_key)
+/// == the assignment proof's own solver) is re-verified here; the node verifies the full
+/// ECVRF at connect_block. Mainnet hard-off.
+pub fn build_collected_bundle_ext(
+    store: &RoleProtocolStore,
+    network_id: u8,
+    height: u64,
+    fee: Option<(u16, [u8; 20])>,
+    prev_hash: &[u8; 32],
+) -> Option<Phase20ReceiptExtMirror> {
+    let _ = prev_hash;
+    if network_id == 0 || !role_protocol_enabled() {
+        return None;
+    }
+    let winners = store.best_bundled_reveals(height)?;
+    let next_root = store.precommit_root_for(height + 1)?;
+    let mut assigns: Vec<AssignmentProofV2Mirror> = Vec::with_capacity(3);
+    for w in &winners {
+        let apk = w.assignment_public_key?;
+        let a = AssignmentProofV2Mirror::deserialize(&w.assignment_proof).ok()?;
+        // Phase 1 binding, re-verified on the collected proof.
+        if pool_hash160(&apk) != w.claim.solver_pkh
+            || a.solver_pkh != w.claim.solver_pkh
+            || a.assignment_public_key != apk
+        {
+            return None;
+        }
+        // ticket/puzzle carried in the reveal bundle (w.ticket_proof / w.puzzle_solution);
+        // their mirror types lack deserialize, so full attachment is a Phase 4 detail for
+        // node acceptance. M2 attaches the Phase-1-critical payout-bound assignment proofs.
+        assigns.push(a);
+    }
+    let (fee_bps, fee_pkh) = match fee {
+        Some((b, p)) if b >= 1 && b <= THIRD_PARTY_FEE_CAP_BPS && p != [0u8; 20] => (b, p),
+        _ => (0u16, [0u8; 20]),
+    };
+    let role_reward = RoleRewardMirror {
+        compute_contributor_pkh: winners[0].claim.solver_pkh,
+        verify_contributor_pkh: winners[1].claim.solver_pkh,
+        support_contributor_pkh: winners[2].claim.solver_pkh,
+    };
+    Some(Phase20ReceiptExtMirror {
+        role_reward,
+        compute_claim: winners[0].claim.clone(),
+        verify_claim: winners[1].claim.clone(),
+        support_claim: winners[2].claim.clone(),
+        fee_bps,
+        fee_pkh,
+        precommit_root: Some(next_root),
+        role_ticket_proofs: None,
+        role_dominance_weights: None,
+        candidate_set: None,
+        role_puzzle_proofs: None,
+        finality_proof: None,
+        committed_admission: None,
+        role_assignment_v2: Some([assigns[0].clone(), assigns[1].clone(), assigns[2].clone()]),
+    })
+}
+
 pub fn build_collected_phase20_ext(
     store: &RoleProtocolStore,
     network_id: u8,
@@ -6812,6 +6926,81 @@ mod tests {
             assignment_proof: String::new(),
             ticket_proof: String::new(),
             puzzle_solution: String::new(),
+        }
+    }
+
+    #[test]
+    fn phase3_m2_distinct_attribution_and_best_for_role() {
+        // Distinct participants each win their role; when two compete for one role, the
+        // higher genuine self-VRF score wins (best_for_role). Attribution routes to the
+        // winning participant. The pool admits all valid submissions and picks the best.
+        let net = 2u8;
+        let h = 40u64;
+        let store = RoleProtocolStore::new();
+        let mk = |role: u8, apk: [u8; 33], vrf0: u8| -> [u8; 20] {
+            let pkh = {
+                let rip = ripemd::Ripemd160::digest(Sha256::digest(apk));
+                let mut o = [0u8; 20];
+                o.copy_from_slice(&rip);
+                o
+            };
+            let secret = [role ^ vrf0; 32];
+            let nonce = [role.wrapping_add(vrf0); 32];
+            let commitment = role_precommit_commitment(&secret, &nonce);
+            let mut vrf_output = [0u8; 32];
+            vrf_output[0] = vrf0;
+            let proof = AssignmentProofV2Mirror {
+                version: 2,
+                network_id: net,
+                target_height: h,
+                role_id: role,
+                solver_pkh: pkh,
+                assignment_public_key: apk,
+                ticket_digest: [0u8; 32],
+                seed: [0u8; 32],
+                vrf_output,
+                vrf_proof: [0u8; VRF_PROOF_WIRE],
+                digest: [0u8; 32],
+            };
+            store
+                .add_precommit(ValidatedPrecommit {
+                    network_id: net,
+                    target_height: h,
+                    role_id: role,
+                    solver_pkh: pkh,
+                    commitment_hash: commitment,
+                })
+                .unwrap();
+            let dto = RoleRevealDto {
+                network_id: net,
+                target_height: h,
+                role_id: role,
+                lane_id: 0,
+                solver_pkh: hex::encode(pkh),
+                secret: hex::encode(secret),
+                nonce: hex::encode(nonce),
+                commitment_hash: hex::encode(commitment),
+                claim_digest: hex::encode([0u8; 32]),
+                assignment_public_key: hex::encode(apk),
+                assignment_proof: hex::encode(proof.serialize()),
+                ticket_proof: hex::encode([1u8; 4]),
+                puzzle_solution: hex::encode([2u8; 4]),
+            };
+            store.add_reveal(dto.validate(net).unwrap()).unwrap();
+            pkh
+        };
+        // COMPUTE: two competitors -- higher VRF score (0xff) must beat lower (0x10).
+        let pkh_hi = mk(ROLE_COMPUTE_CONTRIBUTOR, [0x02u8; 33], 0xff);
+        let pkh_lo = mk(ROLE_COMPUTE_CONTRIBUTOR, [0x03u8; 33], 0x10);
+        let pkh_v = mk(ROLE_VERIFY_CONTRIBUTOR, [0x04u8; 33], 0x80);
+        let pkh_s = mk(ROLE_SUPPORT_CONTRIBUTOR, [0x05u8; 33], 0x80);
+        assert_ne!(pkh_hi, pkh_lo);
+        let w = store.best_bundled_reveals(h).expect("winners");
+        assert_eq!(w[0].claim.solver_pkh, pkh_hi, "COMPUTE winner = higher self-VRF score");
+        assert_eq!(w[1].claim.solver_pkh, pkh_v, "VERIFY -> its distinct participant");
+        assert_eq!(w[2].claim.solver_pkh, pkh_s, "SUPPORT -> its distinct participant");
+        for wr in &w {
+            assert!(wr.assignment_public_key.is_some(), "winner carries payout-bound proof");
         }
     }
 

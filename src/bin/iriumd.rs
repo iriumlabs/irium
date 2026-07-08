@@ -14697,6 +14697,39 @@ async fn poawx_finality_vote_post(
 
 /// Phase 21I: loopback-only GET finality votes for a height (hex-encoded canonical
 /// wire bytes, deterministic order). The pool filters by block_hash locally.
+#[derive(serde::Deserialize)]
+struct ProposerStatusQuery {
+    pkh: String,
+}
+
+/// Step F: "am I registered / eligible as a proposer?" Given a payout pkh, report whether it
+/// has an on-chain proposer registration and whether it is currently eligible (past the
+/// freeze depth), plus the eligible-set size. Mirrors D's status pattern; read-only.
+async fn poawx_proposer_status_get(
+    State(state): State<AppState>,
+    Query(q): Query<ProposerStatusQuery>,
+) -> Result<Json<Value>, StatusCode> {
+    let pkh_bytes = hex::decode(q.pkh.trim()).map_err(|_| StatusCode::BAD_REQUEST)?;
+    if pkh_bytes.len() != 20 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let mut pkh = [0u8; 20];
+    pkh.copy_from_slice(&pkh_bytes);
+    let tip = state.status_height_cache.load(Ordering::Relaxed);
+    let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
+    let reg = &guard.proposer_registry;
+    let registered = reg.is_registered_pkh(&pkh);
+    let eligible = reg.eligible_pkhs(tip).contains(&pkh);
+    let eligible_count = reg.eligible_count(tip);
+    Ok(Json(json!({
+        "pkh": q.pkh,
+        "tip_height": tip,
+        "registered": registered,
+        "eligible": eligible,
+        "eligible_count": eligible_count,
+    })))
+}
+
 async fn poawx_finality_votes_get(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
@@ -19437,6 +19470,7 @@ async fn main() {
         // hard-off, disabled unless the finality gossip gate is configured).
         .route("/poawx/finality-vote", post(poawx_finality_vote_post))
         .route("/poawx/registration", post(poawx_post_registration))
+        .route("/poawx/proposer-status", get(poawx_proposer_status_get))
         .route("/poawx/finality-votes", get(poawx_finality_votes_get))
         .route("/rpc/submit_tx", post(submit_tx))
         // Fix D: pending-tx introspection + per-address pending-spent

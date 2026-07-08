@@ -454,6 +454,7 @@ pub fn pool_identity_json(
     pool_pubkey_hex: &str,
     network_id: u8,
     fee: Option<(u16, [u8; 20])>,
+    proposer_pubkey: Option<[u8; 33]>,
 ) -> serde_json::Value {
     let mut v = serde_json::json!({
         "pool_pubkey": pool_pubkey_hex,
@@ -466,6 +467,12 @@ pub fn pool_identity_json(
         if bps > 0 {
             v["fee_pkh"] = serde_json::Value::String(hex::encode(pkh));
         }
+    }
+    // Stage D v2: advertise the pool's custodial proposer key so a miner's signup
+    // tool can bind it into the delegation (enables real delegated block production,
+    // not just the receipt path). Omitted => legacy receipt-only signup.
+    if let Some(pp) = proposer_pubkey {
+        v["proposer_pubkey"] = serde_json::Value::String(hex::encode(pp));
     }
     v
 }
@@ -4571,14 +4578,98 @@ async fn handle_conn(mut stream: TcpStream, ctx: Arc<ServerCtx>) {
             Some(p) => {
                 // Advertise the pool's configured third-party fee terms (or fee-0
                 // when official / mode off / mainnet).
+                // The pool holds only the proposer PUBKEY (the producer holds the
+                // secret). Advertise it from env when configured; absent => omitted.
+                let proposer_pubkey = std::env::var("IRIUM_POAWX_POOL_PROPOSER_PUBKEY_HEX")
+                    .ok()
+                    .and_then(|s| hex::decode(s.trim()).ok())
+                    .filter(|b| b.len() == 33)
+                    .map(|b| {
+                        let mut o = [0u8; 33];
+                        o.copy_from_slice(&b);
+                        o
+                    });
                 let v = pool_identity_json(
                     &p.key.pubkey_hex(),
                     p.network_id,
                     pool_third_party_fee_terms(),
+                    proposer_pubkey,
                 );
                 respond(&mut stream, 200, "OK", &v).await
             }
         },
+        ("GET", "/poawx/delegation-status") => {
+            // Step D: report whether a miner (by payout pkh) has delegations on file, with
+            // each worker's expiry_height and deleg_nonce (the latter lets the app populate
+            // the revoke flow). Loopback-only; 503 on mainnet like the rest of the server.
+            let store = match &ctx.producer {
+                Some(p) => &p.store,
+                None => {
+                    respond(
+                        &mut stream,
+                        503,
+                        "Service Unavailable",
+                        &serde_json::json!({"error":"delegation unavailable on mainnet"}),
+                    )
+                    .await;
+                    return;
+                }
+            };
+            let query = path.split('?').nth(1).unwrap_or("");
+            let miner_pkh = query
+                .split('&')
+                .find_map(|kv| {
+                    let mut it = kv.splitn(2, '=');
+                    if it.next() == Some("miner_pkh") {
+                        it.next()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or("")
+                .to_string();
+            if miner_pkh.len() != 40 || hex::decode(&miner_pkh).is_err() {
+                respond(
+                    &mut stream,
+                    400,
+                    "Bad Request",
+                    &serde_json::json!({"error":"miner_pkh query param required (40 hex)"}),
+                )
+                .await;
+                return;
+            }
+            let entries: Vec<serde_json::Value> = store
+                .all_active(0)
+                .into_iter()
+                .filter(|d| d.miner_pkh.eq_ignore_ascii_case(&miner_pkh))
+                .map(|d| {
+                    // deleg_nonce lives at wire offset 130..162 of the delegation.
+                    let nonce = hex::decode(&d.delegation_hex)
+                        .ok()
+                        .filter(|b| b.len() >= 162)
+                        .map(|b| hex::encode(&b[130..162]))
+                        .unwrap_or_default();
+                    serde_json::json!({
+                        "worker": d.worker,
+                        "expiry_height": d.expiry_height,
+                        "network_id": d.network_id,
+                        "status": d.status,
+                        "deleg_nonce": nonce,
+                    })
+                })
+                .collect();
+            respond(
+                &mut stream,
+                200,
+                "OK",
+                &serde_json::json!({
+                    "miner_pkh": miner_pkh,
+                    "delegated": !entries.is_empty(),
+                    "delegations": entries,
+                }),
+            )
+            .await;
+        }
         ("POST", "/poawx/delegation") => {
             let (key, store) = match &ctx.producer {
                 Some(p) => (&p.key, &p.store),
@@ -4769,6 +4860,136 @@ mod tests {
     use super::*;
     use k256::ecdsa::signature::hazmat::PrehashSigner;
     use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
+
+    // Step A: /poawx/pool-identity advertises the configured custodial proposer key,
+    // and the pool accepts a delegation that binds it -- over real HTTP against serve().
+    #[tokio::test]
+    async fn step_a_pool_identity_advertises_proposer_and_accepts_bound_delegation() {
+        use std::sync::Arc;
+        let _g = p20_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        let dir = std::env::temp_dir().join(format!("stepA_pool_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_DELEGATE_KEY_PATH", dir.join("delegate.hex"));
+        std::env::set_var("IRIUM_POAWX_DELEGATIONS_PATH", dir.join("delegations.json"));
+        let proposer_sk = SigningKey::from_bytes((&[0x11u8; 32]).into()).unwrap();
+        let proposer_pub = pk33(&proposer_sk);
+        std::env::set_var("IRIUM_POAWX_POOL_PROPOSER_PUBKEY_HEX", hex::encode(proposer_pub));
+
+        let producer = load_producer().map(Arc::new);
+        let prod = producer.clone().expect("producer loads on devnet");
+        let pool_pubkey = prod.key.pubkey();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let bind = format!("127.0.0.1:{port}");
+        {
+            let b = bind.clone();
+            let p = producer.clone();
+            tokio::spawn(async move {
+                let _ = serve(b, p, 2, "http://127.0.0.1:1/".to_string(), "t".to_string()).await;
+            });
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+
+        let client = reqwest::Client::new();
+        // 1. identity advertises the proposer key (the Step A pool change).
+        let id: serde_json::Value = client
+            .get(format!("http://{bind}/poawx/pool-identity"))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(
+            id["proposer_pubkey"].as_str().unwrap_or(""),
+            hex::encode(proposer_pub),
+            "pool-identity must advertise the configured proposer_pubkey"
+        );
+        assert_eq!(id["pool_pubkey"].as_str().unwrap_or(""), hex::encode(pool_pubkey));
+
+        // 2. a proposer-bound delegation is accepted.
+        let miner_sk = SigningKey::from_bytes((&[0x22u8; 32]).into()).unwrap();
+        let mut d = Delegation {
+            deleg_version: Delegation::VERSION,
+            network_id: 2,
+            miner_pubkey: pk33(&miner_sk),
+            pool_pubkey,
+            worker_tag: [0u8; 32],
+            expiry_height: 10_000_000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [7u8; 32],
+            proposer_pubkey: proposer_pub,
+            delegation_sig: [0u8; 64],
+        };
+        let sig: Signature = miner_sk.sign_prehash(&d.message_hash()).unwrap();
+        d.delegation_sig.copy_from_slice(&sig.to_bytes());
+        assert_eq!(&d.serialize()[162..195], &proposer_pub[..], "proposer at wire offset 162");
+        d.verify_signature().expect("delegation self-verifies");
+        // Acceptance: verify_and_store validates + persists the proposer-bound delegation
+        // (tip/time passed directly; the HTTP path only adds a node tip lookup).
+        let stored = verify_and_store(
+            prod.store.as_ref(),
+            &hex::encode(d.serialize()),
+            "",
+            &hex::encode(d.miner_pkh()),
+            &pool_pubkey,
+            2,
+            100,
+            1_700_000_000,
+            None,
+        )
+        .expect("proposer-bound delegation accepted by verify_and_store");
+        assert_eq!(stored.miner_pkh, hex::encode(d.miner_pkh()), "stored under miner pkh");
+
+        // Step D: GET /poawx/delegation-status reports the miner as delegated + the nonce.
+        let miner_pkh_hex = hex::encode(d.miner_pkh());
+        let st: serde_json::Value = client
+            .get(format!(
+                "http://{bind}/poawx/delegation-status?miner_pkh={miner_pkh_hex}"
+            ))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(st["delegated"].as_bool(), Some(true), "status: delegated");
+        let entry = &st["delegations"][0];
+        assert_eq!(entry["expiry_height"].as_u64(), Some(10_000_000));
+        assert_eq!(
+            entry["deleg_nonce"].as_str().unwrap_or(""),
+            hex::encode([7u8; 32]),
+            "status returns the deleg_nonce for revoke"
+        );
+        // an unrelated pkh is not delegated.
+        let none: serde_json::Value = client
+            .get(format!(
+                "http://{bind}/poawx/delegation-status?miner_pkh={}",
+                hex::encode([0x99u8; 20])
+            ))
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert_eq!(none["delegated"].as_bool(), Some(false), "unrelated pkh not delegated");
+
+        for k in [
+            "IRIUM_NETWORK",
+            "IRIUM_POAWX_DELEGATE_KEY_PATH",
+            "IRIUM_POAWX_DELEGATIONS_PATH",
+            "IRIUM_POAWX_POOL_PROPOSER_PUBKEY_HEX",
+        ] {
+            std::env::remove_var(k);
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn pk33(sk: &SigningKey) -> [u8; 33] {
         let vk = VerifyingKey::from(sk);
@@ -5247,7 +5468,7 @@ mod tests {
     #[test]
     fn pool_identity_json_shape() {
         let pk = "02".to_string() + &"ab".repeat(32);
-        let v = pool_identity_json(&pk, 1, None);
+        let v = pool_identity_json(&pk, 1, None, None);
         assert_eq!(v["pool_pubkey"], pk);
         assert_eq!(v["network_id"], 1);
         assert_eq!(v["fee_bps"], 0);
@@ -5259,7 +5480,7 @@ mod tests {
         );
         // Third-party identity advertises exact fee terms.
         let fp = [0xFEu8; 20];
-        let vt = pool_identity_json(&pk, 1, Some((200, fp)));
+        let vt = pool_identity_json(&pk, 1, Some((200, fp)), None);
         assert_eq!(vt["fee_bps"], 200);
         assert_eq!(vt["fee_pkh"], hex::encode(fp));
     }

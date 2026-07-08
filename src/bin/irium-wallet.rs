@@ -3379,9 +3379,28 @@ fn signer_material_from_wallet(address: &str) -> Result<(WalletKey, SigningKey),
 /// OFFICIAL pool fee is 0% (`fee_bps == 0`, zero `fee_pkh`). Phase 20 Step 4: a
 /// third-party fee (`fee_bps` in 1..=200 with a non-zero `fee_pkh`) is supported
 /// on non-mainnet networks; the fee terms are bound into the miner's signature.
-fn build_signed_delegation(
+/// Resolve the signing key: prefer the raw secret in IRIUM_POAWX_DELEGATION_SECRET_HEX (set
+/// by the Irium Core app, which derives it from the unlocked wallet and passes it via env to
+/// this sidecar), else load it from the plaintext wallet file for `address`. Lets the app
+/// reuse the delegate-pool / revoke-delegation flows without a shared wallet file.
+fn resolve_signing_key(address: &str) -> Result<(Option<WalletKey>, SigningKey), String> {
+    if let Ok(hex_s) = std::env::var("IRIUM_POAWX_DELEGATION_SECRET_HEX") {
+        let b = hex::decode(hex_s.trim())
+            .map_err(|_| "IRIUM_POAWX_DELEGATION_SECRET_HEX invalid hex".to_string())?;
+        if b.len() != 32 {
+            return Err("IRIUM_POAWX_DELEGATION_SECRET_HEX must be 32 bytes (64 hex)".to_string());
+        }
+        let sk = SigningKey::from_slice(&b).map_err(|e| format!("bad delegation secret: {e}"))?;
+        return Ok((None, sk));
+    }
+    let (k, sk) = signer_material_from_wallet(address)?;
+    Ok((Some(k), sk))
+}
+
+fn build_signed_delegation_with_proposer(
     signing_key: &SigningKey,
     pool_pubkey: [u8; 33],
+    proposer_pubkey: [u8; 33],
     network_id: u8,
     worker: &str,
     expiry_height: u64,
@@ -3431,9 +3450,8 @@ fn build_signed_delegation(
         fee_bps,
         fee_pkh,
         deleg_nonce,
-        // Stage D Step 1: v2 wire field. A real custodial proposer key is wired
-        // into the wallet CLI in a later step; zero placeholder for now.
-        proposer_pubkey: [0u8; 33],
+        // Stage D v2: the pool's custodial proposer key (zero => legacy receipt-only).
+        proposer_pubkey,
         delegation_sig: [0u8; 64],
     };
     let sig: Signature = signing_key
@@ -3441,6 +3459,51 @@ fn build_signed_delegation(
         .map_err(|e| format!("sign delegation: {e}"))?;
     d.delegation_sig.copy_from_slice(&sig.to_bytes());
     Ok(d)
+}
+
+/// Back-compat wrapper: bind a zero proposer key (receipt-path only / legacy tests).
+/// The Stage D v2 signup path calls build_signed_delegation_with_proposer with the
+/// pool's advertised proposer key.
+#[allow(clippy::too_many_arguments)]
+fn build_signed_delegation(
+    signing_key: &SigningKey,
+    pool_pubkey: [u8; 33],
+    network_id: u8,
+    worker: &str,
+    expiry_height: u64,
+    fee_bps: u16,
+    fee_pkh: [u8; 20],
+    deleg_nonce: [u8; 32],
+) -> Result<irium_node_rs::poawx::Delegation, String> {
+    build_signed_delegation_with_proposer(
+        signing_key,
+        pool_pubkey,
+        [0u8; 33],
+        network_id,
+        worker,
+        expiry_height,
+        fee_bps,
+        fee_pkh,
+        deleg_nonce,
+    )
+}
+
+/// Resolve an optional `--proposer-pubkey` hex (66 chars / 33 bytes); None => zero
+/// (legacy / receipt-only). Online mode reads this from /poawx/pool-identity instead.
+fn resolve_proposer_pubkey(hex_opt: &Option<String>) -> Result<[u8; 33], String> {
+    match hex_opt {
+        None => Ok([0u8; 33]),
+        Some(h) => {
+            let b = hex::decode(h.trim())
+                .map_err(|_| "--proposer-pubkey invalid hex".to_string())?;
+            if b.len() != 33 {
+                return Err("--proposer-pubkey must be 33 bytes (66 hex)".to_string());
+            }
+            let mut o = [0u8; 33];
+            o.copy_from_slice(&b);
+            Ok(o)
+        }
+    }
 }
 
 fn next_flag_value(args: &[String], i: &mut usize) -> Result<String, String> {
@@ -3481,6 +3544,9 @@ struct PoawxRegisterArgs {
     third_party_pool: bool,
     /// Phase 20 Step 4: third-party fee recipient (base58 address or 40-hex pkh).
     fee_pkh: Option<String>,
+    /// Stage D v2: optional custodial proposer pubkey to bind (emit-only mode;
+    /// online mode reads it from /poawx/pool-identity).
+    proposer_pubkey_hex: Option<String>,
 }
 
 /// Resolve a `--fee-pkh` argument: a 40-char hex (20-byte) pkh, or a base58 P2PKH
@@ -3517,6 +3583,7 @@ fn parse_poawx_register_args(args: &[String]) -> Result<PoawxRegisterArgs, Strin
         fee_bps: 0,
         third_party_pool: false,
         fee_pkh: None,
+        proposer_pubkey_hex: None,
     };
     let mut i = 1usize;
     while i < args.len() {
@@ -3553,6 +3620,9 @@ fn parse_poawx_register_args(args: &[String]) -> Result<PoawxRegisterArgs, Strin
                 i += 1;
             }
             "--fee-pkh" => a.fee_pkh = Some(next_flag_value(args, &mut i)?),
+            "--proposer-pubkey" => {
+                a.proposer_pubkey_hex = Some(next_flag_value(args, &mut i)?)
+            }
             other => return Err(format!("unknown flag {other}")),
         }
     }
@@ -4765,12 +4835,14 @@ fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
     if a.emit_only {
         let (pool_pubkey, network_id, addr, worker, expiry, fee_bps, fee_pkh) =
             resolve_emit_only_args(&a)?;
-        let (_key, signing_key) = signer_material_from_wallet(&addr)?;
+        let (_key, signing_key) = resolve_signing_key(&addr)?;
+        let proposer_pubkey = resolve_proposer_pubkey(&a.proposer_pubkey_hex)?;
         let mut nonce = [0u8; 32];
         OsRng.fill_bytes(&mut nonce);
-        let d = build_signed_delegation(
+        let d = build_signed_delegation_with_proposer(
             &signing_key,
             pool_pubkey,
+            proposer_pubkey,
             network_id,
             &worker,
             expiry,
@@ -4797,8 +4869,9 @@ fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
             "official fee_bps 0".to_string()
         };
         eprintln!(
-            "[emit-only] signed delegation for miner_pkh {} (worker {worker}, expiry {expiry}, {fee_note}); no network used. Send the JSON above to the operator to POST to the loopback-only /poawx/delegation endpoint.",
-            hex::encode(d.miner_pkh())
+            "[emit-only] signed delegation for miner_pkh {} (worker {worker}, expiry {expiry}, deleg_nonce {}, {fee_note}); no network used. Send the JSON above to the operator to POST to the loopback-only /poawx/delegation endpoint. Keep the deleg_nonce -- you need it to revoke later.",
+            hex::encode(d.miner_pkh()),
+            hex::encode(d.deleg_nonce)
         );
         return Ok(());
     }
@@ -4865,13 +4938,33 @@ fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
     let mut pool_pubkey = [0u8; 33];
     pool_pubkey.copy_from_slice(&pool_pubkey_bytes);
 
+    // Stage D v2: bind the pool's advertised custodial proposer key so the delegation
+    // authorizes real delegated block production. Legacy pools that don't advertise one
+    // => zero proposer (receipt-path only), with a clear note.
+    let proposer_pubkey = match id.get("proposer_pubkey").and_then(|v| v.as_str()) {
+        Some(h) => {
+            let b = hex::decode(h).map_err(|_| "pool proposer_pubkey invalid hex".to_string())?;
+            if b.len() != 33 {
+                return Err("pool proposer_pubkey must be 33 bytes".to_string());
+            }
+            let mut o = [0u8; 33];
+            o.copy_from_slice(&b);
+            o
+        }
+        None => {
+            eprintln!("[register] note: pool did not advertise a proposer_pubkey; binding zero (receipt-path only, not delegated block production)");
+            [0u8; 33]
+        }
+    };
+
     // 2. Sign delegation with the wallet key (in memory only).
-    let (_key, signing_key) = signer_material_from_wallet(&addr)?;
+    let (_key, signing_key) = resolve_signing_key(&addr)?;
     let mut nonce = [0u8; 32];
     OsRng.fill_bytes(&mut nonce);
-    let d = build_signed_delegation(
+    let d = build_signed_delegation_with_proposer(
         &signing_key,
         pool_pubkey,
+        proposer_pubkey,
         network_id,
         &worker,
         expiry,
@@ -4900,11 +4993,77 @@ fn cmd_poawx_register(args: &[String]) -> Result<(), String> {
     let status = resp.status();
     let text = resp.text().unwrap_or_default();
     if status.is_success() {
-        println!("delegation registered (miner_pkh {miner_pkh_hex}, worker {worker}, expiry {expiry}): {text}");
+        println!("delegation registered (miner_pkh {miner_pkh_hex}, worker {worker}, expiry {expiry}, deleg_nonce {}): {text}", hex::encode(nonce));
+        eprintln!("[register] keep this deleg_nonce -- you need it to revoke later: irium-wallet revoke-delegation --addr <addr> --deleg-nonce {} --network-id {network_id}", hex::encode(nonce));
         Ok(())
     } else {
         Err(format!("delegation rejected (HTTP {status}): {text}"))
     }
+}
+
+/// `revoke-delegation`: sign a Stage D DelegationRevocationV1 with the wallet's payout key
+/// to cancel a previously-signed pool delegation. GENERATE AND HAND OFF: revocation is
+/// on-chain only right now (no pool submit endpoint), so this prints the signed 130-byte
+/// revocation hex plus plain guidance; the operator embeds it on-chain, and it takes effect
+/// once included in a block -- not instantly like signup.
+fn cmd_revoke_delegation(args: &[String]) -> Result<(), String> {
+    let mut addr: Option<String> = None;
+    let mut nonce_hex: Option<String> = None;
+    let mut network_id: Option<u8> = None;
+    let mut i = 1usize;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--addr" => addr = Some(next_flag_value(args, &mut i)?),
+            "--deleg-nonce" => nonce_hex = Some(next_flag_value(args, &mut i)?),
+            "--network-id" => {
+                network_id = Some(
+                    next_flag_value(args, &mut i)?
+                        .parse()
+                        .map_err(|_| "invalid --network-id".to_string())?,
+                )
+            }
+            other => return Err(format!("unknown flag {other}")),
+        }
+    }
+    let addr = addr.ok_or("revoke-delegation requires --addr <address>")?;
+    let network_id = network_id
+        .ok_or("revoke-delegation requires --network-id <id> (must match the delegation's network)")?;
+    if network_id == 0 {
+        return Err("delegation revocation is not available on mainnet (network_id 0)".to_string());
+    }
+    let nonce_hex = nonce_hex.ok_or(
+        "revoke-delegation requires --deleg-nonce <64hex> (the deleg_nonce printed at signup)",
+    )?;
+    let nb = hex::decode(nonce_hex.trim()).map_err(|_| "--deleg-nonce invalid hex".to_string())?;
+    if nb.len() != 32 {
+        return Err("--deleg-nonce must be 32 bytes (64 hex)".to_string());
+    }
+    let mut deleg_nonce = [0u8; 32];
+    deleg_nonce.copy_from_slice(&nb);
+
+    // Load the payout key (the delegation's signer = the revocation authority) and sign.
+    let (_key, signing_key) = resolve_signing_key(&addr)?;
+    let secret: [u8; 32] = signing_key.to_bytes().into();
+    let rec = irium_node_rs::poawx::DelegationRevocationV1::build_signed(
+        &secret,
+        network_id,
+        deleg_nonce,
+    )
+    .map_err(|e| format!("build revocation: {e}"))?;
+    rec.validate(network_id)
+        .map_err(|e| format!("self-verify revocation failed before emit: {e}"))?;
+
+    // stdout: ONLY the hex (pipe/save friendly). stderr: plain-language hand-off guidance.
+    println!("{}", hex::encode(rec.serialize()));
+    eprintln!(
+        "[revoke] signed delegation-revocation for address {addr} (deleg_nonce {}).",
+        hex::encode(deleg_nonce)
+    );
+    eprintln!("[revoke] Revocation is ON-CHAIN ONLY right now -- there is no instant pool submit endpoint.");
+    eprintln!("[revoke] Hand the hex above to the pool operator to embed on-chain (IRIUM_POAWX_REVOKE_HEX).");
+    eprintln!("[revoke] It takes effect once included in a block, NOT instantly. After that the network stops");
+    eprintln!("[revoke] paying delegated rewards for this delegation and you fall back to the pool's off-chain fair tracking.");
+    Ok(())
 }
 
 fn sign_target_hash(
@@ -27255,6 +27414,28 @@ fn main() {
         }
         "poawx-register" => {
             if let Err(e) = cmd_poawx_register(&args) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        "delegate-pool" => {
+            // Friendly alias for poawx-register: `delegate-pool <address> --pool <url>
+            // --worker <name> --expiry-height <N> [flags]`. Translates the positional
+            // <address> into --addr and reuses the exact register flow.
+            if args.len() < 2 || args[1].starts_with("--") {
+                eprintln!("usage: irium-wallet delegate-pool <address> --pool <url> --worker <name> --expiry-height <N>");
+                std::process::exit(1);
+            }
+            let mut translated =
+                vec!["poawx-register".to_string(), "--addr".to_string(), args[1].clone()];
+            translated.extend_from_slice(&args[2..]);
+            if let Err(e) = cmd_poawx_register(&translated) {
+                eprintln!("{e}");
+                std::process::exit(1);
+            }
+        }
+        "revoke-delegation" => {
+            if let Err(e) = cmd_revoke_delegation(&args) {
                 eprintln!("{e}");
                 std::process::exit(1);
             }

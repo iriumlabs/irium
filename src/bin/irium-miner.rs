@@ -3283,6 +3283,10 @@ struct DelegatedCtx {
     delegate_secret: [u8; 32],
     /// The miner-signed Delegation v2 (binds proposer_pubkey -> pool_pubkey -> payout).
     delegation: irium_node_rs::poawx::Delegation,
+    /// Stage D Step 5 Milestone F: delegation-revocation records to embed on-chain in
+    /// this producer's blocks (comma-separated hexes via IRIUM_POAWX_REVOKE_HEX). Empty
+    /// => no revocation carried.
+    revocations: Vec<irium_node_rs::poawx::DelegationRevocationV1>,
 }
 
 fn poawx_secret_env(name: &str) -> Result<[u8; 32], String> {
@@ -3336,10 +3340,26 @@ fn poawx_delegated_ctx() -> Result<Option<DelegatedCtx>, String> {
     // enforced downstream (the harness asserts delegate==pool_pubkey; the node's Step-3
     // proposer branch asserts the proof key==proposer_pubkey), so a mismatch fails with
     // a clear error at build/submit rather than producing an invalid block.
+    let revocations = match env::var("IRIUM_POAWX_REVOKE_HEX").ok() {
+        None => Vec::new(),
+        Some(list) => {
+            let mut out = Vec::new();
+            for h in list.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                let b = hex::decode(h).map_err(|e| format!("bad IRIUM_POAWX_REVOKE_HEX: {e}"))?;
+                let rec = irium_node_rs::poawx::DelegationRevocationV1::deserialize(&b)
+                    .map_err(|e| format!("bad revocation record: {e}"))?;
+                rec.validate(irium_node_rs::activation::network_id_byte())
+                    .map_err(|e| format!("revocation record invalid: {e}"))?;
+                out.push(rec);
+            }
+            out
+        }
+    };
     Ok(Some(DelegatedCtx {
         custodial_secret,
         delegate_secret,
         delegation,
+        revocations,
     }))
 }
 
@@ -3741,6 +3761,7 @@ fn run_poawx_solo() -> Result<(), String> {
                 &d.delegate_secret, d.delegation.clone(), net, height, prev_hash,
                 parent_prev_hash, bits, tmpl.time, diff, parent_seed_components, &dominance,
                 node_gates.as_ref(), proposer_ctx.as_ref(), registration_section.as_ref(),
+                d.revocations.clone(),
             ),
             None => irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer(
                 &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,

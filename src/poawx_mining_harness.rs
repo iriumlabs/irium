@@ -223,6 +223,10 @@ pub struct AllGatesIdentities {
     /// delegate key (signs the receipt + does role work) and the proposer proof is
     /// bound to `delegation.proposer_pubkey` rather than to `worker_pkh`.
     pub delegation: Option<crate::poawx::Delegation>,
+    /// Stage D Step 5 Milestone F: optional delegation-revocation records to embed in
+    /// the block's RVK1 ext section (a producer revoking miners' delegations on-chain).
+    /// None for solo/dev and for delegated blocks that carry no revocation.
+    pub revocations: Option<Vec<crate::poawx::DelegationRevocationV1>>,
 }
 
 impl AllGatesIdentities {
@@ -246,6 +250,7 @@ impl AllGatesIdentities {
             claim_seed: [0x2Au8; 32],
             worker_pkh_override: None,
             delegation: None,
+            revocations: None,
         })
     }
 
@@ -279,6 +284,7 @@ impl AllGatesIdentities {
             claim_seed: derive(b"claim"),
             worker_pkh_override: None,
             delegation: None,
+            revocations: None,
         })
     }
 
@@ -293,6 +299,7 @@ impl AllGatesIdentities {
     pub fn delegated(
         delegate_secret: &[u8; 32],
         delegation: crate::poawx::Delegation,
+        revocations: Vec<crate::poawx::DelegationRevocationV1>,
     ) -> Result<Self, String> {
         let sk = SigningKey::from_bytes(delegate_secret.into())
             .map_err(|_| "delegated: bad delegate key".to_string())?;
@@ -326,6 +333,11 @@ impl AllGatesIdentities {
             claim_seed: derive(b"claim"),
             worker_pkh_override: Some(delegation.miner_pkh()),
             delegation: Some(delegation),
+            revocations: if revocations.is_empty() {
+                None
+            } else {
+                Some(revocations)
+            },
         })
     }
 }
@@ -482,9 +494,10 @@ pub fn build_delegated_poawx_block_with_proposer(
     node_gates: Option<&NodeGateFlags>,
     proposer_ctx: Option<&ProposerCtx>,
     registration_section: Option<&crate::poawx::ProposerRegistrationSection>,
+    revocations: Vec<crate::poawx::DelegationRevocationV1>,
 ) -> Result<AllGatesProof, String> {
     build_all_gates_block_with(
-        &AllGatesIdentities::delegated(delegate_secret, delegation)?,
+        &AllGatesIdentities::delegated(delegate_secret, delegation, revocations)?,
         network_id,
         height,
         prev_hash,
@@ -925,7 +938,7 @@ fn build_all_gates_block_with(
         fraud_proofs: None,
         proposer_assignment,
         proposer_registrations,
-        delegation_revocations: None,
+        delegation_revocations: ids.revocations.clone(),
     };
 
     // Worker receipt: real receipt PoW solution + signed challenge (mode-0).

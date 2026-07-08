@@ -11429,7 +11429,7 @@ mod tests {
         let bits2 = st.target_for_height(2).bits;
         let p2 = build_delegated_poawx_block_with_proposer(
             &delegate_secret, d.clone(), net, 2, h1_hash, Some(genesis_hash), bits2,
-            genesis.header.time + 2, 1, pc2, &st.dominance, None, Some(&ctx), None,
+            genesis.header.time + 2, 1, pc2, &st.dominance, None, Some(&ctx), None, vec![],
         )
         .expect("build delegated h2");
 

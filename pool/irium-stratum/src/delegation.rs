@@ -627,6 +627,15 @@ pub struct AssignmentContext {
     pub lane: String,
 }
 
+fn decode33(s: &str) -> Option<[u8; 33]> {
+    let b = hex::decode(s.trim()).ok()?;
+    if b.len() != 33 {
+        return None;
+    }
+    let mut o = [0u8; 33];
+    o.copy_from_slice(&b);
+    Some(o)
+}
 fn decode32(s: &str) -> Option<[u8; 32]> {
     let b = hex::decode(s).ok()?;
     if b.len() != 32 {
@@ -3233,6 +3242,15 @@ pub struct RoleRevealDto {
     pub nonce: String,
     pub commitment_hash: String,
     pub claim_digest: String,
+    /// Phase 3 payout-bound role-work bundle (optional; empty => legacy claim-only).
+    #[serde(default)]
+    pub assignment_public_key: String,
+    #[serde(default)]
+    pub assignment_proof: String,
+    #[serde(default)]
+    pub ticket_proof: String,
+    #[serde(default)]
+    pub puzzle_solution: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -3261,6 +3279,14 @@ pub struct ValidatedReveal {
     pub network_id: u8,
     pub target_height: u64,
     pub claim: PoawxRoleClaimMirror,
+    /// Phase 3: the participant's payout-bound role-work proofs. `assignment_public_key`
+    /// is Some iff a bundle was supplied AND hash160(it) == claim.solver_pkh was verified
+    /// on ingest (the Phase 1 structural binding). The node verifies the full ECVRF at
+    /// connect_block; the pool only enforces the hash binding + carries the proofs.
+    pub assignment_public_key: Option<[u8; 33]>,
+    pub assignment_proof: Vec<u8>,
+    pub ticket_proof: Vec<u8>,
+    pub puzzle_solution: Vec<u8>,
 }
 
 impl RolePrecommitDto {
@@ -3312,6 +3338,38 @@ impl RoleRevealDto {
         if role_precommit_commitment(&secret, &nonce) != commitment_hash {
             return Err("role reveal: commitment_hash != H(secret||nonce)".to_string());
         }
+        // Phase 3: optional payout-bound role-work bundle. Enforce the Phase 1 structural
+        // binding at ingest: hash160(assignment_public_key) MUST equal claim.solver_pkh, so
+        // a reveal can only attribute a role to the key that will prove it. A distinct
+        // participant proving with its own payout key passes; a producer naming an address
+        // it does not hold the proving key for is rejected here (the node then verifies the
+        // full ECVRF at connect_block).
+        let (assignment_public_key, assignment_proof, ticket_proof, puzzle_solution) =
+            if self.assignment_public_key.trim().is_empty() {
+                (None, Vec::new(), Vec::new(), Vec::new())
+            } else {
+                let apk =
+                    decode33(&self.assignment_public_key).ok_or("role reveal: bad assignment_public_key")?;
+                let a_pkh = {
+                    let rip = ripemd::Ripemd160::digest(Sha256::digest(apk));
+                    let mut o = [0u8; 20];
+                    o.copy_from_slice(&rip);
+                    o
+                };
+                if a_pkh != solver_pkh {
+                    return Err(
+                        "role reveal: assignment_public_key does not hash to solver_pkh (Phase 1 binding)"
+                            .to_string(),
+                    );
+                }
+                let ap = hex::decode(self.assignment_proof.trim())
+                    .map_err(|_| "role reveal: bad assignment_proof hex".to_string())?;
+                let tp = hex::decode(self.ticket_proof.trim())
+                    .map_err(|_| "role reveal: bad ticket_proof hex".to_string())?;
+                let ps = hex::decode(self.puzzle_solution.trim())
+                    .map_err(|_| "role reveal: bad puzzle_solution hex".to_string())?;
+                (Some(apk), ap, tp, ps)
+            };
         Ok(ValidatedReveal {
             network_id: self.network_id,
             target_height: self.target_height,
@@ -3324,6 +3382,10 @@ impl RoleRevealDto {
                 claim_digest,
                 commitment_hash: Some(commitment_hash),
             },
+            assignment_public_key,
+            assignment_proof,
+            ticket_proof,
+            puzzle_solution,
         })
     }
 }
@@ -6746,7 +6808,62 @@ mod tests {
             nonce: hex::encode(nonce),
             commitment_hash: hex::encode(role_precommit_commitment(&secret, &nonce)),
             claim_digest: hex::encode(cd),
+            assignment_public_key: String::new(),
+            assignment_proof: String::new(),
+            ticket_proof: String::new(),
+            puzzle_solution: String::new(),
         }
+    }
+
+    #[test]
+    fn phase3_reveal_bundle_enforces_payout_binding() {
+        // A payout-bound bundle whose assignment_public_key hashes to solver_pkh is
+        // accepted and carries the proofs; one that does not is rejected (the Phase 1
+        // structural binding, enforced at pool ingest); a legacy claim-only reveal still works.
+        let net = 2u8;
+        let secret = [0x11u8; 32];
+        let nonce = [0x22u8; 32];
+        let commitment = role_precommit_commitment(&secret, &nonce);
+        let apk = [0x02u8; 33];
+        let pkh = {
+            let rip = ripemd::Ripemd160::digest(Sha256::digest(apk));
+            let mut o = [0u8; 20];
+            o.copy_from_slice(&rip);
+            o
+        };
+        let mk = |apk_hex: &str, solver: [u8; 20]| RoleRevealDto {
+            network_id: net,
+            target_height: 10,
+            role_id: ROLE_COMPUTE_CONTRIBUTOR,
+            lane_id: 0,
+            solver_pkh: hex::encode(solver),
+            secret: hex::encode(secret),
+            nonce: hex::encode(nonce),
+            commitment_hash: hex::encode(commitment),
+            claim_digest: hex::encode([0u8; 32]),
+            assignment_public_key: apk_hex.to_string(),
+            assignment_proof: hex::encode([1u8; 8]),
+            ticket_proof: hex::encode([2u8; 8]),
+            puzzle_solution: hex::encode([3u8; 8]),
+        };
+        // matching binding -> accepted, carries the proofs
+        let v = mk(&hex::encode(apk), pkh).validate(net).expect("matching bundle accepted");
+        assert_eq!(v.assignment_public_key, Some(apk));
+        assert_eq!(v.assignment_proof.len(), 8);
+        assert_eq!(v.ticket_proof.len(), 8);
+        assert_eq!(v.puzzle_solution.len(), 8);
+        // mismatched solver (apk does not hash to it) -> rejected with the Phase 1 binding error
+        let e = mk(&hex::encode(apk), [0x99u8; 20])
+            .validate(net)
+            .expect_err("mismatched binding must be rejected");
+        assert!(e.contains("Phase 1 binding"), "got: {e}");
+        // legacy claim-only (empty bundle) still accepted, no proofs carried
+        let mut legacy = mk("", pkh);
+        legacy.assignment_proof = String::new();
+        legacy.ticket_proof = String::new();
+        legacy.puzzle_solution = String::new();
+        let lv = legacy.validate(net).expect("legacy claim-only accepted");
+        assert!(lv.assignment_public_key.is_none());
     }
 
     #[test]

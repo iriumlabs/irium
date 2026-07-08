@@ -1258,6 +1258,56 @@ impl TicketProofMirror {
         out.extend_from_slice(&self.ticket_digest);
         out
     }
+
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        if raw.len() != TICKET_PROOF_WIRE {
+            return Err(format!(
+                "ticket proof mirror: wrong length {} (want {})",
+                raw.len(),
+                TICKET_PROOF_WIRE
+            ));
+        }
+        let mut o = 0usize;
+        let network_id = raw[o];
+        o += 1;
+        let target_height = u64::from_le_bytes(raw[o..o + 8].try_into().unwrap());
+        o += 8;
+        let role_id = raw[o];
+        o += 1;
+        let mut miner_pkh = [0u8; 20];
+        miner_pkh.copy_from_slice(&raw[o..o + 20]);
+        o += 20;
+        let epoch = u64::from_le_bytes(raw[o..o + 8].try_into().unwrap());
+        o += 8;
+        let expiry_height = u64::from_le_bytes(raw[o..o + 8].try_into().unwrap());
+        o += 8;
+        let mut assignment_public_key = [0u8; 33];
+        assignment_public_key.copy_from_slice(&raw[o..o + 33]);
+        o += 33;
+        let mut sybil_work_nonce = [0u8; 32];
+        sybil_work_nonce.copy_from_slice(&raw[o..o + 32]);
+        o += 32;
+        let mut sybil_work_digest = [0u8; 32];
+        sybil_work_digest.copy_from_slice(&raw[o..o + 32]);
+        o += 32;
+        let penalty_status = raw[o];
+        o += 1;
+        let mut ticket_digest = [0u8; 32];
+        ticket_digest.copy_from_slice(&raw[o..o + 32]);
+        Ok(Self {
+            network_id,
+            target_height,
+            role_id,
+            miner_pkh,
+            epoch,
+            expiry_height,
+            assignment_public_key,
+            sybil_work_nonce,
+            sybil_work_digest,
+            penalty_status,
+            ticket_digest,
+        })
+    }
 }
 
 /// Phase 22D: opaque mirror of `irium_node_rs::poawx_candidate::AssignmentProofV2`
@@ -2379,6 +2429,25 @@ impl PuzzleSolutionMirror {
         o[1..9].copy_from_slice(&self.nonce.to_le_bytes());
         o[9..41].copy_from_slice(&self.proof_digest);
         o
+    }
+
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        if raw.len() != PUZZLE_SOLUTION_WIRE {
+            return Err(format!(
+                "puzzle solution mirror: wrong length {} (want {})",
+                raw.len(),
+                PUZZLE_SOLUTION_WIRE
+            ));
+        }
+        let mode = raw[0];
+        let nonce = u64::from_le_bytes(raw[1..9].try_into().unwrap());
+        let mut proof_digest = [0u8; 32];
+        proof_digest.copy_from_slice(&raw[9..41]);
+        Ok(Self {
+            mode,
+            nonce,
+            proof_digest,
+        })
     }
 }
 
@@ -3588,6 +3657,8 @@ pub fn build_collected_bundle_ext(
     let winners = store.best_bundled_reveals(height)?;
     let next_root = store.precommit_root_for(height + 1)?;
     let mut assigns: Vec<AssignmentProofV2Mirror> = Vec::with_capacity(3);
+    let mut tickets: Vec<TicketProofMirror> = Vec::with_capacity(3);
+    let mut puzzles: Vec<PuzzleSolutionMirror> = Vec::with_capacity(3);
     for w in &winners {
         let apk = w.assignment_public_key?;
         let a = AssignmentProofV2Mirror::deserialize(&w.assignment_proof).ok()?;
@@ -3598,10 +3669,16 @@ pub fn build_collected_bundle_ext(
         {
             return None;
         }
-        // ticket/puzzle carried in the reveal bundle (w.ticket_proof / w.puzzle_solution);
-        // their mirror types lack deserialize, so full attachment is a Phase 4 detail for
-        // node acceptance. M2 attaches the Phase-1-critical payout-bound assignment proofs.
+        // Phase 4: full attachment -- the participant's own ticket + puzzle proofs.
+        let t = TicketProofMirror::deserialize(&w.ticket_proof).ok()?;
+        let p = PuzzleSolutionMirror::deserialize(&w.puzzle_solution).ok()?;
+        // ticket must bind to the same participant identity as the reward.
+        if t.miner_pkh != w.claim.solver_pkh {
+            return None;
+        }
         assigns.push(a);
+        tickets.push(t);
+        puzzles.push(p);
     }
     let (fee_bps, fee_pkh) = match fee {
         Some((b, p)) if b >= 1 && b <= THIRD_PARTY_FEE_CAP_BPS && p != [0u8; 20] => (b, p),
@@ -3620,10 +3697,10 @@ pub fn build_collected_bundle_ext(
         fee_bps,
         fee_pkh,
         precommit_root: Some(next_root),
-        role_ticket_proofs: None,
+        role_ticket_proofs: Some([tickets[0].clone(), tickets[1].clone(), tickets[2].clone()]),
         role_dominance_weights: None,
         candidate_set: None,
-        role_puzzle_proofs: None,
+        role_puzzle_proofs: Some([puzzles[0].clone(), puzzles[1].clone(), puzzles[2].clone()]),
         finality_proof: None,
         committed_admission: None,
         role_assignment_v2: Some([assigns[0].clone(), assigns[1].clone(), assigns[2].clone()]),
@@ -7023,6 +7100,19 @@ mod tests {
             sa, sb, win_score, hex::encode(w[0].claim.solver_pkh),
             hex::encode(w[1].claim.solver_pkh), hex::encode(w[2].claim.solver_pkh)
         );
+    }
+
+    #[test]
+    fn phase4_mirror_ticket_puzzle_deserialize_roundtrip() {
+        // Phase 4 M2: the new mirror deserializers are exact inverses of serialize.
+        let t = TicketProofMirror::new(
+            2, 10, [0x33u8; 32], ROLE_COMPUTE_CONTRIBUTOR, [0x44u8; 20], 10, 100_010,
+            [0x02u8; 33], [0x55u8; 32], 0,
+        );
+        assert_eq!(TicketProofMirror::deserialize(&t.serialize()).unwrap(), t);
+        assert!(TicketProofMirror::deserialize(&t.serialize()[..175]).is_err());
+        let pz = PuzzleSolutionMirror { mode: 3, nonce: 12_345, proof_digest: [0x66u8; 32] };
+        assert_eq!(PuzzleSolutionMirror::deserialize(&pz.serialize()).unwrap(), pz);
     }
 
     #[test]

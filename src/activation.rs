@@ -268,6 +268,36 @@ pub fn poawx_effective_activation(network_id: u8, env_activation: Option<u64>) -
     }
 }
 
+/// Mainnet Phase 18B / Stage D delegated-receipt (mode-1) activation height.
+///
+/// `None` keeps delegated PoAW-X receipts disabled on mainnet. Governance flips
+/// this to `Some(<height>)` (with a coordinated upgrade window) to activate the
+/// direct-pool-rewards / delegated path on mainnet. This makes the mainnet
+/// delegation gate a real, settable height gate instead of an unconditional off.
+///
+/// IMPORTANT: delegation gets its OWN mainnet height and is deliberately NOT
+/// routed through `poawx_effective_activation` (which returns the fixed 50_000
+/// PoAW-X activation height on mainnet). Mainnet is already well past 50_000, so
+/// reusing that resolver would activate delegation immediately. Delegation must
+/// therefore carry a separate constant that defaults to `None`.
+pub const MAINNET_POAWX_DELEGATION_ACTIVATION_HEIGHT: Option<u64> = None;
+
+/// Effective delegation (mode-1) activation height for `network_id`: the fixed
+/// mainnet delegation constant on mainnet (env ignored), else the supplied
+/// testnet/devnet env activation. Same shape as `poawx_effective_activation`
+/// but backed by delegation's own mainnet constant. Param-driven (takes
+/// `network_id`) to preserve race-free gate unit tests.
+pub fn poawx_effective_delegation_activation(
+    network_id: u8,
+    env_activation: Option<u64>,
+) -> Option<u64> {
+    if network_id == 0 {
+        MAINNET_POAWX_DELEGATION_ACTIVATION_HEIGHT
+    } else {
+        env_activation
+    }
+}
+
 /// Whether PoAW-X consensus is active at `height`. Mainnet: the fixed code height,
 /// no env. Testnet/devnet: the env master-switch (`IRIUM_POAWX_MODE=active` AND
 /// `IRIUM_POAWX_ACTIVATION_HEIGHT` reached). Replaces the per-callsite env + "==
@@ -1135,5 +1165,32 @@ mod tests {
             Some(55)
         );
         std::env::remove_var("IRIUM_BTC_SWAP_BECH32_PAYMENT_ACTIVATION_HEIGHT");
+    }
+
+    #[test]
+    fn mainnet_delegation_activation_is_none_pending_governance() {
+        // Delegated (mode-1) PoAW-X receipts must stay disabled on mainnet until
+        // governance flips MAINNET_POAWX_DELEGATION_ACTIVATION_HEIGHT to Some(height).
+        assert!(
+            MAINNET_POAWX_DELEGATION_ACTIVATION_HEIGHT.is_none(),
+            "mainnet delegation activation must be None until an explicit governance height is set"
+        );
+        assert!(poawx_effective_delegation_activation(0, None).is_none());
+    }
+
+    #[test]
+    fn mainnet_delegation_ignores_env_override() {
+        // Mainnet must ignore the testnet/devnet env activation entirely: the gate
+        // is driven solely by the fixed mainnet constant (None => off at every height).
+        assert_eq!(poawx_effective_delegation_activation(0, Some(123)), None);
+        assert_eq!(poawx_effective_delegation_activation(0, Some(50_000)), None);
+    }
+
+    #[test]
+    fn non_mainnet_delegation_uses_env_override() {
+        // Testnet (1) / devnet (2) resolve to the supplied env activation, or None.
+        assert_eq!(poawx_effective_delegation_activation(1, Some(7)), Some(7));
+        assert_eq!(poawx_effective_delegation_activation(2, Some(7)), Some(7));
+        assert_eq!(poawx_effective_delegation_activation(2, None), None);
     }
 }

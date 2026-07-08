@@ -3559,16 +3559,25 @@ fn poawx_block_difficulty_bits() -> u32 {
 }
 
 /// Phase 18B: true when mode-1 (delegated) PoAW-X receipts are active for
-/// `height`. Mainnet always returns false (mode-1 hard-off). Testnet/devnet
-/// gate on `IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT`.
+/// `height`. Mainnet gates on the fixed `MAINNET_POAWX_DELEGATION_ACTIVATION_HEIGHT`
+/// consensus constant (currently `None` => off at every height until governance
+/// sets a height); testnet/devnet gate on `IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT`.
+///
+/// This is a real, settable height gate (same shape as `poawx_effective_activation`)
+/// rather than an unconditional mainnet-off. NOTE: a second, independent mainnet
+/// guard in `validate_poawx_block_receipts` still unconditionally rejects any
+/// mainnet block carrying delegated receipts ("unconditional and stays"); that
+/// guard must be converted to this same gate as part of the eventual mainnet
+/// delegation-activation commit before the gate alone becomes determinative on
+/// mainnet.
 fn poawx_delegation_active(height: u64) -> bool {
-    if crate::activation::network_kind_from_env() == crate::activation::NetworkKind::Mainnet {
-        return false;
-    }
-    match crate::activation::poawx_delegation_activation_height() {
-        Some(h) => height >= h,
-        None => false,
-    }
+    matches!(
+        crate::activation::poawx_effective_delegation_activation(
+            crate::activation::network_id_byte(),
+            crate::activation::poawx_delegation_activation_height(),
+        ),
+        Some(h) if height >= h
+    )
 }
 
 /// Phase 20: true when the multi-role reward split is active for `height`.

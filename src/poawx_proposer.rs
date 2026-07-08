@@ -349,6 +349,13 @@ impl ProposerEligibilityRegistry {
         self.keys.contains_key(vrf_pubkey)
     }
 
+    /// Step F: whether ANY on-chain-registered proposer key is owned by `pkh` (regardless
+    /// of freeze/eligibility). Used by the proposer-status query so a miner can check by its
+    /// payout pkh without knowing the exact VRF key bytes.
+    pub fn is_registered_pkh(&self, pkh: &[u8; 20]) -> bool {
+        self.keys.values().any(|r| &r.pkh == pkh)
+    }
+
     pub fn len(&self) -> usize {
         self.keys.len()
     }

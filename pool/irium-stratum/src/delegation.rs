@@ -6930,6 +6930,102 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // rig integration test: reads REAL worker bundles from IRIUM_M3_DIR
+    fn phase3_m3_real_worker_bundles_collection_and_attribution() {
+        // End-to-end with GENUINE Phase-2 worker output: feed real bundles through the
+        // actual collection path (validate -> store -> best_bundled_reveals). Confirms the
+        // pool collects, validates the Phase-1 payout bindings on real proofs, and
+        // attributes each role to its rightful distinct real participant.
+        let dir = std::env::var("IRIUM_M3_DIR").unwrap_or_else(|_| "/home/irium/tmp/m3".to_string());
+        let load = |name: &str| -> serde_json::Value {
+            serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{name}.json")).expect("read bundle"),
+            )
+            .expect("bundle json")
+        };
+        let pkh_of = |b: &serde_json::Value| -> [u8; 20] {
+            let mut o = [0u8; 20];
+            o.copy_from_slice(&hex::decode(b["solver_pkh"].as_str().unwrap()).unwrap());
+            o
+        };
+        let score_of = |b: &serde_json::Value| -> u64 {
+            let ap = AssignmentProofV2Mirror::deserialize(
+                &hex::decode(b["assignment_proof"].as_str().unwrap()).unwrap(),
+            )
+            .unwrap();
+            let mut s = [0u8; 8];
+            s.copy_from_slice(&ap.vrf_output[0..8]);
+            u64::from_le_bytes(s)
+        };
+        let feed = |store: &RoleProtocolStore, b: &serde_json::Value| {
+            let g = |k: &str| b[k].as_str().unwrap().to_string();
+            let claim = &b["claim"];
+            let cg = |k: &str| claim[k].as_str().unwrap().to_string();
+            let net = b["network_id"].as_u64().unwrap() as u8;
+            let h = b["target_height"].as_u64().unwrap();
+            let role = b["role_id"].as_u64().unwrap() as u8;
+            let pre = RolePrecommitDto {
+                network_id: net,
+                target_height: h,
+                role_id: role,
+                solver_pkh: g("solver_pkh"),
+                commitment_hash: cg("commitment_hash"),
+                worker: String::new(),
+            };
+            store
+                .add_precommit(pre.validate(net).expect("real precommit valid"))
+                .expect("add precommit");
+            let dto = RoleRevealDto {
+                network_id: net,
+                target_height: h,
+                role_id: role,
+                lane_id: claim["lane_id"].as_u64().unwrap() as u8,
+                solver_pkh: g("solver_pkh"),
+                secret: cg("secret"),
+                nonce: cg("nonce"),
+                commitment_hash: cg("commitment_hash"),
+                claim_digest: cg("claim_digest"),
+                assignment_public_key: g("assignment_public_key"),
+                assignment_proof: g("assignment_proof"),
+                ticket_proof: g("ticket_proof"),
+                puzzle_solution: g("puzzle_solution"),
+            };
+            // validate ENFORCES the Phase 1 binding on the REAL bundle.
+            let v = dto.validate(net).expect("real bundle passes the Phase 1 binding");
+            assert!(v.assignment_public_key.is_some(), "real bundle carries payout-bound proof");
+            store.add_reveal(v).expect("add reveal");
+        };
+        let (ca, cb, vf, sp) = (load("compute_A"), load("compute_B"), load("verify_1"), load("support_1"));
+        let store = RoleProtocolStore::new();
+        for x in [&ca, &cb, &vf, &sp] {
+            feed(&store, x);
+        }
+        let h = ca["target_height"].as_u64().unwrap();
+        let w = store.best_bundled_reveals(h).expect("collected winners from real bundles");
+        // distinct attribution: verify + support go to their own workers
+        assert_eq!(w[1].claim.solver_pkh, pkh_of(&vf), "VERIFY attributed to its worker");
+        assert_eq!(w[2].claim.solver_pkh, pkh_of(&sp), "SUPPORT attributed to its worker");
+        // best_for_role: the COMPUTE winner is the higher-self-VRF-score real competitor
+        let (sa, sb) = (score_of(&ca), score_of(&cb));
+        let win_score = {
+            let ap = AssignmentProofV2Mirror::deserialize(&w[0].assignment_proof).unwrap();
+            let mut s = [0u8; 8];
+            s.copy_from_slice(&ap.vrf_output[0..8]);
+            u64::from_le_bytes(s)
+        };
+        assert_eq!(win_score, sa.max(sb), "COMPUTE winner has the higher self-VRF score");
+        assert!(
+            w[0].claim.solver_pkh == pkh_of(&ca) || w[0].claim.solver_pkh == pkh_of(&cb),
+            "COMPUTE winner is one of the two real competitors"
+        );
+        println!(
+            "[m3] REAL bundles: compute A={} B={} -> winner score {} pkh {}; verify {}; support {}",
+            sa, sb, win_score, hex::encode(w[0].claim.solver_pkh),
+            hex::encode(w[1].claim.solver_pkh), hex::encode(w[2].claim.solver_pkh)
+        );
+    }
+
+    #[test]
     fn phase3_m2_distinct_attribution_and_best_for_role() {
         // Distinct participants each win their role; when two compete for one role, the
         // higher genuine self-VRF score wins (best_for_role). Attribution routes to the

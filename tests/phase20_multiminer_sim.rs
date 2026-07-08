@@ -78,6 +78,7 @@ fn make_ext(
     sc: PoawxRoleClaim,
 ) -> Phase20ReceiptExt {
     Phase20ReceiptExt {
+        delegation_revocations: None,
         role_reward: rr,
         compute_claim: cc,
         verify_claim: vc,

@@ -805,6 +805,7 @@ fn build_all_gates_block_with(
         fraud_proofs: None,
         proposer_assignment,
         proposer_registrations,
+        delegation_revocations: None,
     };
 
     // Worker receipt: real receipt PoW solution + signed challenge (mode-0).

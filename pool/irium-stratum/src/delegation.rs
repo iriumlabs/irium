@@ -5209,6 +5209,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         assert_eq!(
             ext.serialize(),
@@ -5633,6 +5634,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         assert_eq!(pe.serialize(), ne.serialize(), "ext AVR2 wire parity");
         assert_eq!(pe.digest(), ne.digest(), "ext AVR2 digest parity");

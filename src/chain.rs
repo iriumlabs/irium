@@ -307,6 +307,11 @@ pub struct ChainState {
     /// registrations. Producers force-drain the head into the eligibility registry
     /// (gated on `proposer_registration_active`; mainnet hard-off => stays empty).
     pub proposer_reg_queue: std::collections::VecDeque<crate::poawx::ProposerRegistrationV1>,
+    /// Stage D Step 4: reorg-safe set of revoked delegations, keyed by
+    /// `(miner_pubkey, deleg_nonce)`. Applied in `connect_block` and reverted in
+    /// `disconnect_tip_block` (gated on `poawx_delegation_active`; mainnet hard-off =>
+    /// stays empty). Rebuilt deterministically by chain replay (never serialized).
+    pub revoked_delegations: crate::poawx::DelegationRevocationRegistry,
     /// Phase 26+: persistent, reorg-safe penalty/slashing state driven by
     /// accepted fraud proofs. Applied in `connect_block` and reverted in
     /// `disconnect_tip_block` (both gated + mainnet hard-off); deterministically
@@ -418,6 +423,7 @@ impl ChainState {
             dominance: crate::poawx_dominance::PersistentDominance::from_env(),
             proposer_registry: crate::poawx_proposer::ProposerEligibilityRegistry::from_env(),
             proposer_reg_queue: std::collections::VecDeque::new(),
+            revoked_delegations: crate::poawx::DelegationRevocationRegistry::default(),
             penalty: crate::poawx_penalty::PersistentPenalty::from_env(),
             adaptive_mode: crate::poawx_adaptive::AdaptiveMode::Normal,
             reorg_signal: 0,
@@ -908,6 +914,7 @@ impl ChainState {
         self.validate_block_header(&block, expected_height, previous)?;
         validate_poawx_coinbase(&block, expected_height)?;
         validate_poawx_block_receipts(&block, expected_height, previous)?;
+        self.validate_block_delegation_revocations(&block, expected_height)?;
         if crate::poawx_dominance::anti_domination_enforced(expected_height) {
             self.validate_block_dominance_weights(&block, expected_height)?;
         }
@@ -968,6 +975,7 @@ impl ChainState {
         self.apply_block_dominance(expected_height);
         self.apply_block_proposer_registry(expected_height);
         self.apply_block_proposer_registrations(expected_height);
+        self.apply_block_delegation_revocations(expected_height);
         self.apply_block_fraud_slashing(expected_height);
         self.update_adaptive_mode(expected_height);
         // Finality-checkpoint watermark: when finality is enforced, an accepted
@@ -1084,6 +1092,7 @@ impl ChainState {
         self.revert_block_dominance(&tip_block, tip_height);
         self.revert_block_proposer_registrations(&tip_block, tip_height);
         self.revert_block_proposer_registry(&tip_block, tip_height);
+        self.revert_block_delegation_revocations(&tip_block, tip_height);
         self.revert_block_fraud_slashing(&tip_block, tip_height);
         // Gap 10: node-local reorg pressure feeds the adaptive Defense trigger.
         self.reorg_signal = self.reorg_signal.saturating_add(1);
@@ -2175,6 +2184,107 @@ impl ChainState {
         }
     }
 
+    /// Stage D Step 4: every delegation-revocation record carried by a block's receipts.
+    fn block_delegation_revocations(
+        block: &Block,
+    ) -> Vec<crate::poawx::DelegationRevocationV1> {
+        let mut out = Vec::new();
+        if let Some(receipts) = &block.poawx_receipts {
+            for r in receipts {
+                if let Some(ext) = &r.phase20_ext {
+                    if let Some(revs) = &ext.delegation_revocations {
+                        out.extend(revs.iter().cloned());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Stage D Step 4: validate the RVK1 revocation records in a block AND reject any
+    /// delegated receipt whose `(miner_pubkey, deleg_nonce)` was revoked in an EARLIER
+    /// block. Read-only; called right after `validate_poawx_block_receipts`. Uses the
+    /// revoked set as of BEFORE this block's own revocations are applied
+    /// (`apply_block_delegation_revocations` runs later), so revocation is forward-looking
+    /// only: it never invalidates a block at or before the revocation's own height.
+    fn validate_block_delegation_revocations(
+        &self,
+        block: &Block,
+        height: u64,
+    ) -> Result<(), String> {
+        if !poawx_delegation_active(height) {
+            return Ok(());
+        }
+        let net = crate::activation::network_id_byte();
+        let receipts = match &block.poawx_receipts {
+            Some(r) => r,
+            None => return Ok(()),
+        };
+        // (1) At most one revocation section per block; each record must carry the miner's
+        //     valid signature over its own miner_pubkey; per-block cap enforced.
+        let mut section_count = 0usize;
+        for r in receipts {
+            if let Some(ext) = &r.phase20_ext {
+                if let Some(revs) = &ext.delegation_revocations {
+                    section_count += 1;
+                    if section_count > 1 {
+                        return Err(
+                            "delegation revocation: multiple sections in block".to_string()
+                        );
+                    }
+                    if revs.len() > crate::poawx::REVOCATION_CAP {
+                        return Err(
+                            "delegation revocation: section over cap".to_string()
+                        );
+                    }
+                    for rv in revs {
+                        rv.validate(net)?;
+                    }
+                }
+            }
+        }
+        // (2) Reject a delegated receipt that uses an already-revoked delegation.
+        for r in receipts {
+            if let Some(d) = &r.delegation {
+                let key = (d.miner_pubkey, d.deleg_nonce);
+                if self.revoked_delegations.is_revoked(&key, height) {
+                    return Err(format!(
+                        "delegation revocation: receipt uses a revoked delegation (deleg_nonce {}) at height {}",
+                        hex::encode(d.deleg_nonce),
+                        height
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Stage D Step 4: add this block's revocations to the persistent set. Reads the
+    /// just-connected tip (mirrors `apply_block_proposer_registrations`).
+    fn apply_block_delegation_revocations(&mut self, height: u64) {
+        if !poawx_delegation_active(height) {
+            return;
+        }
+        let revs = match self.chain.last() {
+            Some(b) => Self::block_delegation_revocations(b),
+            None => return,
+        };
+        for rv in &revs {
+            self.revoked_delegations.revoke(rv.key(), height);
+        }
+    }
+
+    /// Exact inverse of `apply_block_delegation_revocations` for a disconnected tip.
+    fn revert_block_delegation_revocations(&mut self, block: &Block, height: u64) {
+        if !poawx_delegation_active(height) {
+            return;
+        }
+        let revs = Self::block_delegation_revocations(block);
+        for rv in &revs {
+            self.revoked_delegations.unrevoke(&rv.key(), height);
+        }
+    }
+
     fn apply_block_dominance(&mut self, height: u64) {
         if !crate::poawx_dominance::anti_domination_active(height) {
             return;
@@ -3139,6 +3249,7 @@ impl ChainState {
             dominance: crate::poawx_dominance::PersistentDominance::from_env(),
             proposer_registry: crate::poawx_proposer::ProposerEligibilityRegistry::from_env(),
             proposer_reg_queue: std::collections::VecDeque::new(),
+            revoked_delegations: crate::poawx::DelegationRevocationRegistry::default(),
             penalty: crate::poawx_penalty::PersistentPenalty::from_env(),
             adaptive_mode: crate::poawx_adaptive::AdaptiveMode::Normal,
             reorg_signal: 0,
@@ -8288,6 +8399,212 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
     }
 
+    // ---- Stage D Step 4: delegation revocation (connect-level validate/apply/revert) ----
+
+    /// Minimal Phase20ReceiptExt carrying an optional RVK1 revocation section. The role
+    /// claims are dummies: validate_block_delegation_revocations validates only the
+    /// revocation records and the revoked-set membership, never the claims.
+    fn rev_ext(revs: Vec<crate::poawx::DelegationRevocationV1>) -> crate::poawx::Phase20ReceiptExt {
+        use crate::poawx::{Phase20ReceiptExt, PoawxRoleClaim, RoleReward};
+        let claim = || PoawxRoleClaim {
+            role_id: 0,
+            lane_id: 0,
+            solver_pkh: [0u8; 20],
+            nonce: [0u8; 32],
+            secret: [0u8; 32],
+            claim_digest: [0u8; 32],
+            commitment_hash: None,
+        };
+        Phase20ReceiptExt {
+            role_reward: RoleReward {
+                compute_contributor_pkh: [0u8; 20],
+                verify_contributor_pkh: [0u8; 20],
+                support_contributor_pkh: [0u8; 20],
+            },
+            compute_claim: claim(),
+            verify_claim: claim(),
+            support_claim: claim(),
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            precommit_root: None,
+            role_ticket_proofs: None,
+            role_dominance_weights: None,
+            candidate_set: None,
+            role_puzzle_proofs: None,
+            finality_proof: None,
+            committed_admission: None,
+            role_assignment_v2: None,
+            fraud_proofs: None,
+            proposer_assignment: None,
+            proposer_registrations: None,
+            delegation_revocations: if revs.is_empty() { None } else { Some(revs) },
+        }
+    }
+
+    /// A mode-1 (delegated) receipt for `(miner_pubkey, deleg_nonce)`, with an optional
+    /// ext. PoW/signatures are dummies: the revocation path never checks them.
+    fn deleg_receipt(
+        miner_pubkey: [u8; 33],
+        deleg_nonce: [u8; 32],
+        ext: Option<crate::poawx::Phase20ReceiptExt>,
+    ) -> crate::poawx::PoawxBlockReceipt {
+        let d = crate::poawx::Delegation {
+            deleg_version: 2,
+            network_id: crate::activation::network_id_byte(),
+            miner_pubkey,
+            pool_pubkey: [0x02u8; 33],
+            worker_tag: [0u8; 32],
+            expiry_height: 1_000_000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce,
+            proposer_pubkey: [0u8; 33],
+            delegation_sig: [0u8; 64],
+        };
+        crate::poawx::PoawxBlockReceipt {
+            height: 0,
+            lane: b'A',
+            worker_pkh: [0u8; 20],
+            worker_pubkey: [0x02u8; 33],
+            worker_sig: [0u8; 64],
+            solution: [0u8; 8],
+            commitment_nonce: [0u8; 32],
+            delegation: Some(d),
+            phase20_ext: ext,
+        }
+    }
+
+    fn mode0_receipt() -> crate::poawx::PoawxBlockReceipt {
+        crate::poawx::PoawxBlockReceipt {
+            height: 0,
+            lane: b'A',
+            worker_pkh: [0u8; 20],
+            worker_pubkey: [0x02u8; 33],
+            worker_sig: [0u8; 64],
+            solution: [0u8; 8],
+            commitment_nonce: [0u8; 32],
+            delegation: None,
+            phase20_ext: None,
+        }
+    }
+
+    fn rev_block(receipts: Vec<crate::poawx::PoawxBlockReceipt>) -> Block {
+        Block {
+            header: BlockHeader {
+                version: 0,
+                prev_hash: [0x55u8; 32],
+                merkle_root: [0u8; 32],
+                time: 5_000,
+                bits: 0x207fffff,
+                nonce: 0,
+            },
+            transactions: vec![],
+            auxpow: None,
+            poawx_receipts: Some(receipts),
+        }
+    }
+
+    #[test]
+    fn stage_d_revocation_accepts_unrevoked_and_ignores_mode0() {
+        // (a)/(d): an unrevoked delegation is accepted, and a mode-0 receipt is unaffected
+        // even when the revoked set is populated.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        set_mode1_env();
+        let net = crate::activation::network_id_byte();
+        let miner = crate::poawx::DelegationRevocationV1::build_signed(&[0x11u8; 32], net, [0x01u8; 32])
+            .unwrap()
+            .miner_pubkey;
+
+        let cs = base_chain(Some(0));
+        let block = rev_block(vec![deleg_receipt(miner, [0x01u8; 32], None)]);
+        cs.validate_block_delegation_revocations(&block, 10)
+            .expect("unrevoked delegation accepted");
+
+        let mut cs2 = base_chain(Some(0));
+        cs2.revoked_delegations.revoke((miner, [0x01u8; 32]), 1);
+        let block0 = rev_block(vec![mode0_receipt()]);
+        cs2.validate_block_delegation_revocations(&block0, 10)
+            .expect("mode-0 receipt unaffected by revocations");
+        clear_mode1_env();
+    }
+
+    #[test]
+    fn stage_d_revocation_rejects_revoked_forward_looking() {
+        // (b)/(c): a delegation revoked in block 5 is rejected only at heights > 5; the
+        // block at (or before) the revocation's own height is never retroactively invalid.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        set_mode1_env();
+        let net = crate::activation::network_id_byte();
+        let nonce = [0x01u8; 32];
+        let miner = crate::poawx::DelegationRevocationV1::build_signed(&[0x11u8; 32], net, nonce)
+            .unwrap()
+            .miner_pubkey;
+        let mut cs = base_chain(Some(0));
+        cs.revoked_delegations.revoke((miner, nonce), 5);
+        let block = rev_block(vec![deleg_receipt(miner, nonce, None)]);
+        cs.validate_block_delegation_revocations(&block, 4)
+            .expect("earlier block unaffected");
+        cs.validate_block_delegation_revocations(&block, 5)
+            .expect("the revocation's own height is not retroactively invalidated");
+        let err = cs
+            .validate_block_delegation_revocations(&block, 6)
+            .expect_err("revoked delegation rejected from the next height forward");
+        assert!(err.contains("revoked delegation"), "got: {err}");
+        clear_mode1_env();
+    }
+
+    #[test]
+    fn stage_d_revocation_record_validation_and_apply_revert() {
+        // Record validity is enforced, and apply/revert from a block are exact inverses.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        set_mode1_env();
+        let net = crate::activation::network_id_byte();
+        let nonce = [0x77u8; 32];
+        let good =
+            crate::poawx::DelegationRevocationV1::build_signed(&[0x11u8; 32], net, nonce).unwrap();
+        let miner = good.miner_pubkey;
+
+        // (1) a block whose revocation record has a bad signature is rejected.
+        let mut bad = good.clone();
+        bad.signature[0] ^= 0xFF;
+        let bad_block =
+            rev_block(vec![deleg_receipt(miner, [0xEEu8; 32], Some(rev_ext(vec![bad])))]);
+        let mut cs = base_chain(Some(0));
+        let err = cs
+            .validate_block_delegation_revocations(&bad_block, 10)
+            .expect_err("invalid revocation record rejected");
+        assert!(err.contains("signature verification failed"), "got: {err}");
+
+        // (2) apply then revert (reading the block) are exact inverses.
+        let good_block = rev_block(vec![deleg_receipt(
+            miner,
+            [0xEEu8; 32],
+            Some(rev_ext(vec![good.clone()])),
+        )]);
+        cs.chain.push(good_block.clone());
+        cs.apply_block_delegation_revocations(9);
+        assert!(
+            cs.revoked_delegations.is_revoked(&good.key(), 10),
+            "revoked at heights > 9 after applying block 9"
+        );
+        assert!(
+            !cs.revoked_delegations.is_revoked(&good.key(), 9),
+            "forward-looking: not revoked at the apply height itself"
+        );
+        cs.revert_block_delegation_revocations(&good_block, 9);
+        assert!(
+            cs.revoked_delegations.is_empty(),
+            "revert restores the empty set"
+        );
+        clear_mode1_env();
+    }
+
     #[test]
     fn phase18b_mode1_accepts_valid_delegated_receipt() {
         let _g = chain_poawx_env_lock()
@@ -8953,6 +9270,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         }
     }
 
@@ -13606,6 +13924,7 @@ mod tests {
                 fraud_proofs: None,
                 proposer_assignment: None,
                 proposer_registrations: None,
+                delegation_revocations: None,
             }
         };
         let build = |h: u64, prev: &[u8; 32], ext: &crate::poawx::Phase20ReceiptExt| -> Block {

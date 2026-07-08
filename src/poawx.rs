@@ -926,6 +926,11 @@ pub struct Phase20ReceiptExt {
     /// byte-identical to pre-31R). Announces enqueue, activations force-drain the
     /// FIFO queue head; validated + applied in connect_block under the gate.
     pub proposer_registrations: Option<ProposerRegistrationSection>,
+    /// Stage D Step 4: optional trailing RVK1 delegation-revocation section; None =>
+    /// byte-identical to pre-Step-4 exts. Each entry is a miner-signed revocation of
+    /// one of the miner's own delegations. Validated + applied in connect_block under
+    /// the delegation gate; reverted on disconnect.
+    pub delegation_revocations: Option<Vec<DelegationRevocationV1>>,
 }
 
 impl Phase20ReceiptExt {
@@ -965,6 +970,7 @@ impl Phase20ReceiptExt {
                     || self.fraud_proofs.is_some()
                     || self.proposer_assignment.is_some()
                     || self.proposer_registrations.is_some()
+                    || self.delegation_revocations.is_some()
                 {
                     out.push(0);
                 }
@@ -1050,6 +1056,15 @@ impl Phase20ReceiptExt {
                 out.extend_from_slice(&r.serialize());
             }
         }
+        // Stage D Step 4 trailing RVK1 delegation-revocation section (present-only):
+        // magic + u16 count + records. Absent => byte-identical to pre-Step-4 exts.
+        if let Some(revs) = &self.delegation_revocations {
+            out.extend_from_slice(REVOCATION_SECTION_MAGIC);
+            out.extend_from_slice(&(revs.len() as u16).to_le_bytes());
+            for rv in revs {
+                out.extend_from_slice(&rv.serialize());
+            }
+        }
         out
     }
 
@@ -1121,6 +1136,7 @@ impl Phase20ReceiptExt {
         let mut fraud_proofs: Option<Vec<FraudProofV1>> = None;
         let mut proposer_assignment: Option<ProposerAssignmentV1> = None;
         let mut proposer_registrations: Option<ProposerRegistrationSection> = None;
+        let mut delegation_revocations: Option<Vec<DelegationRevocationV1>> = None;
         while off < raw.len() {
             need(off, 4, "trailing section magic")?;
             let magic = &raw[off..off + 4];
@@ -1280,6 +1296,29 @@ impl Phase20ReceiptExt {
                     announces,
                     activations,
                 });
+            } else if magic == REVOCATION_SECTION_MAGIC {
+                if delegation_revocations.is_some() {
+                    return Err(
+                        "phase20 ext: duplicate delegation revocation section".to_string()
+                    );
+                }
+                off += 4;
+                need(off, 2, "revocation count")?;
+                let rc =
+                    u16::from_le_bytes(raw[off..off + 2].try_into().expect("len 2")) as usize;
+                off += 2;
+                if rc > REVOCATION_CAP {
+                    return Err("phase20 ext: revocation count over cap".to_string());
+                }
+                let mut revs = Vec::with_capacity(rc);
+                for _ in 0..rc {
+                    need(off, DELEGATION_REVOCATION_V1_WIRE, "revocation record")?;
+                    revs.push(DelegationRevocationV1::deserialize(
+                        &raw[off..off + DELEGATION_REVOCATION_V1_WIRE],
+                    )?);
+                    off += DELEGATION_REVOCATION_V1_WIRE;
+                }
+                delegation_revocations = Some(revs);
             } else {
                 return Err("phase20 ext: unknown trailing section magic".to_string());
             }
@@ -1302,6 +1341,7 @@ impl Phase20ReceiptExt {
             fraud_proofs,
             proposer_assignment,
             proposer_registrations,
+            delegation_revocations,
         })
     }
 
@@ -1671,6 +1711,175 @@ impl Delegation {
             .map_err(|_| "delegation: malformed delegation_sig")?;
         vk.verify_prehash(&self.message_hash(), &sig)
             .map_err(|_| "delegation: signature verification failed")
+    }
+}
+
+/// Stage D Step 4: signing domain for a `DelegationRevocationV1`, distinct from
+/// `DOMAIN_DELEG` so a delegation signature can never be replayed as a revocation
+/// (or vice versa).
+pub const DOMAIN_DELEG_REVOKE: &[u8] = b"irium.poawx.delegation.revoke.v1";
+
+/// Trailing RVK1 section magic in `Phase20ReceiptExt` (present-only).
+pub const REVOCATION_SECTION_MAGIC: &[u8; 4] = b"RVK1";
+
+/// Wire size of a `DelegationRevocationV1`: net(1) + miner_pubkey(33) +
+/// deleg_nonce(32) + signature(64) = 130 bytes.
+pub const DELEGATION_REVOCATION_V1_WIRE: usize = 1 + 33 + 32 + 64;
+
+/// Max revocation records per block (matches the proposer-registration cap).
+pub const REVOCATION_CAP: usize = 8;
+
+/// Stage D Step 4: a miner-signed, on-chain revocation of one of the miner's OWN
+/// delegations, identified by `(miner_pubkey, deleg_nonce)`. A miner revokes so a
+/// pool it has left can no longer propose in its name before `expiry_height`. Because
+/// revoking only REMOVES the miner's own delegated proposer power, the record carries
+/// NO sybil work (there is nothing to grind for). Consensus rejects any delegated
+/// receipt whose `(miner_pubkey, deleg_nonce)` was revoked in an EARLIER block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegationRevocationV1 {
+    pub network_id: u8,
+    /// The payout key that signed the original delegation (revocation authority).
+    pub miner_pubkey: [u8; 33],
+    /// The `deleg_nonce` of the delegation being revoked.
+    pub deleg_nonce: [u8; 32],
+    /// The miner's secp256k1 signature over `signing_digest()`.
+    pub signature: [u8; 64],
+}
+
+impl DelegationRevocationV1 {
+    /// SHA256(DOMAIN_DELEG_REVOKE || [network_id] || miner_pubkey || deleg_nonce).
+    pub fn signing_digest(&self) -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(DOMAIN_DELEG_REVOKE);
+        h.update([self.network_id]);
+        h.update(self.miner_pubkey);
+        h.update(self.deleg_nonce);
+        h.finalize().into()
+    }
+
+    /// The `(miner_pubkey, deleg_nonce)` key this record revokes.
+    pub fn key(&self) -> ([u8; 33], [u8; 32]) {
+        (self.miner_pubkey, self.deleg_nonce)
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(DELEGATION_REVOCATION_V1_WIRE);
+        out.push(self.network_id);
+        out.extend_from_slice(&self.miner_pubkey);
+        out.extend_from_slice(&self.deleg_nonce);
+        out.extend_from_slice(&self.signature);
+        out
+    }
+
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        if raw.len() != DELEGATION_REVOCATION_V1_WIRE {
+            return Err(format!(
+                "delegation revocation: wrong length {} (want {})",
+                raw.len(),
+                DELEGATION_REVOCATION_V1_WIRE
+            ));
+        }
+        let network_id = raw[0];
+        let mut miner_pubkey = [0u8; 33];
+        miner_pubkey.copy_from_slice(&raw[1..34]);
+        let mut deleg_nonce = [0u8; 32];
+        deleg_nonce.copy_from_slice(&raw[34..66]);
+        let mut signature = [0u8; 64];
+        signature.copy_from_slice(&raw[66..130]);
+        Ok(Self {
+            network_id,
+            miner_pubkey,
+            deleg_nonce,
+            signature,
+        })
+    }
+
+    /// Verify the record: network match + the miner's signature over `signing_digest()`
+    /// against its own `miner_pubkey`. Deliberately no sybil / anchor check.
+    pub fn validate(&self, network_id: u8) -> Result<(), String> {
+        use k256::ecdsa::signature::hazmat::PrehashVerifier;
+        use k256::ecdsa::{Signature, VerifyingKey};
+        if self.network_id != network_id {
+            return Err("delegation revocation: network_id mismatch".to_string());
+        }
+        let vk = VerifyingKey::from_sec1_bytes(&self.miner_pubkey)
+            .map_err(|_| "delegation revocation: invalid miner_pubkey".to_string())?;
+        let sig = Signature::from_slice(&self.signature)
+            .map_err(|_| "delegation revocation: malformed signature".to_string())?;
+        vk.verify_prehash(&self.signing_digest(), &sig)
+            .map_err(|_| "delegation revocation: signature verification failed".to_string())
+    }
+
+    /// Build a signed revocation for `(miner_secret, deleg_nonce)` on `network_id`.
+    pub fn build_signed(
+        miner_secret: &[u8; 32],
+        network_id: u8,
+        deleg_nonce: [u8; 32],
+    ) -> Result<Self, String> {
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
+        let sk = SigningKey::from_bytes(miner_secret.into())
+            .map_err(|_| "delegation revocation: invalid miner secret".to_string())?;
+        let vk = VerifyingKey::from(&sk);
+        let enc = vk.to_encoded_point(true);
+        let mut miner_pubkey = [0u8; 33];
+        miner_pubkey.copy_from_slice(enc.as_bytes());
+        let mut rec = Self {
+            network_id,
+            miner_pubkey,
+            deleg_nonce,
+            signature: [0u8; 64],
+        };
+        let sig: Signature = sk
+            .sign_prehash(&rec.signing_digest())
+            .map_err(|_| "delegation revocation: signing failed".to_string())?;
+        rec.signature.copy_from_slice(&sig.to_bytes());
+        Ok(rec)
+    }
+}
+
+/// Stage D Step 4: reorg-safe set of revoked delegations, keyed by
+/// `(miner_pubkey, deleg_nonce)`. Mirrors `ProposerEligibilityRegistry`: each key maps
+/// to the SET of block heights that carried a revocation for it, so `revoke`/`unrevoke`
+/// are exact inverses and the whole set is rebuilt deterministically by chain replay
+/// (never serialized to disk).
+#[derive(Debug, Clone, Default)]
+pub struct DelegationRevocationRegistry {
+    revoked: std::collections::BTreeMap<([u8; 33], [u8; 32]), std::collections::BTreeSet<u64>>,
+}
+
+impl DelegationRevocationRegistry {
+    /// Record that `(miner_pubkey, deleg_nonce)` was revoked in the block at `height`.
+    pub fn revoke(&mut self, key: ([u8; 33], [u8; 32]), height: u64) {
+        self.revoked.entry(key).or_default().insert(height);
+    }
+
+    /// Exact inverse of `revoke`: drop `height`; remove the key when no heights remain.
+    pub fn unrevoke(&mut self, key: &([u8; 33], [u8; 32]), height: u64) {
+        if let Some(set) = self.revoked.get_mut(key) {
+            set.remove(&height);
+            if set.is_empty() {
+                self.revoked.remove(key);
+            }
+        }
+    }
+
+    /// True iff `key` was revoked in some block STRICTLY BEFORE `height` (forward-looking:
+    /// a revocation in block Hr rejects delegated uses at heights > Hr and never
+    /// retroactively invalidates a block at or before Hr).
+    pub fn is_revoked(&self, key: &([u8; 33], [u8; 32]), height: u64) -> bool {
+        self.revoked
+            .get(key)
+            .map(|set| set.iter().any(|&hr| hr < height))
+            .unwrap_or(false)
+    }
+
+    pub fn len(&self) -> usize {
+        self.revoked.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.revoked.is_empty()
     }
 }
 
@@ -2397,6 +2606,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let bytes = ext.serialize();
         let ext2 = Phase20ReceiptExt::deserialize(&bytes).expect("deserialize");
@@ -2768,6 +2978,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let absent = ext.serialize();
         assert!(!absent.windows(4).any(|w| w == PROPOSER_SECTION_MAGIC));
@@ -2778,6 +2989,114 @@ mod tests {
         let back = Phase20ReceiptExt::deserialize(&present).unwrap();
         assert_eq!(back.proposer_assignment, Some(pa));
         assert_eq!(back, ext);
+    }
+
+    #[test]
+    fn stage_d_revocation_record_roundtrip_and_validate() {
+        // Stage D Step 4: a DelegationRevocationV1 wire-round-trips and validates only
+        // with the miner's genuine signature over its own (network, miner_pubkey, nonce).
+        let net = 2u8;
+        let nonce = [0x7bu8; 32];
+        let rec = DelegationRevocationV1::build_signed(&[0x09u8; 32], net, nonce).unwrap();
+        let b = rec.serialize();
+        assert_eq!(b.len(), DELEGATION_REVOCATION_V1_WIRE);
+        assert_eq!(DelegationRevocationV1::deserialize(&b).unwrap(), rec);
+        rec.validate(net).expect("genuine revocation validates");
+        assert!(rec.validate(1).is_err(), "wrong network rejected");
+        let mut bad_sig = rec.clone();
+        bad_sig.signature[0] ^= 0xFF;
+        assert!(bad_sig.validate(net).is_err(), "tampered signature rejected");
+        let mut bad_nonce = rec.clone();
+        bad_nonce.deleg_nonce[0] ^= 0xFF;
+        assert!(bad_nonce.validate(net).is_err(), "tampered nonce rejected");
+        let other = DelegationRevocationV1::build_signed(&[0x0au8; 32], net, nonce).unwrap();
+        let mut swapped = rec.clone();
+        swapped.miner_pubkey = other.miner_pubkey;
+        assert!(swapped.validate(net).is_err(), "swapped miner_pubkey rejected");
+    }
+
+    #[test]
+    fn stage_d_revocation_registry_semantics() {
+        // Forward-looking, anti-grief, and exact apply/revert inverse.
+        let victim =
+            DelegationRevocationV1::build_signed(&[0x11u8; 32], 2, [0x01u8; 32]).unwrap();
+        let vkey = victim.key();
+
+        let mut reg = DelegationRevocationRegistry::default();
+        assert!(reg.is_empty());
+        reg.revoke(vkey, 5);
+        assert!(!reg.is_revoked(&vkey, 4), "not revoked at an earlier height");
+        assert!(!reg.is_revoked(&vkey, 5), "not revoked at the revocation's own height");
+        assert!(reg.is_revoked(&vkey, 6), "revoked from the next height forward");
+
+        // anti-grief: an attacker revoking the victim's NONCE under the attacker's OWN
+        // key does NOT revoke the victim's (victim_pubkey, nonce) delegation.
+        let attacker =
+            DelegationRevocationV1::build_signed(&[0x22u8; 32], 2, [0x01u8; 32]).unwrap();
+        assert_ne!(attacker.miner_pubkey, victim.miner_pubkey);
+        let mut reg2 = DelegationRevocationRegistry::default();
+        reg2.revoke(attacker.key(), 5);
+        assert!(!reg2.is_revoked(&vkey, 100), "attacker cannot revoke the victim's delegation");
+
+        // apply/revert are exact inverses (reorg-safety).
+        let mut reg3 = DelegationRevocationRegistry::default();
+        reg3.revoke(vkey, 5);
+        reg3.revoke(vkey, 7);
+        reg3.unrevoke(&vkey, 7);
+        assert!(reg3.is_revoked(&vkey, 6), "the height-5 revocation survives reverting height 7");
+        reg3.unrevoke(&vkey, 5);
+        assert!(reg3.is_empty(), "reverting all heights empties the set");
+    }
+
+    #[test]
+    fn stage_d_ext_revocation_section_roundtrip() {
+        // Absent => byte-identical to pre-Step-4 (no RVK1 magic); present => +section.
+        let prev = [0x44u8; 32];
+        let rec = DelegationRevocationV1::build_signed(&[0x33u8; 32], 2, [0x99u8; 32]).unwrap();
+        let mut ext = Phase20ReceiptExt {
+            role_reward: RoleReward {
+                compute_contributor_pkh: [0xC1u8; 20],
+                verify_contributor_pkh: [0xC2u8; 20],
+                support_contributor_pkh: [0xC3u8; 20],
+            },
+            compute_claim: fairness_valid_claim(1, 60, &prev, ROLE_COMPUTE_CONTRIBUTOR, 0),
+            verify_claim: fairness_valid_claim(1, 60, &prev, ROLE_VERIFY_CONTRIBUTOR, 0),
+            support_claim: fairness_valid_claim(1, 60, &prev, ROLE_SUPPORT_CONTRIBUTOR, 0),
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            precommit_root: None,
+            role_ticket_proofs: None,
+            role_dominance_weights: None,
+            candidate_set: None,
+            role_puzzle_proofs: None,
+            finality_proof: None,
+            committed_admission: None,
+            role_assignment_v2: None,
+            fraud_proofs: None,
+            proposer_assignment: None,
+            proposer_registrations: None,
+            delegation_revocations: None,
+        };
+        let absent = ext.serialize();
+        assert!(!absent.windows(4).any(|w| w == REVOCATION_SECTION_MAGIC));
+        assert_eq!(Phase20ReceiptExt::deserialize(&absent).unwrap(), ext);
+        // present: +1 precommit flag byte + magic(4) + count(2) + one record.
+        ext.delegation_revocations = Some(vec![rec.clone()]);
+        let present = ext.serialize();
+        assert_eq!(
+            present.len(),
+            absent.len() + 1 + 4 + 2 + DELEGATION_REVOCATION_V1_WIRE
+        );
+        let back = Phase20ReceiptExt::deserialize(&present).unwrap();
+        assert_eq!(back.delegation_revocations, Some(vec![rec.clone()]));
+        assert_eq!(back, ext);
+        // over-cap section rejected on deserialize.
+        ext.delegation_revocations = Some(vec![rec; REVOCATION_CAP + 1]);
+        let over = ext.serialize();
+        assert!(
+            Phase20ReceiptExt::deserialize(&over).is_err(),
+            "over-cap revocation section rejected"
+        );
     }
 
     #[test]
@@ -2813,6 +3132,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let absent = ext.serialize();
         assert!(!absent.windows(4).any(|w| w == PROPOSER_REG_SECTION_MAGIC));
@@ -2856,6 +3176,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let none = base();
         let mut some = base();
@@ -2902,6 +3223,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let proofs = [
             TicketProof::new(
@@ -3027,6 +3349,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let good = ext.serialize();
         assert_eq!(Phase20ReceiptExt::deserialize(&good).unwrap(), ext);
@@ -3075,6 +3398,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let seed = [0x55u8; 32];
         let mk = |secret: u8, role: u8, solver: [u8; 20]| {
@@ -3166,6 +3490,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let seed = [0x55u8; 32];
         let mut cs = CandidateSet::new(1, 61, seed);
@@ -3249,6 +3574,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let sk = k256::ecdsa::SigningKey::from_slice(&[0x21u8; 32]).unwrap();
         let mut fp = FinalityProofV1::new(1, 60, prev, [0u8; 32], 0, 1, 1);
@@ -3328,6 +3654,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let sol = |m: u8, n: u64, t: u8| PuzzleSolutionV1 {
             mode: m,
@@ -3398,6 +3725,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let mut cs = CandidateSet::new(1, 60, prev);
         cs.push(RoleCandidate::build(
@@ -3474,6 +3802,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let weights = [1000u64, 800, 900, 950];
         // (1) absent => no DOM1 magic, byte-identical, round-trips.
@@ -3580,6 +3909,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         // no-ext v3 element == v2 element + a single 0 flag byte (present-only).
         let r = make_test_receipt(9);
@@ -3625,6 +3955,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
 
         // Base mode-0 receipt with a production extension attached.

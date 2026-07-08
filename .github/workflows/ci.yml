@@ -4,7 +4,7 @@ on:
   push:
     branches: [main, testing-codes-before-merging]
   pull_request:
-    branches: [main]
+    branches: [main, testing-codes-before-merging]
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

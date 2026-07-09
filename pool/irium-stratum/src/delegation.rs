@@ -1702,6 +1702,255 @@ pub fn stage_d_production_active(_height: u64) -> bool {
         .unwrap_or(false)
 }
 
+// ── M3 Step 3: pool-side custodial-proposer registration (byte-parity mirror) ──
+//
+// Byte-for-byte mirror of the node's `poawx::ProposerRegistrationV1` /
+// `ProposerRegistrationSection` (169-byte record; PRG1 section), plus custodial
+// proposer key generation and a registration builder. This lets the pool
+// receipt-producer register its OWN custodial proposer key on-chain (Stage D) so
+// consensus can accept the pool as a delegated proposer while paying each miner
+// directly.
+//
+// Parity with the real node types is asserted in the dev-dependency parity tests
+// (`m3_proposer_registration_*`). The pool intentionally does NOT depend on the
+// node crate in production, so these mirrors must stay byte-identical.
+//
+// GATING / DEFERRED: these types + key gen + builder are INERT. Producing a block
+// that carries a registration section, and wiring the proposer proof through the
+// pool stratum `submit_block_extended` path, is the separately-scoped, DEFERRED
+// live-production follow-up documented in
+// docs/m3_stage_d_proposer_production_plan.md. Nothing here runs until that wiring
+// lands AND `stage_d_production_active` is explicitly enabled (mainnet hard-off).
+
+/// Mirror of node `poawx::PROPOSER_REGISTRATION_V1_WIRE`
+/// (vrf_pubkey 33 + anchor_height 8 + sybil_nonce 32 + sybil_digest 32 + signature 64).
+pub const PROPOSER_REGISTRATION_V1_WIRE: usize = 33 + 8 + 32 + 32 + 64;
+/// Mirror of node `poawx::PROPOSER_REG_SIGN_DOMAIN`.
+pub const PROPOSER_REG_SIGN_DOMAIN: &[u8] = b"IRIUM_POAWX_PROPOSER_REG_V1";
+/// Mirror of node `poawx::PROPOSER_REG_SECTION_MAGIC`.
+pub const PROPOSER_REG_SECTION_MAGIC: &[u8; 4] = b"PRG1";
+/// Mirror of node `poawx_proposer::PROPOSER_ANNOUNCE_CAP`.
+pub const PROPOSER_ANNOUNCE_CAP: usize = 8;
+/// Mirror of node `poawx_proposer::PROPOSER_REG_CAP`.
+pub const PROPOSER_REG_CAP: usize = 8;
+
+/// Byte-parity mirror of node `poawx::ProposerRegistrationV1`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProposerRegistrationV1Mirror {
+    pub vrf_pubkey: [u8; 33],
+    pub anchor_height: u64,
+    pub sybil_nonce: [u8; 32],
+    pub sybil_digest: [u8; 32],
+    pub signature: [u8; 64],
+}
+
+impl ProposerRegistrationV1Mirror {
+    /// hash160(vrf_pubkey) — the proposer identity pkh (mirror of node `reg_hash160`).
+    pub fn pkh(&self) -> [u8; 20] {
+        pool_hash160(&self.vrf_pubkey)
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(PROPOSER_REGISTRATION_V1_WIRE);
+        out.extend_from_slice(&self.vrf_pubkey);
+        out.extend_from_slice(&self.anchor_height.to_le_bytes());
+        out.extend_from_slice(&self.sybil_nonce);
+        out.extend_from_slice(&self.sybil_digest);
+        out.extend_from_slice(&self.signature);
+        out
+    }
+
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        if raw.len() != PROPOSER_REGISTRATION_V1_WIRE {
+            return Err(format!(
+                "proposer registration mirror: bad wire len {} (want {})",
+                raw.len(),
+                PROPOSER_REGISTRATION_V1_WIRE
+            ));
+        }
+        let mut vrf_pubkey = [0u8; 33];
+        vrf_pubkey.copy_from_slice(&raw[0..33]);
+        let anchor_height = u64::from_le_bytes(raw[33..41].try_into().expect("len 8"));
+        let mut sybil_nonce = [0u8; 32];
+        sybil_nonce.copy_from_slice(&raw[41..73]);
+        let mut sybil_digest = [0u8; 32];
+        sybil_digest.copy_from_slice(&raw[73..105]);
+        let mut signature = [0u8; 64];
+        signature.copy_from_slice(&raw[105..169]);
+        Ok(Self {
+            vrf_pubkey,
+            anchor_height,
+            sybil_nonce,
+            sybil_digest,
+            signature,
+        })
+    }
+
+    /// Mirror of node `signing_digest`: SHA256(DOMAIN || net || vrf_pubkey ||
+    /// anchor_height_le || sybil_nonce || sybil_digest).
+    pub fn signing_digest(&self, network_id: u8) -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(PROPOSER_REG_SIGN_DOMAIN);
+        h.update([network_id]);
+        h.update(self.vrf_pubkey);
+        h.update(self.anchor_height.to_le_bytes());
+        h.update(self.sybil_nonce);
+        h.update(self.sybil_digest);
+        h.finalize().into()
+    }
+
+    /// Build + grind + self-sign, mirroring node `ProposerRegistrationV1::build_signed`.
+    /// Derives `vrf_pubkey` from `secret`, grinds `sybil_nonce` until the sybil
+    /// digest meets `required_bits` leading-zero bits, then ECDSA-signs the signing
+    /// digest. Uses the already-proven `mirror_compute_sybil_digest` and
+    /// `count_leading_zero_bits` so the grind matches the node byte-for-byte.
+    pub fn build_signed(
+        secret: &[u8; 32],
+        network_id: u8,
+        anchor_height: u64,
+        anchor_hash: &[u8; 32],
+        required_bits: u32,
+    ) -> Result<Self, String> {
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        let sk = k256::ecdsa::SigningKey::from_slice(secret)
+            .map_err(|_| "proposer reg mirror: invalid secret".to_string())?;
+        let vk = sk.verifying_key();
+        let pt = vk.to_encoded_point(true);
+        let mut vrf_pubkey = [0u8; 33];
+        vrf_pubkey.copy_from_slice(pt.as_bytes());
+        let pkh = pool_hash160(&vrf_pubkey);
+        let mut nonce = [0u8; 32];
+        let mut counter: u64 = 0;
+        let sybil_digest = loop {
+            nonce[..8].copy_from_slice(&counter.to_le_bytes());
+            let d = mirror_compute_sybil_digest(
+                network_id,
+                anchor_hash,
+                &pkh,
+                anchor_height,
+                &vrf_pubkey,
+                &nonce,
+            );
+            if count_leading_zero_bits(&d) >= required_bits {
+                break d;
+            }
+            counter += 1;
+            if counter > 200_000_000 {
+                return Err("proposer reg mirror: sybil grind exceeded budget".to_string());
+            }
+        };
+        let mut me = Self {
+            vrf_pubkey,
+            anchor_height,
+            sybil_nonce: nonce,
+            sybil_digest,
+            signature: [0u8; 64],
+        };
+        let sig: k256::ecdsa::Signature = sk
+            .sign_prehash(&me.signing_digest(network_id))
+            .map_err(|_| "proposer reg mirror: signing failed".to_string())?;
+        me.signature.copy_from_slice(&sig.to_bytes());
+        Ok(me)
+    }
+}
+
+/// Byte-parity mirror of node `poawx::ProposerRegistrationSection` (PRG1).
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ProposerRegistrationSectionMirror {
+    pub announces: Vec<ProposerRegistrationV1Mirror>,
+    pub activations: Vec<ProposerRegistrationV1Mirror>,
+}
+
+impl ProposerRegistrationSectionMirror {
+    pub fn is_empty(&self) -> bool {
+        self.announces.is_empty() && self.activations.is_empty()
+    }
+
+    /// Serialize EXACTLY as the node reads/writes it inside the Phase20 ext:
+    /// PRG1 magic (4) || announce_count u16 le || [record...] ||
+    /// activation_count u16 le || [record...].
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(PROPOSER_REG_SECTION_MAGIC);
+        out.extend_from_slice(&(self.announces.len() as u16).to_le_bytes());
+        for r in &self.announces {
+            out.extend_from_slice(&r.serialize());
+        }
+        out.extend_from_slice(&(self.activations.len() as u16).to_le_bytes());
+        for r in &self.activations {
+            out.extend_from_slice(&r.serialize());
+        }
+        out
+    }
+}
+
+/// Filesystem path for the pool's custodial proposer secret (M3 Stage D). Kept
+/// separate from the delegate key. Overridable via `IRIUM_POAWX_PROPOSER_KEY_FILE`.
+pub fn proposer_key_path() -> PathBuf {
+    if let Ok(p) = env::var("IRIUM_POAWX_PROPOSER_KEY_FILE") {
+        if !p.trim().is_empty() {
+            return PathBuf::from(p);
+        }
+    }
+    delegate_key_path().with_file_name("poawx_proposer_secret.hex")
+}
+
+/// Load or generate the pool's custodial proposer secret (32-byte k256). Mirrors
+/// `DelegateKey::load_or_generate` storage discipline (written 0600 where supported,
+/// never logged). Generation is refused when `allow_generate` is false (callers
+/// pass false on mainnet — Stage D is non-mainnet until an explicit, separately
+/// approved activation).
+pub fn load_or_generate_proposer_secret(
+    path: &Path,
+    allow_generate: bool,
+) -> Result<[u8; 32], String> {
+    if path.exists() {
+        let hex_str = std::fs::read_to_string(path)
+            .map_err(|e| format!("read proposer key {}: {e}", path.display()))?;
+        let bytes = hex::decode(hex_str.trim())
+            .map_err(|_| "proposer key file: invalid hex".to_string())?;
+        if bytes.len() != 32 {
+            return Err("proposer key file: expected 32 bytes".to_string());
+        }
+        let mut secret = [0u8; 32];
+        secret.copy_from_slice(&bytes);
+        // Validate it is a usable k256 scalar before returning.
+        let _ = pubkey_from_secret(&secret)?;
+        Ok(secret)
+    } else {
+        if !allow_generate {
+            return Err("proposer key missing and generation not allowed".to_string());
+        }
+        let secret = random_valid_secret()?;
+        write_secret_file(path, &secret)?;
+        Ok(secret)
+    }
+}
+
+/// Registration builder: build a signed `ProposerRegistrationV1Mirror` and place it
+/// in a fresh section's `announces`. This is the pool's registration producer; the
+/// DEFERRED live-production wiring attaches the returned section to a produced
+/// block's Phase20 ext (see docs/m3_stage_d_proposer_production_plan.md).
+pub fn build_pool_proposer_registration_section(
+    secret: &[u8; 32],
+    network_id: u8,
+    anchor_height: u64,
+    anchor_hash: &[u8; 32],
+    required_bits: u32,
+) -> Result<ProposerRegistrationSectionMirror, String> {
+    let reg = ProposerRegistrationV1Mirror::build_signed(
+        secret,
+        network_id,
+        anchor_height,
+        anchor_hash,
+        required_bits,
+    )?;
+    Ok(ProposerRegistrationSectionMirror {
+        announces: vec![reg],
+        activations: Vec::new(),
+    })
+}
+
 /// Whether the gated SYNTHETIC role-claim builder is enabled. Testnet/devnet-only
 /// (`IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS=1`), mainnet hard-off, disabled by default.
 /// This is for production-wiring validation; it is NOT the live hidden-precommit
@@ -6311,6 +6560,129 @@ mod tests {
         assert!(!stage_d_production_active(10), "flag=0 stays off");
         std::env::remove_var("IRIUM_NETWORK");
         std::env::remove_var("IRIUM_POAWX_STAGE_D_PRODUCTION");
+    }
+
+    #[test]
+    fn m3_proposer_registration_record_byte_parity_with_node() {
+        // The pool mirror's build_signed must produce a record the real node
+        // accepts, with wire bytes byte-identical in both directions. This proves
+        // the full crypto (sybil grind via mirror_compute_sybil_digest + the
+        // signing digest + ECDSA signature) matches the node.
+        let net = 2u8; // devnet
+        let anchor_hash = [0x33u8; 32];
+        let anchor_height = 7u64;
+        let secret = [0x11u8; 32];
+        // bits=0 keeps the grind trivial (first nonce wins) and deterministic.
+        let pool_reg =
+            ProposerRegistrationV1Mirror::build_signed(&secret, net, anchor_height, &anchor_hash, 0)
+                .expect("pool build_signed");
+        // Node deserializes the pool wire, re-serializes identically, and FULLY
+        // validates it (sybil digest recomputation + self-signature).
+        let node_reg =
+            irium_node_rs::poawx::ProposerRegistrationV1::deserialize(&pool_reg.serialize())
+                .expect("node deserializes pool record");
+        assert_eq!(
+            node_reg.serialize(),
+            pool_reg.serialize(),
+            "proposer registration record wire is byte-identical"
+        );
+        node_reg
+            .validate(net, &anchor_hash, 0)
+            .expect("node accepts the pool-built proposer registration");
+        assert_eq!(pool_reg.pkh(), node_reg.pkh(), "pkh parity");
+        assert_eq!(
+            pool_reg.signing_digest(net),
+            node_reg.signing_digest(net),
+            "signing digest parity"
+        );
+
+        // Reverse: a node-built registration parses byte-identically in the pool.
+        let node_built = irium_node_rs::poawx::ProposerRegistrationV1::build_signed(
+            &secret,
+            net,
+            anchor_height,
+            &anchor_hash,
+            0,
+        )
+        .expect("node build_signed");
+        let pool_parsed = ProposerRegistrationV1Mirror::deserialize(&node_built.serialize())
+            .expect("pool parses node record");
+        assert_eq!(
+            pool_parsed.serialize(),
+            node_built.serialize(),
+            "pool parses the node record byte-identically"
+        );
+    }
+
+    #[test]
+    fn m3_proposer_registration_section_and_consts_parity_with_node() {
+        // Constants come straight from the node crate (not hand-copied), so a node
+        // change breaks this test.
+        assert_eq!(
+            PROPOSER_REGISTRATION_V1_WIRE,
+            irium_node_rs::poawx::PROPOSER_REGISTRATION_V1_WIRE,
+            "record wire size parity"
+        );
+        assert_eq!(
+            PROPOSER_ANNOUNCE_CAP,
+            irium_node_rs::poawx_proposer::PROPOSER_ANNOUNCE_CAP,
+            "announce cap parity"
+        );
+        assert_eq!(
+            PROPOSER_REG_CAP,
+            irium_node_rs::poawx_proposer::PROPOSER_REG_CAP,
+            "activation cap parity"
+        );
+
+        // The pool's PRG1 section framing must equal the node's encoder layout
+        // (magic || u16 announce || records || u16 activation || records).
+        let net = 2u8;
+        let anchor_hash = [0x44u8; 32];
+        let secret = [0x22u8; 32];
+        let section =
+            build_pool_proposer_registration_section(&secret, net, 5, &anchor_hash, 0).unwrap();
+        assert_eq!(section.announces.len(), 1);
+        assert!(section.activations.is_empty());
+        let node_reg = irium_node_rs::poawx::ProposerRegistrationV1::deserialize(
+            &section.announces[0].serialize(),
+        )
+        .unwrap();
+        let mut expect = Vec::new();
+        expect.extend_from_slice(b"PRG1");
+        expect.extend_from_slice(&1u16.to_le_bytes());
+        expect.extend_from_slice(&node_reg.serialize());
+        expect.extend_from_slice(&0u16.to_le_bytes());
+        assert_eq!(
+            section.serialize(),
+            expect,
+            "pool PRG1 section framing is byte-identical to the node ext encoder layout"
+        );
+    }
+
+    #[test]
+    fn m3_proposer_secret_load_or_generate_roundtrip_and_mainnet_refusal() {
+        // Generation refused when not allowed (mainnet callers pass allow_generate=false).
+        let missing = std::path::PathBuf::from(format!(
+            "/tmp/m3_proposer_missing_{}.hex",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&missing);
+        assert!(
+            load_or_generate_proposer_secret(&missing, false).is_err(),
+            "must refuse to generate when allow_generate=false"
+        );
+        // Generate, then load must return the SAME secret (stable custodial key).
+        let path = std::path::PathBuf::from(format!(
+            "/tmp/m3_proposer_key_{}.hex",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_file(&path);
+        let s1 = load_or_generate_proposer_secret(&path, true).expect("generate");
+        let s2 = load_or_generate_proposer_secret(&path, false).expect("load existing");
+        assert_eq!(s1, s2, "loaded custodial proposer secret is stable across restarts");
+        // The derived pubkey is a valid compressed secp256k1 point.
+        assert!(pubkey_from_secret(&s1).is_ok(), "derived proposer pubkey valid");
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]

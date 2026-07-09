@@ -11516,6 +11516,178 @@ mod tests {
     }
 
     #[test]
+    fn stage_d_delegated_direct_payout_proposer_vrf_off_connect_block_pays_miner() {
+        // D5 end-to-end (the pool's actual Stage-D scenario): a DELEGATED (mode-1)
+        // all-gates block that carries NO proposer-VRF assignment (proposer_ctx = None)
+        // is accepted by the full connect_block when proposer-VRF enforcement is OFF -
+        // exactly what the pool can produce today (it has no ECVRF prover; see
+        // docs/d4_spike_finding.md). The coinbase PRIMARY still pays the MINER's payout
+        // pkh directly on-chain (delegation triangle only; no central wallet). This is
+        // the direct-payout proof for Option 1: user-facing goal delivered without any
+        // prover. All the OTHER all-gates checks stay ON, so this is the full block
+        // minus proposer-VRF.
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::seed_components_from_block;
+        use crate::poawx_mining_harness::{
+            build_delegated_poawx_block_with_proposer, build_solo_poawx_block_with_parent,
+        };
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            // proposer-VRF NOT set => proposer_vrf_enforced(h) == false (the pool's mode).
+            ("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        assert!(
+            !crate::poawx_proposer::proposer_vrf_enforced(2),
+            "this test runs with proposer-VRF enforcement OFF (the pool's no-prover mode)"
+        );
+
+        let skf = |s: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(s.into()).unwrap();
+
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let cache = global_admission_cache();
+
+        // ---- h1: solo block ----
+        let solo_secret = [0x4Du8; 32];
+        let pc1 = seed_components_from_block(st.chain.last());
+        let bits1 = st.target_for_height(1).bits;
+        let p1 = build_solo_poawx_block_with_parent(
+            &solo_secret, net, 1, genesis_hash, None, bits1, genesis.header.time + 1, 1, pc1,
+        )
+        .expect("build h1");
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &p1.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let h1_hash = p1.block_hash;
+        st.connect_block(p1.block).expect("connect h1");
+
+        // ---- keys: pool delegate (signs + does role work) and the MINER payout key ----
+        let delegate_secret = [0xB2u8; 32];
+        let payout_secret = [0xC3u8; 32];
+        let custodial_pubkey = pubkey33(&skf(&[0xA1u8; 32])); // advertised proposer key (unenforced here)
+        let delegate_pubkey = pubkey33(&skf(&delegate_secret));
+        let payout_pubkey = pubkey33(&skf(&payout_secret));
+        let payout_pkh = pkh_of(&skf(&payout_secret));
+        let delegate_pkh = pkh_of(&skf(&delegate_secret));
+
+        // ---- miner-signed Delegation v2 (payout key signs; binds proposer+pool+payout) ----
+        let mut d = crate::poawx::Delegation {
+            deleg_version: 2,
+            network_id: net,
+            miner_pubkey: payout_pubkey,
+            pool_pubkey: delegate_pubkey,
+            worker_tag: [0u8; 32],
+            expiry_height: 1_000_000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [0x5Du8; 32],
+            proposer_pubkey: custodial_pubkey,
+            delegation_sig: [0u8; 64],
+        };
+        {
+            use k256::ecdsa::signature::hazmat::PrehashSigner;
+            let sig: k256::ecdsa::Signature =
+                skf(&payout_secret).sign_prehash(&d.message_hash()).unwrap();
+            d.delegation_sig.copy_from_slice(&sig.to_bytes());
+        }
+        d.verify_signature().expect("delegation self-verifies");
+
+        // ---- h2: DELEGATED block, NO proposer assignment (proposer_ctx = None) ----
+        let pc2 = seed_components_from_block(st.chain.last());
+        let bits2 = st.target_for_height(2).bits;
+        let p2 = build_delegated_poawx_block_with_proposer(
+            &delegate_secret, d.clone(), net, 2, h1_hash, Some(genesis_hash), bits2,
+            genesis.header.time + 2, 1, pc2, &st.dominance, None, None, None, vec![],
+        )
+        .expect("build delegated h2 (no proposer proof)");
+
+        let r = &p2.block.poawx_receipts.as_ref().unwrap()[0];
+        assert!(r.delegation.is_some(), "h2 receipt is delegated");
+        assert_eq!(r.worker_pkh, payout_pkh, "receipt worker_pkh == miner payout pkh");
+        assert_ne!(r.worker_pkh, delegate_pkh, "receipt worker_pkh != delegate pkh");
+        assert!(
+            r.phase20_ext
+                .as_ref()
+                .and_then(|e| e.proposer_assignment.as_ref())
+                .is_none(),
+            "no proposer-VRF assignment is carried (proposer-VRF off)"
+        );
+
+        cache.clear();
+        cache.set_tip(2);
+        for adm in &p2.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let coinbase = p2.block.transactions[0].clone();
+        st.connect_block(p2.block)
+            .expect("connect_block accepts the delegated block with proposer-VRF off");
+        assert_eq!(st.tip_height(), 2, "tip advanced to the delegated block");
+
+        // ---- decode the on-chain coinbase: PRIMARY -> miner, roles -> delegate ----
+        let primary_script = crate::tx::p2pkh_script(&payout_pkh);
+        let delegate_script = crate::tx::p2pkh_script(&delegate_pkh);
+        assert_eq!(
+            coinbase.outputs[1].script_pubkey, primary_script,
+            "PRIMARY coinbase output pays the miner payout pkh directly on-chain"
+        );
+        assert!(coinbase.outputs[1].value > 0, "PRIMARY output has value");
+        for i in 2..=4usize {
+            assert_eq!(
+                coinbase.outputs[i].script_pubkey, delegate_script,
+                "role output {i} pays the pool delegate (it did the role work)"
+            );
+        }
+        assert_ne!(payout_pkh, delegate_pkh, "no central wallet: miner != delegate");
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
     fn phase4_multi_participant_distinct_role_payouts_connect_block() {
         // Role-attribution Phase 4 final proof: with the contributor-role binding rule
         // ACTIVE, a full all-gates block whose COMPUTE/VERIFY/SUPPORT roles are performed by

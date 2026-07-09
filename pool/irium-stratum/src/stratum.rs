@@ -2780,6 +2780,15 @@ fn decode_native_rewardable_submit(
     }
     let extranonce2 =
         hex::decode(&submit.extranonce2_hex).map_err(|e| anyhow!("extranonce2 decode: {e}"))?;
+    // FAIL-SAFE (submit side): a multi-role coinbase-build error here is ALREADY
+    // graceful and does NOT drop the session. This Err propagates up through
+    // handle_submit_native_rewardable -> handle_submit, and the `mining.submit`
+    // dispatch arm in handle_request converts any handle_submit Err into a share
+    // reject response (Stratum error 23) and keeps the connection alive (only the
+    // deliberate __DISCONNECT_VARIANT_NONE__ low-difficulty marker disconnects).
+    // So the requested "reject cleanly rather than drop" behavior already holds
+    // for the submit path; no change is needed here beyond this note. (The same
+    // holds for the auxpow reconstruct in handle_submit_auxpow.)
     let coinbase = reconstruct_canonical_coinbase(snapshot, &extranonce2)?;
     let coinbase_hash_internal = sha256d(&coinbase);
     let canonical_merkle_root = reconstruct_canonical_merkle_root(snapshot, coinbase_hash_internal);
@@ -4534,6 +4543,51 @@ async fn send_set_difficulty(
     write_json(wr, &msg).await
 }
 
+/// Fail-safe multi-role notify coinbase. Tries the multi-role split
+/// (`native_rewardable_notify_split`); on ANY build error it logs a warning and
+/// falls back to the ASIC-compatible self-pay coinbase (`coinbase_prefix_suffix`),
+/// so the caller (`send_notify`) can NEVER drop the session on a coinbase-build
+/// error. Infallible by construction (returns the coinbase, never a `Result`).
+///
+/// On success this returns exactly what the previous `native_rewardable_notify_split(snap)?`
+/// produced (multi-role cb1/cb2 + snapshot branches), so the success path is
+/// byte-identical. Only the error case changes: drop -> self-pay fallback.
+///
+/// NOTE for any future Bitaxe / C4 sustained-load test: this fallback is SILENT.
+/// A run with malformed exts would exercise the SELF-PAY path, not the multi-role
+/// path. To actually load-test the multi-role coinbase (the point of C4), the test
+/// must feed WELL-FORMED phase20 exts throughout, else it silently measures
+/// self-pay heap behavior instead of multi-role.
+fn native_notify_coinbase_or_selfpay(
+    snap: &CanonicalJobSnapshot,
+    session: &SessionState,
+    job: &Job,
+    pkh: &[u8; 20],
+) -> (Vec<u8>, Vec<u8>, Vec<String>) {
+    match native_rewardable_notify_split(snap) {
+        Ok((cb1, cb2)) => (
+            cb1,
+            cb2,
+            snap.branches.iter().map(hex::encode).collect(),
+        ),
+        Err(e) => {
+            warn!(
+                "[poawx] multi-role coinbase build failed ({e}); falling back to self-pay for worker={} job={} — session KEPT (well-formed exts required for a C4 multi-role load test)",
+                session.worker.as_deref().unwrap_or("-"),
+                job.job_id
+            );
+            let (cb1, cb2) = coinbase_prefix_suffix(
+                job.height,
+                job.coinbase_value,
+                pkh,
+                session.coinbase_bip34,
+                session_coinbase_extras(job, session),
+            );
+            (cb1, cb2, job.branches.iter().map(hex::encode).collect())
+        }
+    }
+}
+
 async fn send_notify(
     wr: &mut tokio::net::tcp::OwnedWriteHalf,
     session: &SessionState,
@@ -4574,12 +4628,23 @@ async fn send_notify(
             // build_native_rewardable_coinbase (which carries the mode-1 irx1
             // commitment). The notify MUST send that same coinbase, split at the
             // extranonce boundary, so the mined coinbase matches validation.
-            let (cb1, cb2) = native_rewardable_notify_split(snap)?;
+            //
+            // FAIL-SAFE (investigation finding): native_rewardable_notify_split is
+            // fallible (malformed phase20_ext / missing extranonce marker / any
+            // build error). Propagating that Err here previously dropped the ASIC
+            // session (the loop does `break Err(e)` on a send_notify error), which
+            // collapsed candidate production in three live deploys. The infallible
+            // helper below falls back to the self-pay coinbase on ANY error and
+            // keeps the session connected; on success it is byte-identical to
+            // before. This changes NO success-case behavior and NO live-mainnet
+            // behavior (mainnet ASICs are served self-pay via LegacyRewardable and
+            // never reach this branch).
+            let (cb1, cb2, branches) = native_notify_coinbase_or_selfpay(snap, session, job, &pkh);
             (
                 prev_hex_for_height(&job.prev_hash, job.height),
                 hex::encode(cb1),
                 hex::encode(cb2),
-                snap.branches.iter().map(hex::encode).collect(),
+                branches,
             )
         } else {
             // Use the snapshot's prefix/suffix so the bytes stay byte-identical
@@ -5325,14 +5390,15 @@ mod tests {
     }
 
     #[test]
-    fn repro_multirole_notify_split_is_fallible_and_drops_session_selfpay_is_not() {
-        // INVESTIGATION reproduction (test-only): the multi-role coinbase notify
-        // path is FALLIBLE, and in the live session loop its Err propagates via `?`
-        // / `break Err(e)` and DROPS the ASIC connection at job/notify time (before
-        // any share). The self-pay path (coinbase_prefix_suffix) is INFALLIBLE and
-        // never drops a session this way. This is the structural difference behind
-        // the 3x live symptom (disconnects + candidate collapse + 0 rejects) that a
-        // size measurement cannot see.
+    fn multirole_notify_failsafe_falls_back_to_selfpay_keeps_session() {
+        // Investigation reproduction + FAIL-SAFE proof (test-only). The raw
+        // multi-role coinbase split is FALLIBLE; propagating its Err in send_notify
+        // previously dropped the ASIC connection at notify time (the 3x live symptom:
+        // disconnects + candidate collapse + 0 rejects). This test asserts (1) the
+        // raw split can still error, and (2) the infallible wrapper
+        // native_notify_coinbase_or_selfpay now falls back to the self-pay coinbase
+        // under that exact condition and returns normally, so send_notify can no
+        // longer drop the session (dropped -> kept-alive).
         let _g = crate::delegation::p20_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -5351,20 +5417,43 @@ mod tests {
         bad.phase20_ext = "00".to_string(); // valid hex, invalid ext structure
         let snapshot = snapshot_with_receipts(vec![bad]);
 
-        // Multi-role path: ERRORS -> in send_notify this is `native_rewardable_notify_split(snap)?`
-        // -> Err -> the session loop does `break Err(e)` -> the ASIC connection is dropped.
+        // (1) The RAW multi-role split is FALLIBLE (the underlying hazard): if this
+        // Err were propagated in send_notify it would drop the ASIC connection.
         let multirole = native_rewardable_notify_split(&snapshot);
         assert!(
             multirole.is_err(),
-            "multi-role notify split MUST be able to error (fallible session-drop path); got Ok"
+            "multi-role notify split MUST be able to error (the underlying fallible hazard); got Ok"
         );
 
-        // Self-pay path: INFALLIBLE — always returns (cb1, cb2), so it can never
-        // drop a session at notify time.
+        // (2) FAIL-SAFE: under the EXACT same malformed-ext condition, the infallible
+        // wrapper send_notify now uses falls back to the self-pay coinbase and
+        // returns normally, so the session is KEPT (no drop). Bytes equal the
+        // self-pay path for this job.
         let pkh = [0x11u8; 20];
-        let (cb1, cb2) = crate::block::coinbase_prefix_suffix(1, 5_000_000_000, &pkh, true, &[]);
+        let session = test_session(AdapterKind::NativeRewardableReserved);
+        let job = test_job();
+        let (cb1, cb2, branches) = native_notify_coinbase_or_selfpay(&snapshot, &session, &job, &pkh);
+        let (exp_cb1, exp_cb2) = crate::block::coinbase_prefix_suffix(
+            job.height,
+            job.coinbase_value,
+            &pkh,
+            session.coinbase_bip34,
+            session_coinbase_extras(&job, &session),
+        );
+        assert_eq!(cb1, exp_cb1, "fail-safe must fall back to the self-pay cb1");
+        assert_eq!(cb2, exp_cb2, "fail-safe must fall back to the self-pay cb2");
         assert!(
-            !cb1.is_empty() && !cb2.is_empty(),
+            branches.len() == job.branches.len(),
+            "fail-safe uses the job branches on fallback"
+        );
+        // Reaching here without a panic/Err is the point: the wrapper is infallible,
+        // so send_notify cannot `break Err(e)` on a coinbase-build error -> the
+        // session stays connected (dropped -> kept-alive).
+
+        // (3) Self-pay path itself is INFALLIBLE (contrast): always produces cb1/cb2.
+        let (s1, s2) = crate::block::coinbase_prefix_suffix(1, 5_000_000_000, &pkh, true, &[]);
+        assert!(
+            !s1.is_empty() && !s2.is_empty(),
             "self-pay coinbase is infallible and always produces cb1/cb2"
         );
 

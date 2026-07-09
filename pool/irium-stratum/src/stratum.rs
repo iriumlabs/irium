@@ -1512,7 +1512,27 @@ fn build_session_poawx_receipts(
                         ctx.block_height,
                         fee,
                         &job.prev_hash,
-                    );
+                    )
+                    .map(|mut ext| {
+                        // D3: attach the pool custodial proposer registration (PRG1)
+                        // when emission is enabled (IRIUM_POAWX_PROPOSER_REGISTER=1,
+                        // default OFF) and a custodial secret is held. Forward-prep for
+                        // the proposer-VRF-enforced mode; inert/unvalidated under
+                        // proposer-VRF off. OFF by default => byte-identical to today.
+                        if let Some(sec) = producer.proposer_secret.as_ref() {
+                            if let Some(section) =
+                                crate::delegation::maybe_build_proposer_registration(
+                                    sec,
+                                    producer.network_id,
+                                    ctx.block_height,
+                                    &job.prev_hash,
+                                )
+                            {
+                                ext.proposer_registrations = Some(section);
+                            }
+                        }
+                        ext
+                    });
                     if trace {
                         info!(
                             "[poawx-trace] phase20 M3 stage_d gate ON block_h={} bundle={}",
@@ -7370,6 +7390,7 @@ mod tests {
             key: std::sync::Arc::new(delegate),
             network_id: 2,
             role_store: std::sync::Arc::new(crate::delegation::RoleProtocolStore::new()),
+            proposer_secret: None,
         });
         config.poawx_producer = Some(producer);
 

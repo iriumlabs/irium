@@ -1966,6 +1966,59 @@ pub fn build_pool_proposer_registration_section(
     })
 }
 
+/// D3 emission gate: whether the pool should attach its custodial proposer
+/// registration (PRG1) to produced blocks. Non-mainnet only, default OFF
+/// (`IRIUM_POAWX_PROPOSER_REGISTER=1`). Deliberately INDEPENDENT of
+/// `stage_d_production_active` so the delegated DIRECT-PAYOUT path can run without
+/// emitting any registration (keeping the produced ext byte-identical to the
+/// no-registration case). Under proposer-VRF-off the node parses but does not
+/// validate the section (forward-prep for the proposer-VRF-enforced mode; the full
+/// "emit until frozen, then stop" freeze-tracking via /poawx/proposer-status is
+/// deferred with the ECVRF custodial-proposer decision - see docs/d4_spike_finding.md).
+pub fn proposer_registration_emit_enabled() -> bool {
+    if network_id_from_env() == 0 {
+        return false; // mainnet hard-off
+    }
+    env::var("IRIUM_POAWX_PROPOSER_REGISTER")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false)
+}
+
+/// D3: build the custodial proposer registration section to attach to a produced
+/// block, anchored to the parent block (anchor_height = height-1, anchor_hash =
+/// prev_hash). Returns None when emission is disabled or on any build error
+/// (fail-open: the block is still produced without it). `required_bits` from
+/// `IRIUM_POAWX_PROPOSER_SYBIL_BITS` (default 0; the node only validates the sybil
+/// PoW under proposer-VRF enforcement, which is off in direct-payout mode).
+pub fn maybe_build_proposer_registration(
+    proposer_secret: &[u8; 32],
+    network_id: u8,
+    height: u64,
+    prev_hash: &[u8; 32],
+) -> Option<ProposerRegistrationSectionMirror> {
+    if !proposer_registration_emit_enabled() {
+        return None;
+    }
+    let anchor_height = height.saturating_sub(1);
+    let required_bits = env::var("IRIUM_POAWX_PROPOSER_SYBIL_BITS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(0);
+    match build_pool_proposer_registration_section(
+        proposer_secret,
+        network_id,
+        anchor_height,
+        prev_hash,
+        required_bits,
+    ) {
+        Ok(section) => Some(section),
+        Err(e) => {
+            warn!("[poawx-deleg] proposer registration build failed: {e}");
+            None
+        }
+    }
+}
+
 /// Whether the gated SYNTHETIC role-claim builder is enabled. Testnet/devnet-only
 /// (`IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS=1`), mainnet hard-off, disabled by default.
 /// This is for production-wiring validation; it is NOT the live hidden-precommit
@@ -4700,6 +4753,15 @@ pub struct PoawxProducer {
     /// Step 6B: shared role precommit/reveal store (loopback-fed); read by the
     /// receipt-producer path to build collected Phase 20 exts.
     pub role_store: Arc<RoleProtocolStore>,
+    /// D1 (Stage D): the pool's custodial proposer secret, loaded ONLY when the
+    /// Stage-D production gate is configured and the network is non-mainnet. `None`
+    /// => today's behavior (no custodial proposer key; delegation signup advertises
+    /// no proposer_pubkey). Used to advertise the matching proposer pubkey (so a
+    /// miner's delegation binds a key the pool actually holds) and by D3 to sign the
+    /// on-chain proposer registration. NOT used to VRF-prove a block proposer - the
+    /// pool has no ECVRF prover (see docs/d4_spike_finding.md); direct-payout mode
+    /// runs with proposer-VRF enforcement off.
+    pub proposer_secret: Option<[u8; 32]>,
 }
 
 /// Load the producer (delegate key + delegation store). Returns None on mainnet
@@ -4728,11 +4790,46 @@ pub fn load_producer() -> Option<PoawxProducer> {
         "[poawx-deleg] pool_pubkey={} network_id={network_id}",
         key.pubkey_hex()
     );
+    // D1: when the Stage-D production gate is configured (non-mainnet only; mainnet
+    // already returned None above), load or generate the custodial proposer secret
+    // and advertise its derived pubkey so a miner's delegation signup binds a key the
+    // pool actually holds. Fail-open to None on any error (delegation direct-payout
+    // still works; only the proposer-registration/binding forward-prep is skipped).
+    let proposer_secret = if stage_d_production_active(0) {
+        match load_or_generate_proposer_secret(&proposer_key_path(), network_id != 0) {
+            Ok(sec) => {
+                match pubkey_from_secret(&sec) {
+                    Ok(pk) => {
+                        // Only set when not already provided, so an explicit operator
+                        // override of the advertised pubkey is preserved.
+                        if env::var("IRIUM_POAWX_POOL_PROPOSER_PUBKEY_HEX").is_err() {
+                            env::set_var(
+                                "IRIUM_POAWX_POOL_PROPOSER_PUBKEY_HEX",
+                                hex::encode(pk),
+                            );
+                        }
+                        info!(
+                            "[poawx-deleg] custodial proposer pubkey advertised (Stage D, network_id={network_id})"
+                        );
+                    }
+                    Err(e) => warn!("[poawx-deleg] proposer pubkey derive failed: {e}"),
+                }
+                Some(sec)
+            }
+            Err(e) => {
+                warn!("[poawx-deleg] custodial proposer key unavailable: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
     Some(PoawxProducer {
         store,
         key: Arc::new(key),
         network_id,
         role_store: Arc::new(RoleProtocolStore::new()),
+        proposer_secret,
     })
 }
 
@@ -6757,6 +6854,53 @@ mod tests {
         let node_none =
             irium_node_rs::poawx::Phase20ReceiptExt::deserialize(&ext_none.serialize()).unwrap();
         assert!(node_none.proposer_registrations.is_none());
+    }
+
+    #[test]
+    fn d3_proposer_registration_emit_gate_and_section_validity() {
+        // D3: the pool attaches its custodial proposer registration only when the
+        // emit gate is on (default OFF, so the direct-payout path stays clean), it is
+        // mainnet-hard-off regardless of the flag, and the produced section is a valid
+        // node-parseable PRG1 anchored to the parent block.
+        let _g = p20_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let secret = [0x33u8; 32];
+        let net = 2u8;
+        let prev = [0x77u8; 32];
+
+        // Gate OFF (default): nothing emitted.
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_REGISTER");
+        assert!(
+            maybe_build_proposer_registration(&secret, net, 100, &prev).is_none(),
+            "no registration emitted when the gate is off (direct-payout stays clean)"
+        );
+
+        // Gate ON: a valid section anchored to the parent (height-1), node-parseable.
+        std::env::set_var("IRIUM_POAWX_PROPOSER_REGISTER", "1");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_SYBIL_BITS", "0");
+        let section = maybe_build_proposer_registration(&secret, net, 100, &prev)
+            .expect("registration emitted when the gate is on");
+        assert_eq!(section.announces.len(), 1);
+        assert!(section.activations.is_empty());
+        // anchor_height is bytes [33..41] LE of the record wire; must be parent = 99.
+        let rec_bytes = section.announces[0].serialize();
+        let anchor_height =
+            u64::from_le_bytes(rec_bytes[33..41].try_into().expect("anchor_height slice"));
+        assert_eq!(anchor_height, 99, "registration anchored to the parent height");
+        // The node accepts the pool-built record byte-for-byte.
+        irium_node_rs::poawx::ProposerRegistrationV1::deserialize(&rec_bytes)
+            .expect("node deserializes the pool-built registration record");
+
+        // Mainnet hard-off regardless of the flag.
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        assert!(
+            !proposer_registration_emit_enabled(),
+            "proposer registration emission is mainnet-hard-off"
+        );
+
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_REGISTER");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_SYBIL_BITS");
+        std::env::remove_var("IRIUM_NETWORK");
     }
 
     #[test]

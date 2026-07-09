@@ -5325,6 +5325,55 @@ mod tests {
     }
 
     #[test]
+    fn repro_multirole_notify_split_is_fallible_and_drops_session_selfpay_is_not() {
+        // INVESTIGATION reproduction (test-only): the multi-role coinbase notify
+        // path is FALLIBLE, and in the live session loop its Err propagates via `?`
+        // / `break Err(e)` and DROPS the ASIC connection at job/notify time (before
+        // any share). The self-pay path (coinbase_prefix_suffix) is INFALLIBLE and
+        // never drops a session this way. This is the structural difference behind
+        // the 3x live symptom (disconnects + candidate collapse + 0 rejects) that a
+        // size measurement cannot see.
+        let _g = crate::delegation::p20_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1");
+        assert!(
+            crate::delegation::node_phase20_production_active(1),
+            "multi-role production must be active for this repro"
+        );
+
+        // A receipt whose phase20_ext is PRESENT but not parseable as role rewards.
+        // This is the kind of transient/edge-case ext (a receipt in an unexpected
+        // state) that the controlled rig never produces but that can occur live.
+        let mut bad = sample_poawx_receipt();
+        bad.phase20_ext = "00".to_string(); // valid hex, invalid ext structure
+        let snapshot = snapshot_with_receipts(vec![bad]);
+
+        // Multi-role path: ERRORS -> in send_notify this is `native_rewardable_notify_split(snap)?`
+        // -> Err -> the session loop does `break Err(e)` -> the ASIC connection is dropped.
+        let multirole = native_rewardable_notify_split(&snapshot);
+        assert!(
+            multirole.is_err(),
+            "multi-role notify split MUST be able to error (fallible session-drop path); got Ok"
+        );
+
+        // Self-pay path: INFALLIBLE — always returns (cb1, cb2), so it can never
+        // drop a session at notify time.
+        let pkh = [0x11u8; 20];
+        let (cb1, cb2) = crate::block::coinbase_prefix_suffix(1, 5_000_000_000, &pkh, true, &[]);
+        assert!(
+            !cb1.is_empty() && !cb2.is_empty(),
+            "self-pay coinbase is infallible and always produces cb1/cb2"
+        );
+
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT");
+    }
+
+    #[test]
     fn poawx_template_receipt_deserializes_pubkey_sig() {
         let json = r#"{"height":1,"lane":"A","worker_pkh":"aa","solution":"bb","commitment_nonce":"cc","worker_pubkey":"02dead","worker_sig":"beef"}"#;
         let r: PoawxPendingReceipt = serde_json::from_str(json).unwrap();

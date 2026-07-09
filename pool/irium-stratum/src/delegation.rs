@@ -1477,6 +1477,12 @@ pub struct Phase20ReceiptExtMirror {
     /// Phase 22D: optional per-role true-VRF assignment proofs [compute, verify,
     /// support] (trailing AVR2 section; None => byte-identical to pre-22D).
     pub role_assignment_v2: Option<[AssignmentProofV2Mirror; 3]>,
+    /// D2 (Stage D deferred): optional proposer-registration section (trailing PRG1;
+    /// None => byte-identical to pre-D2). Serialized in the EXACT node position: after
+    /// AVR2 and before the node's RVK1 section (the pool never emits RVK1). Attached by
+    /// the gated emit-until-frozen path (D3) so the custodial proposer key is registered
+    /// on-chain. Node reads it order-tolerantly by PRG1 magic (poawx.rs deserialize loop).
+    pub proposer_registrations: Option<ProposerRegistrationSectionMirror>,
 }
 
 impl Phase20ReceiptExtMirror {
@@ -1510,6 +1516,7 @@ impl Phase20ReceiptExtMirror {
                     || self.finality_proof.is_some()
                     || self.committed_admission.is_some()
                     || self.role_assignment_v2.is_some()
+                    || self.proposer_registrations.is_some()
                 {
                     out.push(0);
                 }
@@ -1558,6 +1565,14 @@ impl Phase20ReceiptExtMirror {
             for pr in proofs.iter() {
                 out.extend_from_slice(&pr.serialize());
             }
+        }
+        // D2 trailing PRG1 proposer-registration section (present-only). Emitted in
+        // the node's exact position (after AVR2, before the node's RVK1). The pool
+        // never emits RVK1, so PRG1 is the pool mirror's last section. reg.serialize()
+        // already writes the PRG1 magic + counts + records, byte-identical to the node
+        // encoder (poawx.rs Phase20ReceiptExt::serialize).
+        if let Some(reg) = &self.proposer_registrations {
+            out.extend_from_slice(&reg.serialize());
         }
         out
     }
@@ -3566,6 +3581,7 @@ pub fn build_synthetic_phase20_ext(
         finality_proof,
         committed_admission,
         role_assignment_v2,
+        proposer_registrations: None,
     })
 }
 
@@ -4097,6 +4113,7 @@ pub fn build_collected_bundle_ext(
         finality_proof: None,
         committed_admission: None,
         role_assignment_v2: Some([assigns[0].clone(), assigns[1].clone(), assigns[2].clone()]),
+        proposer_registrations: None,
     })
 }
 
@@ -4212,6 +4229,7 @@ pub fn build_collected_phase20_ext(
         finality_proof,
         committed_admission,
         role_assignment_v2,
+        proposer_registrations: None,
     })
 }
 
@@ -6050,6 +6068,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            proposer_registrations: None,
         };
         let node_ext = irium_node_rs::poawx::Phase20ReceiptExt {
             role_reward: node_rr,
@@ -6470,6 +6489,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            proposer_registrations: None,
         };
         attach_true_vrf_section(&mut pe, mp);
         let ne = irium_node_rs::poawx::Phase20ReceiptExt {
@@ -6657,6 +6677,86 @@ mod tests {
             expect,
             "pool PRG1 section framing is byte-identical to the node ext encoder layout"
         );
+    }
+
+    #[test]
+    fn d2_proposer_registration_section_full_ext_parity_with_node() {
+        // D2: the PRG1 proposer-registration section must serialize at the EXACT node
+        // position inside the FULL Phase20 ext (trailing, after AVR2, preceded by the
+        // `0` precommit flag when precommit is None), and the node must deserialize the
+        // pool-produced full-ext bytes back with the section intact. The node reads
+        // trailing sections order-tolerantly by magic, so emitting PRG1 alone - without
+        // the intervening FRAUD/PRP1/RVK1 sections the pool never produces - is valid.
+        let net = 2u8;
+        let anchor_hash = [0x44u8; 32];
+        let secret = [0x22u8; 32];
+        let section =
+            build_pool_proposer_registration_section(&secret, net, 5, &anchor_hash, 0).unwrap();
+
+        let mk_pool = |role: u8| PoawxRoleClaimMirror {
+            role_id: role,
+            lane_id: LANE_GPU_PARALLEL,
+            solver_pkh: [role; 20],
+            nonce: [role; 32],
+            secret: [role.wrapping_add(1); 32],
+            claim_digest: [role.wrapping_add(2); 32],
+            commitment_hash: None,
+        };
+        let base = |proposer_registrations| Phase20ReceiptExtMirror {
+            role_reward: RoleRewardMirror {
+                compute_contributor_pkh: [1u8; 20],
+                verify_contributor_pkh: [2u8; 20],
+                support_contributor_pkh: [3u8; 20],
+            },
+            compute_claim: mk_pool(1),
+            verify_claim: mk_pool(2),
+            support_claim: mk_pool(3),
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            precommit_root: None,
+            role_ticket_proofs: None,
+            role_dominance_weights: None,
+            candidate_set: None,
+            role_puzzle_proofs: None,
+            finality_proof: None,
+            committed_admission: None,
+            role_assignment_v2: None,
+            proposer_registrations,
+        };
+        let ext_none = base(None);
+        let ext_reg = base(Some(section.clone()));
+
+        // (1) Exact position: the ONLY difference from the no-section ext is the `0`
+        // precommit flag followed by the PRG1 section bytes, appended last.
+        let mut expect = ext_none.serialize();
+        expect.push(0u8);
+        expect.extend_from_slice(&section.serialize());
+        assert_eq!(
+            ext_reg.serialize(),
+            expect,
+            "PRG1 must be the trailing section, preceded by the 0 precommit flag"
+        );
+
+        // (2) The node deserializes the pool's full-ext bytes, recovers the section,
+        // and re-serializes to the identical bytes (full fidelity through the node).
+        let node_round =
+            irium_node_rs::poawx::Phase20ReceiptExt::deserialize(&ext_reg.serialize())
+                .expect("node must deserialize the pool ext carrying PRG1");
+        assert!(
+            node_round.proposer_registrations.is_some(),
+            "node recovered the PRG1 registration section"
+        );
+        assert_eq!(
+            node_round.serialize(),
+            ext_reg.serialize(),
+            "node round-trips the pool ext (incl. PRG1) byte-for-byte"
+        );
+
+        // (3) Gate-off byte-identity: with no section the ext is byte-identical to a
+        // pre-D2 ext (no trailing bytes) and carries no registration.
+        let node_none =
+            irium_node_rs::poawx::Phase20ReceiptExt::deserialize(&ext_none.serialize()).unwrap();
+        assert!(node_none.proposer_registrations.is_none());
     }
 
     #[test]
@@ -7654,6 +7754,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            proposer_registrations: None,
         };
         // node lib reads the pool DOM1 weights back identically (wire parity).
         let node_ext =
@@ -9327,6 +9428,7 @@ mod tests {
                 finality_proof: None,
                 committed_admission: None,
                 role_assignment_v2: None,
+                proposer_registrations: None,
             };
         let fpkh = [0x7Fu8; 20];
         // Pre-6A (no precommit_root): fee parses correctly.
@@ -9531,6 +9633,7 @@ mod tests {
             finality_proof: None,
             committed_admission: None,
             role_assignment_v2: None,
+            proposer_registrations: None,
         };
         let node_ext =
             irium_node_rs::poawx::Phase20ReceiptExt::deserialize(&ext.serialize()).unwrap();

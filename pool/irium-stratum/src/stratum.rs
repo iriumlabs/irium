@@ -1723,7 +1723,7 @@ fn build_canonical_job_snapshot(
         auxpow_mode,
         irium_header80,
         irium_coinbase_hex,
-        coinbase_extra_outputs: job.template_coinbase_extra_outputs.clone(),
+        coinbase_extra_outputs: session_template_coinbase_extras(job, session),
         poawx_pending_receipts: build_session_poawx_receipts(job, session, config, &pkh),
         poawx_reg_activations: job.poawx_reg_activations.clone(),
         poawx_reg_announces: job.poawx_reg_announces.clone(),
@@ -2206,6 +2206,28 @@ fn session_coinbase_extras<'a>(job: &'a Job, session: &SessionState) -> &'a [(u6
         &[]
     } else {
         &job.coinbase_extras
+    }
+}
+
+/// C4 carrier-stripping mitigation: the MULTI-ROLE (native rewardable / Stage-D)
+/// coinbase carrier extras, filtered per-session EXACTLY like session_coinbase_extras
+/// filters the self-pay extras. Small-buffer ASIC firmware gets EMPTY carriers so the
+/// reshaped multi-role mining.notify stays small (role payouts + irx1 only, ~2.5KB)
+/// instead of the carrier-laden ~4.7KB..~9KB worst case that inflates the firmware's
+/// transient JSON/parse footprint (see docs/c4_sustained_heap_results.md). Non-small-
+/// buffer keeps the raw template extras (backward-compat). STRATUM_CARRIERS=off already
+/// empties template_coinbase_extra_outputs at to_job, so the kill-switch still wins.
+/// Returns an owned Vec (not a borrow) because the empty case has no backing slice.
+fn session_template_coinbase_extras(job: &Job, session: &SessionState) -> Vec<(u64, Vec<u8>)> {
+    if session
+        .user_agent
+        .as_deref()
+        .map(is_small_buffer_firmware)
+        .unwrap_or(false)
+    {
+        Vec::new()
+    } else {
+        job.template_coinbase_extra_outputs.clone()
     }
 }
 
@@ -5358,6 +5380,128 @@ mod tests {
             mined, validation_cb,
             "mode-0 split must still match validation"
         );
+    }
+
+    #[test]
+    fn c4_multirole_notify_strips_carriers_for_small_buffer_asic() {
+        // C4 mitigation regression: the reshaped multi-role coinbase must NOT carry the
+        // header-relay carrier outputs for small-buffer ASIC firmware, so its
+        // mining.notify stays small (role payouts + irx1 only) instead of the
+        // carrier-laden ~4.7KB..~9KB worst case that inflates the firmware's transient
+        // parse footprint (docs/c4_sustained_heap_results.md). Non-small-buffer firmware
+        // keeps the carriers (backward-compat). This must never regress.
+        // Enable multi-role production so build_native_rewardable_coinbase takes the
+        // 4-output multi-role branch (node_phase20_production_active must be true).
+        let _g = crate::delegation::p20_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1");
+        let mut config = test_config(MinerFamilyMode::Asic);
+        config.adapter_mode = AdapterMode::NativeRewardableOnly;
+        config.native_rewardable_enabled = true;
+
+        // A job whose template carries a large (~2 KB) header-relay carrier output.
+        let mut job = native_test_job();
+        let carrier = vec![0xCAu8; 2000]; // distinctive 2 KB carrier script
+        job.template_coinbase_extra_outputs = vec![(0u64, carrier.clone())];
+
+        // A valid role-reward phase20_ext so build_native_rewardable_coinbase takes the
+        // multi-role (4 role outputs + carriers + irx1) branch, not the single-payout
+        // fallback (role_reward_pkhs_from_ext_hex must parse the ext).
+        let mk_claim = |role: u8| crate::delegation::PoawxRoleClaimMirror {
+            role_id: role,
+            lane_id: crate::delegation::LANE_GPU_PARALLEL,
+            solver_pkh: [role; 20],
+            nonce: [role; 32],
+            secret: [role.wrapping_add(1); 32],
+            claim_digest: [role.wrapping_add(2); 32],
+            commitment_hash: None,
+        };
+        let role_ext_hex = hex::encode(
+            crate::delegation::Phase20ReceiptExtMirror {
+                role_reward: crate::delegation::RoleRewardMirror {
+                    compute_contributor_pkh: [0xA1; 20],
+                    verify_contributor_pkh: [0xB2; 20],
+                    support_contributor_pkh: [0xC3; 20],
+                },
+                compute_claim: mk_claim(1),
+                verify_claim: mk_claim(2),
+                support_claim: mk_claim(3),
+                fee_bps: 0,
+                fee_pkh: [0u8; 20],
+                precommit_root: None,
+                role_ticket_proofs: None,
+                role_dominance_weights: None,
+                candidate_set: None,
+                role_puzzle_proofs: None,
+                finality_proof: None,
+                committed_admission: None,
+                role_assignment_v2: None,
+                proposer_registrations: None,
+            }
+            .serialize(),
+        );
+        let with_mode1 = |snap: &mut CanonicalJobSnapshot| {
+            snap.poawx_pending_receipts = vec![PoawxPendingReceipt {
+                height: snap.height,
+                lane: "A".to_string(),
+                worker_pkh: hex::encode([0x11u8; 20]),
+                solution: "0011223344556677".to_string(),
+                commitment_nonce: "cd".repeat(32),
+                worker_pubkey: hex::encode([0x02u8; 33]),
+                worker_sig: "11".repeat(64),
+                delegation: String::new(),
+                phase20_ext: role_ext_hex.clone(),
+            }];
+        };
+
+        // Small-buffer ASIC session (bitaxe): carriers MUST be stripped.
+        let mut asic = test_session(AdapterKind::NativeRewardableReserved);
+        asic.user_agent = Some("bitaxe/2.14.1 (esp-miner bm1370)".to_string());
+        let mut snap_asic = build_canonical_job_snapshot(&job, &asic, &config).unwrap();
+        assert!(
+            snap_asic.coinbase_extra_outputs.is_empty(),
+            "small-buffer ASIC multi-role coinbase MUST strip header-relay carriers"
+        );
+        with_mode1(&mut snap_asic);
+        let (cb1a, cb2a) = native_rewardable_notify_split(&snap_asic).unwrap();
+        assert!(
+            !cb1a.windows(carrier.len()).any(|w| w == &carrier[..])
+                && !cb2a.windows(carrier.len()).any(|w| w == &carrier[..]),
+            "stripped ASIC multi-role notify coinbase must NOT contain the carrier bytes"
+        );
+        let asic_len = cb1a.len() + cb2a.len();
+
+        // Non-small-buffer session (cgminer/large-buffer): carriers INCLUDED (unchanged).
+        let mut big = test_session(AdapterKind::NativeRewardableReserved);
+        big.user_agent = Some("cgminer/4.11.1".to_string());
+        let mut snap_big = build_canonical_job_snapshot(&job, &big, &config).unwrap();
+        assert_eq!(
+            snap_big.coinbase_extra_outputs,
+            vec![(0u64, carrier.clone())],
+            "non-small-buffer multi-role coinbase keeps the template carriers"
+        );
+        with_mode1(&mut snap_big);
+        let (cb1b, cb2b) = native_rewardable_notify_split(&snap_big).unwrap();
+        assert!(
+            cb2b.windows(carrier.len()).any(|w| w == &carrier[..]),
+            "non-small-buffer multi-role notify coinbase carries the carrier bytes"
+        );
+        let big_len = cb1b.len() + cb2b.len();
+
+        // The mitigation strictly shrinks the ASIC frame by ~the carrier size.
+        assert!(
+            asic_len + carrier.len() <= big_len,
+            "stripping removes ~carrier bytes: asic_coinbase={} big_coinbase={}",
+            asic_len,
+            big_len
+        );
+
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT");
     }
 
     fn sample_submit_request() -> SubmitRequest {

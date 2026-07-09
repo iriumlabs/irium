@@ -1662,6 +1662,46 @@ pub fn node_audit_hardening_active(height: u64) -> bool {
     activation_height_reached("IRIUM_POAWX_AUDIT_HARDENING_ACTIVATION_HEIGHT", height)
 }
 
+/// M3 (Stage D + Option A production) fallback gate.
+///
+/// Controls the NEW receipt-producer path: real per-participant role attribution
+/// via `build_collected_bundle_ext` (Option A) plus the custodial-proposer
+/// (Stage D) delegated production, in place of the exemption-based
+/// `build_collected_phase20_ext` -> synthetic fallback. When this returns false
+/// the producer's behavior is byte-identical to the pre-M3 path.
+///
+/// DEFAULT OFF everywhere and HARD mainnet-off (network_id == 0 -> false). The new
+/// path is inert until an operator EXPLICITLY sets `IRIUM_POAWX_STAGE_D_PRODUCTION=1`
+/// (or `=active`) on a non-mainnet network. There is no height component: enabling
+/// is a single deliberate opt-in, never a silent height rollover.
+///
+/// SAFETY (why this gate exists and must stay off):
+/// The Option A / Stage D path reshapes the ASIC-facing multi-role coinbase — the
+/// cb1/cb2 payload sent over `mining.notify`. That exact reshaping collapsed real
+/// ASIC candidate production THREE separate times while cpuminer / simulated rigs
+/// stayed green ("rig-green != live-safe"). Therefore:
+///
+///   This gate MUST NOT be turned on for any pool serving real ASIC hardware, and
+///   MUST NEVER be enabled on mainnet, until a REAL-ASIC `mining.notify` validation
+///   test (a real or faithfully-emulated ASIC assembling coinbase = cb1 + extranonce
+///   + cb2, computing the merkle root, and producing accepted shares against the
+///   reshaped multi-role coinbase) has EXPLICITLY PASSED and been separately
+///   approved for activation. A green isolated rig is NOT sufficient evidence.
+///
+/// See docs/miner-direct-pool-rewards.md and the M6 readiness report for the exact
+/// precondition that must hold before this gate is ever flipped on.
+pub fn stage_d_production_active(_height: u64) -> bool {
+    if network_id_from_env() == 0 {
+        return false; // mainnet: the reshaped coinbase path is never active
+    }
+    env::var("IRIUM_POAWX_STAGE_D_PRODUCTION")
+        .map(|v| {
+            let t = v.trim();
+            t == "1" || t == "active"
+        })
+        .unwrap_or(false)
+}
+
 /// Whether the gated SYNTHETIC role-claim builder is enabled. Testnet/devnet-only
 /// (`IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS=1`), mainnet hard-off, disabled by default.
 /// This is for production-wiring validation; it is NOT the live hidden-precommit
@@ -6238,6 +6278,39 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_POAWX_TRUE_VRF_REQUIRED");
+    }
+
+    #[test]
+    fn m3_stage_d_production_gate_off_by_default_and_mainnet_hard_off() {
+        let _g = p20_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        // Default OFF on a non-mainnet network with the flag unset: the new
+        // Option A / Stage D coinbase path must be inert until explicit opt-in.
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::remove_var("IRIUM_POAWX_STAGE_D_PRODUCTION");
+        assert!(
+            !stage_d_production_active(10),
+            "new path must be OFF by default even on devnet (inert until explicit opt-in)"
+        );
+        // Explicit opt-in on devnet/testnet turns it on.
+        std::env::set_var("IRIUM_POAWX_STAGE_D_PRODUCTION", "1");
+        assert!(
+            stage_d_production_active(10),
+            "explicit IRIUM_POAWX_STAGE_D_PRODUCTION=1 enables the new path on devnet"
+        );
+        std::env::set_var("IRIUM_POAWX_STAGE_D_PRODUCTION", "active");
+        assert!(stage_d_production_active(10), "=active also enables");
+        // HARD mainnet-off: even with the flag set, mainnet never activates the
+        // reshaped ASIC coinbase path.
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        assert!(
+            !stage_d_production_active(10),
+            "mainnet must be hard-off regardless of the flag (reshaped ASIC coinbase never active on mainnet)"
+        );
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_STAGE_D_PRODUCTION", "0");
+        assert!(!stage_d_production_active(10), "flag=0 stays off");
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_STAGE_D_PRODUCTION");
     }
 
     #[test]

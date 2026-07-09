@@ -1493,14 +1493,53 @@ fn build_session_poawx_receipts(
                 // protocol) if enabled + complete; (2) SYNTHETIC fallback only when
                 // IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS=1; (3) otherwise NO ext (the node
                 // fails closed after activation — never fakes claims).
-                let collected = crate::delegation::build_collected_phase20_ext(
-                    producer.role_store.as_ref(),
-                    producer.network_id,
-                    ctx.block_height,
-                    fee,
-                    pkh,
-                    &job.prev_hash,
-                );
+                //
+                // M3 (Option A / Stage D, gated): when IRIUM_POAWX_STAGE_D_PRODUCTION
+                // is EXPLICITLY enabled (non-mainnet, default OFF), prefer the real
+                // per-participant collected BUNDLE (best_bundled_reveals + Phase-1
+                // binding + full ticket/puzzle attachment) via build_collected_bundle_ext.
+                // If no complete bundle exists, or the gate is off, fall through to
+                // EXACTLY today's path (build_collected_phase20_ext -> synthetic), so
+                // the producer stays byte-identical to pre-M3 whenever the gate is off.
+                // SAFETY: the bundle path reshapes the ASIC-facing multi-role coinbase;
+                // stage_d_production_active is hard mainnet-off and MUST NOT be enabled
+                // for real ASIC hardware until a real-ASIC mining.notify validation test
+                // passes (see delegation::stage_d_production_active docs + M6 report).
+                let collected = if crate::delegation::stage_d_production_active(ctx.block_height) {
+                    let bundle = crate::delegation::build_collected_bundle_ext(
+                        producer.role_store.as_ref(),
+                        producer.network_id,
+                        ctx.block_height,
+                        fee,
+                        &job.prev_hash,
+                    );
+                    if trace {
+                        info!(
+                            "[poawx-trace] phase20 M3 stage_d gate ON block_h={} bundle={}",
+                            ctx.block_height,
+                            bundle.is_some()
+                        );
+                    }
+                    bundle.or_else(|| {
+                        crate::delegation::build_collected_phase20_ext(
+                            producer.role_store.as_ref(),
+                            producer.network_id,
+                            ctx.block_height,
+                            fee,
+                            pkh,
+                            &job.prev_hash,
+                        )
+                    })
+                } else {
+                    crate::delegation::build_collected_phase20_ext(
+                        producer.role_store.as_ref(),
+                        producer.network_id,
+                        ctx.block_height,
+                        fee,
+                        pkh,
+                        &job.prev_hash,
+                    )
+                };
                 let chosen = match collected {
                     Some(ext) => {
                         if trace {

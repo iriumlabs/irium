@@ -5223,6 +5223,81 @@ mod tests {
     }
 
     #[test]
+    fn per_miner_delegation_mixed_batch_direct_and_fallback() {
+        // Per-miner delegation, MIXED batch (scenario c): in ONE production cycle some miners
+        // have registered a delegation and some have not. Each miner's receipt is built
+        // independently from ITS OWN delegation looked up by (miner_pkh, worker): registered
+        // miners are paid directly to their own address (worker_pkh == that miner's pkh);
+        // unregistered miners return None so the pool falls back to today's custodial payout.
+        // Confirms the existing per-miner path handles a mixed cohort, not just single miners.
+        let miner_a = SigningKey::from_slice(&[0xA1u8; 32]).unwrap();
+        let miner_b = SigningKey::from_slice(&[0xB2u8; 32]).unwrap();
+        let miner_c = SigningKey::from_slice(&[0xC3u8; 32]).unwrap();
+        // One store + one pool delegate key; register A and B, NOT C.
+        let dir = temp_dir("mixed_per_miner");
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = DelegateKey::load_or_generate(&dir.join("k.hex"), true).unwrap();
+        let store = JsonDelegationStore::open(dir.join("d.json")).unwrap();
+        let reg = |m: &SigningKey, w: &str| -> [u8; 20] {
+            let d = mirror_signed(m, key.pubkey(), 1, w, 1000, 0);
+            let pkh = d.miner_pkh();
+            verify_and_store(
+                &store,
+                &hex::encode(d.serialize()),
+                w,
+                &hex::encode(pkh),
+                &key.pubkey(),
+                1,
+                0,
+                1,
+                None,
+            )
+            .expect("store delegation");
+            pkh
+        };
+        let pkh_a = reg(&miner_a, "rigA");
+        let pkh_b = reg(&miner_b, "rigB");
+        // miner C: derive its pkh but DO NOT register a delegation.
+        let pkh_c = mirror_signed(&miner_c, key.pubkey(), 1, "rigC", 1000, 0).miner_pkh();
+        assert_eq!(
+            [pkh_a, pkh_b, pkh_c]
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            3,
+            "three distinct miners"
+        );
+
+        let dto = p18b3_assignment_dto(0, 4, "cpu"); // tip 0 -> block height 1
+        let ctx = assignment_context_from_dto(&dto, 1).expect("ctx");
+
+        // (a within the mix) A is delegated -> paid DIRECTLY to A's own address.
+        let ra = build_mode1_pending_receipt(&store, &key, 1, pkh_a, "rigA", &ctx)
+            .expect("miner A delegated -> receipt");
+        assert_eq!(ra.worker_pkh, hex::encode(pkh_a), "miner A paid directly to A");
+        // B is delegated -> paid DIRECTLY to B's own (distinct) address.
+        let rb = build_mode1_pending_receipt(&store, &key, 1, pkh_b, "rigB", &ctx)
+            .expect("miner B delegated -> receipt");
+        assert_eq!(rb.worker_pkh, hex::encode(pkh_b), "miner B paid directly to B");
+        assert_ne!(
+            ra.worker_pkh, rb.worker_pkh,
+            "A and B are paid to their OWN distinct addresses, not pooled"
+        );
+        // (b within the mix) C is NOT delegated -> None -> fallback (today's custodial payout).
+        assert!(
+            build_mode1_pending_receipt(&store, &key, 1, pkh_c, "rigC", &ctx).is_none(),
+            "miner C (no delegation) falls back to custodial -- zero disruption"
+        );
+
+        println!(
+            "[mixed] per-miner cohort: A={} paid direct, B={} paid direct, C={} fallback -- mixed batch correct",
+            hex::encode(pkh_a),
+            hex::encode(pkh_b),
+            hex::encode(pkh_c)
+        );
+    }
+
+    #[test]
     fn phase18b3_build_mode1_receipt_and_root_parity() {
         let miner = SigningKey::from_slice(&[5u8; 32]).unwrap();
         let (key, store, miner_pkh) = p18b3_setup(&miner, "rig1", 1000, 0, 1);

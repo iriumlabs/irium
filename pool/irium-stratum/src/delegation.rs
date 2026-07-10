@@ -6427,6 +6427,7 @@ mod tests {
                 fraud_proofs: None,
                 proposer_assignment: None,
                 proposer_registrations: None,
+                delegation_revocations: None,
             };
             let outs = vec![
                 outp(&primary, a[0]),
@@ -6613,6 +6614,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let p2pkh = |pkh: &[u8; 20]| {
             let mut s = vec![0x76, 0xa9, 0x14];

@@ -497,6 +497,7 @@ pub fn build_multi_participant_poawx_block_with_parent(
         None,
         None,
         None,
+        &default_cpu_nonce_solver,
     )
 }
 
@@ -607,6 +608,7 @@ pub fn build_delegated_poawx_block_with_proposer(
         node_gates,
         proposer_ctx,
         registration_section,
+        &default_cpu_nonce_solver,
     )
 }
 
@@ -729,6 +731,7 @@ pub fn build_multi_participant_poawx_block_with_proposer(
         node_gates,
         proposer_ctx,
         registration_section,
+        &default_cpu_nonce_solver,
     )
 }
 

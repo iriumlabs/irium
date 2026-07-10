@@ -95,6 +95,7 @@ fn make_ext(
         fraud_proofs: None,
         proposer_assignment: None,
         proposer_registrations: None,
+        delegation_revocations: None,
     }
 }
 

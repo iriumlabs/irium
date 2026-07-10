@@ -12285,6 +12285,167 @@ mod tests {
     }
 
     #[test]
+    fn state_a_registered_proposer_no_delegation_pays_single_custodial() {
+        // Option A fallback matrix, STATE (a): a REGISTERED proposer with NO delegation
+        // produces a normal SOLO single-payout block -- exactly today's production behavior
+        // (the operator's own miner is paid; no direct-to-delegate payment, no distinct
+        // contributor split). Under enforced proposer-VRF + all gates, connect_block accepts
+        // the solo block and every coinbase reward output (PRIMARY + the three roles) pays
+        // the miner's own address (one recipient). This is the real state of mainnet at
+        // activation for any miner who has not delegated.
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_solo_poawx_block_with_parent, build_solo_poawx_block_with_proposer, ProposerCtx,
+        };
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            ("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "2"),
+            ("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        let miner = [0x4Du8; 32];
+        let miner_pkh = pkh_of(&skf(&miner));
+
+        let net = crate::activation::network_id_byte();
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let cache = global_admission_cache();
+
+        // ---- h1: solo, pre-activation (proposer-VRF not active at h1) ----
+        let pc1 = seed_components_from_block(st.chain.last());
+        let bits1 = st.target_for_height(1).bits;
+        let p1 = build_solo_poawx_block_with_parent(
+            &miner, net, 1, genesis_hash, None, bits1, genesis.header.time + 1, 1, pc1,
+        )
+        .expect("build h1");
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &p1.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let h1_hash = p1.block_hash;
+        st.connect_block(p1.block).expect("connect h1");
+
+        // ---- register the miner as its OWN proposer at h0; NO delegation is created ----
+        let miner_pubkey = pubkey33(&skf(&miner));
+        st.proposer_registry
+            .register(miner_pubkey, hash160(&miner_pubkey), 0);
+        assert_eq!(
+            st.proposer_registry.eligible_count(2),
+            1,
+            "registered miner eligible as proposer at h2"
+        );
+
+        // ---- proposer proof for h2 (the miner IS the proposer; solo, no delegate) ----
+        let seed2 = expected_epoch_seed(2, h1_hash, st.chain.last());
+        let proof = crate::poawx_candidate::AssignmentProofV2::prove_self_solver(
+            &miner, net, 2, crate::poawx_proposer::ROLE_PROPOSER, [0u8; 32], seed2,
+        )
+        .expect("proposer proof");
+        let priority = crate::poawx_proposer::proposer_priority(&proof.vrf_output);
+        let n = st.proposer_registry.eligible_count(2);
+        let round = (0..=8u32)
+            .find(|r| crate::poawx_proposer::is_selected(priority, n, *r))
+            .expect("registered miner selected as proposer at some round");
+        let ctx = ProposerCtx {
+            assignment: crate::poawx::ProposerAssignmentV1 { round, proof },
+        };
+
+        // ---- h2: solo block, REGISTERED proposer, NO delegation = STATE (a) ----
+        let pc2 = seed_components_from_block(st.chain.last());
+        let bits2 = st.target_for_height(2).bits;
+        let p2 = build_solo_poawx_block_with_proposer(
+            &miner, net, 2, h1_hash, Some(genesis_hash), bits2, genesis.header.time + 2, 1, pc2,
+            &st.dominance, None, Some(&ctx), None,
+        )
+        .expect("build solo h2 with registered proposer, no delegation");
+        let r2 = &p2.block.poawx_receipts.as_ref().unwrap()[0];
+        assert!(
+            r2.delegation.is_none(),
+            "state (a): the receipt carries NO delegation"
+        );
+        let cb = p2.block.transactions[0].clone();
+        cache.clear();
+        cache.set_tip(2);
+        for adm in &p2.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        st.connect_block(p2.block)
+            .expect("connect_block accepts the registered-no-delegation solo block (fallback)");
+        assert_eq!(st.tip_height(), 2, "tip advanced to the solo fallback block");
+
+        // ---- coinbase: single-payout -> every reward output pays the miner's own address ----
+        let miner_script = crate::tx::p2pkh_script(&miner_pkh);
+        for i in 1..=4usize {
+            assert_eq!(
+                cb.outputs[i].script_pubkey, miner_script,
+                "solo reward output {i} pays the miner (single-payout fallback, exactly today's behavior)"
+            );
+            assert!(cb.outputs[i].value > 0, "reward output {i} funded");
+        }
+        let recipients: std::collections::BTreeSet<_> = (1..=4usize)
+            .map(|i| cb.outputs[i].script_pubkey.clone())
+            .collect();
+        assert_eq!(
+            recipients.len(),
+            1,
+            "single-payout fallback: exactly one recipient (the miner) -- no split, no delegate output"
+        );
+        println!(
+            "[state-a] registered proposer + NO delegation -> connect_block ACCEPTED solo single-payout: all 4 reward outputs pay {} (no delegation, no split) -- matches today's production behavior",
+            hex::encode(miner_pkh)
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
     fn phase4_contributor_binding_rejects_mismatched_solver() {
         // Isolated proof of the rule at AssignmentProofV2::validate (dominance/ordering cannot
         // preempt it here): solver_pkh must == hash160(assignment_public_key) for a contributor

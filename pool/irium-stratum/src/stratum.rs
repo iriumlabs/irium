@@ -4810,6 +4810,49 @@ mod tests {
     }
 
     #[test]
+    fn build_session_falls_back_to_receipt_producer_receipts_without_per_miner_delegation() {
+        // Dual-path precedence (fallback side), the mainnet-current state: PoAW-X is enabled
+        // but the pool's per-miner delegation producer is absent (poawx_producer = None) --
+        // so build_session_poawx_receipts returns the node-template pending receipts (the
+        // receipt-producer's single-config receipts) UNCHANGED. This proves the receipt-
+        // producer remains the correct fallback whenever no per-miner delegation applies.
+        // The precedence winner side (a delegation exists -> that miner is paid directly, and
+        // the per-miner receipt is used instead of this fallback) is proven at the decision
+        // point build_mode1_pending_receipt by phase18b3_build_mode1_receipt_and_root_parity
+        // ("pays miner pkh") and per_miner_delegation_mixed_batch_direct_and_fallback.
+        let mut config = test_config(MinerFamilyMode::Asic);
+        config.poawx_enabled = true; // active, but poawx_producer stays None (per-miner path off)
+        let session = test_session(AdapterKind::NativeRewardableReserved);
+        let mut job = test_job();
+        // Stand-in for the receipt-producer's node-template receipt (today's custodial payout).
+        let producer_receipt = PoawxPendingReceipt {
+            height: job.height,
+            lane: "A".to_string(),
+            worker_pkh: "c2fc860000000000000000000000000000000000".to_string(),
+            solution: "0000000000000000".to_string(),
+            commitment_nonce: "11".repeat(32),
+            worker_pubkey: String::new(),
+            worker_sig: String::new(),
+            delegation: String::new(),
+            phase20_ext: String::new(),
+        };
+        job.poawx_pending_receipts = vec![producer_receipt];
+        let session_pkh = [0x11u8; 20];
+
+        let out = build_session_poawx_receipts(&job, &session, &config, &session_pkh);
+
+        assert_eq!(out.len(), 1, "fallback yields exactly the receipt-producer's pending receipts");
+        assert_eq!(
+            out[0].worker_pkh, "c2fc860000000000000000000000000000000000",
+            "the receipt-producer's receipt is used UNCHANGED as the fallback (custodial), not replaced"
+        );
+        assert!(
+            out[0].delegation.is_empty(),
+            "fallback receipt carries no per-miner delegation -- zero disruption to today's behavior"
+        );
+    }
+
+    #[test]
     fn phase18b3_native_coinbase_pays_miner_not_delegate_with_irx1() {
         let config = test_config(MinerFamilyMode::Asic);
         let session = test_session(AdapterKind::NativeRewardableReserved);

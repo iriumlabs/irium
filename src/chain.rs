@@ -11790,6 +11790,214 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // rig: real role-worker bundles land on-chain UNDER proposer-VRF ENFORCED (mainnet-faithful)
+    fn phase4_real_worker_bundles_land_block_with_proposer_vrf_enforced() {
+        // Mainnet-faithful combination: proposer-VRF is ACTIVE + REQUIRED (as on live
+        // mainnet, where proposer_vrf_active is true past height 50000 and
+        // proposer_vrf_required() is true on net 0) AND the contributor-role-binding rule
+        // is active. First time these two systems are exercised together. Builds a 2-block
+        // chain: h1 multi-participant (proposer-VRF not yet active -> no proposer proof),
+        // then h2 multi-participant WITH the PRIMARY worker's custodial proposer-VRF
+        // assignment (Option 2 single custodial proposer: the non-delegated builder binds
+        // the proposer proof to worker_pkh). connect_block must accept h2 under BOTH gates,
+        // and the coinbase pays the three DISTINCT real workers. Uses the real bundles from
+        // IRIUM_M3_DIR (asserting each solver_pkh == its key's pkh) so the on-chain payout
+        // is genuinely the collected participants.
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_multi_participant_poawx_block_with_parent,
+            build_multi_participant_poawx_block_with_proposer, ProposerCtx,
+        };
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            ("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1"),
+            // proposer-VRF: ACTIVE from h2 (so h1 bootstraps without a proposer, exactly
+            // as the delegated all-gates test does) and REQUIRED (enforced) -- the
+            // mainnet-matching combination.
+            ("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "2"),
+            ("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        let k_ca = [0xa1u8; 32];
+        let k_cb = [0xd4u8; 32];
+        let k_v = [0xb2u8; 32];
+        let k_s = [0xc3u8; 32];
+        let worker = [0x4Du8; 32]; // PRIMARY + custodial proposer (Option 2)
+
+        // ---- real bundles: pick the COMPUTE winner by self-VRF score, bind to pkh ----
+        let dir = std::env::var("IRIUM_M3_DIR").unwrap_or_else(|_| "/home/irium/tmp/m3".to_string());
+        let load = |name: &str| -> serde_json::Value {
+            serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{name}.json")).expect("read real bundle"),
+            )
+            .expect("bundle json")
+        };
+        let bundle_pkh = |b: &serde_json::Value| -> [u8; 20] {
+            let mut o = [0u8; 20];
+            o.copy_from_slice(&hex::decode(b["solver_pkh"].as_str().unwrap()).unwrap());
+            o
+        };
+        let bundle_score = |b: &serde_json::Value| -> u64 {
+            let ap = crate::poawx_candidate::AssignmentProofV2::deserialize(
+                &hex::decode(b["assignment_proof"].as_str().unwrap()).unwrap(),
+            )
+            .expect("deserialize real assignment proof");
+            crate::poawx_candidate::assignment_v2_score_from_output(&ap.vrf_output)
+        };
+        let (ca, cb, vf, sp) = (
+            load("compute_A"),
+            load("compute_B"),
+            load("verify_1"),
+            load("support_1"),
+        );
+        let (compute_key, compute_bundle) = if bundle_score(&cb) >= bundle_score(&ca) {
+            (k_cb, &cb)
+        } else {
+            (k_ca, &ca)
+        };
+        let compute_pkh = pkh_of(&skf(&compute_key));
+        let verify_pkh = pkh_of(&skf(&k_v));
+        let support_pkh = pkh_of(&skf(&k_s));
+        let worker_pkh = pkh_of(&skf(&worker));
+        assert_eq!(compute_pkh, bundle_pkh(compute_bundle), "COMPUTE winner key == real bundle pkh");
+        assert_eq!(verify_pkh, bundle_pkh(&vf), "VERIFY key == real bundle pkh");
+        assert_eq!(support_pkh, bundle_pkh(&sp), "SUPPORT key == real bundle pkh");
+
+        let net = crate::activation::network_id_byte();
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let cache = global_admission_cache();
+
+        // ---- h1: multi-participant, NO proposer (proposer-VRF not active at h1) ----
+        let pc1 = seed_components_from_block(st.chain.last());
+        let bits1 = st.target_for_height(1).bits;
+        let p1 = build_multi_participant_poawx_block_with_parent(
+            &worker, &compute_key, &k_v, &k_s, net, 1, genesis_hash, None, bits1,
+            genesis.header.time + 1, 1, pc1,
+        )
+        .unwrap_or_else(|e| panic!("build h1: {e}"));
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &p1.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let h1_hash = p1.block_hash;
+        st.connect_block(p1.block).expect("connect h1 (multi-participant, pre-proposer)");
+
+        // ---- register the PRIMARY worker as the custodial proposer, frozen-eligible at h2 ----
+        let worker_pubkey = pubkey33(&skf(&worker));
+        st.proposer_registry
+            .register(worker_pubkey, hash160(&worker_pubkey), 0);
+        assert_eq!(
+            st.proposer_registry.eligible_count(2),
+            1,
+            "custodial proposer (= worker) eligible at h2"
+        );
+
+        // ---- custodial proposer proof for h2 (seed == the node resolver) ----
+        let seed2 = expected_epoch_seed(2, h1_hash, st.chain.last());
+        let proof = crate::poawx_candidate::AssignmentProofV2::prove_self_solver(
+            &worker, net, 2, crate::poawx_proposer::ROLE_PROPOSER, [0u8; 32], seed2,
+        )
+        .expect("custodial proposer proof");
+        let priority = crate::poawx_proposer::proposer_priority(&proof.vrf_output);
+        let n = st.proposer_registry.eligible_count(2);
+        let round = (0..=8u32)
+            .find(|r| crate::poawx_proposer::is_selected(priority, n, *r))
+            .expect("custodial proposer selected at some round");
+        let ctx = ProposerCtx {
+            assignment: crate::poawx::ProposerAssignmentV1 { round, proof },
+        };
+
+        // ---- h2: multi-participant WITH the proposer-VRF assignment (both gates active) ----
+        let pc2 = seed_components_from_block(st.chain.last());
+        let bits2 = st.target_for_height(2).bits;
+        let p2 = build_multi_participant_poawx_block_with_proposer(
+            &worker, &compute_key, &k_v, &k_s, net, 2, h1_hash, Some(genesis_hash), bits2,
+            genesis.header.time + 2, 1, pc2, &st.dominance, None, Some(&ctx), None,
+        )
+        .unwrap_or_else(|e| panic!("build h2 (multi-participant + proposer): {e}"));
+        // the built h2 receipt carries BOTH the proposer assignment and the 3 role rewards.
+        let r2 = &p2.block.poawx_receipts.as_ref().unwrap()[0];
+        assert!(
+            r2.phase20_ext.as_ref().unwrap().proposer_assignment.is_some(),
+            "h2 receipt carries the proposer-VRF assignment"
+        );
+        let cb_tx = p2.block.transactions[0].clone();
+        cache.clear();
+        cache.set_tip(2);
+        for adm in &p2.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        st.connect_block(p2.block).expect(
+            "connect_block accepts multi-participant + proposer-VRF-ENFORCED h2 (both gates active)",
+        );
+        assert_eq!(st.tip_height(), 2, "tip advanced to the enforced multi-participant block");
+
+        // ---- decode h2 coinbase: 3 distinct real recipients, under proposer enforcement ----
+        assert_eq!(cb_tx.outputs[1].script_pubkey, crate::tx::p2pkh_script(&worker_pkh), "PRIMARY -> worker/proposer");
+        assert_eq!(cb_tx.outputs[2].script_pubkey, crate::tx::p2pkh_script(&compute_pkh), "COMPUTE -> real worker");
+        assert_eq!(cb_tx.outputs[3].script_pubkey, crate::tx::p2pkh_script(&verify_pkh), "VERIFY -> real worker");
+        assert_eq!(cb_tx.outputs[4].script_pubkey, crate::tx::p2pkh_script(&support_pkh), "SUPPORT -> real worker");
+        let role_recipients: std::collections::BTreeSet<_> = (2..=4usize)
+            .map(|i| cb_tx.outputs[i].script_pubkey.clone())
+            .collect();
+        assert_eq!(role_recipients.len(), 3, "3 distinct role recipients on-chain");
+        println!(
+            "[proposer-enforced] connect_block ACCEPTED multi-participant H2 under proposer-VRF ENFORCED: COMPUTE={} VERIFY={} SUPPORT={} proposer_round={}",
+            hex::encode(compute_pkh), hex::encode(verify_pkh), hex::encode(support_pkh), round
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
     fn phase4_contributor_binding_rejects_mismatched_solver() {
         // Isolated proof of the rule at AssignmentProofV2::validate (dominance/ordering cannot
         // preempt it here): solver_pkh must == hash160(assignment_public_key) for a contributor

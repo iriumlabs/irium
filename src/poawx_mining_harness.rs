@@ -623,6 +623,54 @@ pub fn build_solo_poawx_block_with_proposer(
     )
 }
 
+/// Build a mined all-gates block with THREE genuinely distinct role participants
+/// (compute/verify/support) AND the PRIMARY worker's proposer-VRF assignment. For the
+/// role-attribution + proposer-VRF combination (Option A distinct role-workers + Option 2
+/// single custodial proposer): the worker plays PRIMARY and holds the proposer key -- the
+/// non-delegated builder binds the proposer proof to worker_pkh -- while each role is paid
+/// to its own distinct participant. Mirrors build_solo_poawx_block_with_proposer with the
+/// multi-participant identity set. Mainnet-hard-off.
+#[allow(clippy::too_many_arguments)]
+pub fn build_multi_participant_poawx_block_with_proposer(
+    worker_secret: &[u8; 32],
+    compute_secret: &[u8; 32],
+    verify_secret: &[u8; 32],
+    support_secret: &[u8; 32],
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+    parent_seed_components: ([u8; 32], [u8; 32]),
+    dominance: &PersistentDominance,
+    node_gates: Option<&NodeGateFlags>,
+    proposer_ctx: Option<&ProposerCtx>,
+    registration_section: Option<&crate::poawx::ProposerRegistrationSection>,
+) -> Result<AllGatesProof, String> {
+    build_all_gates_block_with(
+        &AllGatesIdentities::multi_participant(
+            worker_secret,
+            compute_secret,
+            verify_secret,
+            support_secret,
+        )?,
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+        parent_seed_components,
+        Some(dominance),
+        node_gates,
+        proposer_ctx,
+        registration_section,
+    )
+}
+
 /// Node-authoritative gate-activation flags for a target height, supplied by the
 /// block template so a standalone miner builds exactly what its node will validate
 /// (instead of reading its own env). `None` at a call site => fall back to the

@@ -926,6 +926,11 @@ pub struct Phase20ReceiptExt {
     /// byte-identical to pre-31R). Announces enqueue, activations force-drain the
     /// FIFO queue head; validated + applied in connect_block under the gate.
     pub proposer_registrations: Option<ProposerRegistrationSection>,
+    /// Stage D Step 4: optional trailing RVK1 delegation-revocation section; None =>
+    /// byte-identical to pre-Step-4 exts. Each entry is a miner-signed revocation of
+    /// one of the miner's own delegations. Validated + applied in connect_block under
+    /// the delegation gate; reverted on disconnect.
+    pub delegation_revocations: Option<Vec<DelegationRevocationV1>>,
 }
 
 impl Phase20ReceiptExt {
@@ -965,6 +970,7 @@ impl Phase20ReceiptExt {
                     || self.fraud_proofs.is_some()
                     || self.proposer_assignment.is_some()
                     || self.proposer_registrations.is_some()
+                    || self.delegation_revocations.is_some()
                 {
                     out.push(0);
                 }
@@ -1050,6 +1056,15 @@ impl Phase20ReceiptExt {
                 out.extend_from_slice(&r.serialize());
             }
         }
+        // Stage D Step 4 trailing RVK1 delegation-revocation section (present-only):
+        // magic + u16 count + records. Absent => byte-identical to pre-Step-4 exts.
+        if let Some(revs) = &self.delegation_revocations {
+            out.extend_from_slice(REVOCATION_SECTION_MAGIC);
+            out.extend_from_slice(&(revs.len() as u16).to_le_bytes());
+            for rv in revs {
+                out.extend_from_slice(&rv.serialize());
+            }
+        }
         out
     }
 
@@ -1121,6 +1136,7 @@ impl Phase20ReceiptExt {
         let mut fraud_proofs: Option<Vec<FraudProofV1>> = None;
         let mut proposer_assignment: Option<ProposerAssignmentV1> = None;
         let mut proposer_registrations: Option<ProposerRegistrationSection> = None;
+        let mut delegation_revocations: Option<Vec<DelegationRevocationV1>> = None;
         while off < raw.len() {
             need(off, 4, "trailing section magic")?;
             let magic = &raw[off..off + 4];
@@ -1280,6 +1296,29 @@ impl Phase20ReceiptExt {
                     announces,
                     activations,
                 });
+            } else if magic == REVOCATION_SECTION_MAGIC {
+                if delegation_revocations.is_some() {
+                    return Err(
+                        "phase20 ext: duplicate delegation revocation section".to_string()
+                    );
+                }
+                off += 4;
+                need(off, 2, "revocation count")?;
+                let rc =
+                    u16::from_le_bytes(raw[off..off + 2].try_into().expect("len 2")) as usize;
+                off += 2;
+                if rc > REVOCATION_CAP {
+                    return Err("phase20 ext: revocation count over cap".to_string());
+                }
+                let mut revs = Vec::with_capacity(rc);
+                for _ in 0..rc {
+                    need(off, DELEGATION_REVOCATION_V1_WIRE, "revocation record")?;
+                    revs.push(DelegationRevocationV1::deserialize(
+                        &raw[off..off + DELEGATION_REVOCATION_V1_WIRE],
+                    )?);
+                    off += DELEGATION_REVOCATION_V1_WIRE;
+                }
+                delegation_revocations = Some(revs);
             } else {
                 return Err("phase20 ext: unknown trailing section magic".to_string());
             }
@@ -1302,6 +1341,7 @@ impl Phase20ReceiptExt {
             fraud_proofs,
             proposer_assignment,
             proposer_registrations,
+            delegation_revocations,
         })
     }
 
@@ -1383,12 +1423,13 @@ impl PoawxBlockReceipt {
             }
             RECEIPT_MODE_DELEGATED => {
                 let deleg_start = Self::WIRE_SIZE;
-                if body.len() < deleg_start + Delegation::WIRE_SIZE {
+                if body.len() < deleg_start + Delegation::WIRE_SIZE_V1 {
                     return Err("poawx v2 receipt: delegation truncated".to_string());
                 }
                 let d = Delegation::deserialize(&body[deleg_start..])?;
+                let deleg_len = d.wire_len();
                 receipt.delegation = Some(d);
-                Ok((receipt, 1 + Self::WIRE_SIZE + Delegation::WIRE_SIZE))
+                Ok((receipt, 1 + Self::WIRE_SIZE + deleg_len))
             }
             other => Err(format!("poawx v2 receipt: unknown mode {}", other)),
         }
@@ -1509,14 +1550,32 @@ pub struct Delegation {
     pub fee_bps: u16,
     pub fee_pkh: [u8; 20],
     pub deleg_nonce: [u8; 32],
+    /// Phase 31 / Stage D (v2 only): the miner's separate custodial proposer key,
+    /// authorized to make the delegated proposer-VRF assignment. All-zero and
+    /// excluded from the wire form and `message_hash()` for v1 delegations.
+    pub proposer_pubkey: [u8; 33],
     pub delegation_sig: [u8; 64],
 }
 
 impl Delegation {
-    /// Current delegation format version.
-    pub const VERSION: u8 = 1;
-    /// Fixed wire size: 1 + 1 + 33 + 33 + 32 + 8 + 2 + 20 + 32 + 64 = 226 bytes.
-    pub const WIRE_SIZE: usize = 1 + 1 + 33 + 33 + 32 + 8 + 2 + 20 + 32 + 64;
+    /// Current delegation format version (v2 adds `proposer_pubkey`).
+    pub const VERSION: u8 = 2;
+    /// v1 wire size: 1 + 1 + 33 + 33 + 32 + 8 + 2 + 20 + 32 + 64 = 226 bytes.
+    pub const WIRE_SIZE_V1: usize = 1 + 1 + 33 + 33 + 32 + 8 + 2 + 20 + 32 + 64;
+    /// v2 wire size: v1 + 33 (proposer_pubkey) = 259 bytes.
+    pub const WIRE_SIZE_V2: usize = Self::WIRE_SIZE_V1 + 33;
+    /// "Current"/maximum wire size = v2 (259). Capacity hints and fixed-size
+    /// assertions use this; length-critical parsing uses `wire_len()`/version.
+    pub const WIRE_SIZE: usize = Self::WIRE_SIZE_V2;
+
+    /// Actual serialized length for THIS delegation, per its version byte.
+    pub fn wire_len(&self) -> usize {
+        if self.deleg_version >= 2 {
+            Self::WIRE_SIZE_V2
+        } else {
+            Self::WIRE_SIZE_V1
+        }
+    }
 
     pub fn serialize(&self) -> Vec<u8> {
         let mut out = Vec::with_capacity(Self::WIRE_SIZE);
@@ -1529,21 +1588,37 @@ impl Delegation {
         out.extend_from_slice(&self.fee_bps.to_le_bytes());
         out.extend_from_slice(&self.fee_pkh);
         out.extend_from_slice(&self.deleg_nonce);
+        if self.deleg_version >= 2 {
+            out.extend_from_slice(&self.proposer_pubkey);
+        }
         out.extend_from_slice(&self.delegation_sig);
         out
     }
 
     pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
-        if raw.len() < Self::WIRE_SIZE {
+        if raw.len() < Self::WIRE_SIZE_V1 {
             return Err(format!(
                 "delegation too short: {} < {}",
                 raw.len(),
-                Self::WIRE_SIZE
+                Self::WIRE_SIZE_V1
             ));
         }
         let mut off = 0usize;
         let deleg_version = raw[off];
         off += 1;
+        let expected = if deleg_version >= 2 {
+            Self::WIRE_SIZE_V2
+        } else {
+            Self::WIRE_SIZE_V1
+        };
+        if raw.len() < expected {
+            return Err(format!(
+                "delegation too short: {} < {} (v{})",
+                raw.len(),
+                expected,
+                deleg_version
+            ));
+        }
         let network_id = raw[off];
         off += 1;
         let mut miner_pubkey = [0u8; 33];
@@ -1566,6 +1641,11 @@ impl Delegation {
         let mut deleg_nonce = [0u8; 32];
         deleg_nonce.copy_from_slice(&raw[off..off + 32]);
         off += 32;
+        let mut proposer_pubkey = [0u8; 33];
+        if deleg_version >= 2 {
+            proposer_pubkey.copy_from_slice(&raw[off..off + 33]);
+            off += 33;
+        }
         let mut delegation_sig = [0u8; 64];
         delegation_sig.copy_from_slice(&raw[off..off + 64]);
         Ok(Self {
@@ -1578,6 +1658,7 @@ impl Delegation {
             fee_bps,
             fee_pkh,
             deleg_nonce,
+            proposer_pubkey,
             delegation_sig,
         })
     }
@@ -1595,6 +1676,9 @@ impl Delegation {
         h.update(self.fee_bps.to_le_bytes());
         h.update(self.fee_pkh);
         h.update(self.deleg_nonce);
+        if self.deleg_version >= 2 {
+            h.update(self.proposer_pubkey);
+        }
         h.finalize().into()
     }
 
@@ -1627,6 +1711,175 @@ impl Delegation {
             .map_err(|_| "delegation: malformed delegation_sig")?;
         vk.verify_prehash(&self.message_hash(), &sig)
             .map_err(|_| "delegation: signature verification failed")
+    }
+}
+
+/// Stage D Step 4: signing domain for a `DelegationRevocationV1`, distinct from
+/// `DOMAIN_DELEG` so a delegation signature can never be replayed as a revocation
+/// (or vice versa).
+pub const DOMAIN_DELEG_REVOKE: &[u8] = b"irium.poawx.delegation.revoke.v1";
+
+/// Trailing RVK1 section magic in `Phase20ReceiptExt` (present-only).
+pub const REVOCATION_SECTION_MAGIC: &[u8; 4] = b"RVK1";
+
+/// Wire size of a `DelegationRevocationV1`: net(1) + miner_pubkey(33) +
+/// deleg_nonce(32) + signature(64) = 130 bytes.
+pub const DELEGATION_REVOCATION_V1_WIRE: usize = 1 + 33 + 32 + 64;
+
+/// Max revocation records per block (matches the proposer-registration cap).
+pub const REVOCATION_CAP: usize = 8;
+
+/// Stage D Step 4: a miner-signed, on-chain revocation of one of the miner's OWN
+/// delegations, identified by `(miner_pubkey, deleg_nonce)`. A miner revokes so a
+/// pool it has left can no longer propose in its name before `expiry_height`. Because
+/// revoking only REMOVES the miner's own delegated proposer power, the record carries
+/// NO sybil work (there is nothing to grind for). Consensus rejects any delegated
+/// receipt whose `(miner_pubkey, deleg_nonce)` was revoked in an EARLIER block.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DelegationRevocationV1 {
+    pub network_id: u8,
+    /// The payout key that signed the original delegation (revocation authority).
+    pub miner_pubkey: [u8; 33],
+    /// The `deleg_nonce` of the delegation being revoked.
+    pub deleg_nonce: [u8; 32],
+    /// The miner's secp256k1 signature over `signing_digest()`.
+    pub signature: [u8; 64],
+}
+
+impl DelegationRevocationV1 {
+    /// SHA256(DOMAIN_DELEG_REVOKE || [network_id] || miner_pubkey || deleg_nonce).
+    pub fn signing_digest(&self) -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(DOMAIN_DELEG_REVOKE);
+        h.update([self.network_id]);
+        h.update(self.miner_pubkey);
+        h.update(self.deleg_nonce);
+        h.finalize().into()
+    }
+
+    /// The `(miner_pubkey, deleg_nonce)` key this record revokes.
+    pub fn key(&self) -> ([u8; 33], [u8; 32]) {
+        (self.miner_pubkey, self.deleg_nonce)
+    }
+
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut out = Vec::with_capacity(DELEGATION_REVOCATION_V1_WIRE);
+        out.push(self.network_id);
+        out.extend_from_slice(&self.miner_pubkey);
+        out.extend_from_slice(&self.deleg_nonce);
+        out.extend_from_slice(&self.signature);
+        out
+    }
+
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        if raw.len() != DELEGATION_REVOCATION_V1_WIRE {
+            return Err(format!(
+                "delegation revocation: wrong length {} (want {})",
+                raw.len(),
+                DELEGATION_REVOCATION_V1_WIRE
+            ));
+        }
+        let network_id = raw[0];
+        let mut miner_pubkey = [0u8; 33];
+        miner_pubkey.copy_from_slice(&raw[1..34]);
+        let mut deleg_nonce = [0u8; 32];
+        deleg_nonce.copy_from_slice(&raw[34..66]);
+        let mut signature = [0u8; 64];
+        signature.copy_from_slice(&raw[66..130]);
+        Ok(Self {
+            network_id,
+            miner_pubkey,
+            deleg_nonce,
+            signature,
+        })
+    }
+
+    /// Verify the record: network match + the miner's signature over `signing_digest()`
+    /// against its own `miner_pubkey`. Deliberately no sybil / anchor check.
+    pub fn validate(&self, network_id: u8) -> Result<(), String> {
+        use k256::ecdsa::signature::hazmat::PrehashVerifier;
+        use k256::ecdsa::{Signature, VerifyingKey};
+        if self.network_id != network_id {
+            return Err("delegation revocation: network_id mismatch".to_string());
+        }
+        let vk = VerifyingKey::from_sec1_bytes(&self.miner_pubkey)
+            .map_err(|_| "delegation revocation: invalid miner_pubkey".to_string())?;
+        let sig = Signature::from_slice(&self.signature)
+            .map_err(|_| "delegation revocation: malformed signature".to_string())?;
+        vk.verify_prehash(&self.signing_digest(), &sig)
+            .map_err(|_| "delegation revocation: signature verification failed".to_string())
+    }
+
+    /// Build a signed revocation for `(miner_secret, deleg_nonce)` on `network_id`.
+    pub fn build_signed(
+        miner_secret: &[u8; 32],
+        network_id: u8,
+        deleg_nonce: [u8; 32],
+    ) -> Result<Self, String> {
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        use k256::ecdsa::{Signature, SigningKey, VerifyingKey};
+        let sk = SigningKey::from_bytes(miner_secret.into())
+            .map_err(|_| "delegation revocation: invalid miner secret".to_string())?;
+        let vk = VerifyingKey::from(&sk);
+        let enc = vk.to_encoded_point(true);
+        let mut miner_pubkey = [0u8; 33];
+        miner_pubkey.copy_from_slice(enc.as_bytes());
+        let mut rec = Self {
+            network_id,
+            miner_pubkey,
+            deleg_nonce,
+            signature: [0u8; 64],
+        };
+        let sig: Signature = sk
+            .sign_prehash(&rec.signing_digest())
+            .map_err(|_| "delegation revocation: signing failed".to_string())?;
+        rec.signature.copy_from_slice(&sig.to_bytes());
+        Ok(rec)
+    }
+}
+
+/// Stage D Step 4: reorg-safe set of revoked delegations, keyed by
+/// `(miner_pubkey, deleg_nonce)`. Mirrors `ProposerEligibilityRegistry`: each key maps
+/// to the SET of block heights that carried a revocation for it, so `revoke`/`unrevoke`
+/// are exact inverses and the whole set is rebuilt deterministically by chain replay
+/// (never serialized to disk).
+#[derive(Debug, Clone, Default)]
+pub struct DelegationRevocationRegistry {
+    revoked: std::collections::BTreeMap<([u8; 33], [u8; 32]), std::collections::BTreeSet<u64>>,
+}
+
+impl DelegationRevocationRegistry {
+    /// Record that `(miner_pubkey, deleg_nonce)` was revoked in the block at `height`.
+    pub fn revoke(&mut self, key: ([u8; 33], [u8; 32]), height: u64) {
+        self.revoked.entry(key).or_default().insert(height);
+    }
+
+    /// Exact inverse of `revoke`: drop `height`; remove the key when no heights remain.
+    pub fn unrevoke(&mut self, key: &([u8; 33], [u8; 32]), height: u64) {
+        if let Some(set) = self.revoked.get_mut(key) {
+            set.remove(&height);
+            if set.is_empty() {
+                self.revoked.remove(key);
+            }
+        }
+    }
+
+    /// True iff `key` was revoked in some block STRICTLY BEFORE `height` (forward-looking:
+    /// a revocation in block Hr rejects delegated uses at heights > Hr and never
+    /// retroactively invalidates a block at or before Hr).
+    pub fn is_revoked(&self, key: &([u8; 33], [u8; 32]), height: u64) -> bool {
+        self.revoked
+            .get(key)
+            .map(|set| set.iter().any(|&hr| hr < height))
+            .unwrap_or(false)
+    }
+
+    pub fn len(&self) -> usize {
+        self.revoked.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.revoked.is_empty()
     }
 }
 
@@ -2353,6 +2606,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let bytes = ext.serialize();
         let ext2 = Phase20ReceiptExt::deserialize(&bytes).expect("deserialize");
@@ -2473,6 +2727,217 @@ mod tests {
     }
 
     #[test]
+    fn stage_d_delegated_proposer_key_registration_eligibility() {
+        // Stage D Step 2 (verification, not a new subsystem): a miner's SEPARATE custodial
+        // proposer key -- held by the pool on the miner's behalf because an ASIC miner cannot
+        // run proving software -- is registered through the EXISTING self-signed sybil path
+        // (Phase 31R ProposerRegistrationV1) and becomes eligible in the frozen registry that
+        // is keyed by the 33-byte proposer_pubkey a Delegation v2 authorizes. Also asserts the
+        // negatives (unregistered / forged-signature / unpaid-sybil) are rejected in this
+        // delegated context. No new registration code exists or is needed; this proves the
+        // existing mechanism is exactly what the delegated Stage D path requires.
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        let net = 2u8; // devnet, matching the isolated rig
+        let bits = 8u32; // the rig's effective_sybil_bits()
+        let anchor_height = 10u64;
+        let anchor_hash = [0x5au8; 32];
+
+        // (1) The pool builds + self-signs the custodial proposer registration exactly as a
+        //     solo miner would: build_signed grinds the sybil PoW and signs with the proposer
+        //     secret it actually holds. This is the "the delegate cannot register a key it
+        //     lacks" property -- registration proves possession of the proposer key.
+        let proposer_secret = [0x77u8; 32];
+        let reg = ProposerRegistrationV1::build_signed(
+            &proposer_secret,
+            net,
+            anchor_height,
+            &anchor_hash,
+            bits,
+        )
+        .expect("build custodial proposer registration");
+        // Full connect_block-style self-validation passes against the same anchor + bits.
+        reg.validate(net, &anchor_hash, bits)
+            .expect("custodial proposer registration validates");
+        let proposer_pubkey = reg.vrf_pubkey;
+
+        // (2) Tie it to Delegation v2 (Step 1): the miner -- a DISTINCT payout/identity key --
+        //     signs a v2 delegation authorizing exactly this proposer key. proposer_pubkey is
+        //     separate from miner_pubkey: the C1 custodial-proposer / private-payout split.
+        let miner_sk = k256::ecdsa::SigningKey::from_slice(&[0x24u8; 32]).unwrap();
+        let miner_pubkey = {
+            let vk = k256::ecdsa::VerifyingKey::from(&miner_sk);
+            let enc = vk.to_encoded_point(true);
+            let mut pk = [0u8; 33];
+            pk.copy_from_slice(enc.as_bytes());
+            pk
+        };
+        let mut d = Delegation {
+            deleg_version: Delegation::VERSION, // v2
+            network_id: net,
+            miner_pubkey,
+            pool_pubkey: [0x02u8; 33],
+            worker_tag: [0xaau8; 32],
+            expiry_height: 1000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [0xcdu8; 32],
+            proposer_pubkey, // authorizes the registered custodial proposer key
+            delegation_sig: [0u8; 64],
+        };
+        let sig: k256::ecdsa::Signature = miner_sk.sign_prehash(&d.message_hash()).unwrap();
+        d.delegation_sig.copy_from_slice(&sig.to_bytes());
+        assert_eq!(d.deleg_version, 2, "delegation must be v2 to carry proposer_pubkey");
+        d.verify_signature().expect("miner-signed v2 delegation verifies");
+        assert_eq!(
+            d.proposer_pubkey, proposer_pubkey,
+            "delegation must authorize exactly the registered proposer key"
+        );
+        assert_ne!(
+            d.miner_pubkey, proposer_pubkey,
+            "proposer key must be separate from the miner payout/identity key"
+        );
+
+        // (3) Registry eligibility respects FREEZE_DEPTH: a key registered on-chain at
+        //     H_reg is eligible only from H_reg + fd onward (frozen), never before -- so the
+        //     seed revealed at H-1 cannot be used to register a winning key after the fact.
+        let (fd, ew) = (16u64, 100u64);
+        let mut registry = crate::poawx_proposer::ProposerEligibilityRegistry::default();
+        // before registration: not registered, not eligible.
+        assert!(!registry.is_registered(&proposer_pubkey));
+        assert!(!registry.is_eligible_with(&proposer_pubkey, anchor_height + fd, fd, ew));
+        // on-chain registration (what apply_block_proposer_registrations does at activation).
+        registry.register(proposer_pubkey, reg.pkh(), anchor_height);
+        assert!(registry.is_registered(&proposer_pubkey));
+        // one block too early (frozen-window hi = H - fd = anchor_height - 1) => not eligible.
+        assert!(
+            !registry.is_eligible_with(&proposer_pubkey, anchor_height + fd - 1, fd, ew),
+            "must NOT be eligible before FREEZE_DEPTH blocks have passed"
+        );
+        // exactly FREEZE_DEPTH later (hi = anchor_height) => eligible.
+        assert!(
+            registry.is_eligible_with(&proposer_pubkey, anchor_height + fd, fd, ew),
+            "delegated custodial proposer key must be eligible at H_reg + FREEZE_DEPTH"
+        );
+        // the key the Delegation v2 authorizes is exactly the eligible key.
+        assert!(registry.is_eligible_with(&d.proposer_pubkey, anchor_height + fd, fd, ew));
+
+        // (4) Negatives, in the delegated context.
+        // (4a) UNREGISTERED custodial proposer key (built + valid, but never put on-chain).
+        let other = ProposerRegistrationV1::build_signed(
+            &[0x99u8; 32],
+            net,
+            anchor_height,
+            &anchor_hash,
+            bits,
+        )
+        .unwrap();
+        assert_ne!(other.vrf_pubkey, proposer_pubkey);
+        assert!(!registry.is_registered(&other.vrf_pubkey));
+        assert!(
+            !registry.is_eligible_with(&other.vrf_pubkey, anchor_height + fd, fd, ew),
+            "an unregistered proposer key must never be eligible"
+        );
+        // (4b) FORGED signature: tampering the self-signature fails validate, so the pool
+        //      cannot register a proposer key whose secret it does not actually hold.
+        let mut forged = reg.clone();
+        forged.signature[0] ^= 0xff;
+        assert!(
+            forged.validate(net, &anchor_hash, bits).is_err(),
+            "a forged-signature registration must be rejected"
+        );
+        // (4c) INSUFFICIENT sybil work: requiring far more work than was ground fails (the
+        //      registration did not pay the sybil cost for that bar).
+        assert!(
+            reg.validate(net, &anchor_hash, bits + 20).is_err(),
+            "an insufficient-sybil-work registration must be rejected"
+        );
+    }
+
+    // Live confirmation on the isolated all-gates rig (:38500). Ignored by default; run with
+    //   E2E_NODE=http://127.0.0.1:38500 E2E_TOKEN=$(cat /home/irium/stage-d-rig/.rigtok) \
+    //   cargo test --release stage_d_delegated_proposer_registration_rig_e2e -- --ignored --exact --nocapture
+    // Proves the REAL running node accepts a delegated custodial proposer-key registration
+    // built + self-signed through ProposerRegistrationV1 and bound to the rig's real tip.
+    #[test]
+    #[ignore]
+    fn stage_d_delegated_proposer_registration_rig_e2e() {
+        let base =
+            std::env::var("E2E_NODE").unwrap_or_else(|_| "http://127.0.0.1:38500".to_string());
+        let token = std::env::var("E2E_TOKEN").unwrap_or_default();
+        let net = 2u8; // devnet
+        let bits = 8u32; // the rig's effective_sybil_bits()
+        let client = reqwest::blocking::Client::new();
+
+        // real current tip => the sybil anchor (strictly in the past).
+        let status: serde_json::Value = client
+            .get(format!("{base}/status"))
+            .bearer_auth(&token)
+            .send()
+            .expect("GET /status")
+            .json()
+            .expect("status json");
+        let tip_height = status["height"].as_u64().expect("tip height");
+        assert!(tip_height >= 1, "rig has no blocks yet");
+        let anchor_height = tip_height - 1;
+        let blk: serde_json::Value = client
+            .get(format!("{base}/rpc/block?height={anchor_height}"))
+            .bearer_auth(&token)
+            .send()
+            .expect("GET /rpc/block")
+            .json()
+            .expect("block json");
+        let anchor_hash_hex = blk["header"]["hash"].as_str().expect("anchor hash hex");
+        let hb = hex::decode(anchor_hash_hex).expect("hash hex decode");
+        assert_eq!(hb.len(), 32, "anchor hash must be 32 bytes");
+        let mut anchor_hash = [0u8; 32];
+        anchor_hash.copy_from_slice(&hb);
+
+        // pool builds the delegated custodial proposer registration bound to the real tip.
+        let proposer_secret = [0x7du8; 32];
+        let reg = ProposerRegistrationV1::build_signed(
+            &proposer_secret,
+            net,
+            anchor_height,
+            &anchor_hash,
+            bits,
+        )
+        .expect("build_signed against real rig anchor");
+        reg.validate(net, &anchor_hash, bits)
+            .expect("registration validates against the real rig anchor");
+
+        // submit to the real node endpoint; the node light-validates (sybil + signature) + pools.
+        let resp = client
+            .post(format!("{base}/poawx/registration"))
+            .bearer_auth(&token)
+            .body(reg.serialize())
+            .send()
+            .expect("POST /poawx/registration");
+        assert!(
+            resp.status().is_success(),
+            "rig rejected the delegated proposer registration: HTTP {}",
+            resp.status()
+        );
+        let body: serde_json::Value = resp.json().expect("registration response json");
+        assert!(
+            matches!(body["status"].as_str(), Some("accepted") | Some("duplicate")),
+            "unexpected rig registration response: {body}"
+        );
+
+        // live registry state is observable from the running node.
+        let status2: serde_json::Value = client
+            .get(format!("{base}/status"))
+            .bearer_auth(&token)
+            .send()
+            .expect("GET /status (2)")
+            .json()
+            .expect("status2 json");
+        eprintln!(
+            "[rig e2e] tip={tip_height} anchor={anchor_height} registration={} eligible_count={}",
+            body["status"], status2["poawx_proposer_eligible_count"]
+        );
+    }
+
+    #[test]
     fn proposer_assignment_section_roundtrip() {
         let prev = [0x44u8; 32];
         let proof = crate::poawx_candidate::AssignmentProofV2::prove(
@@ -2513,6 +2978,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let absent = ext.serialize();
         assert!(!absent.windows(4).any(|w| w == PROPOSER_SECTION_MAGIC));
@@ -2523,6 +2989,114 @@ mod tests {
         let back = Phase20ReceiptExt::deserialize(&present).unwrap();
         assert_eq!(back.proposer_assignment, Some(pa));
         assert_eq!(back, ext);
+    }
+
+    #[test]
+    fn stage_d_revocation_record_roundtrip_and_validate() {
+        // Stage D Step 4: a DelegationRevocationV1 wire-round-trips and validates only
+        // with the miner's genuine signature over its own (network, miner_pubkey, nonce).
+        let net = 2u8;
+        let nonce = [0x7bu8; 32];
+        let rec = DelegationRevocationV1::build_signed(&[0x09u8; 32], net, nonce).unwrap();
+        let b = rec.serialize();
+        assert_eq!(b.len(), DELEGATION_REVOCATION_V1_WIRE);
+        assert_eq!(DelegationRevocationV1::deserialize(&b).unwrap(), rec);
+        rec.validate(net).expect("genuine revocation validates");
+        assert!(rec.validate(1).is_err(), "wrong network rejected");
+        let mut bad_sig = rec.clone();
+        bad_sig.signature[0] ^= 0xFF;
+        assert!(bad_sig.validate(net).is_err(), "tampered signature rejected");
+        let mut bad_nonce = rec.clone();
+        bad_nonce.deleg_nonce[0] ^= 0xFF;
+        assert!(bad_nonce.validate(net).is_err(), "tampered nonce rejected");
+        let other = DelegationRevocationV1::build_signed(&[0x0au8; 32], net, nonce).unwrap();
+        let mut swapped = rec.clone();
+        swapped.miner_pubkey = other.miner_pubkey;
+        assert!(swapped.validate(net).is_err(), "swapped miner_pubkey rejected");
+    }
+
+    #[test]
+    fn stage_d_revocation_registry_semantics() {
+        // Forward-looking, anti-grief, and exact apply/revert inverse.
+        let victim =
+            DelegationRevocationV1::build_signed(&[0x11u8; 32], 2, [0x01u8; 32]).unwrap();
+        let vkey = victim.key();
+
+        let mut reg = DelegationRevocationRegistry::default();
+        assert!(reg.is_empty());
+        reg.revoke(vkey, 5);
+        assert!(!reg.is_revoked(&vkey, 4), "not revoked at an earlier height");
+        assert!(!reg.is_revoked(&vkey, 5), "not revoked at the revocation's own height");
+        assert!(reg.is_revoked(&vkey, 6), "revoked from the next height forward");
+
+        // anti-grief: an attacker revoking the victim's NONCE under the attacker's OWN
+        // key does NOT revoke the victim's (victim_pubkey, nonce) delegation.
+        let attacker =
+            DelegationRevocationV1::build_signed(&[0x22u8; 32], 2, [0x01u8; 32]).unwrap();
+        assert_ne!(attacker.miner_pubkey, victim.miner_pubkey);
+        let mut reg2 = DelegationRevocationRegistry::default();
+        reg2.revoke(attacker.key(), 5);
+        assert!(!reg2.is_revoked(&vkey, 100), "attacker cannot revoke the victim's delegation");
+
+        // apply/revert are exact inverses (reorg-safety).
+        let mut reg3 = DelegationRevocationRegistry::default();
+        reg3.revoke(vkey, 5);
+        reg3.revoke(vkey, 7);
+        reg3.unrevoke(&vkey, 7);
+        assert!(reg3.is_revoked(&vkey, 6), "the height-5 revocation survives reverting height 7");
+        reg3.unrevoke(&vkey, 5);
+        assert!(reg3.is_empty(), "reverting all heights empties the set");
+    }
+
+    #[test]
+    fn stage_d_ext_revocation_section_roundtrip() {
+        // Absent => byte-identical to pre-Step-4 (no RVK1 magic); present => +section.
+        let prev = [0x44u8; 32];
+        let rec = DelegationRevocationV1::build_signed(&[0x33u8; 32], 2, [0x99u8; 32]).unwrap();
+        let mut ext = Phase20ReceiptExt {
+            role_reward: RoleReward {
+                compute_contributor_pkh: [0xC1u8; 20],
+                verify_contributor_pkh: [0xC2u8; 20],
+                support_contributor_pkh: [0xC3u8; 20],
+            },
+            compute_claim: fairness_valid_claim(1, 60, &prev, ROLE_COMPUTE_CONTRIBUTOR, 0),
+            verify_claim: fairness_valid_claim(1, 60, &prev, ROLE_VERIFY_CONTRIBUTOR, 0),
+            support_claim: fairness_valid_claim(1, 60, &prev, ROLE_SUPPORT_CONTRIBUTOR, 0),
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            precommit_root: None,
+            role_ticket_proofs: None,
+            role_dominance_weights: None,
+            candidate_set: None,
+            role_puzzle_proofs: None,
+            finality_proof: None,
+            committed_admission: None,
+            role_assignment_v2: None,
+            fraud_proofs: None,
+            proposer_assignment: None,
+            proposer_registrations: None,
+            delegation_revocations: None,
+        };
+        let absent = ext.serialize();
+        assert!(!absent.windows(4).any(|w| w == REVOCATION_SECTION_MAGIC));
+        assert_eq!(Phase20ReceiptExt::deserialize(&absent).unwrap(), ext);
+        // present: +1 precommit flag byte + magic(4) + count(2) + one record.
+        ext.delegation_revocations = Some(vec![rec.clone()]);
+        let present = ext.serialize();
+        assert_eq!(
+            present.len(),
+            absent.len() + 1 + 4 + 2 + DELEGATION_REVOCATION_V1_WIRE
+        );
+        let back = Phase20ReceiptExt::deserialize(&present).unwrap();
+        assert_eq!(back.delegation_revocations, Some(vec![rec.clone()]));
+        assert_eq!(back, ext);
+        // over-cap section rejected on deserialize.
+        ext.delegation_revocations = Some(vec![rec; REVOCATION_CAP + 1]);
+        let over = ext.serialize();
+        assert!(
+            Phase20ReceiptExt::deserialize(&over).is_err(),
+            "over-cap revocation section rejected"
+        );
     }
 
     #[test]
@@ -2558,6 +3132,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let absent = ext.serialize();
         assert!(!absent.windows(4).any(|w| w == PROPOSER_REG_SECTION_MAGIC));
@@ -2601,6 +3176,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let none = base();
         let mut some = base();
@@ -2647,6 +3223,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let proofs = [
             TicketProof::new(
@@ -2772,6 +3349,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let good = ext.serialize();
         assert_eq!(Phase20ReceiptExt::deserialize(&good).unwrap(), ext);
@@ -2820,6 +3398,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let seed = [0x55u8; 32];
         let mk = |secret: u8, role: u8, solver: [u8; 20]| {
@@ -2911,6 +3490,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let seed = [0x55u8; 32];
         let mut cs = CandidateSet::new(1, 61, seed);
@@ -2994,6 +3574,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let sk = k256::ecdsa::SigningKey::from_slice(&[0x21u8; 32]).unwrap();
         let mut fp = FinalityProofV1::new(1, 60, prev, [0u8; 32], 0, 1, 1);
@@ -3073,6 +3654,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let sol = |m: u8, n: u64, t: u8| PuzzleSolutionV1 {
             mode: m,
@@ -3143,6 +3725,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let mut cs = CandidateSet::new(1, 60, prev);
         cs.push(RoleCandidate::build(
@@ -3219,6 +3802,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         let weights = [1000u64, 800, 900, 950];
         // (1) absent => no DOM1 magic, byte-identical, round-trips.
@@ -3325,6 +3909,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
         // no-ext v3 element == v2 element + a single 0 flag byte (present-only).
         let r = make_test_receipt(9);
@@ -3370,6 +3955,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         };
 
         // Base mode-0 receipt with a production extension attached.
@@ -3498,6 +4084,7 @@ mod tests {
             fee_bps,
             fee_pkh: [0u8; 20],
             deleg_nonce: [0xcdu8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let sig: k256::ecdsa::Signature = sk.sign_prehash(&d.message_hash()).unwrap();
@@ -3516,7 +4103,8 @@ mod tests {
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         let bytes = d.serialize();
-        assert_eq!(Delegation::WIRE_SIZE, 226);
+        assert_eq!(Delegation::WIRE_SIZE_V1, 226);
+        assert_eq!(Delegation::WIRE_SIZE, 259);
         assert_eq!(bytes.len(), Delegation::WIRE_SIZE);
         let d2 = Delegation::deserialize(&bytes).expect("deserialize");
         assert_eq!(d, d2);

@@ -813,6 +813,22 @@ impl AssignmentProofV2 {
                 );
             }
         }
+        // Option A: bind CONTRIBUTOR-role solvers (COMPUTE/VERIFY/SUPPORT) to their VRF key
+        // once the contributor-role binding is active (mainnet not live-active until a
+        // separate announced activation; rig/devnet env-overridable). This removes the
+        // former exemption: a contributor role's payout must be the hash160 of the key that
+        // produced its ECVRF proof. Off => byte-identical (contributor roles stay exempt).
+        if crate::poawx_proposer::contributor_role_binding_active(target_height)
+            && self.role_id != crate::poawx_proposer::ROLE_PROPOSER
+        {
+            let mut expect_pkh = [0u8; 20];
+            expect_pkh.copy_from_slice(&Ripemd160::digest(Sha256::digest(self.assignment_public_key)));
+            if self.solver_pkh != expect_pkh {
+                return Err(
+                    "assignment v2: contributor solver pkh not derived from vrf key".to_string(),
+                );
+            }
+        }
         Ok(())
     }
 

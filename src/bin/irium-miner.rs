@@ -3182,6 +3182,323 @@ fn run_solo_stratum_server(addr: &str) -> Result<(), String> {
     Ok(())
 }
 
+// ── Gap 12: solo PoAW-X mining (--poawx) ─────────────────────────────────────
+//
+// Build a complete all-gates PoAW-X block where the miner's own key plays every
+// role, then ingest its candidate admissions and submit via the node's extended
+// RPC. Devnet/testnet only (mainnet hard-off). Requires the gate env to match the
+// target node (same IRIUM_POAWX_* activation/required vars) and the miner secret
+// in IRIUM_POAWX_MINER_SECRET_HEX (64 hex chars). The block validity proof for
+// this builder is the lib test chain::tests::gap12_solo_poawx_builder_connect_block;
+// this function is the (not unit-testable) live node round-trip.
+
+fn poawx_miner_secret() -> Result<[u8; 32], String> {
+    let hexs = env::var("IRIUM_POAWX_MINER_SECRET_HEX").map_err(|_| {
+        "solo PoAW-X mining requires IRIUM_POAWX_MINER_SECRET_HEX (64 hex chars)".to_string()
+    })?;
+    let bytes =
+        hex::decode(hexs.trim()).map_err(|e| format!("bad IRIUM_POAWX_MINER_SECRET_HEX: {e}"))?;
+    if bytes.len() != 32 {
+        return Err("IRIUM_POAWX_MINER_SECRET_HEX must be 32 bytes (64 hex chars)".to_string());
+    }
+    let mut o = [0u8; 32];
+    o.copy_from_slice(&bytes);
+    Ok(o)
+}
+
+/// Stage D Step 5 (delegated/mode-1 mining) context. Present only when the pool
+/// supplies a custodial proposer secret + a delegate secret + a miner-signed
+/// Delegation v2. When absent, the miner mines solo exactly as before.
+struct DelegatedCtx {
+    /// Custodial proposer secret (pool-held): drives the proposer-VRF proof AND the
+    /// proposer-key registration. Its pubkey == delegation.proposer_pubkey.
+    custodial_secret: [u8; 32],
+    /// Pool delegate secret: signs the receipt (worker_sig) and does the role work.
+    /// Its pubkey == delegation.pool_pubkey.
+    delegate_secret: [u8; 32],
+    /// The miner-signed Delegation v2 (binds proposer_pubkey -> pool_pubkey -> payout).
+    delegation: irium_node_rs::poawx::Delegation,
+    /// Stage D Step 5 Milestone F: delegation-revocation records to embed on-chain in
+    /// this producer's blocks (comma-separated hexes via IRIUM_POAWX_REVOKE_HEX). Empty
+    /// => no revocation carried.
+    revocations: Vec<irium_node_rs::poawx::DelegationRevocationV1>,
+}
+
+fn poawx_secret_env(name: &str) -> Result<[u8; 32], String> {
+    let hexs = env::var(name).map_err(|_| format!("{name} not set"))?;
+    let bytes = hex::decode(hexs.trim()).map_err(|e| format!("bad {name}: {e}"))?;
+    if bytes.len() != 32 {
+        return Err(format!("{name} must be 32 bytes (64 hex chars)"));
+    }
+    let mut o = [0u8; 32];
+    o.copy_from_slice(&bytes);
+    Ok(o)
+}
+
+/// Load the delegated (mode-1) mining context. Returns None for solo mode. The
+/// delegation is supplied inline via IRIUM_POAWX_DELEGATION_HEX or from a file via
+/// IRIUM_POAWX_DELEGATION_FILE. A partial configuration (one secret set but no
+/// delegation) is an error, so the operator never silently mines solo by mistake.
+fn poawx_delegated_ctx() -> Result<Option<DelegatedCtx>, String> {
+    let deleg_hex = match (
+        env::var("IRIUM_POAWX_DELEGATION_HEX").ok(),
+        env::var("IRIUM_POAWX_DELEGATION_FILE").ok(),
+    ) {
+        (Some(h), _) => Some(h),
+        (None, Some(path)) => Some(
+            std::fs::read_to_string(&path)
+                .map_err(|e| format!("read IRIUM_POAWX_DELEGATION_FILE {path}: {e}"))?,
+        ),
+        (None, None) => None,
+    };
+    let deleg_hex = match deleg_hex {
+        Some(h) => h,
+        None => {
+            if env::var("IRIUM_POAWX_PROPOSER_SECRET_HEX").is_ok()
+                || env::var("IRIUM_POAWX_DELEGATE_SECRET_HEX").is_ok()
+            {
+                return Err("delegated mode needs IRIUM_POAWX_DELEGATION_HEX (or _FILE) together with IRIUM_POAWX_PROPOSER_SECRET_HEX and IRIUM_POAWX_DELEGATE_SECRET_HEX".to_string());
+            }
+            return Ok(None);
+        }
+    };
+    let deleg_bytes = hex::decode(deleg_hex.trim())
+        .map_err(|e| format!("bad IRIUM_POAWX_DELEGATION_HEX: {e}"))?;
+    let delegation = irium_node_rs::poawx::Delegation::deserialize(&deleg_bytes)
+        .map_err(|e| format!("bad delegation: {e}"))?;
+    delegation
+        .verify_signature()
+        .map_err(|e| format!("delegation signature invalid: {e}"))?;
+    let custodial_secret = poawx_secret_env("IRIUM_POAWX_PROPOSER_SECRET_HEX")?;
+    let delegate_secret = poawx_secret_env("IRIUM_POAWX_DELEGATE_SECRET_HEX")?;
+    // The delegate<->pool_pubkey and custodial<->proposer_pubkey bindings are also
+    // enforced downstream (the harness asserts delegate==pool_pubkey; the node's Step-3
+    // proposer branch asserts the proof key==proposer_pubkey), so a mismatch fails with
+    // a clear error at build/submit rather than producing an invalid block.
+    let revocations = match env::var("IRIUM_POAWX_REVOKE_HEX").ok() {
+        None => Vec::new(),
+        Some(list) => {
+            let mut out = Vec::new();
+            for h in list.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+                let b = hex::decode(h).map_err(|e| format!("bad IRIUM_POAWX_REVOKE_HEX: {e}"))?;
+                let rec = irium_node_rs::poawx::DelegationRevocationV1::deserialize(&b)
+                    .map_err(|e| format!("bad revocation record: {e}"))?;
+                rec.validate(irium_node_rs::activation::network_id_byte())
+                    .map_err(|e| format!("revocation record invalid: {e}"))?;
+                out.push(rec);
+            }
+            out
+        }
+    };
+    Ok(Some(DelegatedCtx {
+        custodial_secret,
+        delegate_secret,
+        delegation,
+        revocations,
+    }))
+}
+
+fn poawx_decode_hash32(s: &str) -> Result<[u8; 32], String> {
+    let b = hex::decode(s.trim()).map_err(|e| format!("bad hash hex: {e}"))?;
+    if b.len() != 32 {
+        return Err(format!("hash must be 32 bytes, got {}", b.len()));
+    }
+    let mut o = [0u8; 32];
+    o.copy_from_slice(&b);
+    Ok(o)
+}
+
+fn poawx_receipt_difficulty_bits() -> u32 {
+    if irium_node_rs::activation::network_id_byte() == 0 {
+        return 20; // mainnet configured puzzle difficulty (bits)
+    }
+    env::var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(4)
+}
+
+/// Seconds the solo --poawx miner waits between block-production attempts.
+/// `IRIUM_POAWX_MINER_INTERVAL_SECS` (devnet/testnet only); default 2 (unchanged
+/// legacy cadence). Raising it (e.g. 30) slows block production so remote testnet
+/// nodes can stay synced via gossip. Clamped to a minimum of 1s.
+fn poawx_miner_interval_secs() -> u64 {
+    env::var("IRIUM_POAWX_MINER_INTERVAL_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(2)
+        .max(1)
+}
+
+/// Build the `/rpc/submit_block_extended` JSON request from a built proof (public
+/// block data only; no secret key material). Mirrors the live-proof harness shape.
+fn build_poawx_submit_request(
+    proof: &irium_node_rs::poawx_mining_harness::AllGatesProof,
+) -> Result<serde_json::Value, String> {
+    let block = &proof.block;
+    let coinbase = block
+        .transactions
+        .first()
+        .ok_or("missing coinbase in built block")?;
+    let receipt = block
+        .poawx_receipts
+        .as_ref()
+        .and_then(|r| r.first())
+        .ok_or("missing receipt in built block")?;
+    let ext_hex = receipt
+        .phase20_ext
+        .as_ref()
+        .map(|e: &irium_node_rs::poawx::Phase20ReceiptExt| hex::encode(e.serialize()))
+        .unwrap_or_default();
+    // Stage D Step 5: carry the mode-1 delegation (empty => node reads it as mode-0/solo).
+    let delegation_hex = receipt
+        .delegation
+        .as_ref()
+        .map(|d| hex::encode(d.serialize()))
+        .unwrap_or_default();
+    let header = &block.header;
+    Ok(json!({
+        "height": proof.height,
+        "header": {
+            "version": header.version,
+            "prev_hash": hex::encode(header.prev_hash),
+            "merkle_root": hex::encode(header.merkle_root),
+            "time": header.time,
+            "bits": format!("{:08x}", header.bits),
+            "nonce": header.nonce,
+            "hash": hex::encode(proof.block_hash),
+        },
+        "tx_hex": [hex::encode(coinbase.serialize())],
+        "submit_source": "irium-miner-poawx",
+        "poawx_receipts": [{
+            "height": receipt.height,
+            "lane": (receipt.lane as char).to_string(),
+            "worker_pkh": hex::encode(receipt.worker_pkh),
+            "solution": hex::encode(receipt.solution),
+            "commitment_nonce": hex::encode(receipt.commitment_nonce),
+            "worker_pubkey": hex::encode(receipt.worker_pubkey),
+            "worker_sig": hex::encode(receipt.worker_sig),
+            "delegation": delegation_hex,
+            "phase20_ext": ext_hex,
+        }],
+        "poawx_receipts_root": hex::encode(proof.irx1_root),
+    }))
+}
+
+type PoawxParentInfo = (Option<[u8; 32]>, ([u8; 32], [u8; 32]));
+
+/// Fetch the parent (H-1) block prev_hash PLUS its PoAW-X multi-source seed
+/// components (finality-proof digest, precommit root). For height <= 1 the parent is
+/// genesis: prev_hash None and zero components. The components feed the multi-source
+/// assignment seed so blocks at height >= 2 validate once that gate is active.
+fn poawx_fetch_parent_info(client: &Client, height: u64) -> Result<PoawxParentInfo, String> {
+    if height <= 1 {
+        return Ok((None, ([0u8; 32], [0u8; 32])));
+    }
+    with_rpc_base(|base| {
+        let url = format!("{}/rpc/block?height={}", base.trim_end_matches('/'), height - 1);
+        let mut req = client.get(&url);
+        if let Some(token) = rpc_token() {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().map_err(|e| format!("get parent block: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(rpc_status_error("get parent block", resp.status()));
+        }
+        let v: serde_json::Value = resp.json().map_err(|e| format!("parent parse: {e}"))?;
+        let prev = v
+            .get("header")
+            .and_then(|h| h.get("prev_hash"))
+            .and_then(|x| x.as_str())
+            .ok_or("parent block missing header.prev_hash")?;
+        let comp = |key: &str| -> Result<[u8; 32], String> {
+            match v.get(key).and_then(|x| x.as_str()) {
+                Some(s) => poawx_decode_hash32(s),
+                None => Ok([0u8; 32]),
+            }
+        };
+        let fin = comp("poawx_finality_digest")?;
+        let pre = comp("poawx_precommit_root")?;
+        Ok((Some(poawx_decode_hash32(prev)?), (fin, pre)))
+    })
+}
+
+fn poawx_fetch_dominance(
+    client: &Client,
+) -> Result<irium_node_rs::poawx_dominance::PersistentDominance, String> {
+    with_rpc_base(|base| {
+        let url = format!("{}/rpc/poawx_dominance", base.trim_end_matches('/'));
+        let mut req = client.get(&url);
+        if let Some(token) = rpc_token() {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().map_err(|e| format!("get dominance: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(rpc_status_error("get dominance", resp.status()));
+        }
+        let v: serde_json::Value = resp.json().map_err(|e| format!("dominance parse: {e}"))?;
+        let hexs = v
+            .get("hex")
+            .and_then(|x| x.as_str())
+            .ok_or("dominance response missing hex")?;
+        let bytes = hex::decode(hexs.trim()).map_err(|e| format!("dominance hex decode: {e}"))?;
+        irium_node_rs::poawx_dominance::PersistentDominance::from_bytes(&bytes)
+    })
+}
+
+fn poawx_post_admission(client: &Client, adm: &[u8]) -> Result<(), String> {
+    with_rpc_base(|base| {
+        let url = format!("{}/poawx/candidate-admission", base.trim_end_matches('/'));
+        let mut req = client
+            .post(&url)
+            .header("Content-Type", "application/octet-stream")
+            .body(adm.to_vec());
+        if let Some(token) = rpc_token() {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().map_err(|e| format!("post admission: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(rpc_status_error("post admission", resp.status()));
+        }
+        Ok(())
+    })
+}
+
+fn poawx_submit_registration(client: &Client, reg: &[u8]) -> Result<(), String> {
+    with_rpc_base(|base| {
+        let url = format!("{}/poawx/registration", base.trim_end_matches('/'));
+        let mut req = client
+            .post(&url)
+            .header("Content-Type", "application/octet-stream")
+            .body(reg.to_vec());
+        if let Some(token) = rpc_token() {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().map_err(|e| format!("post registration: {e}"))?;
+        if !resp.status().is_success() {
+            return Err(rpc_status_error("post registration", resp.status()));
+        }
+        Ok(())
+    })
+}
+
+fn poawx_submit_extended(client: &Client, req_body: &serde_json::Value) -> Result<(), String> {
+    with_rpc_base(|base| {
+        let url = format!("{}/rpc/submit_block_extended", base.trim_end_matches('/'));
+        let mut req = client.post(&url).json(req_body);
+        if let Some(token) = rpc_token() {
+            req = req.bearer_auth(token);
+        }
+        let resp = req.send().map_err(|e| format!("submit_block_extended: {e}"))?;
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        if !status.is_success() {
+            return Err(format!("submit_block_extended rejected: HTTP {status} body={body}"));
+        }
+        Ok(())
+    })
+}
+
 /// Solo PoAW-X mining loop: fetch template -> build all-gates block with the
 /// miner key -> ingest admissions -> submit extended. Devnet/testnet only.
 fn run_poawx_solo() -> Result<(), String> {
@@ -3190,6 +3507,13 @@ fn run_poawx_solo() -> Result<(), String> {
     // (50_000); before then the node assignment/submit RPCs return 503 and this loop
     // idles until activation. Non-mainnet is gated by the node env as before.
     let secret = poawx_miner_secret()?;
+    let deleg = poawx_delegated_ctx()?;
+    // In delegated (mode-1) mining the proposer VRF proof + registration use the miner's
+    // CUSTODIAL proposer key; the block is signed by the delegate and paid to the miner.
+    let proving_secret = deleg.as_ref().map(|d| d.custodial_secret).unwrap_or(secret);
+    if deleg.is_some() {
+        println!("[poawx] DELEGATED (mode-1) mining: custodial proposer key proves + registers; delegate signs; block reward pays the miner payout address");
+    }
     let client = rpc_client()?;
     let diff = poawx_receipt_difficulty_bits();
     let interval = poawx_miner_interval_secs();
@@ -3263,7 +3587,7 @@ fn run_poawx_solo() -> Result<(), String> {
                     let a_h = tmpl.poawx_reg_anchor_height.unwrap_or(0);
                     let bits = tmpl.poawx_reg_required_sybil_bits.unwrap_or(0);
                     match irium_node_rs::poawx::ProposerRegistrationV1::build_signed(
-                        &secret, net, a_h, &a_hash, bits,
+                        &proving_secret, net, a_h, &a_hash, bits,
                     ) {
                         Ok(reg) => match poawx_submit_registration(&client, &reg.serialize()) {
                             Ok(()) => {
@@ -3297,7 +3621,7 @@ fn run_poawx_solo() -> Result<(), String> {
             let eligible = tmpl.poawx_proposer_eligible_count.unwrap_or(0);
             let max_round = tmpl.poawx_proposer_max_allowed_round.unwrap_or(0);
             let proof = match irium_node_rs::poawx_candidate::AssignmentProofV2::prove_self_solver(
-                &secret,
+                &proving_secret,
                 net,
                 height,
                 irium_node_rs::poawx_proposer::ROLE_PROPOSER,
@@ -3409,7 +3733,11 @@ fn run_poawx_solo() -> Result<(), String> {
                     "commitment_nonce": hex::encode(receipt.commitment_nonce),
                     "worker_pubkey": hex::encode(receipt.worker_pubkey),
                     "worker_sig": hex::encode(receipt.worker_sig),
-                    "delegation": "",
+                    "delegation": receipt
+                        .delegation
+                        .as_ref()
+                        .map(|d| hex::encode(d.serialize()))
+                        .unwrap_or_default(),
                     "phase20_ext": ext_hex,
                 }))
                 .map_err(|e| format!("receipt json encode: {e}"))?

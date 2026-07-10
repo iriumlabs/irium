@@ -412,6 +412,44 @@ pub fn audit_hardening_active(height: u64) -> bool {
     )
 }
 
+/// Option A (multi-participant role attribution): mainnet activation height for the
+/// contributor-role solver binding. `None` => NOT live-active on mainnet -- the actual
+/// future, announced, coordinated activation is a SEPARATE deferred decision (mirrors the
+/// block-50000 discipline). Rig/devnet activate it low via the env var below for testing.
+pub const MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT: Option<u64> = None;
+
+pub fn contributor_role_binding_activation_height() -> Option<u64> {
+    std::env::var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+/// Pure gate (param-driven for race-free tests). Mainnet (network 0) resolves to the
+/// hard-coded future height (`None` today => off), so the mainnet-facing code is NOT
+/// live-active; non-mainnet uses the env activation for rig/devnet testing.
+pub fn contributor_role_binding_gate(
+    network_id: u8,
+    env_activation: Option<u64>,
+    height: u64,
+) -> bool {
+    let eff = if network_id == 0 {
+        MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT
+    } else {
+        env_activation
+    };
+    matches!(eff, Some(h) if height >= h)
+}
+
+/// Whether contributor-role solvers (COMPUTE/VERIFY/SUPPORT) must bind to their VRF key
+/// (Option A) at `height`. Mainnet hard-off until a separate announced activation.
+pub fn contributor_role_binding_active(height: u64) -> bool {
+    contributor_role_binding_gate(
+        network_id_byte(),
+        contributor_role_binding_activation_height(),
+        height,
+    )
+}
+
 /// Max blocks a single reorg may disconnect (Fix 1). Finality-independent backstop:
 /// the effective reorg floor is `max(finalized_height, tip - max_reorg_depth())`.
 /// Network default + env override, floored at `MAX_REORG_DEPTH_HARD_FLOOR`.
@@ -568,6 +606,20 @@ pub fn global_proposer_reg_pool() -> &'static NodeProposerRegistrationPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contributor_role_binding_gate_mainnet_off_devnet_env() {
+        // CRITICAL: mainnet (network 0) is NOT live-active regardless of any env activation
+        // -- the contributor-role binding stays off until a separate announced decision.
+        assert!(!contributor_role_binding_gate(0, Some(1), 100));
+        assert!(!contributor_role_binding_gate(0, Some(1), u64::MAX));
+        assert!(!contributor_role_binding_gate(0, None, 100));
+        // devnet/rig (network 2): the env activation height gates it (low for testing).
+        assert!(!contributor_role_binding_gate(2, None, 100));
+        assert!(!contributor_role_binding_gate(2, Some(50), 49));
+        assert!(contributor_role_binding_gate(2, Some(50), 50));
+        assert!(contributor_role_binding_gate(2, Some(50), 100));
+    }
 
     #[test]
     fn cumulative_slots_cascade() {

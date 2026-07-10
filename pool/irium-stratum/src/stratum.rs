@@ -1479,12 +1479,30 @@ fn build_session_poawx_receipts(
                 // protocol) if enabled + complete; (2) SYNTHETIC fallback only when
                 // IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS=1; (3) otherwise NO ext (the node
                 // fails closed after activation — never fakes claims).
-                let collected = crate::delegation::build_collected_phase20_ext(
+                // Step 2 (role-attribution upgrade): build the CANONICAL multi-role
+                // payout split from the PROVEN compliant collector. Each contributor role
+                // (COMPUTE/VERIFY/SUPPORT) is attributed to a DISTINCT participant via
+                // best_for_role VRF selection, carrying that participant own ticket +
+                // puzzle + assignment proofs with the Phase-1 binding re-verified -- NOT
+                // pool-synthesized proofs. PRIMARY remains the block real VRF-selected
+                // proposer. Returns None on mainnet (network_id==0), role protocol off, or
+                // when the collected bundles are absent/incomplete -> automatic fallback
+                // below to today exact behavior (synthetic only if explicitly enabled,
+                // else no ext).
+                //
+                // SCOPE (operator-orchestrated): the role bundles reach producer.role_store
+                // over the loopback ingest (/poawx/role-precommit + /poawx/role-reveal),
+                // fed by the single pool operator own role-workers. This delivers correct
+                // multi-role payout-SPLITTING + attribution mechanics using the proven
+                // logic. It does NOT yet accept real external, independently-submitted
+                // role-work from separate, mutually-untrusting participants over the
+                // network -- that decentralised submission protocol is a distinct FUTURE
+                // project (Option B).
+                let collected = crate::delegation::build_collected_bundle_ext(
                     producer.role_store.as_ref(),
                     producer.network_id,
                     ctx.block_height,
                     fee,
-                    pkh,
                     &job.prev_hash,
                 );
                 let chosen = match collected {
@@ -4857,6 +4875,49 @@ mod tests {
             delegation: String::new(),
             phase20_ext: String::new(),
         }
+    }
+
+    #[test]
+    fn build_session_falls_back_to_receipt_producer_receipts_without_per_miner_delegation() {
+        // Dual-path precedence (fallback side), the mainnet-current state: PoAW-X is enabled
+        // but the pool's per-miner delegation producer is absent (poawx_producer = None) --
+        // so build_session_poawx_receipts returns the node-template pending receipts (the
+        // receipt-producer's single-config receipts) UNCHANGED. This proves the receipt-
+        // producer remains the correct fallback whenever no per-miner delegation applies.
+        // The precedence winner side (a delegation exists -> that miner is paid directly, and
+        // the per-miner receipt is used instead of this fallback) is proven at the decision
+        // point build_mode1_pending_receipt by phase18b3_build_mode1_receipt_and_root_parity
+        // ("pays miner pkh") and per_miner_delegation_mixed_batch_direct_and_fallback.
+        let mut config = test_config(MinerFamilyMode::Asic);
+        config.poawx_enabled = true; // active, but poawx_producer stays None (per-miner path off)
+        let session = test_session(AdapterKind::NativeRewardableReserved);
+        let mut job = test_job();
+        // Stand-in for the receipt-producer's node-template receipt (today's custodial payout).
+        let producer_receipt = PoawxPendingReceipt {
+            height: job.height,
+            lane: "A".to_string(),
+            worker_pkh: "c2fc860000000000000000000000000000000000".to_string(),
+            solution: "0000000000000000".to_string(),
+            commitment_nonce: "11".repeat(32),
+            worker_pubkey: String::new(),
+            worker_sig: String::new(),
+            delegation: String::new(),
+            phase20_ext: String::new(),
+        };
+        job.poawx_pending_receipts = vec![producer_receipt];
+        let session_pkh = [0x11u8; 20];
+
+        let out = build_session_poawx_receipts(&job, &session, &config, &session_pkh);
+
+        assert_eq!(out.len(), 1, "fallback yields exactly the receipt-producer's pending receipts");
+        assert_eq!(
+            out[0].worker_pkh, "c2fc860000000000000000000000000000000000",
+            "the receipt-producer's receipt is used UNCHANGED as the fallback (custodial), not replaced"
+        );
+        assert!(
+            out[0].delegation.is_empty(),
+            "fallback receipt carries no per-miner delegation -- zero disruption to today's behavior"
+        );
     }
 
     #[test]

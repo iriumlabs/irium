@@ -307,6 +307,11 @@ pub struct ChainState {
     /// registrations. Producers force-drain the head into the eligibility registry
     /// (gated on `proposer_registration_active`; mainnet hard-off => stays empty).
     pub proposer_reg_queue: std::collections::VecDeque<crate::poawx::ProposerRegistrationV1>,
+    /// Stage D Step 4: reorg-safe set of revoked delegations, keyed by
+    /// `(miner_pubkey, deleg_nonce)`. Applied in `connect_block` and reverted in
+    /// `disconnect_tip_block` (gated on `poawx_delegation_active`; mainnet hard-off =>
+    /// stays empty). Rebuilt deterministically by chain replay (never serialized).
+    pub revoked_delegations: crate::poawx::DelegationRevocationRegistry,
     /// Phase 26+: persistent, reorg-safe penalty/slashing state driven by
     /// accepted fraud proofs. Applied in `connect_block` and reverted in
     /// `disconnect_tip_block` (both gated + mainnet hard-off); deterministically
@@ -418,6 +423,7 @@ impl ChainState {
             dominance: crate::poawx_dominance::PersistentDominance::from_env(),
             proposer_registry: crate::poawx_proposer::ProposerEligibilityRegistry::from_env(),
             proposer_reg_queue: std::collections::VecDeque::new(),
+            revoked_delegations: crate::poawx::DelegationRevocationRegistry::default(),
             penalty: crate::poawx_penalty::PersistentPenalty::from_env(),
             adaptive_mode: crate::poawx_adaptive::AdaptiveMode::Normal,
             reorg_signal: 0,
@@ -908,6 +914,7 @@ impl ChainState {
         self.validate_block_header(&block, expected_height, previous)?;
         validate_poawx_coinbase(&block, expected_height)?;
         validate_poawx_block_receipts(&block, expected_height, previous)?;
+        self.validate_block_delegation_revocations(&block, expected_height)?;
         if crate::poawx_dominance::anti_domination_enforced(expected_height) {
             self.validate_block_dominance_weights(&block, expected_height)?;
         }
@@ -968,6 +975,7 @@ impl ChainState {
         self.apply_block_dominance(expected_height);
         self.apply_block_proposer_registry(expected_height);
         self.apply_block_proposer_registrations(expected_height);
+        self.apply_block_delegation_revocations(expected_height);
         self.apply_block_fraud_slashing(expected_height);
         self.update_adaptive_mode(expected_height);
         // Finality-checkpoint watermark: when finality is enforced, an accepted
@@ -1084,6 +1092,7 @@ impl ChainState {
         self.revert_block_dominance(&tip_block, tip_height);
         self.revert_block_proposer_registrations(&tip_block, tip_height);
         self.revert_block_proposer_registry(&tip_block, tip_height);
+        self.revert_block_delegation_revocations(&tip_block, tip_height);
         self.revert_block_fraud_slashing(&tip_block, tip_height);
         // Gap 10: node-local reorg pressure feeds the adaptive Defense trigger.
         self.reorg_signal = self.reorg_signal.saturating_add(1);
@@ -1379,8 +1388,46 @@ impl ChainState {
             if pa.proof.solver_pkh != hash160(&pa.proof.assignment_public_key) {
                 return Err("proposer: solver pkh not derived from vrf key".to_string());
             }
-            if pa.proof.solver_pkh != r.worker_pkh {
-                return Err("proposer: proposer is not the block worker".to_string());
+            // Proposer identity. Mode-0 (solo): the proposer key IS the payee, so
+            // solver_pkh (== hash160(assignment_public_key), checked just above) must
+            // equal worker_pkh. Mode-1 (delegated): the block is PROPOSED by the
+            // miner's separate, sybil-registered custodial proposer key and PAID to
+            // the miner's payout pkh. By the time this runs, validate_poawx_block_receipts
+            // (called earlier in connect_block) has already verified, for the delegated
+            // receipt: d.verify_signature() [the miner signed this delegation; for v2 the
+            // signed preimage covers proposer_pubkey, so the miner authorised THIS proposer
+            // key], d.miner_pkh() == r.worker_pkh [the coinbase pays the miner payout],
+            // r.worker_pubkey == d.pool_pubkey [the signer is the delegated pool], plus
+            // network / expiry (height <= d.expiry_height) / delegation-active. Here we
+            // only bind the PROPOSER PROOF to the proposer key the miner cryptographically
+            // authorised. Sortition (priority < threshold), seed, role, ticket-digest,
+            // round-timing and is_eligible(assignment_public_key) below are UNCHANGED and
+            // still bind to that proposer key -- the sybil bound is identical to a solo
+            // proposer's (one sybil-work registration per distinct proposer key).
+            match &r.delegation {
+                Some(d) => {
+                    // v1 delegations carry a placeholder (all-zero) proposer_pubkey and
+                    // predate proposer-VRF; they must not authorise a delegated proposer.
+                    if d.deleg_version < 2 {
+                        return Err(
+                            "proposer: delegated proposer requires delegation v2".to_string(),
+                        );
+                    }
+                    // The VRF proof key MUST be the exact proposer key the miner signed
+                    // into the delegation, closing the triangle proposer-key <-> payout
+                    // <-> pool (all bound by the one miner signature checked above).
+                    if d.proposer_pubkey != pa.proof.assignment_public_key {
+                        return Err(
+                            "proposer: assignment key != delegated proposer_pubkey".to_string(),
+                        );
+                    }
+                }
+                None => {
+                    // Mode-0 (solo): the proposer is the block worker. UNCHANGED.
+                    if pa.proof.solver_pkh != r.worker_pkh {
+                        return Err("proposer: proposer is not the block worker".to_string());
+                    }
+                }
             }
             // eligibility against the frozen registry; permissive while the registry is
             // empty (bootstrap) since the threshold then admits everyone.
@@ -1804,6 +1851,17 @@ impl ChainState {
                 if pr.solver_pkh != cand.solver_pkh {
                     return Err("phase22d: v2 proof wrong solver".to_string());
                 }
+                // Option A (defence-in-depth, mirrors the proposer's two-site binding):
+                // once the contributor-role binding is active, the contributor solver must be
+                // hash160 of its own VRF key. AssignmentProofV2::validate enforces the same;
+                // this rejects at the block validator too. Gate off => no-op.
+                if crate::poawx_proposer::contributor_role_binding_active(height)
+                    && pr.solver_pkh != hash160(&pr.assignment_public_key)
+                {
+                    return Err(
+                        "phase22d: contributor solver pkh not derived from vrf key".to_string(),
+                    );
+                }
                 if pr.ticket_digest != cand.ticket_digest {
                     return Err("phase22d: v2 proof wrong ticket digest".to_string());
                 }
@@ -2134,6 +2192,107 @@ impl ChainState {
         }
         for reg in section.activations.iter().rev() {
             self.proposer_reg_queue.push_front(reg.clone());
+        }
+    }
+
+    /// Stage D Step 4: every delegation-revocation record carried by a block's receipts.
+    fn block_delegation_revocations(
+        block: &Block,
+    ) -> Vec<crate::poawx::DelegationRevocationV1> {
+        let mut out = Vec::new();
+        if let Some(receipts) = &block.poawx_receipts {
+            for r in receipts {
+                if let Some(ext) = &r.phase20_ext {
+                    if let Some(revs) = &ext.delegation_revocations {
+                        out.extend(revs.iter().cloned());
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    /// Stage D Step 4: validate the RVK1 revocation records in a block AND reject any
+    /// delegated receipt whose `(miner_pubkey, deleg_nonce)` was revoked in an EARLIER
+    /// block. Read-only; called right after `validate_poawx_block_receipts`. Uses the
+    /// revoked set as of BEFORE this block's own revocations are applied
+    /// (`apply_block_delegation_revocations` runs later), so revocation is forward-looking
+    /// only: it never invalidates a block at or before the revocation's own height.
+    fn validate_block_delegation_revocations(
+        &self,
+        block: &Block,
+        height: u64,
+    ) -> Result<(), String> {
+        if !poawx_delegation_active(height) {
+            return Ok(());
+        }
+        let net = crate::activation::network_id_byte();
+        let receipts = match &block.poawx_receipts {
+            Some(r) => r,
+            None => return Ok(()),
+        };
+        // (1) At most one revocation section per block; each record must carry the miner's
+        //     valid signature over its own miner_pubkey; per-block cap enforced.
+        let mut section_count = 0usize;
+        for r in receipts {
+            if let Some(ext) = &r.phase20_ext {
+                if let Some(revs) = &ext.delegation_revocations {
+                    section_count += 1;
+                    if section_count > 1 {
+                        return Err(
+                            "delegation revocation: multiple sections in block".to_string()
+                        );
+                    }
+                    if revs.len() > crate::poawx::REVOCATION_CAP {
+                        return Err(
+                            "delegation revocation: section over cap".to_string()
+                        );
+                    }
+                    for rv in revs {
+                        rv.validate(net)?;
+                    }
+                }
+            }
+        }
+        // (2) Reject a delegated receipt that uses an already-revoked delegation.
+        for r in receipts {
+            if let Some(d) = &r.delegation {
+                let key = (d.miner_pubkey, d.deleg_nonce);
+                if self.revoked_delegations.is_revoked(&key, height) {
+                    return Err(format!(
+                        "delegation revocation: receipt uses a revoked delegation (deleg_nonce {}) at height {}",
+                        hex::encode(d.deleg_nonce),
+                        height
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Stage D Step 4: add this block's revocations to the persistent set. Reads the
+    /// just-connected tip (mirrors `apply_block_proposer_registrations`).
+    fn apply_block_delegation_revocations(&mut self, height: u64) {
+        if !poawx_delegation_active(height) {
+            return;
+        }
+        let revs = match self.chain.last() {
+            Some(b) => Self::block_delegation_revocations(b),
+            None => return,
+        };
+        for rv in &revs {
+            self.revoked_delegations.revoke(rv.key(), height);
+        }
+    }
+
+    /// Exact inverse of `apply_block_delegation_revocations` for a disconnected tip.
+    fn revert_block_delegation_revocations(&mut self, block: &Block, height: u64) {
+        if !poawx_delegation_active(height) {
+            return;
+        }
+        let revs = Self::block_delegation_revocations(block);
+        for rv in &revs {
+            self.revoked_delegations.unrevoke(&rv.key(), height);
         }
     }
 
@@ -3101,6 +3260,7 @@ impl ChainState {
             dominance: crate::poawx_dominance::PersistentDominance::from_env(),
             proposer_registry: crate::poawx_proposer::ProposerEligibilityRegistry::from_env(),
             proposer_reg_queue: std::collections::VecDeque::new(),
+            revoked_delegations: crate::poawx::DelegationRevocationRegistry::default(),
             penalty: crate::poawx_penalty::PersistentPenalty::from_env(),
             adaptive_mode: crate::poawx_adaptive::AdaptiveMode::Normal,
             reorg_signal: 0,
@@ -8205,6 +8365,7 @@ mod tests {
             fee_bps,
             fee_pkh: [0u8; 20],
             deleg_nonce: [0x33u8; 32],
+            proposer_pubkey: [0u8; 33],
             delegation_sig: [0u8; 64],
         };
         let dsig: k256::ecdsa::Signature = miner_sk.sign_prehash(&d.message_hash()).unwrap();
@@ -8247,6 +8408,212 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_MODE");
         std::env::remove_var("IRIUM_NETWORK");
         std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
+    }
+
+    // ---- Stage D Step 4: delegation revocation (connect-level validate/apply/revert) ----
+
+    /// Minimal Phase20ReceiptExt carrying an optional RVK1 revocation section. The role
+    /// claims are dummies: validate_block_delegation_revocations validates only the
+    /// revocation records and the revoked-set membership, never the claims.
+    fn rev_ext(revs: Vec<crate::poawx::DelegationRevocationV1>) -> crate::poawx::Phase20ReceiptExt {
+        use crate::poawx::{Phase20ReceiptExt, PoawxRoleClaim, RoleReward};
+        let claim = || PoawxRoleClaim {
+            role_id: 0,
+            lane_id: 0,
+            solver_pkh: [0u8; 20],
+            nonce: [0u8; 32],
+            secret: [0u8; 32],
+            claim_digest: [0u8; 32],
+            commitment_hash: None,
+        };
+        Phase20ReceiptExt {
+            role_reward: RoleReward {
+                compute_contributor_pkh: [0u8; 20],
+                verify_contributor_pkh: [0u8; 20],
+                support_contributor_pkh: [0u8; 20],
+            },
+            compute_claim: claim(),
+            verify_claim: claim(),
+            support_claim: claim(),
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            precommit_root: None,
+            role_ticket_proofs: None,
+            role_dominance_weights: None,
+            candidate_set: None,
+            role_puzzle_proofs: None,
+            finality_proof: None,
+            committed_admission: None,
+            role_assignment_v2: None,
+            fraud_proofs: None,
+            proposer_assignment: None,
+            proposer_registrations: None,
+            delegation_revocations: if revs.is_empty() { None } else { Some(revs) },
+        }
+    }
+
+    /// A mode-1 (delegated) receipt for `(miner_pubkey, deleg_nonce)`, with an optional
+    /// ext. PoW/signatures are dummies: the revocation path never checks them.
+    fn deleg_receipt(
+        miner_pubkey: [u8; 33],
+        deleg_nonce: [u8; 32],
+        ext: Option<crate::poawx::Phase20ReceiptExt>,
+    ) -> crate::poawx::PoawxBlockReceipt {
+        let d = crate::poawx::Delegation {
+            deleg_version: 2,
+            network_id: crate::activation::network_id_byte(),
+            miner_pubkey,
+            pool_pubkey: [0x02u8; 33],
+            worker_tag: [0u8; 32],
+            expiry_height: 1_000_000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce,
+            proposer_pubkey: [0u8; 33],
+            delegation_sig: [0u8; 64],
+        };
+        crate::poawx::PoawxBlockReceipt {
+            height: 0,
+            lane: b'A',
+            worker_pkh: [0u8; 20],
+            worker_pubkey: [0x02u8; 33],
+            worker_sig: [0u8; 64],
+            solution: [0u8; 8],
+            commitment_nonce: [0u8; 32],
+            delegation: Some(d),
+            phase20_ext: ext,
+        }
+    }
+
+    fn mode0_receipt() -> crate::poawx::PoawxBlockReceipt {
+        crate::poawx::PoawxBlockReceipt {
+            height: 0,
+            lane: b'A',
+            worker_pkh: [0u8; 20],
+            worker_pubkey: [0x02u8; 33],
+            worker_sig: [0u8; 64],
+            solution: [0u8; 8],
+            commitment_nonce: [0u8; 32],
+            delegation: None,
+            phase20_ext: None,
+        }
+    }
+
+    fn rev_block(receipts: Vec<crate::poawx::PoawxBlockReceipt>) -> Block {
+        Block {
+            header: BlockHeader {
+                version: 0,
+                prev_hash: [0x55u8; 32],
+                merkle_root: [0u8; 32],
+                time: 5_000,
+                bits: 0x207fffff,
+                nonce: 0,
+            },
+            transactions: vec![],
+            auxpow: None,
+            poawx_receipts: Some(receipts),
+        }
+    }
+
+    #[test]
+    fn stage_d_revocation_accepts_unrevoked_and_ignores_mode0() {
+        // (a)/(d): an unrevoked delegation is accepted, and a mode-0 receipt is unaffected
+        // even when the revoked set is populated.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        set_mode1_env();
+        let net = crate::activation::network_id_byte();
+        let miner = crate::poawx::DelegationRevocationV1::build_signed(&[0x11u8; 32], net, [0x01u8; 32])
+            .unwrap()
+            .miner_pubkey;
+
+        let cs = base_chain(Some(0));
+        let block = rev_block(vec![deleg_receipt(miner, [0x01u8; 32], None)]);
+        cs.validate_block_delegation_revocations(&block, 10)
+            .expect("unrevoked delegation accepted");
+
+        let mut cs2 = base_chain(Some(0));
+        cs2.revoked_delegations.revoke((miner, [0x01u8; 32]), 1);
+        let block0 = rev_block(vec![mode0_receipt()]);
+        cs2.validate_block_delegation_revocations(&block0, 10)
+            .expect("mode-0 receipt unaffected by revocations");
+        clear_mode1_env();
+    }
+
+    #[test]
+    fn stage_d_revocation_rejects_revoked_forward_looking() {
+        // (b)/(c): a delegation revoked in block 5 is rejected only at heights > 5; the
+        // block at (or before) the revocation's own height is never retroactively invalid.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        set_mode1_env();
+        let net = crate::activation::network_id_byte();
+        let nonce = [0x01u8; 32];
+        let miner = crate::poawx::DelegationRevocationV1::build_signed(&[0x11u8; 32], net, nonce)
+            .unwrap()
+            .miner_pubkey;
+        let mut cs = base_chain(Some(0));
+        cs.revoked_delegations.revoke((miner, nonce), 5);
+        let block = rev_block(vec![deleg_receipt(miner, nonce, None)]);
+        cs.validate_block_delegation_revocations(&block, 4)
+            .expect("earlier block unaffected");
+        cs.validate_block_delegation_revocations(&block, 5)
+            .expect("the revocation's own height is not retroactively invalidated");
+        let err = cs
+            .validate_block_delegation_revocations(&block, 6)
+            .expect_err("revoked delegation rejected from the next height forward");
+        assert!(err.contains("revoked delegation"), "got: {err}");
+        clear_mode1_env();
+    }
+
+    #[test]
+    fn stage_d_revocation_record_validation_and_apply_revert() {
+        // Record validity is enforced, and apply/revert from a block are exact inverses.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        set_mode1_env();
+        let net = crate::activation::network_id_byte();
+        let nonce = [0x77u8; 32];
+        let good =
+            crate::poawx::DelegationRevocationV1::build_signed(&[0x11u8; 32], net, nonce).unwrap();
+        let miner = good.miner_pubkey;
+
+        // (1) a block whose revocation record has a bad signature is rejected.
+        let mut bad = good.clone();
+        bad.signature[0] ^= 0xFF;
+        let bad_block =
+            rev_block(vec![deleg_receipt(miner, [0xEEu8; 32], Some(rev_ext(vec![bad])))]);
+        let mut cs = base_chain(Some(0));
+        let err = cs
+            .validate_block_delegation_revocations(&bad_block, 10)
+            .expect_err("invalid revocation record rejected");
+        assert!(err.contains("signature verification failed"), "got: {err}");
+
+        // (2) apply then revert (reading the block) are exact inverses.
+        let good_block = rev_block(vec![deleg_receipt(
+            miner,
+            [0xEEu8; 32],
+            Some(rev_ext(vec![good.clone()])),
+        )]);
+        cs.chain.push(good_block.clone());
+        cs.apply_block_delegation_revocations(9);
+        assert!(
+            cs.revoked_delegations.is_revoked(&good.key(), 10),
+            "revoked at heights > 9 after applying block 9"
+        );
+        assert!(
+            !cs.revoked_delegations.is_revoked(&good.key(), 9),
+            "forward-looking: not revoked at the apply height itself"
+        );
+        cs.revert_block_delegation_revocations(&good_block, 9);
+        assert!(
+            cs.revoked_delegations.is_empty(),
+            "revert restores the empty set"
+        );
+        clear_mode1_env();
     }
 
     #[test]
@@ -8914,6 +9281,7 @@ mod tests {
             fraud_proofs: None,
             proposer_assignment: None,
             proposer_registrations: None,
+            delegation_revocations: None,
         }
     }
 
@@ -10950,6 +11318,1205 @@ mod tests {
         ] {
             std::env::remove_var(k);
         }
+    }
+
+    #[test]
+    fn stage_d_delegated_all_gates_connect_block_pays_miner() {
+        // Stage D Step 5 Milestone A: the DELEGATED (mode-1) builder produces a block the
+        // full connect_block accepts under all gates INCLUDING proposer-VRF (Step 3
+        // delegated branch) and delegation-revocation-clean (Step 4), and the coinbase
+        // PRIMARY pays the MINER's payout pkh -- NOT the pool delegate. The custodial
+        // proposer key (pool-held) proves; the delegate key signs + does role work; the
+        // miner's own payout address receives the block reward (the "no central wallet"
+        // property, proven deterministically in-process before any live rig run).
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_delegated_poawx_block_with_proposer, build_solo_poawx_block_with_parent,
+            ProposerCtx,
+        };
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            // proposer-VRF active from h2 (so solo h1 skips it, delegated h2 exercises it).
+            ("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "2"),
+            ("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1"),
+            // delegation (mode-1) active.
+            ("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+
+        let skf = |s: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(s.into()).unwrap();
+
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let cache = global_admission_cache();
+
+        // ---- h1: solo block (proposer-VRF not yet active at h1) ----
+        let solo_secret = [0x4Du8; 32];
+        let pc1 = seed_components_from_block(st.chain.last());
+        let bits1 = st.target_for_height(1).bits;
+        let p1 = build_solo_poawx_block_with_parent(
+            &solo_secret, net, 1, genesis_hash, None, bits1, genesis.header.time + 1, 1, pc1,
+        )
+        .expect("build h1");
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &p1.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let h1_hash = p1.block_hash;
+        st.connect_block(p1.block).expect("connect h1");
+
+        // ---- three distinct pool-held/miner keys; register the custodial proposer key
+        //      at height 0 so it is frozen-eligible at h2 (FREEZE_DEPTH=2) ----
+        let custodial_secret = [0xA1u8; 32];
+        let delegate_secret = [0xB2u8; 32];
+        let payout_secret = [0xC3u8; 32];
+        let custodial_pubkey = pubkey33(&skf(&custodial_secret));
+        let delegate_pubkey = pubkey33(&skf(&delegate_secret));
+        let payout_pubkey = pubkey33(&skf(&payout_secret));
+        let payout_pkh = pkh_of(&skf(&payout_secret));
+        let delegate_pkh = pkh_of(&skf(&delegate_secret));
+        st.proposer_registry
+            .register(custodial_pubkey, hash160(&custodial_pubkey), 0);
+        assert_eq!(st.proposer_registry.eligible_count(2), 1, "custodial key eligible at h2");
+
+        // ---- miner-signed Delegation v2 (payout key signs; binds proposer+pool+payout) ----
+        let mut d = crate::poawx::Delegation {
+            deleg_version: 2,
+            network_id: net,
+            miner_pubkey: payout_pubkey,
+            pool_pubkey: delegate_pubkey,
+            worker_tag: [0u8; 32],
+            expiry_height: 1_000_000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [0x5Du8; 32],
+            proposer_pubkey: custodial_pubkey,
+            delegation_sig: [0u8; 64],
+        };
+        {
+            use k256::ecdsa::signature::hazmat::PrehashSigner;
+            let sig: k256::ecdsa::Signature =
+                skf(&payout_secret).sign_prehash(&d.message_hash()).unwrap();
+            d.delegation_sig.copy_from_slice(&sig.to_bytes());
+        }
+        d.verify_signature().expect("delegation self-verifies");
+
+        // ---- custodial proposer proof for h2 (seed == the node's resolver) ----
+        let seed2 = expected_epoch_seed(2, h1_hash, st.chain.last());
+        let proof = crate::poawx_candidate::AssignmentProofV2::prove_self_solver(
+            &custodial_secret, net, 2, crate::poawx_proposer::ROLE_PROPOSER, [0u8; 32], seed2,
+        )
+        .expect("custodial proposer proof");
+        let priority = crate::poawx_proposer::proposer_priority(&proof.vrf_output);
+        let n = st.proposer_registry.eligible_count(2);
+        let round = (0..=8u32)
+            .find(|r| crate::poawx_proposer::is_selected(priority, n, *r))
+            .expect("custodial proposer selected at some round");
+        let ctx = ProposerCtx {
+            assignment: crate::poawx::ProposerAssignmentV1 { round, proof },
+        };
+
+        // ---- h2: DELEGATED block ----
+        let pc2 = seed_components_from_block(st.chain.last());
+        let bits2 = st.target_for_height(2).bits;
+        let p2 = build_delegated_poawx_block_with_proposer(
+            &delegate_secret, d.clone(), net, 2, h1_hash, Some(genesis_hash), bits2,
+            genesis.header.time + 2, 1, pc2, &st.dominance, None, Some(&ctx), None, vec![],
+        )
+        .expect("build delegated h2");
+
+        // the built receipt is mode-1 and already pays the miner (not the delegate).
+        let r = &p2.block.poawx_receipts.as_ref().unwrap()[0];
+        assert!(r.delegation.is_some(), "h2 receipt is delegated");
+        assert_eq!(r.worker_pkh, payout_pkh, "receipt worker_pkh == miner payout pkh");
+        assert_ne!(r.worker_pkh, delegate_pkh, "receipt worker_pkh != delegate pkh");
+
+        cache.clear();
+        cache.set_tip(2);
+        for adm in &p2.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let coinbase = p2.block.transactions[0].clone();
+        st.connect_block(p2.block)
+            .expect("connect_block accepts the delegated all-gates block");
+        assert_eq!(st.tip_height(), 2, "tip advanced to the delegated block");
+
+        // ---- decode the on-chain coinbase: PRIMARY -> miner, roles -> delegate ----
+        let primary_script = crate::tx::p2pkh_script(&payout_pkh);
+        let delegate_script = crate::tx::p2pkh_script(&delegate_pkh);
+        assert_eq!(
+            coinbase.outputs[1].script_pubkey, primary_script,
+            "PRIMARY coinbase output pays the miner payout pkh"
+        );
+        assert!(coinbase.outputs[1].value > 0, "PRIMARY output has value");
+        for i in 2..=4usize {
+            assert_eq!(
+                coinbase.outputs[i].script_pubkey, delegate_script,
+                "role output {i} pays the pool delegate (it did the role work)"
+            );
+        }
+        assert_ne!(payout_pkh, delegate_pkh, "no central wallet: miner != delegate");
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn phase4_multi_participant_distinct_role_payouts_connect_block() {
+        // Role-attribution Phase 4 final proof: with the contributor-role binding rule
+        // ACTIVE, a full all-gates block whose COMPUTE/VERIFY/SUPPORT roles are performed by
+        // three GENUINELY DISTINCT participants (each solver == hash160 of its own VRF key) is
+        // accepted by connect_block, and the coinbase pays each role to its distinct
+        // participant. A solo block (roles fused to one identity) is rejected under the rule.
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::seed_components_from_block;
+        use crate::poawx_mining_harness::build_multi_participant_poawx_block_with_parent;
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            // THE NEW RULE, ACTIVE (rig/devnet gate low; mainnet stays off).
+            ("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        let worker = [0x4Du8; 32];
+        let compute = [0xC0u8; 32];
+        let verify = [0xBEu8; 32];
+        let support = [0x5Fu8; 32];
+        let compute_pkh = pkh_of(&skf(&compute));
+        let verify_pkh = pkh_of(&skf(&verify));
+        let support_pkh = pkh_of(&skf(&support));
+        let worker_pkh = pkh_of(&skf(&worker));
+        // 3 role participants + worker are all distinct.
+        assert!(
+            [compute_pkh, verify_pkh, support_pkh, worker_pkh]
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == 4,
+            "participants distinct"
+        );
+
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let cache = global_admission_cache();
+
+        let mut prev = genesis_hash;
+        let mut parent_prev: Option<[u8; 32]> = None;
+        for h in 1..=3u64 {
+            let pc = seed_components_from_block(st.chain.last());
+            let bits = st.target_for_height(h).bits;
+            let proof = build_multi_participant_poawx_block_with_parent(
+                &worker, &compute, &verify, &support, net, h, prev, parent_prev, bits,
+                genesis.header.time + h as u32, 1, pc,
+            )
+            .unwrap_or_else(|e| panic!("build multi H{h}: {e}"));
+            cache.clear();
+            cache.set_tip(h);
+            for adm in &proof.admissions {
+                let _ = cache.ingest_bytes(adm);
+            }
+            let cb = proof.block.transactions[0].clone();
+            let (blk_prev, blk_hash) = (prev, proof.block_hash);
+            st.connect_block(proof.block)
+                .unwrap_or_else(|e| panic!("connect multi H{h} (contributor rule active): {e}"));
+            if h == 1 {
+                // coinbase: [irx1, PRIMARY->worker, COMPUTE->compute, VERIFY->verify, SUPPORT->support]
+                assert_eq!(cb.outputs[2].script_pubkey, crate::tx::p2pkh_script(&compute_pkh), "COMPUTE -> its participant");
+                assert_eq!(cb.outputs[3].script_pubkey, crate::tx::p2pkh_script(&verify_pkh), "VERIFY -> its participant");
+                assert_eq!(cb.outputs[4].script_pubkey, crate::tx::p2pkh_script(&support_pkh), "SUPPORT -> its participant");
+                assert_eq!(cb.outputs[1].script_pubkey, crate::tx::p2pkh_script(&worker_pkh), "PRIMARY -> worker");
+            }
+            parent_prev = Some(blk_prev);
+            prev = blk_hash;
+        }
+        assert_eq!(
+            st.tip_height(),
+            3,
+            "multi-participant all-gates chain accepted by connect_block under the active rule"
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    #[ignore] // rig: reads REAL role-worker bundles from IRIUM_M3_DIR and lands their attributed identities on-chain
+    fn phase4_real_worker_bundles_land_block_distinct_recipients() {
+        // Chains the genuine distinct role-workers to an on-chain accepted block. Reads the
+        // real bundles produced by connected workers (compute_A/compute_B/verify_1/support_1),
+        // determines which COMPUTE competitor the higher self-VRF score selects (best_for_role),
+        // then builds a full all-gates block with the SAME real worker keys and asserts
+        // connect_block accepts it under the ACTIVE contributor-role-binding rule and the
+        // coinbase pays each role to that worker's own attributed address -- 3 DISTINCT
+        // on-chain recipients. Each real bundle's solver_pkh is asserted equal to the pkh
+        // derived from its key, so the block genuinely pays the collected participants.
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::seed_components_from_block;
+        use crate::poawx_mining_harness::build_multi_participant_poawx_block_with_parent;
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            // THE NEW RULE, ACTIVE (rig/devnet gate low; mainnet stays off).
+            ("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        // The 4 real role-worker secret keys (match /home/irium/tmp/optiona_m3_bundles.sh:
+        // compute_A=a1, compute_B=d4, verify_1=b2, support_1=c3) + a distinct PRIMARY worker.
+        let k_ca = [0xa1u8; 32];
+        let k_cb = [0xd4u8; 32];
+        let k_v = [0xb2u8; 32];
+        let k_s = [0xc3u8; 32];
+        let worker = [0x4Du8; 32];
+
+        // ---- read the REAL bundles; pick the COMPUTE winner by self-VRF score ----
+        let dir = std::env::var("IRIUM_M3_DIR").unwrap_or_else(|_| "/home/irium/tmp/m3".to_string());
+        let load = |name: &str| -> serde_json::Value {
+            serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{name}.json")).expect("read real bundle"),
+            )
+            .expect("bundle json")
+        };
+        let bundle_pkh = |b: &serde_json::Value| -> [u8; 20] {
+            let mut o = [0u8; 20];
+            o.copy_from_slice(&hex::decode(b["solver_pkh"].as_str().unwrap()).unwrap());
+            o
+        };
+        let bundle_score = |b: &serde_json::Value| -> u64 {
+            let ap = crate::poawx_candidate::AssignmentProofV2::deserialize(
+                &hex::decode(b["assignment_proof"].as_str().unwrap()).unwrap(),
+            )
+            .expect("deserialize real assignment proof");
+            crate::poawx_candidate::assignment_v2_score_from_output(&ap.vrf_output)
+        };
+        let (ca, cb, vf, sp) = (
+            load("compute_A"),
+            load("compute_B"),
+            load("verify_1"),
+            load("support_1"),
+        );
+        // best_for_role: the higher self-VRF COMPUTE competitor is the one the pool attributes.
+        let (compute_key, compute_bundle) = if bundle_score(&cb) >= bundle_score(&ca) {
+            (k_cb, &cb)
+        } else {
+            (k_ca, &ca)
+        };
+
+        // Each real bundle's solver_pkh MUST equal the pkh derived from that worker's key,
+        // so the on-chain payout genuinely pays the collected participant (not a stand-in).
+        let compute_pkh = pkh_of(&skf(&compute_key));
+        let verify_pkh = pkh_of(&skf(&k_v));
+        let support_pkh = pkh_of(&skf(&k_s));
+        let worker_pkh = pkh_of(&skf(&worker));
+        assert_eq!(
+            compute_pkh,
+            bundle_pkh(compute_bundle),
+            "COMPUTE winner key derives the real bundle solver_pkh"
+        );
+        assert_eq!(verify_pkh, bundle_pkh(&vf), "VERIFY key derives the real bundle solver_pkh");
+        assert_eq!(support_pkh, bundle_pkh(&sp), "SUPPORT key derives the real bundle solver_pkh");
+        assert_eq!(
+            [compute_pkh, verify_pkh, support_pkh, worker_pkh]
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            4,
+            "4 genuinely distinct participants"
+        );
+
+        let net = crate::activation::network_id_byte();
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let cache = global_admission_cache();
+
+        // ---- build + connect a real all-gates block paying the 3 distinct real workers ----
+        let pc = seed_components_from_block(st.chain.last());
+        let bits = st.target_for_height(1).bits;
+        let built = build_multi_participant_poawx_block_with_parent(
+            &worker, &compute_key, &k_v, &k_s, net, 1, genesis_hash, None, bits,
+            genesis.header.time + 1, 1, pc,
+        )
+        .unwrap_or_else(|e| panic!("build real-bundle multi-participant block: {e}"));
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &built.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let cb_tx = built.block.transactions[0].clone();
+        st.connect_block(built.block)
+            .expect("connect_block accepts the real-worker all-gates block under the active rule");
+        assert_eq!(st.tip_height(), 1, "tip advanced to the real-worker block");
+
+        // ---- decode the on-chain coinbase: PRIMARY->worker, roles->3 distinct real workers ----
+        assert_eq!(
+            cb_tx.outputs[1].script_pubkey,
+            crate::tx::p2pkh_script(&worker_pkh),
+            "PRIMARY -> worker"
+        );
+        assert_eq!(
+            cb_tx.outputs[2].script_pubkey,
+            crate::tx::p2pkh_script(&compute_pkh),
+            "COMPUTE -> real compute worker's own address"
+        );
+        assert_eq!(
+            cb_tx.outputs[3].script_pubkey,
+            crate::tx::p2pkh_script(&verify_pkh),
+            "VERIFY -> real verify worker's own address"
+        );
+        assert_eq!(
+            cb_tx.outputs[4].script_pubkey,
+            crate::tx::p2pkh_script(&support_pkh),
+            "SUPPORT -> real support worker's own address"
+        );
+        for i in 1..=4usize {
+            assert!(cb_tx.outputs[i].value > 0, "coinbase output {i} funded");
+        }
+        let role_recipients: std::collections::BTreeSet<_> = (2..=4usize)
+            .map(|i| cb_tx.outputs[i].script_pubkey.clone())
+            .collect();
+        assert_eq!(role_recipients.len(), 3, "3 distinct role recipients paid on-chain");
+        println!(
+            "[real-bundle] connect_block ACCEPTED H1 paying 3 DISTINCT real workers: COMPUTE={} VERIFY={} SUPPORT={}",
+            hex::encode(compute_pkh),
+            hex::encode(verify_pkh),
+            hex::encode(support_pkh)
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    #[ignore] // rig: real role-worker bundles land on-chain UNDER proposer-VRF ENFORCED (mainnet-faithful)
+    fn phase4_real_worker_bundles_land_block_with_proposer_vrf_enforced() {
+        // Mainnet-faithful combination: proposer-VRF is ACTIVE + REQUIRED (as on live
+        // mainnet, where proposer_vrf_active is true past height 50000 and
+        // proposer_vrf_required() is true on net 0) AND the contributor-role-binding rule
+        // is active. First time these two systems are exercised together. Builds a 2-block
+        // chain: h1 multi-participant (proposer-VRF not yet active -> no proposer proof),
+        // then h2 multi-participant WITH the PRIMARY worker's custodial proposer-VRF
+        // assignment (Option 2 single custodial proposer: the non-delegated builder binds
+        // the proposer proof to worker_pkh). connect_block must accept h2 under BOTH gates,
+        // and the coinbase pays the three DISTINCT real workers. Uses the real bundles from
+        // IRIUM_M3_DIR (asserting each solver_pkh == its key's pkh) so the on-chain payout
+        // is genuinely the collected participants.
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_multi_participant_poawx_block_with_parent,
+            build_multi_participant_poawx_block_with_proposer, ProposerCtx,
+        };
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            ("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1"),
+            // proposer-VRF: ACTIVE from h2 (so h1 bootstraps without a proposer, exactly
+            // as the delegated all-gates test does) and REQUIRED (enforced) -- the
+            // mainnet-matching combination.
+            ("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "2"),
+            ("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        let k_ca = [0xa1u8; 32];
+        let k_cb = [0xd4u8; 32];
+        let k_v = [0xb2u8; 32];
+        let k_s = [0xc3u8; 32];
+        let worker = [0x4Du8; 32]; // PRIMARY + custodial proposer (Option 2)
+
+        // ---- real bundles: pick the COMPUTE winner by self-VRF score, bind to pkh ----
+        let dir = std::env::var("IRIUM_M3_DIR").unwrap_or_else(|_| "/home/irium/tmp/m3".to_string());
+        let load = |name: &str| -> serde_json::Value {
+            serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{name}.json")).expect("read real bundle"),
+            )
+            .expect("bundle json")
+        };
+        let bundle_pkh = |b: &serde_json::Value| -> [u8; 20] {
+            let mut o = [0u8; 20];
+            o.copy_from_slice(&hex::decode(b["solver_pkh"].as_str().unwrap()).unwrap());
+            o
+        };
+        let bundle_score = |b: &serde_json::Value| -> u64 {
+            let ap = crate::poawx_candidate::AssignmentProofV2::deserialize(
+                &hex::decode(b["assignment_proof"].as_str().unwrap()).unwrap(),
+            )
+            .expect("deserialize real assignment proof");
+            crate::poawx_candidate::assignment_v2_score_from_output(&ap.vrf_output)
+        };
+        let (ca, cb, vf, sp) = (
+            load("compute_A"),
+            load("compute_B"),
+            load("verify_1"),
+            load("support_1"),
+        );
+        let (compute_key, compute_bundle) = if bundle_score(&cb) >= bundle_score(&ca) {
+            (k_cb, &cb)
+        } else {
+            (k_ca, &ca)
+        };
+        let compute_pkh = pkh_of(&skf(&compute_key));
+        let verify_pkh = pkh_of(&skf(&k_v));
+        let support_pkh = pkh_of(&skf(&k_s));
+        let worker_pkh = pkh_of(&skf(&worker));
+        assert_eq!(compute_pkh, bundle_pkh(compute_bundle), "COMPUTE winner key == real bundle pkh");
+        assert_eq!(verify_pkh, bundle_pkh(&vf), "VERIFY key == real bundle pkh");
+        assert_eq!(support_pkh, bundle_pkh(&sp), "SUPPORT key == real bundle pkh");
+
+        let net = crate::activation::network_id_byte();
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let cache = global_admission_cache();
+
+        // ---- h1: multi-participant, NO proposer (proposer-VRF not active at h1) ----
+        let pc1 = seed_components_from_block(st.chain.last());
+        let bits1 = st.target_for_height(1).bits;
+        let p1 = build_multi_participant_poawx_block_with_parent(
+            &worker, &compute_key, &k_v, &k_s, net, 1, genesis_hash, None, bits1,
+            genesis.header.time + 1, 1, pc1,
+        )
+        .unwrap_or_else(|e| panic!("build h1: {e}"));
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &p1.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let h1_hash = p1.block_hash;
+        st.connect_block(p1.block).expect("connect h1 (multi-participant, pre-proposer)");
+
+        // ---- register the PRIMARY worker as the custodial proposer, frozen-eligible at h2 ----
+        let worker_pubkey = pubkey33(&skf(&worker));
+        st.proposer_registry
+            .register(worker_pubkey, hash160(&worker_pubkey), 0);
+        assert_eq!(
+            st.proposer_registry.eligible_count(2),
+            1,
+            "custodial proposer (= worker) eligible at h2"
+        );
+
+        // ---- custodial proposer proof for h2 (seed == the node resolver) ----
+        let seed2 = expected_epoch_seed(2, h1_hash, st.chain.last());
+        let proof = crate::poawx_candidate::AssignmentProofV2::prove_self_solver(
+            &worker, net, 2, crate::poawx_proposer::ROLE_PROPOSER, [0u8; 32], seed2,
+        )
+        .expect("custodial proposer proof");
+        let priority = crate::poawx_proposer::proposer_priority(&proof.vrf_output);
+        let n = st.proposer_registry.eligible_count(2);
+        let round = (0..=8u32)
+            .find(|r| crate::poawx_proposer::is_selected(priority, n, *r))
+            .expect("custodial proposer selected at some round");
+        let ctx = ProposerCtx {
+            assignment: crate::poawx::ProposerAssignmentV1 { round, proof },
+        };
+
+        // ---- h2: multi-participant WITH the proposer-VRF assignment (both gates active) ----
+        let pc2 = seed_components_from_block(st.chain.last());
+        let bits2 = st.target_for_height(2).bits;
+        let p2 = build_multi_participant_poawx_block_with_proposer(
+            &worker, &compute_key, &k_v, &k_s, net, 2, h1_hash, Some(genesis_hash), bits2,
+            genesis.header.time + 2, 1, pc2, &st.dominance, None, Some(&ctx), None,
+        )
+        .unwrap_or_else(|e| panic!("build h2 (multi-participant + proposer): {e}"));
+        // the built h2 receipt carries BOTH the proposer assignment and the 3 role rewards.
+        let r2 = &p2.block.poawx_receipts.as_ref().unwrap()[0];
+        assert!(
+            r2.phase20_ext.as_ref().unwrap().proposer_assignment.is_some(),
+            "h2 receipt carries the proposer-VRF assignment"
+        );
+        let cb_tx = p2.block.transactions[0].clone();
+        cache.clear();
+        cache.set_tip(2);
+        for adm in &p2.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        st.connect_block(p2.block).expect(
+            "connect_block accepts multi-participant + proposer-VRF-ENFORCED h2 (both gates active)",
+        );
+        assert_eq!(st.tip_height(), 2, "tip advanced to the enforced multi-participant block");
+
+        // ---- decode h2 coinbase: 3 distinct real recipients, under proposer enforcement ----
+        assert_eq!(cb_tx.outputs[1].script_pubkey, crate::tx::p2pkh_script(&worker_pkh), "PRIMARY -> worker/proposer");
+        assert_eq!(cb_tx.outputs[2].script_pubkey, crate::tx::p2pkh_script(&compute_pkh), "COMPUTE -> real worker");
+        assert_eq!(cb_tx.outputs[3].script_pubkey, crate::tx::p2pkh_script(&verify_pkh), "VERIFY -> real worker");
+        assert_eq!(cb_tx.outputs[4].script_pubkey, crate::tx::p2pkh_script(&support_pkh), "SUPPORT -> real worker");
+        let role_recipients: std::collections::BTreeSet<_> = (2..=4usize)
+            .map(|i| cb_tx.outputs[i].script_pubkey.clone())
+            .collect();
+        assert_eq!(role_recipients.len(), 3, "3 distinct role recipients on-chain");
+        println!(
+            "[proposer-enforced] connect_block ACCEPTED multi-participant H2 under proposer-VRF ENFORCED: COMPUTE={} VERIFY={} SUPPORT={} proposer_round={}",
+            hex::encode(compute_pkh), hex::encode(verify_pkh), hex::encode(support_pkh), round
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    #[ignore] // rig: real VRF sortition picks PRIMARY among many proposers + 3 distinct contributor roles
+    fn phase4_multiproposer_vrf_sortition_with_distinct_contributor_roles() {
+        // Mainnet-faithful, no shortcuts to fairness. proposer-VRF is ACTIVE + REQUIRED and
+        // contributor-role-binding is ACTIVE. SIX genuinely distinct proposer candidates are
+        // frozen-registered; the UNMODIFIED VRF sortition (priority < threshold(n, round))
+        // decides which one legitimately wins the round and produces the block as PRIMARY --
+        // no proposer is exempted. Three genuinely distinct role-workers (real bundles from
+        // IRIUM_M3_DIR) are attributed COMPUTE/VERIFY/SUPPORT. connect_block accepts the block
+        // and the coinbase decodes to FOUR distinct recipients (PRIMARY + 3 contributor
+        // roles). A candidate NOT selected at the round is REJECTED, proving the sortition is
+        // genuinely enforced. (A full multi-proposer VRF pool -- distinct proposers producing
+        // competing blocks across a live network -- is a separate future project; here PRIMARY
+        // is the single legitimate round winner, exactly as unmodified mainnet selects it.)
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_multi_participant_poawx_block_with_parent,
+            build_multi_participant_poawx_block_with_proposer, ProposerCtx,
+        };
+        use crate::poawx_proposer::{
+            is_selected, min_time_for_round, proposer_priority, proposer_round_interval_secs,
+            ROLE_PROPOSER,
+        };
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            ("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "2"),
+            ("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        let k_ca = [0xa1u8; 32];
+        let k_cb = [0xd4u8; 32];
+        let k_v = [0xb2u8; 32];
+        let k_s = [0xc3u8; 32];
+
+        // ---- real bundles: pick the COMPUTE winner by self-VRF score, bind to pkh ----
+        let dir = std::env::var("IRIUM_M3_DIR").unwrap_or_else(|_| "/home/irium/tmp/m3".to_string());
+        let load = |name: &str| -> serde_json::Value {
+            serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{name}.json")).expect("read real bundle"),
+            )
+            .expect("bundle json")
+        };
+        let bundle_pkh = |b: &serde_json::Value| -> [u8; 20] {
+            let mut o = [0u8; 20];
+            o.copy_from_slice(&hex::decode(b["solver_pkh"].as_str().unwrap()).unwrap());
+            o
+        };
+        let bundle_score = |b: &serde_json::Value| -> u64 {
+            let ap = crate::poawx_candidate::AssignmentProofV2::deserialize(
+                &hex::decode(b["assignment_proof"].as_str().unwrap()).unwrap(),
+            )
+            .expect("deserialize real assignment proof");
+            crate::poawx_candidate::assignment_v2_score_from_output(&ap.vrf_output)
+        };
+        let (ca, cb, vf, sp) = (
+            load("compute_A"),
+            load("compute_B"),
+            load("verify_1"),
+            load("support_1"),
+        );
+        let (compute_key, compute_bundle) = if bundle_score(&cb) >= bundle_score(&ca) {
+            (k_cb, &cb)
+        } else {
+            (k_ca, &ca)
+        };
+        let compute_pkh = pkh_of(&skf(&compute_key));
+        let verify_pkh = pkh_of(&skf(&k_v));
+        let support_pkh = pkh_of(&skf(&k_s));
+        assert_eq!(compute_pkh, bundle_pkh(compute_bundle), "COMPUTE winner key == real bundle pkh");
+        assert_eq!(verify_pkh, bundle_pkh(&vf), "VERIFY key == real bundle pkh");
+        assert_eq!(support_pkh, bundle_pkh(&sp), "SUPPORT key == real bundle pkh");
+
+        let net = crate::activation::network_id_byte();
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let cache = global_admission_cache();
+
+        // ---- h1: multi-participant, NO proposer (proposer-VRF not active at h1) ----
+        // PRIMARY at h1 is played by a bootstrap identity distinct from all proposer
+        // candidates and role workers; irrelevant to the h2 sortition proof.
+        let boot = [0x4Du8; 32];
+        let pc1 = seed_components_from_block(st.chain.last());
+        let bits1 = st.target_for_height(1).bits;
+        let p1 = build_multi_participant_poawx_block_with_parent(
+            &boot, &compute_key, &k_v, &k_s, net, 1, genesis_hash, None, bits1,
+            genesis.header.time + 1, 1, pc1,
+        )
+        .unwrap_or_else(|e| panic!("build h1: {e}"));
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &p1.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let h1_hash = p1.block_hash;
+        let h1_time = genesis.header.time + 1;
+        st.connect_block(p1.block).expect("connect h1 (multi-participant, pre-proposer)");
+
+        // ---- register SIX genuinely distinct proposer candidates, frozen-eligible at h2 ----
+        let proposer_keys: [[u8; 32]; 6] = [
+            [0xE1u8; 32], [0xE2u8; 32], [0xE3u8; 32],
+            [0xE4u8; 32], [0xE5u8; 32], [0xE6u8; 32],
+        ];
+        for key in &proposer_keys {
+            let pubk = pubkey33(&skf(key));
+            st.proposer_registry.register(pubk, hash160(&pubk), 0);
+        }
+        let n = st.proposer_registry.eligible_count(2);
+        assert_eq!(n, 6, "six distinct proposer candidates frozen-eligible at h2");
+
+        // ---- run the UNMODIFIED VRF sortition over all six candidates for h2 ----
+        let seed2 = expected_epoch_seed(2, h1_hash, st.chain.last());
+        let mut proofs = Vec::with_capacity(6);
+        let mut priorities = [0u64; 6];
+        for (i, key) in proposer_keys.iter().enumerate() {
+            let proof = crate::poawx_candidate::AssignmentProofV2::prove_self_solver(
+                key, net, 2, ROLE_PROPOSER, [0u8; 32], seed2,
+            )
+            .expect("proposer proof");
+            priorities[i] = proposer_priority(&proof.vrf_output);
+            proofs.push(proof);
+        }
+        // legitimate winner: lowest round any candidate is selected; tie-break lowest priority.
+        let mut best: Option<(u32, u64, usize)> = None;
+        for (i, &p) in priorities.iter().enumerate() {
+            if let Some(r) = (0..=8u32).find(|r| is_selected(p, n, *r)) {
+                let cand = (r, p, i);
+                best = Some(match best {
+                    None => cand,
+                    Some(b) => {
+                        if (cand.0, cand.1) < (b.0, b.1) {
+                            cand
+                        } else {
+                            b
+                        }
+                    }
+                });
+            }
+        }
+        let (win_round, _win_prio, win_idx) =
+            best.expect("some candidate is selected by round 8 (liveness)");
+        assert!(
+            is_selected(priorities[win_idx], n, win_round),
+            "winner genuinely crosses the VRF threshold for its round"
+        );
+        let win_key = proposer_keys[win_idx];
+        let win_pkh = pkh_of(&skf(&win_key));
+        // PRIMARY (the VRF winner) must be distinct from all three contributor workers.
+        assert!(
+            [win_pkh, compute_pkh, verify_pkh, support_pkh]
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len()
+                == 4,
+            "PRIMARY winner + 3 contributor roles are four distinct recipients"
+        );
+        let interval = proposer_round_interval_secs();
+
+        // ---- NEGATIVE: a candidate NOT selected at round 0 is REJECTED (no shortcut) ----
+        let loser_idx = (0..6usize)
+            .find(|&i| !is_selected(priorities[i], n, 0))
+            .expect("at least one of six candidates is not selected at round 0");
+        {
+            let loser_key = proposer_keys[loser_idx];
+            let ctx_bad = ProposerCtx {
+                assignment: crate::poawx::ProposerAssignmentV1 {
+                    round: 0,
+                    proof: proofs[loser_idx].clone(),
+                },
+            };
+            let pc_bad = seed_components_from_block(st.chain.last());
+            let bits2 = st.target_for_height(2).bits;
+            let bad = build_multi_participant_poawx_block_with_proposer(
+                &loser_key, &compute_key, &k_v, &k_s, net, 2, h1_hash, Some(genesis_hash), bits2,
+                h1_time + 1, 1, pc_bad, &st.dominance, None, Some(&ctx_bad), None,
+            )
+            .unwrap_or_else(|e| panic!("build negative h2: {e}"));
+            cache.clear();
+            cache.set_tip(2);
+            for adm in &bad.admissions {
+                let _ = cache.ingest_bytes(adm);
+            }
+            let err = st
+                .connect_block(bad.block)
+                .expect_err("a proposer not selected at round 0 must be rejected");
+            assert!(
+                err.contains("not selected"),
+                "rejection is the VRF sortition, got: {err}"
+            );
+            assert_eq!(st.tip_height(), 1, "rejected block did not advance the tip");
+        }
+
+        // ---- POSITIVE: the legitimate VRF winner produces the block as PRIMARY ----
+        let ctx = ProposerCtx {
+            assignment: crate::poawx::ProposerAssignmentV1 {
+                round: win_round,
+                proof: proofs[win_idx].clone(),
+            },
+        };
+        let h2_time = min_time_for_round(h1_time, win_round, interval).max(h1_time + 1);
+        let pc2 = seed_components_from_block(st.chain.last());
+        let bits2 = st.target_for_height(2).bits;
+        let p2 = build_multi_participant_poawx_block_with_proposer(
+            &win_key, &compute_key, &k_v, &k_s, net, 2, h1_hash, Some(genesis_hash), bits2,
+            h2_time, 1, pc2, &st.dominance, None, Some(&ctx), None,
+        )
+        .unwrap_or_else(|e| panic!("build winner h2: {e}"));
+        let r2 = &p2.block.poawx_receipts.as_ref().unwrap()[0];
+        assert!(
+            r2.phase20_ext.as_ref().unwrap().proposer_assignment.is_some(),
+            "winner block carries the proposer-VRF assignment"
+        );
+        let cb_tx = p2.block.transactions[0].clone();
+        cache.clear();
+        cache.set_tip(2);
+        for adm in &p2.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        st.connect_block(p2.block).expect(
+            "connect_block accepts the VRF-winner multi-participant block (both gates enforced)",
+        );
+        assert_eq!(st.tip_height(), 2, "tip advanced to the VRF-winner block");
+
+        // ---- decode: FOUR distinct recipients (PRIMARY winner + 3 contributor roles) ----
+        assert_eq!(cb_tx.outputs[1].script_pubkey, crate::tx::p2pkh_script(&win_pkh), "PRIMARY -> VRF winner");
+        assert_eq!(cb_tx.outputs[2].script_pubkey, crate::tx::p2pkh_script(&compute_pkh), "COMPUTE -> real worker");
+        assert_eq!(cb_tx.outputs[3].script_pubkey, crate::tx::p2pkh_script(&verify_pkh), "VERIFY -> real worker");
+        assert_eq!(cb_tx.outputs[4].script_pubkey, crate::tx::p2pkh_script(&support_pkh), "SUPPORT -> real worker");
+        let recipients: std::collections::BTreeSet<_> = (1..=4usize)
+            .map(|i| cb_tx.outputs[i].script_pubkey.clone())
+            .collect();
+        assert_eq!(recipients.len(), 4, "four distinct on-chain recipients");
+        println!(
+            "[multiproposer] VRF sortition n=6 -> winner idx {} round {} PRIMARY={}; roles COMPUTE={} VERIFY={} SUPPORT={}; rejected non-selected idx {}",
+            win_idx, win_round, hex::encode(win_pkh),
+            hex::encode(compute_pkh), hex::encode(verify_pkh), hex::encode(support_pkh), loser_idx
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn state_a_registered_proposer_no_delegation_pays_single_custodial() {
+        // Option A fallback matrix, STATE (a): a REGISTERED proposer with NO delegation
+        // produces a normal SOLO single-payout block -- exactly today's production behavior
+        // (the operator's own miner is paid; no direct-to-delegate payment, no distinct
+        // contributor split). Under enforced proposer-VRF + all gates, connect_block accepts
+        // the solo block and every coinbase reward output (PRIMARY + the three roles) pays
+        // the miner's own address (one recipient). This is the real state of mainnet at
+        // activation for any miner who has not delegated.
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_solo_poawx_block_with_parent, build_solo_poawx_block_with_proposer, ProposerCtx,
+        };
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            ("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "2"),
+            ("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        let miner = [0x4Du8; 32];
+        let miner_pkh = pkh_of(&skf(&miner));
+
+        let net = crate::activation::network_id_byte();
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let cache = global_admission_cache();
+
+        // ---- h1: solo, pre-activation (proposer-VRF not active at h1) ----
+        let pc1 = seed_components_from_block(st.chain.last());
+        let bits1 = st.target_for_height(1).bits;
+        let p1 = build_solo_poawx_block_with_parent(
+            &miner, net, 1, genesis_hash, None, bits1, genesis.header.time + 1, 1, pc1,
+        )
+        .expect("build h1");
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &p1.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let h1_hash = p1.block_hash;
+        st.connect_block(p1.block).expect("connect h1");
+
+        // ---- register the miner as its OWN proposer at h0; NO delegation is created ----
+        let miner_pubkey = pubkey33(&skf(&miner));
+        st.proposer_registry
+            .register(miner_pubkey, hash160(&miner_pubkey), 0);
+        assert_eq!(
+            st.proposer_registry.eligible_count(2),
+            1,
+            "registered miner eligible as proposer at h2"
+        );
+
+        // ---- proposer proof for h2 (the miner IS the proposer; solo, no delegate) ----
+        let seed2 = expected_epoch_seed(2, h1_hash, st.chain.last());
+        let proof = crate::poawx_candidate::AssignmentProofV2::prove_self_solver(
+            &miner, net, 2, crate::poawx_proposer::ROLE_PROPOSER, [0u8; 32], seed2,
+        )
+        .expect("proposer proof");
+        let priority = crate::poawx_proposer::proposer_priority(&proof.vrf_output);
+        let n = st.proposer_registry.eligible_count(2);
+        let round = (0..=8u32)
+            .find(|r| crate::poawx_proposer::is_selected(priority, n, *r))
+            .expect("registered miner selected as proposer at some round");
+        let ctx = ProposerCtx {
+            assignment: crate::poawx::ProposerAssignmentV1 { round, proof },
+        };
+
+        // ---- h2: solo block, REGISTERED proposer, NO delegation = STATE (a) ----
+        let pc2 = seed_components_from_block(st.chain.last());
+        let bits2 = st.target_for_height(2).bits;
+        let p2 = build_solo_poawx_block_with_proposer(
+            &miner, net, 2, h1_hash, Some(genesis_hash), bits2, genesis.header.time + 2, 1, pc2,
+            &st.dominance, None, Some(&ctx), None,
+        )
+        .expect("build solo h2 with registered proposer, no delegation");
+        let r2 = &p2.block.poawx_receipts.as_ref().unwrap()[0];
+        assert!(
+            r2.delegation.is_none(),
+            "state (a): the receipt carries NO delegation"
+        );
+        let cb = p2.block.transactions[0].clone();
+        cache.clear();
+        cache.set_tip(2);
+        for adm in &p2.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        st.connect_block(p2.block)
+            .expect("connect_block accepts the registered-no-delegation solo block (fallback)");
+        assert_eq!(st.tip_height(), 2, "tip advanced to the solo fallback block");
+
+        // ---- coinbase: single-payout -> every reward output pays the miner's own address ----
+        let miner_script = crate::tx::p2pkh_script(&miner_pkh);
+        for i in 1..=4usize {
+            assert_eq!(
+                cb.outputs[i].script_pubkey, miner_script,
+                "solo reward output {i} pays the miner (single-payout fallback, exactly today's behavior)"
+            );
+            assert!(cb.outputs[i].value > 0, "reward output {i} funded");
+        }
+        let recipients: std::collections::BTreeSet<_> = (1..=4usize)
+            .map(|i| cb.outputs[i].script_pubkey.clone())
+            .collect();
+        assert_eq!(
+            recipients.len(),
+            1,
+            "single-payout fallback: exactly one recipient (the miner) -- no split, no delegate output"
+        );
+        println!(
+            "[state-a] registered proposer + NO delegation -> connect_block ACCEPTED solo single-payout: all 4 reward outputs pay {} (no delegation, no split) -- matches today's production behavior",
+            hex::encode(miner_pkh)
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn phase4_contributor_binding_rejects_mismatched_solver() {
+        // Isolated proof of the rule at AssignmentProofV2::validate (dominance/ordering cannot
+        // preempt it here): solver_pkh must == hash160(assignment_public_key) for a contributor
+        // role when the binding is active; mismatch is rejected, a matched solver is accepted,
+        // and with the gate OFF the former exemption still lets a mismatch through.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let secret = [0x77u8; 32];
+        let apk = {
+            let sk = k256::ecdsa::SigningKey::from_bytes((&secret).into()).unwrap();
+            let pt = sk.verifying_key().to_encoded_point(true);
+            let mut a = [0u8; 33];
+            a.copy_from_slice(pt.as_bytes());
+            a
+        };
+        let good_solver = hash160(&apk);
+        let bad_solver = [0x99u8; 20];
+        let seed = [0x11u8; 32];
+        let ticket = [0x22u8; 32];
+        let role = crate::poawx::ROLE_COMPUTE_CONTRIBUTOR;
+        let mk = |solver: [u8; 20]| {
+            crate::poawx_candidate::AssignmentProofV2::prove(&secret, net, 5, role, solver, ticket, seed)
+                .unwrap()
+        };
+        // gate OFF -> contributor exemption preserved: a mismatched solver validates.
+        std::env::remove_var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT");
+        assert!(
+            mk(bad_solver).validate(net, 5).is_ok(),
+            "gate off: contributor exemption holds"
+        );
+        // gate ON -> mismatched solver rejected; matched solver accepted.
+        std::env::set_var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1");
+        let e = mk(bad_solver)
+            .validate(net, 5)
+            .expect_err("gate on: mismatched contributor solver must be rejected");
+        assert!(
+            e.contains("contributor solver pkh not derived from vrf key"),
+            "expected contributor-binding rejection, got: {e}"
+        );
+        assert!(
+            mk(good_solver).validate(net, 5).is_ok(),
+            "gate on: matched contributor solver accepted"
+        );
+        std::env::remove_var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
     }
 
     #[test]
@@ -13590,6 +15157,7 @@ mod tests {
                 fraud_proofs: None,
                 proposer_assignment: None,
                 proposer_registrations: None,
+                delegation_revocations: None,
             }
         };
         let build = |h: u64, prev: &[u8; 32], ext: &crate::poawx::Phase20ReceiptExt| -> Block {
@@ -15384,6 +16952,273 @@ mod proposer_consensus_tests {
         );
         std::env::remove_var("IRIUM_POAWX_MAX_REORG_DEPTH");
         clear_sib_env();
+    }
+
+    // ---- Stage D Step 3: delegation-aware proposer-VRF (validate_block_proposer) ----
+
+    /// Compressed secp256k1 signing key for a raw scalar produced by `secret_n`.
+    fn signing_key(secret: &[u8; 32]) -> k256::ecdsa::SigningKey {
+        k256::ecdsa::SigningKey::from_bytes(secret.into()).expect("valid scalar")
+    }
+
+    /// Compressed secp256k1 pubkey for a raw scalar (the ECDSA identity that signs
+    /// delegations / receipts). hash160 of it is the on-chain pkh.
+    fn ec_pubkey(secret: &[u8; 32]) -> [u8; 33] {
+        use k256::ecdsa::VerifyingKey;
+        let vk = VerifyingKey::from(&signing_key(secret));
+        let enc = vk.to_encoded_point(true);
+        let mut pk = [0u8; 33];
+        pk.copy_from_slice(enc.as_bytes());
+        pk
+    }
+
+    /// Hand-build a mode-1 (delegated) block: PROPOSED by `proof`'s custodial
+    /// proposer key, PAID to the miner payout pkh, signed over by the pool delegate.
+    /// The miner really signs the (v2) delegation over `message_hash()`. Negative
+    /// tests vary `deleg_version` and `override_proposer_pubkey` -- the two fields
+    /// validate_block_proposer's delegated branch reads.
+    #[allow(clippy::too_many_arguments)]
+    fn delegated_block(
+        prev_hash: [u8; 32],
+        height: u64,
+        proof: AssignmentProofV2,
+        round: u32,
+        time: u32,
+        miner_secret: &[u8; 32],
+        pool_secret: &[u8; 32],
+        net: u8,
+        expiry_height: u64,
+        deleg_version: u8,
+        override_proposer_pubkey: Option<[u8; 33]>,
+    ) -> Block {
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        let miner_pubkey = ec_pubkey(miner_secret);
+        let pool_pubkey = ec_pubkey(pool_secret);
+        let proposer_pubkey = override_proposer_pubkey.unwrap_or(proof.assignment_public_key);
+        let mut d = crate::poawx::Delegation {
+            deleg_version,
+            network_id: net,
+            miner_pubkey,
+            pool_pubkey,
+            worker_tag: [0u8; 32],
+            expiry_height,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [0x33u8; 32],
+            proposer_pubkey,
+            delegation_sig: [0u8; 64],
+        };
+        let dsig: k256::ecdsa::Signature =
+            signing_key(miner_secret).sign_prehash(&d.message_hash()).unwrap();
+        d.delegation_sig.copy_from_slice(&dsig.to_bytes());
+
+        let mut r = ext_skeleton(net);
+        r.height = height;
+        r.worker_pkh = hash160(&miner_pubkey); // PAYOUT identity = the miner
+        r.worker_pubkey = pool_pubkey; // receipt signer = the delegated pool
+        r.delegation = Some(d);
+        let mut ext = r.phase20_ext.clone().expect("ext");
+        ext.proposer_assignment = Some(ProposerAssignmentV1 { round, proof });
+        r.phase20_ext = Some(ext);
+        Block {
+            header: BlockHeader {
+                version: 0,
+                prev_hash,
+                merkle_root: [0u8; 32],
+                time,
+                bits: 0x207fffff,
+                nonce: 0,
+            },
+            transactions: vec![],
+            auxpow: None,
+            poawx_receipts: Some(vec![r]),
+        }
+    }
+
+    #[test]
+    fn stage_d_delegated_proposer_accepts_registered_pays_miner() {
+        // Step 3 (a): a valid v2 delegation whose registered, frozen-eligible custodial
+        // proposer key made the proposer VRF proof is ACCEPTED, and the block pays the
+        // MINER's payout pkh directly -- never the proposer key or the pool delegate.
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+
+        // three DISTINCT keys: custodial proposer, miner payout, pool delegate.
+        let (proposer, miner, pool) = (secret_n(1), secret_n(2), secret_n(3));
+        let proof = prove(&proposer, net, height, seed);
+        let proposer_pubkey = proof.assignment_public_key; // == ec_pubkey(&proposer)
+        let proposer_pkh = proof.solver_pkh; // == hash160(proposer_pubkey)
+        let miner_pkh = hash160(&ec_pubkey(&miner));
+        let pool_pkh = hash160(&ec_pubkey(&pool));
+
+        let block =
+            delegated_block(prev_hash, height, proof, 0, 5_000, &miner, &pool, net, height + 100, 2, None);
+
+        // register the custodial proposer key => frozen-eligible at target height 2.
+        let mut cs = base_chain();
+        cs.proposer_registry.register(proposer_pubkey, proposer_pkh, 0);
+        assert_eq!(cs.proposer_registry.eligible_count(height), 1);
+
+        cs.validate_block_proposer(&block, height, None)
+            .expect("valid delegated proposer with a registered eligible key must be accepted");
+
+        // Payout goes to the MINER, not the delegate or the proposer identity.
+        let r = &block.poawx_receipts.as_ref().unwrap()[0];
+        assert_eq!(r.worker_pkh, miner_pkh, "coinbase must pay the miner payout pkh");
+        assert_ne!(r.worker_pkh, proposer_pkh, "must NOT pay the proposer key");
+        assert_ne!(r.worker_pkh, pool_pkh, "must NOT pay the pool / delegate");
+        // And the delegation carried by the block is genuinely miner-signed.
+        assert!(r.delegation.as_ref().unwrap().verify_signature().is_ok());
+
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn stage_d_delegated_proposer_rejects_unregistered_mismatch_and_v1() {
+        // Step 3 (b): the delegated branch rejects (b1) an unregistered / ineligible
+        // proposer key, (b2) a proof key that differs from the miner-signed
+        // proposer_pubkey, and (b3) a v1 delegation (which cannot authorise a proposer).
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let (proposer, miner, pool) = (secret_n(1), secret_n(2), secret_n(3));
+        let proposer_pubkey = prove(&proposer, net, height, seed).assignment_public_key;
+        let proposer_pkh = hash160(&proposer_pubkey);
+
+        // (b1) proposer key NOT registered (a different key is) => eligibility rejects.
+        let proof1 = prove(&proposer, net, height, seed);
+        let block1 =
+            delegated_block(prev_hash, height, proof1, 0, 5_000, &miner, &pool, net, height + 100, 2, None);
+        let mut cs1 = base_chain();
+        let mut other = [0u8; 33];
+        other[0] = 0x02;
+        other[1] = 0xEE;
+        cs1.proposer_registry.register(other, [0x7Au8; 20], 0);
+        assert_eq!(cs1.proposer_registry.eligible_count(height), 1);
+        let e1 = cs1
+            .validate_block_proposer(&block1, height, None)
+            .expect_err("unregistered proposer key must be rejected");
+        assert!(e1.contains("not eligible"), "b1 got: {e1}");
+
+        // (b2) delegation authorises a DIFFERENT key than the proof's assignment key
+        // (attacker pairs a genuine proof with a mismatched delegation) => bound-check
+        // rejects before eligibility, even though the real proposer key is registered.
+        let proof2 = prove(&proposer, net, height, seed);
+        let mut wrong = proof2.assignment_public_key;
+        wrong[1] ^= 0xFF;
+        let block2 = delegated_block(
+            prev_hash, height, proof2, 0, 5_000, &miner, &pool, net, height + 100, 2, Some(wrong),
+        );
+        let mut cs2 = base_chain();
+        cs2.proposer_registry.register(proposer_pubkey, proposer_pkh, 0);
+        let e2 = cs2
+            .validate_block_proposer(&block2, height, None)
+            .expect_err("proposer key mismatch must be rejected");
+        assert!(e2.contains("assignment key != delegated proposer_pubkey"), "b2 got: {e2}");
+
+        // (b3) v1 delegation cannot authorise a delegated proposer.
+        let proof3 = prove(&proposer, net, height, seed);
+        let block3 =
+            delegated_block(prev_hash, height, proof3, 0, 5_000, &miner, &pool, net, height + 100, 1, None);
+        let mut cs3 = base_chain();
+        cs3.proposer_registry.register(proposer_pubkey, proposer_pkh, 0);
+        let e3 = cs3
+            .validate_block_proposer(&block3, height, None)
+            .expect_err("v1 delegation must be rejected in the delegated proposer branch");
+        assert!(e3.contains("requires delegation v2"), "b3 got: {e3}");
+
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn stage_d_mode0_proposer_unchanged() {
+        // Step 3 (c): the mode-0 (delegation == None) path is byte-identical -- a matching
+        // worker is accepted, a mismatched worker is rejected with the ORIGINAL error.
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let secret = secret_n(1);
+        let proof = prove(&secret, net, height, seed);
+        let key = proof.assignment_public_key;
+        let pkh = proof.solver_pkh;
+        let tmpl = ext_skeleton(net);
+
+        // matching worker_pkh (block_with_proof sets worker_pkh = solver_pkh) => accepted.
+        let block = block_with_proof(&tmpl, prev_hash, height, proof, 0, 5_000);
+        assert!(block.poawx_receipts.as_ref().unwrap()[0].delegation.is_none());
+        let mut cs = base_chain();
+        cs.proposer_registry.register(key, pkh, 0);
+        cs.validate_block_proposer(&block, height, None)
+            .expect("mode-0 matching worker accepted");
+
+        // mismatched worker_pkh => the ORIGINAL "not the block worker" error is preserved.
+        let proof2 = prove(&secret, net, height, seed);
+        let mut block2 = block_with_proof(&tmpl, prev_hash, height, proof2, 0, 5_000);
+        block2.poawx_receipts.as_mut().unwrap()[0].worker_pkh = [0x99u8; 20];
+        let mut cs2 = base_chain();
+        cs2.proposer_registry.register(key, pkh, 0);
+        let err = cs2
+            .validate_block_proposer(&block2, height, None)
+            .expect_err("mode-0 mismatched worker must be rejected");
+        assert!(err.contains("proposer is not the block worker"), "got: {err}");
+
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn stage_d_delegated_tampered_proposer_pubkey_breaks_signature() {
+        // Forgery leg (Attack 1 / 2c): the miner's v2 signature covers proposer_pubkey,
+        // so swapping the proposer key after signing invalidates the delegation. A pool
+        // cannot bind a proposer key the miner never authorised. This is enforced by
+        // d.verify_signature() in validate_poawx_block_receipts, which runs BEFORE
+        // validate_block_proposer in connect_block.
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let miner = secret_n(2);
+        let mut d = crate::poawx::Delegation {
+            deleg_version: 2,
+            network_id: net,
+            miner_pubkey: ec_pubkey(&miner),
+            pool_pubkey: ec_pubkey(&secret_n(3)),
+            worker_tag: [0u8; 32],
+            expiry_height: 1_000,
+            fee_bps: 0,
+            fee_pkh: [0u8; 20],
+            deleg_nonce: [0x33u8; 32],
+            proposer_pubkey: ec_pubkey(&secret_n(1)), // the key the miner signs
+            delegation_sig: [0u8; 64],
+        };
+        let sig: k256::ecdsa::Signature =
+            signing_key(&miner).sign_prehash(&d.message_hash()).unwrap();
+        d.delegation_sig.copy_from_slice(&sig.to_bytes());
+        d.verify_signature().expect("genuine v2 delegation verifies");
+
+        // swap in a proposer key the miner never signed => signature no longer verifies.
+        let mut forged = d.clone();
+        forged.proposer_pubkey = ec_pubkey(&secret_n(9));
+        assert!(
+            forged.verify_signature().is_err(),
+            "a tampered proposer_pubkey must break the miner signature"
+        );
+        std::env::remove_var("IRIUM_NETWORK");
     }
 }
 

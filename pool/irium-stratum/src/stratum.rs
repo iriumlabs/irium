@@ -345,6 +345,11 @@ struct NativeSubmit {
     extranonce2_hex: String,
     ntime_hex: String,
     nonce_hex: String,
+    /// BIP310 version-rolling: the miner's rolled header version from
+    /// mining.submit params[5] (SubmitTuple.rolled_version_hex). Used to
+    /// reconstruct the canonical header with the version the device actually
+    /// hashed; None for miners that do not version-roll.
+    rolled_version_hex: Option<String>,
 }
 
 enum NodeSubmitResult {
@@ -436,6 +441,7 @@ impl RewardableAdapter for NativeRewardableAdapter {
             extranonce2_hex: submit.extranonce2_hex.clone(),
             ntime_hex: submit.ntime_hex.clone(),
             nonce_hex: submit.nonce_hex.clone(),
+            rolled_version_hex: submit.rolled_version_hex.clone(),
         };
         decode_native_rewardable_submit(snapshot, &native_submit)
     }
@@ -2681,6 +2687,30 @@ async fn handle_submit(
     }
 }
 
+/// Candidate header versions to try when validating a native-rewardable submit.
+/// Base first (byte-identical to the pre-fix single reconstruction for miners that
+/// do NOT version-roll). When the miner reported a rolled version in mining.submit
+/// params[5] (BIP310 AsicBoost, negotiated via set_version_mask), add the rolled
+/// candidates: the raw submitted value (miners that send the full rolled nVersion)
+/// and the masked combine (base & !mask) | (rolled & mask) (miners that send only
+/// the rolled bits). Duplicates skipped so the base is always tried first.
+fn native_version_candidates(base: u32, rolled_hex: &Option<String>) -> Vec<u32> {
+    let mut versions = vec![base];
+    if let Some(h) = rolled_hex {
+        if let Ok(rolled) = u32::from_str_radix(h.trim().trim_start_matches("0x"), 16) {
+            let mask = u32::from_str_radix(VERSION_ROLLING_MASK, 16).unwrap_or(0x1fff_e000);
+            let combined = (base & !mask) | (rolled & mask);
+            if rolled != base {
+                versions.push(rolled);
+            }
+            if combined != base && combined != rolled {
+                versions.push(combined);
+            }
+        }
+    }
+    versions
+}
+
 fn decode_native_rewardable_submit(
     snapshot: &CanonicalJobSnapshot,
     submit: &NativeSubmit,
@@ -2695,16 +2725,33 @@ fn decode_native_rewardable_submit(
     let canonical_merkle_root = reconstruct_canonical_merkle_root(snapshot, coinbase_hash_internal);
     let ntime = parse_u32_hex(&submit.ntime_hex)?;
     let nonce = parse_u32_hex(&submit.nonce_hex)?;
-    let canonical_header80 = reconstruct_canonical_header80(
-        snapshot,
-        canonical_merkle_root,
-        ntime,
-        nonce,
-        snapshot.version,
-    );
-    let mut canonical_hash = sha256d(&canonical_header80);
-    canonical_hash.reverse();
+    // Version-rolling (BIP310 AsicBoost): every real ASIC (Bitaxe/BM1370/NerdQAxe)
+    // rolls bits in the header version within the negotiated set_version_mask and
+    // reports the rolled version in mining.submit params[5]. Reconstruct the
+    // canonical header with the miner's ACTUAL version so the hash matches what the
+    // device produced; the pre-fix code always used the base snapshot.version, so
+    // every version-rolled share was rejected as low_difficulty. Base is tried first
+    // (byte-identical for non-rolling miners), then the rolled candidates; the first
+    // version whose hash meets the block target wins (and is what gets submitted).
     let share_target = snapshot.block_target.clone();
+    let (canonical_header80, canonical_hash) = {
+        let mut chosen: Option<([u8; 80], [u8; 32])> = None;
+        for v in native_version_candidates(snapshot.version, &submit.rolled_version_hex) {
+            let hdr =
+                reconstruct_canonical_header80(snapshot, canonical_merkle_root, ntime, nonce, v);
+            let mut hh = sha256d(&hdr);
+            hh.reverse();
+            let meets = BigUint::from_bytes_be(&hh) <= snapshot.block_target;
+            if chosen.is_none() {
+                chosen = Some((hdr, hh));
+            }
+            if meets {
+                chosen = Some((hdr, hh));
+                break;
+            }
+        }
+        chosen.expect("native_version_candidates always yields the base version")
+    };
     let share_ok = BigUint::from_bytes_be(&canonical_hash) <= share_target;
     let block_ok = BigUint::from_bytes_be(&canonical_hash) <= snapshot.block_target;
 
@@ -4746,6 +4793,7 @@ mod tests {
             extranonce2_hex: "01020304".to_string(),
             ntime_hex: format!("{:08x}", snapshot.base_ntime),
             nonce_hex: "0a0b0c0d".to_string(),
+            rolled_version_hex: None,
         };
         let solve = decode_native_rewardable_submit(&snapshot, &submit).unwrap();
         (config, session, snapshot, issued, submit, solve)
@@ -5159,6 +5207,87 @@ mod tests {
         assert_eq!(
             mined, validation_cb,
             "mode-0 split must still match validation"
+        );
+    }
+
+    #[test]
+    fn version_rolling_native_submit_validates_with_rolled_version() {
+        // Real ASICs (Bitaxe/BM1370/NerdQAxe) roll the header version within the
+        // negotiated set_version_mask and report it in mining.submit params[5]. The
+        // native-rewardable submit decode must reconstruct the canonical header with
+        // that rolled version, not the base snapshot.version. Pre-fix, the base version
+        // was always used, so every version-rolled share was rejected low_difficulty.
+        let config = test_config(MinerFamilyMode::Asic);
+        let session = test_session(AdapterKind::NativeRewardableReserved);
+        let mut snapshot =
+            build_canonical_job_snapshot(&native_test_job(), &session, &config).unwrap();
+
+        let base = snapshot.version;
+        let mask = 0x1fff_e000u32;
+        let rolled = base | mask; // fully-rolled within the mask (combined == rolled here)
+
+        let ext2 = vec![0u8; snapshot.extranonce2_size];
+        let cb = build_native_rewardable_coinbase(&snapshot, &ext2).unwrap();
+        let cb_hash = sha256d(&cb);
+        let merkle = reconstruct_canonical_merkle_root(&snapshot, cb_hash);
+        let ntime = snapshot.base_ntime;
+
+        // Find a nonce where the ROLLED-version header hash is strictly smaller than
+        // the BASE-version header hash, so a target set to the rolled hash is met by
+        // the rolled reconstruction but NOT by the base reconstruction.
+        let hash_for = |ver: u32, n: u32| -> [u8; 32] {
+            let mut h = sha256d(&reconstruct_canonical_header80(&snapshot, merkle, ntime, n, ver));
+            h.reverse();
+            h
+        };
+        let (nonce, rolled_hash) = (0u32..500_000)
+            .find_map(|n| {
+                let hr = hash_for(rolled, n);
+                let hb = hash_for(base, n);
+                if BigUint::from_bytes_be(&hr) < BigUint::from_bytes_be(&hb) {
+                    Some((n, hr))
+                } else {
+                    None
+                }
+            })
+            .expect("a nonce with rolled_hash < base_hash exists");
+
+        // Target = rolled hash: rolled meets it, base (strictly larger) does not.
+        snapshot.block_target = BigUint::from_bytes_be(&rolled_hash);
+
+        let mk = |rv: Option<String>| NativeSubmit {
+            job_id: snapshot.job_id.clone(),
+            extranonce2_hex: hex::encode(&ext2),
+            ntime_hex: format!("{:08x}", ntime),
+            nonce_hex: format!("{:08x}", nonce),
+            rolled_version_hex: rv,
+        };
+
+        // WITH the rolled version reported: the share validates and the reconstruction
+        // used the rolled version (header[0..4] == rolled, little-endian).
+        let solve_rolled =
+            decode_native_rewardable_submit(&snapshot, &mk(Some(format!("{:08x}", rolled)))).unwrap();
+        assert!(
+            solve_rolled.share_ok,
+            "version-rolled share MUST validate when the rolled version is used"
+        );
+        assert_eq!(
+            &solve_rolled.canonical_header80[0..4],
+            &rolled.to_le_bytes(),
+            "the canonical header must be reconstructed with the miner's rolled version"
+        );
+
+        // WITHOUT it (base only): the SAME nonce is rejected - reproducing the pre-fix
+        // bug that rejected every real-ASIC (version-rolling) share.
+        let solve_base = decode_native_rewardable_submit(&snapshot, &mk(None)).unwrap();
+        assert!(
+            !solve_base.share_ok,
+            "base-version reconstruction must NOT validate this rolled share (the bug)"
+        );
+        assert_eq!(
+            &solve_base.canonical_header80[0..4],
+            &base.to_le_bytes(),
+            "with no rolled version, reconstruction falls back to the base version"
         );
     }
 

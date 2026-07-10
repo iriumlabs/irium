@@ -11603,6 +11603,193 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // rig: reads REAL role-worker bundles from IRIUM_M3_DIR and lands their attributed identities on-chain
+    fn phase4_real_worker_bundles_land_block_distinct_recipients() {
+        // Chains the genuine distinct role-workers to an on-chain accepted block. Reads the
+        // real bundles produced by connected workers (compute_A/compute_B/verify_1/support_1),
+        // determines which COMPUTE competitor the higher self-VRF score selects (best_for_role),
+        // then builds a full all-gates block with the SAME real worker keys and asserts
+        // connect_block accepts it under the ACTIVE contributor-role-binding rule and the
+        // coinbase pays each role to that worker's own attributed address -- 3 DISTINCT
+        // on-chain recipients. Each real bundle's solver_pkh is asserted equal to the pkh
+        // derived from its key, so the block genuinely pays the collected participants.
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::seed_components_from_block;
+        use crate::poawx_mining_harness::build_multi_participant_poawx_block_with_parent;
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            // THE NEW RULE, ACTIVE (rig/devnet gate low; mainnet stays off).
+            ("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        // The 4 real role-worker secret keys (match /home/irium/tmp/optiona_m3_bundles.sh:
+        // compute_A=a1, compute_B=d4, verify_1=b2, support_1=c3) + a distinct PRIMARY worker.
+        let k_ca = [0xa1u8; 32];
+        let k_cb = [0xd4u8; 32];
+        let k_v = [0xb2u8; 32];
+        let k_s = [0xc3u8; 32];
+        let worker = [0x4Du8; 32];
+
+        // ---- read the REAL bundles; pick the COMPUTE winner by self-VRF score ----
+        let dir = std::env::var("IRIUM_M3_DIR").unwrap_or_else(|_| "/home/irium/tmp/m3".to_string());
+        let load = |name: &str| -> serde_json::Value {
+            serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{name}.json")).expect("read real bundle"),
+            )
+            .expect("bundle json")
+        };
+        let bundle_pkh = |b: &serde_json::Value| -> [u8; 20] {
+            let mut o = [0u8; 20];
+            o.copy_from_slice(&hex::decode(b["solver_pkh"].as_str().unwrap()).unwrap());
+            o
+        };
+        let bundle_score = |b: &serde_json::Value| -> u64 {
+            let ap = crate::poawx_candidate::AssignmentProofV2::deserialize(
+                &hex::decode(b["assignment_proof"].as_str().unwrap()).unwrap(),
+            )
+            .expect("deserialize real assignment proof");
+            crate::poawx_candidate::assignment_v2_score_from_output(&ap.vrf_output)
+        };
+        let (ca, cb, vf, sp) = (
+            load("compute_A"),
+            load("compute_B"),
+            load("verify_1"),
+            load("support_1"),
+        );
+        // best_for_role: the higher self-VRF COMPUTE competitor is the one the pool attributes.
+        let (compute_key, compute_bundle) = if bundle_score(&cb) >= bundle_score(&ca) {
+            (k_cb, &cb)
+        } else {
+            (k_ca, &ca)
+        };
+
+        // Each real bundle's solver_pkh MUST equal the pkh derived from that worker's key,
+        // so the on-chain payout genuinely pays the collected participant (not a stand-in).
+        let compute_pkh = pkh_of(&skf(&compute_key));
+        let verify_pkh = pkh_of(&skf(&k_v));
+        let support_pkh = pkh_of(&skf(&k_s));
+        let worker_pkh = pkh_of(&skf(&worker));
+        assert_eq!(
+            compute_pkh,
+            bundle_pkh(compute_bundle),
+            "COMPUTE winner key derives the real bundle solver_pkh"
+        );
+        assert_eq!(verify_pkh, bundle_pkh(&vf), "VERIFY key derives the real bundle solver_pkh");
+        assert_eq!(support_pkh, bundle_pkh(&sp), "SUPPORT key derives the real bundle solver_pkh");
+        assert_eq!(
+            [compute_pkh, verify_pkh, support_pkh, worker_pkh]
+                .iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            4,
+            "4 genuinely distinct participants"
+        );
+
+        let net = crate::activation::network_id_byte();
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let cache = global_admission_cache();
+
+        // ---- build + connect a real all-gates block paying the 3 distinct real workers ----
+        let pc = seed_components_from_block(st.chain.last());
+        let bits = st.target_for_height(1).bits;
+        let built = build_multi_participant_poawx_block_with_parent(
+            &worker, &compute_key, &k_v, &k_s, net, 1, genesis_hash, None, bits,
+            genesis.header.time + 1, 1, pc,
+        )
+        .unwrap_or_else(|e| panic!("build real-bundle multi-participant block: {e}"));
+        cache.clear();
+        cache.set_tip(1);
+        for adm in &built.admissions {
+            let _ = cache.ingest_bytes(adm);
+        }
+        let cb_tx = built.block.transactions[0].clone();
+        st.connect_block(built.block)
+            .expect("connect_block accepts the real-worker all-gates block under the active rule");
+        assert_eq!(st.tip_height(), 1, "tip advanced to the real-worker block");
+
+        // ---- decode the on-chain coinbase: PRIMARY->worker, roles->3 distinct real workers ----
+        assert_eq!(
+            cb_tx.outputs[1].script_pubkey,
+            crate::tx::p2pkh_script(&worker_pkh),
+            "PRIMARY -> worker"
+        );
+        assert_eq!(
+            cb_tx.outputs[2].script_pubkey,
+            crate::tx::p2pkh_script(&compute_pkh),
+            "COMPUTE -> real compute worker's own address"
+        );
+        assert_eq!(
+            cb_tx.outputs[3].script_pubkey,
+            crate::tx::p2pkh_script(&verify_pkh),
+            "VERIFY -> real verify worker's own address"
+        );
+        assert_eq!(
+            cb_tx.outputs[4].script_pubkey,
+            crate::tx::p2pkh_script(&support_pkh),
+            "SUPPORT -> real support worker's own address"
+        );
+        for i in 1..=4usize {
+            assert!(cb_tx.outputs[i].value > 0, "coinbase output {i} funded");
+        }
+        let role_recipients: std::collections::BTreeSet<_> = (2..=4usize)
+            .map(|i| cb_tx.outputs[i].script_pubkey.clone())
+            .collect();
+        assert_eq!(role_recipients.len(), 3, "3 distinct role recipients paid on-chain");
+        println!(
+            "[real-bundle] connect_block ACCEPTED H1 paying 3 DISTINCT real workers: COMPUTE={} VERIFY={} SUPPORT={}",
+            hex::encode(compute_pkh),
+            hex::encode(verify_pkh),
+            hex::encode(support_pkh)
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
     fn phase4_contributor_binding_rejects_mismatched_solver() {
         // Isolated proof of the rule at AssignmentProofV2::validate (dominance/ordering cannot
         // preempt it here): solver_pkh must == hash160(assignment_public_key) for a contributor

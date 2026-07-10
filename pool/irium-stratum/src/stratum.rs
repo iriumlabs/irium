@@ -1467,12 +1467,30 @@ fn build_session_poawx_receipts(
                 // protocol) if enabled + complete; (2) SYNTHETIC fallback only when
                 // IRIUM_POAWX_SYNTHETIC_ROLE_CLAIMS=1; (3) otherwise NO ext (the node
                 // fails closed after activation — never fakes claims).
-                let collected = crate::delegation::build_collected_phase20_ext(
+                // Step 2 (role-attribution upgrade): build the CANONICAL multi-role
+                // payout split from the PROVEN compliant collector. Each contributor role
+                // (COMPUTE/VERIFY/SUPPORT) is attributed to a DISTINCT participant via
+                // best_for_role VRF selection, carrying that participant own ticket +
+                // puzzle + assignment proofs with the Phase-1 binding re-verified -- NOT
+                // pool-synthesized proofs. PRIMARY remains the block real VRF-selected
+                // proposer. Returns None on mainnet (network_id==0), role protocol off, or
+                // when the collected bundles are absent/incomplete -> automatic fallback
+                // below to today exact behavior (synthetic only if explicitly enabled,
+                // else no ext).
+                //
+                // SCOPE (operator-orchestrated): the role bundles reach producer.role_store
+                // over the loopback ingest (/poawx/role-precommit + /poawx/role-reveal),
+                // fed by the single pool operator own role-workers. This delivers correct
+                // multi-role payout-SPLITTING + attribution mechanics using the proven
+                // logic. It does NOT yet accept real external, independently-submitted
+                // role-work from separate, mutually-untrusting participants over the
+                // network -- that decentralised submission protocol is a distinct FUTURE
+                // project (Option B).
+                let collected = crate::delegation::build_collected_bundle_ext(
                     producer.role_store.as_ref(),
                     producer.network_id,
                     ctx.block_height,
                     fee,
-                    pkh,
                     &job.prev_hash,
                 );
                 let chosen = match collected {

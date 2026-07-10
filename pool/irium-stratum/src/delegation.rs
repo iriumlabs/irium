@@ -7103,6 +7103,162 @@ mod tests {
     }
 
     #[test]
+    #[ignore] // rig: the SWAPPED live call-site build_collected_bundle_ext produces the compliant ext + fallback
+    fn phase4_live_callsite_build_collected_bundle_ext_and_fallback() {
+        // Step 2 receipt-producer upgrade (operator-orchestrated). Proves the SWAPPED live
+        // call-site -- build_session_poawx_receipts now calls build_collected_bundle_ext
+        // (stratum.rs), not build_collected_phase20_ext -- produces the COMPLIANT multi-role
+        // payout-split ext from REAL role-worker bundles fed through the SAME ingest-
+        // validation the live loopback endpoints use (RoleRevealDto::validate + add_reveal +
+        // add_precommit). Each contributor role is attributed to its own DISTINCT participant
+        // by best_for_role VRF selection and carries that participant's OWN ticket + puzzle
+        // proofs. The automatic fallback (empty store / mainnet net==0 / role-protocol-off ->
+        // None) preserves today's exact behavior. SCOPE: the bundles come from the single
+        // pool operator's own workers; accepting independent external submissions from
+        // separate untrusting participants over the network is Option B (a future project).
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_ROLE_PROTOCOL_ENABLED", "1");
+        std::env::set_var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1");
+        let net = 2u8;
+
+        let dir = std::env::var("IRIUM_M3_DIR").unwrap_or_else(|_| "/home/irium/tmp/m3".to_string());
+        let load = |name: &str| -> serde_json::Value {
+            serde_json::from_str(
+                &std::fs::read_to_string(format!("{dir}/{name}.json")).expect("read real bundle"),
+            )
+            .expect("bundle json")
+        };
+        let pkh_of = |b: &serde_json::Value| -> [u8; 20] {
+            let mut o = [0u8; 20];
+            o.copy_from_slice(&hex::decode(b["solver_pkh"].as_str().unwrap()).unwrap());
+            o
+        };
+        let score_of = |b: &serde_json::Value| -> u64 {
+            let ap = AssignmentProofV2Mirror::deserialize(
+                &hex::decode(b["assignment_proof"].as_str().unwrap()).unwrap(),
+            )
+            .unwrap();
+            let mut s = [0u8; 8];
+            s.copy_from_slice(&ap.vrf_output[0..8]);
+            u64::from_le_bytes(s)
+        };
+        // Feed a bundle EXACTLY as the live loopback ingest does: validate the precommit +
+        // reveal DTOs, then add to the shared store.
+        let feed = |store: &RoleProtocolStore, b: &serde_json::Value| {
+            let g = |k: &str| b[k].as_str().unwrap().to_string();
+            let claim = &b["claim"];
+            let cg = |k: &str| claim[k].as_str().unwrap().to_string();
+            let h = b["target_height"].as_u64().unwrap();
+            let role = b["role_id"].as_u64().unwrap() as u8;
+            let pre = RolePrecommitDto {
+                network_id: net,
+                target_height: h,
+                role_id: role,
+                solver_pkh: g("solver_pkh"),
+                commitment_hash: cg("commitment_hash"),
+                worker: String::new(),
+            };
+            store
+                .add_precommit(pre.validate(net).expect("real precommit valid"))
+                .expect("add precommit");
+            let dto = RoleRevealDto {
+                network_id: net,
+                target_height: h,
+                role_id: role,
+                lane_id: claim["lane_id"].as_u64().unwrap() as u8,
+                solver_pkh: g("solver_pkh"),
+                secret: cg("secret"),
+                nonce: cg("nonce"),
+                commitment_hash: cg("commitment_hash"),
+                claim_digest: cg("claim_digest"),
+                assignment_public_key: g("assignment_public_key"),
+                assignment_proof: g("assignment_proof"),
+                ticket_proof: g("ticket_proof"),
+                puzzle_solution: g("puzzle_solution"),
+            };
+            let v = dto.validate(net).expect("real bundle passes the Phase 1 binding");
+            store.add_reveal(v).expect("add reveal");
+        };
+
+        let (ca, cb, vf, sp) = (load("compute_A"), load("compute_B"), load("verify_1"), load("support_1"));
+        let h = ca["target_height"].as_u64().unwrap();
+        let store = RoleProtocolStore::new();
+        for x in [&ca, &cb, &vf, &sp] {
+            feed(&store, x);
+        }
+        // The live flow always has the NEXT round's precommits in flight; the compliant
+        // builder requires precommit_root_for(h+1) (one precommit per role). Add them.
+        let compute_win = if score_of(&cb) >= score_of(&ca) { &cb } else { &ca };
+        for (role, b) in [
+            (ROLE_COMPUTE_CONTRIBUTOR, compute_win),
+            (ROLE_VERIFY_CONTRIBUTOR, &vf),
+            (ROLE_SUPPORT_CONTRIBUTOR, &sp),
+        ] {
+            let pre = RolePrecommitDto {
+                network_id: net,
+                target_height: h + 1,
+                role_id: role,
+                solver_pkh: b["solver_pkh"].as_str().unwrap().to_string(),
+                commitment_hash: b["claim"]["commitment_hash"].as_str().unwrap().to_string(),
+                worker: String::new(),
+            };
+            store
+                .add_precommit(pre.validate(net).expect("next-round precommit valid"))
+                .expect("add next-round precommit");
+        }
+
+        // ---- COMPLIANT PATH: exactly what the swapped stratum.rs call-site now invokes ----
+        let ext = build_collected_bundle_ext(&store, net, h, None, &[0u8; 32])
+            .expect("compliant multi-role ext built from real bundles");
+        let (cpk, vpk, spk) = (
+            ext.role_reward.compute_contributor_pkh,
+            ext.role_reward.verify_contributor_pkh,
+            ext.role_reward.support_contributor_pkh,
+        );
+        // three DISTINCT contributor participants, each its own real worker.
+        assert_eq!(
+            [cpk, vpk, spk].iter().collect::<std::collections::BTreeSet<_>>().len(),
+            3,
+            "three distinct contributor participants"
+        );
+        assert_eq!(cpk, pkh_of(compute_win), "COMPUTE attributed to the higher-VRF real competitor (best_for_role)");
+        assert_eq!(vpk, pkh_of(&vf), "VERIFY attributed to its real worker");
+        assert_eq!(spk, pkh_of(&sp), "SUPPORT attributed to its real worker");
+        // the ext carries each participant's OWN ticket + puzzle proofs (compliant, not synthesized).
+        assert!(ext.role_ticket_proofs.is_some(), "per-participant ticket proofs attached");
+        assert!(ext.role_puzzle_proofs.is_some(), "per-participant puzzle proofs attached");
+        assert!(ext.precommit_root.is_some(), "next-round precommit root committed");
+
+        // ---- FALLBACK PARITY (automatic fallback to today's behavior) ----
+        // (1) empty store -> None (no collected bundles).
+        assert!(
+            build_collected_bundle_ext(&RoleProtocolStore::new(), net, h, None, &[0u8; 32]).is_none(),
+            "fallback: empty store yields no ext"
+        );
+        // (2) mainnet (network_id == 0) -> None: mainnet stays byte-identical / untouched.
+        assert!(
+            build_collected_bundle_ext(&store, 0, h, None, &[0u8; 32]).is_none(),
+            "fallback: mainnet (net 0) yields no ext -- mainnet untouched"
+        );
+        // (3) role protocol disabled -> None.
+        std::env::remove_var("IRIUM_POAWX_ROLE_PROTOCOL_ENABLED");
+        assert!(
+            build_collected_bundle_ext(&store, net, h, None, &[0u8; 32]).is_none(),
+            "fallback: role protocol disabled yields no ext"
+        );
+        std::env::set_var("IRIUM_POAWX_ROLE_PROTOCOL_ENABLED", "1");
+
+        println!(
+            "[callsite] build_collected_bundle_ext -> compliant ext: COMPUTE={} VERIFY={} SUPPORT={} (3 distinct); fallbacks (empty/net0/disabled) all None",
+            hex::encode(cpk), hex::encode(vpk), hex::encode(spk)
+        );
+
+        std::env::remove_var("IRIUM_POAWX_ROLE_PROTOCOL_ENABLED");
+        std::env::remove_var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
     fn phase4_mirror_ticket_puzzle_deserialize_roundtrip() {
         // Phase 4 M2: the new mirror deserializers are exact inverses of serialize.
         let t = TicketProofMirror::new(

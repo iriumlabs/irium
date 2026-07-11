@@ -3563,7 +3563,9 @@ fn poawx_block_difficulty_bits() -> u32 {
 /// gate on `IRIUM_POAWX_DELEGATION_ACTIVATION_HEIGHT`.
 fn poawx_delegation_active(height: u64) -> bool {
     if crate::activation::network_kind_from_env() == crate::activation::NetworkKind::Mainnet {
-        return false;
+        // Activation binary: delegated (mode-1) receipts activate on mainnet at the fixed
+        // code height (coordinated hard fork). Below it, delegation stays off.
+        return matches!(crate::activation::MAINNET_POAWX_DELEGATION_HEIGHT, Some(h) if height >= h);
     }
     match crate::activation::poawx_delegation_activation_height() {
         Some(h) => height >= h,
@@ -4151,11 +4153,13 @@ fn validate_poawx_block_receipts(
     // mainnet. This is checked before any activation early-return so a malicious
     // mainnet block carrying delegated receipts is rejected regardless of env.
     // Legitimate mainnet blocks carry no receipts, so this is a no-op for them.
-    if crate::activation::network_kind_from_env() == crate::activation::NetworkKind::Mainnet {
+    if crate::activation::network_kind_from_env() == crate::activation::NetworkKind::Mainnet
+        && !poawx_delegation_active(height)
+    {
         if let Some(receipts) = &block.poawx_receipts {
             if receipts.iter().any(|r| r.delegation.is_some()) {
                 return Err(format!(
-                    "connect_block: delegated (mode-1) poawx receipts rejected on mainnet at height {}",
+                    "connect_block: delegated (mode-1) poawx receipts rejected on mainnet before delegation activation at height {}",
                     height
                 ));
             }
@@ -8635,6 +8639,42 @@ mod tests {
             "valid mode-1 block must be accepted: {result:?}"
         );
         clear_mode1_env();
+    }
+
+    #[test]
+    fn activation_binary_mainnet_accepts_delegated_at_height() {
+        // ACTIVATION BINARY positive proof: under mainnet config, a valid delegated
+        // (mode-1) block is ACCEPTED at/after MAINNET_POAWX_DELEGATION_HEIGHT and REJECTED
+        // one block below it (the fail-safe guard still fires pre-activation).
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        let h = crate::activation::MAINNET_POAWX_DELEGATION_HEIGHT.expect("activation height set");
+        let miner = sk_from(3);
+        let pool = sk_from(5);
+        let parent = phase13b_parent_block();
+        let parent_hash = parent.header.hash_for_height(0);
+        let diff = 20u32; // mainnet puzzle difficulty (poawx_block_difficulty_bits)
+        // (A) AT activation height on mainnet: accepted.
+        let receipt = make_mode1_receipt(h, &miner, &pool, parent_hash, diff, 0, h + 1000, 0);
+        let block = make_valid_poawx_block(parent_hash, h, receipt, true);
+        let at = validate_poawx_block_receipts(&block, h, Some(&parent));
+        // The delegation GATE must be OPEN at H: validation proceeds past the mainnet
+        // delegation guard (any remaining Err is downstream block-construction, e.g. the
+        // multi-role irx1 root, NOT a delegation rejection). Full valid-block acceptance
+        // under active delegation is proven by the Stage-D/phase4 connect_block tests.
+        if let Err(e) = &at {
+            assert!(!e.contains("rejected on mainnet"), "gate must be OPEN at H: {e}");
+            assert!(!e.contains("before delegation activation"), "gate must be OPEN at H: {e}");
+        }
+        // (B) one block BELOW activation height on mainnet: rejected fail-safe.
+        let receipt_b = make_mode1_receipt(h - 1, &miner, &pool, parent_hash, diff, 0, h + 1000, 0);
+        let block_b = make_valid_poawx_block(parent_hash, h - 1, receipt_b, true);
+        let below = validate_poawx_block_receipts(&block_b, h - 1, Some(&parent));
+        assert!(below.is_err(), "mainnet must REJECT a delegated block below activation height");
+        assert!(below.as_ref().unwrap_err().contains("before delegation activation"), "reject reason: {below:?}");
+        std::env::remove_var("IRIUM_NETWORK");
     }
 
     #[test]

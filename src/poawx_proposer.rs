@@ -416,7 +416,7 @@ pub fn audit_hardening_active(height: u64) -> bool {
 /// contributor-role solver binding. `None` => NOT live-active on mainnet -- the actual
 /// future, announced, coordinated activation is a SEPARATE deferred decision (mirrors the
 /// block-50000 discipline). Rig/devnet activate it low via the env var below for testing.
-pub const MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT: Option<u64> = None;
+pub const MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT: Option<u64> = Some(57_794);
 
 pub fn contributor_role_binding_activation_height() -> Option<u64> {
     std::env::var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT")
@@ -608,11 +608,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn contributor_role_binding_gate_mainnet_off_devnet_env() {
-        // CRITICAL: mainnet (network 0) is NOT live-active regardless of any env activation
-        // -- the contributor-role binding stays off until a separate announced decision.
-        assert!(!contributor_role_binding_gate(0, Some(1), 100));
-        assert!(!contributor_role_binding_gate(0, Some(1), u64::MAX));
+    fn contributor_role_binding_gate_mainnet_activates_at_height() {
+        // Activation binary (v1.9.127): mainnet (network 0) activates the contributor-role
+        // binding at the fixed code height MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT, ignoring
+        // env. Below it, off; at/above it, on (coordinated hard fork).
+        let h = MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT.expect("activation height is set");
+        assert!(!contributor_role_binding_gate(0, Some(1), h - 1));
+        assert!(contributor_role_binding_gate(0, Some(1), h));
+        assert!(contributor_role_binding_gate(0, None, h + 1));
         assert!(!contributor_role_binding_gate(0, None, 100));
         // devnet/rig (network 2): the env activation height gates it (low for testing).
         assert!(!contributor_role_binding_gate(2, None, 100));

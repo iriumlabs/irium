@@ -250,6 +250,12 @@ pub fn network_kind_from_env() -> NetworkKind {
 /// PoAW-X gate set; before it, mainnet is byte-identical to pre-activation.
 pub const MAINNET_POAWX_ACTIVATION_HEIGHT: Option<u64> = Some(50_000);
 
+/// Activation binary (v1.9.127): mainnet activation height for delegated (mode-1)
+/// PoAW-X receipts -- the pool paying each miner directly on-chain. `None` => off
+/// (pre-activation); `Some(H)` => active at height >= H. COORDINATED HARD FORK: every
+/// full node must run this binary before H or it rejects the delegated blocks and forks.
+pub const MAINNET_POAWX_DELEGATION_HEIGHT: Option<u64> = Some(57_794);
+
 /// True when mainnet PoAW-X is active at `height` (mainnet network AND height past
 /// the fixed activation height). Always false on testnet/devnet.
 pub fn poawx_mainnet_active(height: u64) -> bool {

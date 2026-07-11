@@ -538,7 +538,8 @@ pub fn verify_and_store(
     now_unix: u64,
     expected_fee: Option<(u16, [u8; 20])>,
 ) -> Result<StoredDelegation, DelegError> {
-    if network_id == 0 {
+    // Mainnet: registration is inert until the consensus activation height, then opens.
+    if network_id == 0 && !poawx_mainnet_active_at(tip_height) {
         return Err(DelegError::Mainnet);
     }
     let bytes = hex::decode(delegation_hex).map_err(|_| DelegError::BadHex)?;
@@ -734,6 +735,11 @@ pub fn build_mode1_pending_receipt(
             }
             return None;
         }};
+    }
+    // Mainnet: no delegated (mode-1) production before the consensus activation height;
+    // returns None so the caller falls back to legacy receipts (exact mirror of the node).
+    if network_id == 0 && !poawx_mainnet_active_at(ctx.block_height) {
+        deny!("mainnet_before_activation");
     }
     let rec = match store.get(&miner_pkh_hex, worker) {
         Some(r) => r,
@@ -3260,6 +3266,20 @@ pub const ROLE_PROTOCOL_HEIGHT_WINDOW: u64 = 64;
 
 /// Whether the local/testnet role precommit+reveal protocol is enabled
 /// (`IRIUM_POAWX_ROLE_PROTOCOL_ENABLED=1`). Mainnet hard-off; default off.
+/// Mainnet: PoAW-X pool delegation/role production + registration activate at the node
+/// consensus height `MAINNET_POAWX_DELEGATION_HEIGHT` -- an EXACT mirror of the node gate
+/// `poawx_delegation_active`, so the pool never produces (or registers for) anything the
+/// consensus layer would reject. Below H: inert. At/after H: active.
+/// MUST equal the node consensus constant
+/// `irium_node_rs::activation::MAINNET_POAWX_DELEGATION_HEIGHT`. The pool intentionally
+/// does not link the node crate in production, so this is a local mirror; the dev-dep
+/// parity test `pool_activation_height_matches_node` asserts they are identical.
+pub const MAINNET_POAWX_DELEGATION_HEIGHT: u64 = 57_794;
+
+pub fn poawx_mainnet_active_at(height: u64) -> bool {
+    height >= MAINNET_POAWX_DELEGATION_HEIGHT
+}
+
 pub fn role_protocol_enabled() -> bool {
     if network_id_from_env() == 0 {
         return false; // mainnet
@@ -3652,7 +3672,10 @@ pub fn build_collected_bundle_ext(
     prev_hash: &[u8; 32],
 ) -> Option<Phase20ReceiptExtMirror> {
     let _ = prev_hash;
-    if network_id == 0 || !role_protocol_enabled() {
+    // Mainnet: role production activates at the consensus height (exact node-gate mirror);
+    // non-mainnet keeps the existing env gate.
+    let active = if network_id == 0 { poawx_mainnet_active_at(height) } else { role_protocol_enabled() };
+    if !active {
         return None;
     }
     let winners = store.best_bundled_reveals(height)?;
@@ -4296,10 +4319,10 @@ pub struct PoawxProducer {
 /// (no key generated, delegation refused) or if the key/store cannot be loaded.
 pub fn load_producer() -> Option<PoawxProducer> {
     let network_id = network_id_from_env();
-    if network_id == 0 {
-        warn!("[poawx-deleg] mainnet context: PoAW-X delegation disabled (mode-1 hard-off)");
-        return None;
-    }
+    // Mainnet: construct the subsystem (store + key + endpoint) so the pool can deploy
+    // ahead of the activation height and sit dormant. Registration and production are
+    // height-gated downstream (poawx_mainnet_active_at) -- an exact mirror of the node
+    // consensus gate -- so nothing is consensus-visible before H.
     let key = match DelegateKey::load_or_generate(&delegate_key_path(), true) {
         Ok(k) => k,
         Err(e) => {
@@ -5221,6 +5244,39 @@ mod tests {
         )
         .expect("store delegation");
         (key, store, miner_pkh)
+    }
+
+    #[test]
+    fn mainnet_height_gate_complete_path() {
+        // Pool height gate mirrors the node consensus gate EXACTLY: below H the registration
+        // endpoint AND delegated production are inert; at/after H registration opens and a
+        // registered miner is paid directly on-chain (PRIMARY -> miner own address).
+        let h = MAINNET_POAWX_DELEGATION_HEIGHT;
+        let miner = SigningKey::from_slice(&[0x7Au8; 32]).unwrap();
+        let dir = temp_dir("mainnet_gate_path");
+        std::fs::create_dir_all(&dir).unwrap();
+        let key = DelegateKey::load_or_generate(&dir.join("k.hex"), true).unwrap();
+        let store = JsonDelegationStore::open(dir.join("d.json")).unwrap();
+        let d = mirror_signed(&miner, key.pubkey(), 0, "rig0", h + 10_000, 0); // mainnet delegation
+        let pkh = d.miner_pkh();
+        let dhex = hex::encode(d.serialize());
+        // (a) BEFORE H: registration endpoint inert.
+        let before = verify_and_store(&store, &dhex, "rig0", &hex::encode(pkh), &key.pubkey(), 0, h - 1, 1, None);
+        assert!(matches!(before, Err(DelegError::Mainnet)), "registration inert below H: {before:?}");
+        // (b) AT H: registration opens and stores.
+        verify_and_store(&store, &dhex, "rig0", &hex::encode(pkh), &key.pubkey(), 0, h, 1, None)
+            .expect("registration opens at H");
+        // (c) production inert below H.
+        let dto_lo = p18b3_assignment_dto(h - 2, 4, "cpu");
+        let ctx_lo = assignment_context_from_dto(&dto_lo, h - 1).expect("ctx below");
+        assert!(build_mode1_pending_receipt(&store, &key, 0, pkh, "rig0", &ctx_lo).is_none(),
+            "no delegated production below H");
+        // (d) production + direct attribution at H.
+        let dto_hi = p18b3_assignment_dto(h - 1, 4, "cpu");
+        let ctx_hi = assignment_context_from_dto(&dto_hi, h).expect("ctx at H");
+        let rec = build_mode1_pending_receipt(&store, &key, 0, pkh, "rig0", &ctx_hi)
+            .expect("delegated production at H");
+        assert_eq!(rec.worker_pkh, hex::encode(pkh), "PRIMARY paid directly to the registering miner");
     }
 
     #[test]
@@ -8971,5 +9027,19 @@ mod tests {
         assert!(!pool_tickets_enforced(5), "mainnet hard-off");
         std::env::remove_var("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_POAWX_TICKETS_REQUIRED");
+    }
+}
+
+
+#[cfg(test)]
+mod _activation_parity {
+    #[test]
+    fn pool_activation_height_matches_node() {
+        // Exact mirror guarantee: the pool height gate MUST equal the node consensus gate.
+        assert_eq!(
+            Some(super::MAINNET_POAWX_DELEGATION_HEIGHT),
+            irium_node_rs::activation::MAINNET_POAWX_DELEGATION_HEIGHT,
+            "pool activation height must mirror the node consensus height exactly"
+        );
     }
 }

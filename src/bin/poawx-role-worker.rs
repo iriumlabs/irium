@@ -90,7 +90,7 @@ fn main() -> Result<(), String> {
             .map(|(n, _)| n)
             .ok_or("ticket sybil grind failed")?
     } else {
-        [0u8; 32] // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
+        [0u8; 32]
     };
     let ticket = TicketProof::new(
         net, height, prev_hash, role, payout_pkh, epoch, height + 100_000, payout_pubkey, nonce,

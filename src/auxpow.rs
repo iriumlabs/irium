@@ -356,8 +356,8 @@ pub fn deserialize(data: &[u8], offset: &mut usize) -> Result<AuxPoW, String> {
 mod tests {
     use super::*;
 
-    const AUX_NONCE_DEFAULT: u32 = 0; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
-    const AUX_NONCE_VARIED: u32 = 99; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
+    const AUX_NONCE_DEFAULT: u32 = 0;
+    const AUX_NONCE_VARIED: u32 = 99;
     const AUX_CHAIN_COUNT_SINGLE: u32 = 1;
     const AUX_CHAIN_COUNT_MULTI: u32 = 3;
 
@@ -365,7 +365,7 @@ mod tests {
     /// intentional — these tests exercise the validator logic with a
     /// known-good commitment, not a real mining nonce.
     /// CodeQL suppress: rust/hard-coded-cryptographic-value
-    const TEST_AUXPOW_NONCE: u32 = 0; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
+    const TEST_AUXPOW_NONCE: u32 = 0;
 
     fn make_coinbase(aux_hash: &[u8; 32], chain_count: u32) -> Vec<u8> {
         build_commitment(aux_hash, chain_count, AUX_NONCE_DEFAULT).to_vec()

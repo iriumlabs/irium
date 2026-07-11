@@ -851,9 +851,9 @@ pub const MULTI_ROLE_COMPUTE_BPS: u64 = 2200;
 pub const MULTI_ROLE_VERIFY_BPS: u64 = 1300;
 pub const MULTI_ROLE_SUPPORT_BPS: u64 = 1000;
 
-pub const ROLE_COMPUTE_CONTRIBUTOR: u8 = 1; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
-pub const ROLE_VERIFY_CONTRIBUTOR: u8 = 2; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
-pub const ROLE_SUPPORT_CONTRIBUTOR: u8 = 3; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
+pub const ROLE_COMPUTE_CONTRIBUTOR: u8 = 1;
+pub const ROLE_VERIFY_CONTRIBUTOR: u8 = 2;
+pub const ROLE_SUPPORT_CONTRIBUTOR: u8 = 3;
 
 pub const LANE_CPU_FRIENDLY: u8 = 0;
 pub const LANE_GPU_PARALLEL: u8 = 1;
@@ -6327,7 +6327,7 @@ mod tests {
         // a node-valid role claim for `solver` at slot 0, bound to (net,h,prev).
         let claim = |role: u8, solver: [u8; 20], prev: &[u8; 32], h: u64| -> PoawxRoleClaim {
             let lane = assign_lane(net, h, prev, role, 0);
-            let nonce = [0x01u8; 32]; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
+            let nonce = [0x01u8; 32];
             let secret = [0x02u8; 32];
             let cd = role_claim_digest(net, h, prev, role, lane.id(), &solver, &nonce, &secret);
             PoawxRoleClaim {
@@ -6579,7 +6579,7 @@ mod tests {
 
         let claim = |role: u8, solver: [u8; 20]| -> PoawxRoleClaim {
             let lane = assign_lane(net, h, &prev, role, 0);
-            let nonce = [0x01u8; 32]; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
+            let nonce = [0x01u8; 32];
             let secret = [0x02u8; 32];
             let cd = role_claim_digest(net, h, &prev, role, lane.id(), &solver, &nonce, &secret);
             PoawxRoleClaim {
@@ -7712,7 +7712,7 @@ mod tests {
         // Phase 4 M2: the new mirror deserializers are exact inverses of serialize.
         let t = TicketProofMirror::new(
             2, 10, [0x33u8; 32], ROLE_COMPUTE_CONTRIBUTOR, [0x44u8; 20], 10, 100_010,
-            [0x02u8; 33], [0x55u8; 32], 0, // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
+            [0x02u8; 33], [0x55u8; 32], 0,
         );
         assert_eq!(TicketProofMirror::deserialize(&t.serialize()).unwrap(), t);
         assert!(TicketProofMirror::deserialize(&t.serialize()[..175]).is_err());
@@ -7802,7 +7802,7 @@ mod tests {
         // structural binding, enforced at pool ingest); a legacy claim-only reveal still works.
         let net = 2u8;
         let secret = [0x11u8; 32];
-        let nonce = [0x22u8; 32]; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
+        let nonce = [0x22u8; 32];
         let commitment = role_precommit_commitment(&secret, &nonce);
         let apk = [0x02u8; 33];
         let pkh = {
@@ -8767,7 +8767,7 @@ mod tests {
         let net = 1u8;
         let solver = [0xC7u8; 20];
         let apk = [0x02u8; 33];
-        let nonce = [0x44u8; 32]; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
+        let nonce = [0x44u8; 32];
         let prev_a = [0x55u8; 32];
         let prev_b = [0x66u8; 32];
         let mk_pm = |prev: [u8; 32]| {
@@ -8850,7 +8850,7 @@ mod tests {
         let prev = [0x55u8; 32];
         let solver = [0xC7u8; 20];
         let apk = [0x02u8; 33];
-        let nonce = [0x44u8; 32]; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
+        let nonce = [0x44u8; 32];
         let prev = [0x55u8; 32];
         // (1) ticket proof byte-identity vs node.
         let pm = TicketProofMirror::new(

@@ -56,7 +56,7 @@ fn out(pkh: &[u8; 20], value: u64) -> TxOutput {
 /// to (NET, height, prev). Honest miners produce exactly this.
 fn valid_claim(role_id: u8, solver: [u8; 20], prev: &[u8; 32], height: u64) -> PoawxRoleClaim {
     let lane = assign_lane(NET, height, prev, role_id, 0);
-    let nonce = [0x01u8; 32];
+    let nonce = [0x01u8; 32]; // codeql[rust/hard-coded-cryptographic-value]: test/simulation fixture or non-secret constant (role-id/bps/zeroed placeholder), not real key material
     let secret = [0x02u8; 32];
     let claim_digest =
         role_claim_digest(NET, height, prev, role_id, lane.id(), &solver, &nonce, &secret);

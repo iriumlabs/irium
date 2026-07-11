@@ -5087,7 +5087,7 @@ async fn admin_add_seed(
                 .unwrap_or_else(|e| e.into_inner())
                 .tip_height();
             tokio::spawn(async move {
-                let _ = node_c.connect_and_handshake(sa, height, "Irium-Node").await;
+                let _ = node_c.connect_and_handshake(sa, height, &format!("Irium-Node/{}", env!("CARGO_PKG_VERSION"))).await;
             });
         }
     }
@@ -17242,7 +17242,7 @@ async fn main() {
     }
 
     let agent_string =
-        std::env::var("IRIUM_NODE_AGENT").unwrap_or_else(|_| "Irium-Node".to_string());
+        std::env::var("IRIUM_NODE_AGENT").unwrap_or_else(|_| format!("Irium-Node/{}", env!("CARGO_PKG_VERSION")));
     let relay_address = node_cfg
         .as_ref()
         .and_then(|c| c.relay_address.clone())
@@ -17943,7 +17943,7 @@ async fn main() {
                             "peers": current_peer_count,
                             "peer_sample": peer_sample,
                             "seed_count": seed_count,
-                            "agent": std::env::var("IRIUM_NODE_AGENT").unwrap_or_else(|_| "Irium-Node".to_string()),
+                            "agent": std::env::var("IRIUM_NODE_AGENT").unwrap_or_else(|_| format!("Irium-Node/{}", env!("CARGO_PKG_VERSION"))),
                             "tip": tip_hash,
                             "mempool": mempool_size,
                         })
@@ -32511,4 +32511,19 @@ async fn reresolve_agreement(
         new_primary_resolver: new_primary,
         new_fallback_resolver: new_fallback,
     }))
+}
+
+#[cfg(test)]
+mod agent_version_tests {
+    // The P2P agent default must encode the node version ("Irium-Node/<version>") so that
+    // future upgrade rollouts are verifiable over the network via the handshake agent field.
+    // The agent is informational only -- it is NOT part of the protocol-version compatibility
+    // check (that is PROTOCOL_VERSION in p2p.rs), so this does not affect peering.
+    #[test]
+    fn default_agent_encodes_version() {
+        let default_agent = format!("Irium-Node/{}", env!("CARGO_PKG_VERSION"));
+        assert!(default_agent.starts_with("Irium-Node/"), "encodes node name: {default_agent}");
+        assert!(default_agent.contains(env!("CARGO_PKG_VERSION")), "encodes version: {default_agent}");
+        assert_eq!(default_agent, concat!("Irium-Node/", env!("CARGO_PKG_VERSION")));
+    }
 }

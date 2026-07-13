@@ -112,6 +112,35 @@ pub fn proposer_anti_spam_bits() -> u32 {
         .unwrap_or(DEFAULT_PROPOSER_ANTI_SPAM_BITS)
 }
 
+/// Activation height for PoAW-X block-header PoW demotion (env-gated). Reading the
+/// env alone does NOT enable demotion; see `pow_demotion_gate`.
+pub fn pow_demotion_activation_height() -> Option<u64> {
+    std::env::var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+/// Master gate for PoW demotion, which changes block-header validity (a
+/// consensus rule). GENUINE mainnet hard-off: `network_id == 0` returns `false`
+/// unconditionally, so NO environment value can enable demotion on mainnet. This
+/// deliberately does NOT route through `poawx_effective_activation` (which returns
+/// `MAINNET_POAWX_ACTIVATION_HEIGHT` for net 0 and would make a feature active at
+/// height >= 50_000). On non-mainnet networks demotion is OFF unless
+/// `IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT` is explicitly set, and then only
+/// at or after that height. Param-driven for race-free tests.
+pub fn pow_demotion_gate(network_id: u8, activation: Option<u64>, height: u64) -> bool {
+    if network_id == 0 {
+        return false; // mainnet: hard-off, no env can enable it
+    }
+    matches!(activation, Some(h) if height >= h)
+}
+
+/// Whether PoW demotion is active at `height`. Mainnet hard-off; default off on all
+/// networks until the activation-height env is explicitly set.
+pub fn pow_demotion_active(height: u64) -> bool {
+    pow_demotion_gate(network_id_byte(), pow_demotion_activation_height(), height)
+}
+
 /// Pure cap: when `enforced`, the effective puzzle difficulty is capped at the
 /// anti-spam `floor` (never raised), so hashrate cannot be cranked up to matter;
 /// otherwise the configured value passes through verbatim.
@@ -705,6 +734,23 @@ mod tests {
         assert!(proposer_vrf_gate(1, Some(100), 100));
         assert!(!proposer_vrf_gate(2, Some(100), 99));
         assert!(!proposer_vrf_gate(2, None, 1)); // unset => off
+    }
+
+    #[test]
+    fn pow_demotion_gate_is_genuinely_mainnet_hard_off() {
+        // Unlike gates routed through `poawx_effective_activation` (which activate on
+        // mainnet at height >= 50_000), PoW demotion is HARD-off on mainnet at ANY
+        // height and for ANY env value -- it changes block-header validity.
+        assert!(!pow_demotion_gate(0, Some(1), 1)); // mainnet: off
+        assert!(!pow_demotion_gate(0, Some(1), 50_000)); // mainnet: still off at the PoAW-X height
+        assert!(!pow_demotion_gate(0, Some(1), 10_000_000)); // mainnet: off forever, env ignored
+        assert!(!pow_demotion_gate(0, None, 10_000_000)); // mainnet: off, no env
+        // non-mainnet: OFF unless explicitly activated, then on at/after the height.
+        assert!(!pow_demotion_gate(2, None, 1)); // devnet unset => off
+        assert!(!pow_demotion_gate(1, None, 1)); // testnet unset => off
+        assert!(!pow_demotion_gate(2, Some(10), 9)); // before activation => off
+        assert!(pow_demotion_gate(2, Some(10), 10)); // at activation => on
+        assert!(pow_demotion_gate(1, Some(1), 999)); // after activation => on
     }
 
     #[test]

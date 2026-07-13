@@ -86,6 +86,23 @@ pub fn min_difficulty_target(pow_limit: Target, min_difficulty: u64) -> Target {
     Target::from_target(&target)
 }
 
+/// Target representing a proof-of-work floor of `leading_zero_bits` leading zero
+/// bits: a hash satisfies it iff its top `leading_zero_bits` bits are zero, i.e.
+/// `hash <= 2^(256 - leading_zero_bits) - 1`.
+///
+/// This is the PoAW-X proposer PoW *demotion* target. A VRF-selected proposer's
+/// block header is validated against this trivial anti-spam floor instead of the
+/// full network target, so block *production* is hashrate-independent for a
+/// validly-selected proposer. It is applied ONLY when a block carries a valid,
+/// selected proposer assignment (see `chain::ChainState::check_block_proposer`);
+/// a block with no valid assignment still requires the full network target.
+pub fn floor_target(leading_zero_bits: u32) -> Target {
+    let n = leading_zero_bits.min(255) as usize;
+    // 2^(256 - n) - 1: every value with at least `n` leading zero bits satisfies it.
+    let value = (BigUint::from(1u8) << (256 - n)) - BigUint::from(1u8);
+    Target::from_target(&value)
+}
+
 pub fn sha256d(data: &[u8]) -> [u8; 32] {
     let first = Sha256::digest(data);
     let second = Sha256::digest(first);
@@ -129,6 +146,27 @@ mod tests {
             let target = Target { bits };
             assert_eq!(Target::from_target(&target.to_target()).bits, bits);
         }
+    }
+
+    #[test]
+    fn floor_target_enforces_leading_zero_bits() {
+        let t = floor_target(8);
+        // Top byte zero => >= 8 leading zero bits => satisfies the floor.
+        let mut ok = [0u8; 32];
+        ok[1] = 0xff;
+        assert!(meets_target(&ok, t));
+        // Top byte nonzero => 0 leading zero bits => fails the 8-bit floor.
+        let mut bad = [0u8; 32];
+        bad[0] = 0x01;
+        assert!(!meets_target(&bad, t));
+        // The demotion floor is vastly easier than a hard network target: a hash
+        // meeting the floor need not meet a real mainnet-style target.
+        let hard = Target { bits: 0x1d00ffff };
+        assert!(t.to_target() > hard.to_target());
+        // A CPU-reachable hash (8 leading zero bits) that does NOT meet the hard
+        // target: this is exactly the "demoted proposer block" case.
+        assert!(meets_target(&ok, t));
+        assert!(!meets_target(&ok, hard));
     }
 
     #[test]

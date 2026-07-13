@@ -55,3 +55,4 @@ script.js
 .env
 target/
 irium-node-rs/target/
+bootstrap-clean/

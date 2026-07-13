@@ -1218,7 +1218,25 @@ fn build_all_gates_block_with(
         // Receipt export mode: build/validate the PoAW-X receipt material without
         // spending mainnet-scale work on the enclosing block header.
     } else {
-        solver(&mut block.header, height, Target { bits })?;
+        // PoAW-X PoW demotion (miner side): when this miner is building a block as a
+        // validly-selected proposer (`proposer_ctx` present) and the proposer-VRF gate
+        // is enforced, grind against the trivial anti-spam floor instead of the full
+        // network target. This mirrors the node's `proposer_demotion_applies` gate, so
+        // the miner builds exactly what the node will accept. The header still carries
+        // the real `bits` (declared target) — the node checks bits-match against the
+        // network target and only demotes the PoW-satisfaction check. Merge note: this
+        // feeds the demoted target into the pluggable Stage-G0 `solver` (from
+        // testing-codes) rather than calling `mine_pow` directly, preserving the
+        // CPU/GPU solver abstraction.
+        let search_target = if proposer_ctx.is_some()
+            && crate::poawx_proposer::pow_demotion_active(height)
+            && crate::poawx_proposer::proposer_vrf_enforced(height)
+        {
+            crate::pow::floor_target(crate::poawx_proposer::proposer_anti_spam_bits())
+        } else {
+            Target { bits }
+        };
+        solver(&mut block.header, height, search_target)?;
     }
     let block_hash = block.header.hash_for_height(height);
 

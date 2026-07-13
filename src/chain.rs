@@ -675,6 +675,30 @@ impl ChainState {
         self.chain.get(height as usize).cloned()
     }
 
+    /// Devnet/regtest fast-mining target. Normally the near-maximum `0x207fffff` so
+    /// commodity CPUs mine instantly. TEST-ONLY: when both `IRIUM_DEVNET_HARD_TARGET_BITS`
+    /// and `IRIUM_DEVNET_HARD_TARGET_HEIGHT` are set, heights `>=` that height use the
+    /// given HARD bits instead. Used to prove PoW demotion end-to-end on an isolated
+    /// devnet: bootstrap on the trivial target (CPU mines + registers a proposer), then
+    /// at/after the hard height a registered+selected proposer lands demoted-floor blocks
+    /// against a mainnet-hard target a CPU could never meet un-demoted.
+    fn devnet_override_target(height: u64) -> Target {
+        if let (Ok(bits_s), Ok(h_s)) = (
+            std::env::var("IRIUM_DEVNET_HARD_TARGET_BITS"),
+            std::env::var("IRIUM_DEVNET_HARD_TARGET_HEIGHT"),
+        ) {
+            if let (Ok(bits), Ok(hard_h)) = (
+                u32::from_str_radix(bits_s.trim().trim_start_matches("0x"), 16),
+                h_s.trim().parse::<u64>(),
+            ) {
+                if height >= hard_h {
+                    return Target { bits };
+                }
+            }
+        }
+        Target { bits: 0x207fffff }
+    }
+
     fn legacy_target_for_height(&self, height: u64) -> Target {
         // Devnet/regtest fast-mining override: return a near-maximum target so
         // commodity CPU mining finds blocks effectively instantly. Skip for
@@ -688,7 +712,7 @@ impl ChainState {
                 Ok("devnet") | Ok("regtest")
             )
         {
-            return Target { bits: 0x207fffff };
+            return Self::devnet_override_target(height);
         }
         if height == 0 {
             return self.params.genesis_block.header.target();
@@ -773,7 +797,7 @@ impl ChainState {
                 Ok("devnet") | Ok("regtest")
             )
         {
-            return Target { bits: 0x207fffff };
+            return Self::devnet_override_target(target_height);
         }
         let last_block = self
             .chain
@@ -1353,10 +1377,29 @@ impl ChainState {
         height: u64,
         previous: Option<&Block>,
     ) -> Result<(), String> {
+        self.check_block_proposer(block, height, previous).map(|_| ())
+    }
+
+    /// Core proposer-assignment validation, returning whether a valid selected
+    /// assignment is present. `Ok(true)` => the block carries at least one valid,
+    /// selected, eligible proposer assignment, which makes the PoW-demotion floor
+    /// applicable (`floor_target`). `Ok(false)` => no proposer assignment is
+    /// present, so no demotion applies and the full network target is required.
+    /// `Err` => an assignment is present but invalid, and the block is rejected.
+    ///
+    /// This is the single source of truth consulted both by `validate_block_proposer`
+    /// (to reject invalid assignments) and by `proposer_demotion_applies` (to gate
+    /// PoW demotion), so the two can never diverge.
+    fn check_block_proposer(
+        &self,
+        block: &Block,
+        height: u64,
+        previous: Option<&Block>,
+    ) -> Result<bool, String> {
         let net = crate::activation::network_id_byte();
         let receipts = match &block.poawx_receipts {
             Some(r) => r,
-            None => return Ok(()),
+            None => return Ok(false),
         };
         let seed = crate::poawx_committed_admission::expected_epoch_seed(
             height,
@@ -1366,6 +1409,7 @@ impl ChainState {
         let parent_time = previous.map(|b| b.header.time).unwrap_or(0);
         let n = self.proposer_registry.eligible_count(height);
         let round_interval = crate::poawx_proposer::proposer_round_interval_secs();
+        let mut had_assignment = false;
         for r in receipts {
             let ext = r.phase20_ext.as_ref().ok_or_else(|| {
                 format!("proposer: receipt missing extension at height {}", height)
@@ -1481,8 +1525,30 @@ impl ChainState {
                     pa.round, block.header.time, min_t
                 ));
             }
+            had_assignment = true;
         }
-        Ok(())
+        Ok(had_assignment)
+    }
+
+    /// Whether PoW demotion applies to this block: the proposer-VRF gate is
+    /// enforced at `height` AND the block carries a valid, selected proposer
+    /// assignment (`check_block_proposer` == `Ok(true)`). A block with no valid
+    /// assignment (Ok(false)) or an invalid one (Err) does NOT get demotion, so it
+    /// still must satisfy the full network target — preventing trivial-PoW spam.
+    fn proposer_demotion_applies(
+        &self,
+        block: &Block,
+        height: u64,
+        previous: Option<&Block>,
+    ) -> bool {
+        // Master gate FIRST (short-circuits): PoW demotion is a block-header validity
+        // change and is HARD-off on mainnet and off by default on every network until
+        // IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT is explicitly set (see
+        // `pow_demotion_active`). Only then does a valid, selected proposer assignment
+        // trigger the floor-target PoW instead of the full network target.
+        crate::poawx_proposer::pow_demotion_active(height)
+            && crate::poawx_proposer::proposer_vrf_enforced(height)
+            && matches!(self.check_block_proposer(block, height, previous), Ok(true))
     }
 
     fn validate_block_fraud_proofs(&self, block: &Block, height: u64) -> Result<(), String> {
@@ -2811,22 +2877,39 @@ impl ChainState {
         if block.header.target().bits != target.bits {
             return Err("Block bits mismatch".to_string());
         }
+        // PoAW-X PoW demotion (isolated devnet only; mainnet gate hard-off): when a
+        // block carries a valid, selected proposer assignment, its header PoW is
+        // validated against the trivial anti-spam floor instead of the full network
+        // target, so block *production* is hashrate-independent for a validly-selected
+        // proposer. The header still DECLARES the real network `bits` (checked above),
+        // so LWMA continuity is preserved and only the PoW-satisfaction target is
+        // demoted (the declared-bits/LWMA decoupling is the Part-5 security question,
+        // deliberately not changed here). Demotion applies ONLY when
+        // `proposer_demotion_applies` is true; a block with no valid assignment still
+        // requires the full target, so trivial-PoW spam cannot be accepted.
+        let pow_target = if self.proposer_demotion_applies(block, height, previous) {
+            crate::pow::floor_target(crate::poawx_proposer::proposer_anti_spam_bits())
+        } else {
+            target
+        };
         let auxpow_active = self
             .params
             .auxpow_activation_height
             .map(|ah| height >= ah)
             .unwrap_or(false);
         if block.header.version & crate::auxpow::AUXPOW_VERSION_BIT != 0 && auxpow_active {
+            // AuxPoW (merged mining) is validated against the full target; a demoted
+            // proposer block does not carry AuxPoW and takes the branch below.
             let header_bytes = block.header.serialize_for_height(height);
             let ap = block
                 .auxpow
                 .as_ref()
                 .ok_or_else(|| "AuxPoW block is missing AuxPoW data".to_string())?;
             crate::auxpow::validate(ap, &header_bytes, target)?;
-        } else if !meets_target(&header_hash, target)
+        } else if !meets_target(&header_hash, pow_target)
             && !whatsminer_compat_hash
                 .as_ref()
-                .map(|h| meets_target(h, target))
+                .map(|h| meets_target(h, pow_target))
                 .unwrap_or(false)
         {
             return Err("Block does not satisfy proof-of-work target".to_string());
@@ -15286,6 +15369,178 @@ mod proposer_consensus_tests {
             .expect("sole eligible winner accepted regardless of PoW");
         std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
         std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
+    fn pow_demotion_accepts_floor_block_only_with_valid_assignment() {
+        // Part-1/Part-2 PoW demotion, proven at the consensus PoW gate
+        // `validate_block_header` (the exact check `connect_block` runs). A validly
+        // SELECTED proposer's block is ACCEPTED while its header hash meets only the
+        // CPU-reachable anti-spam floor against a HARD (mainnet-level) network target
+        // it could never satisfy. The IDENTICAL block with its proposer assignment
+        // stripped is REJECTED, still requiring the full target. Hashrate never
+        // decides the verdict; a valid selected assignment does.
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        // testnet net-id: the devnet/regtest fast-mining target override (which pins
+        // the target to 0x207fffff) does NOT apply, so a hard-bits genesis yields a
+        // hard target_for_height(1). The proposer-VRF gate is env-driven off mainnet,
+        // so it can be enforced here.
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_ANTISPAM_BITS", "8");
+        // Explicit demotion gate ON (testnet). Without this, demotion is off and the
+        // full network target is enforced (see the gate-off assertion at the end).
+        std::env::set_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", "1");
+        // Freeze depth 2 (the minimum): a height-0 registration falls in the frozen
+        // window [0,0] for target height 2, so it is eligible.
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let net = crate::activation::network_id_byte();
+        assert!(
+            crate::poawx_proposer::proposer_vrf_enforced(1),
+            "proposer VRF must be enforced for this test"
+        );
+
+        // Hard, mainnet-level network target the CPU-built block will NOT meet.
+        const HARD_BITS: u32 = 0x1d00ffff;
+
+        // Chain whose genesis carries the hard bits: with no devnet override on
+        // testnet, target_for_height(1) resolves to the genesis target = HARD_BITS.
+        let locked = crate::genesis::load_locked_genesis().expect("locked genesis");
+        let mut genesis = block_from_locked(&locked).expect("genesis block");
+        genesis.header.bits = HARD_BITS;
+        let pow_limit = Target { bits: HARD_BITS };
+        let params = ChainParams {
+            genesis_block: genesis.clone(),
+            pow_limit,
+            htlcv1_activation_height: None,
+            mpsov1_activation_height: None,
+            lwma: LwmaParams::new(None, pow_limit),
+            lwma_v2: None,
+            auxpow_activation_height: None,
+            btc_spv: None,
+            ltc_spv: None,
+            htlc_btc_swap_v1_activation_height: None,
+            btc_swap_bech32_payment_activation_height: None,
+            htlc_ltc_swap_v1_activation_height: None,
+            swap_order_v1_activation_height: None,
+            ltc_swap_order_v1_activation_height: None,
+            coinbase_header_batch_activation_height: None,
+        };
+        let mut chain = ChainState::new(params);
+        // Proposer eligibility requires target_height >= freeze_depth (>= 2), so we
+        // validate at HEIGHT 2. A genesis-only chain still yields the hard genesis
+        // target at any height (LWMA sample count is 0), and we use previous=None
+        // with a zero prev-hash exactly like the sibling
+        // `non_selected_proposer_rejected_even_with_max_pow` test.
+        const H: u64 = 2;
+        let prev_hash = [0u8; 32];
+        assert_eq!(
+            chain.target_for_height(H).bits,
+            HARD_BITS,
+            "network target at height 2 is the hard mainnet-level target"
+        );
+
+        // Build the proposer block at height H. It declares HARD_BITS, but the miner
+        // grinds ONLY the anti-spam floor (Part-2 demotion inside the harness).
+        let secret = secret_n(1);
+        let seed = expected_epoch_seed(H, prev_hash, None);
+        let proof = prove(&secret, net, H, seed);
+        let vrf_key = proof.assignment_public_key;
+        let miner_pkh = proof.solver_pkh;
+        let ctx = ProposerCtx {
+            assignment: ProposerAssignmentV1 { round: 0, proof },
+        };
+        let dom = PersistentDominance::from_env();
+        let built = build_solo_poawx_block_with_proposer(
+            &secret,
+            net,
+            H,
+            prev_hash,
+            None,
+            HARD_BITS,
+            genesis.header.time + 1,
+            1,
+            ([0u8; 32], [0u8; 32]),
+            &dom,
+            None,
+            Some(&ctx),
+            None,
+        )
+        .expect("build demoted proposer block");
+        let block = built.block;
+
+        // Sanity: the header hash meets the 8-bit floor but NOT the hard target, so the
+        // ONLY reason the block can be valid is demotion (not hashrate).
+        let hash = block.header.hash_for_height(H);
+        assert!(
+            crate::pow::meets_target(&hash, crate::pow::floor_target(8)),
+            "CPU block meets the 8-bit anti-spam floor"
+        );
+        assert!(
+            !crate::pow::meets_target(&hash, Target { bits: HARD_BITS }),
+            "CPU block must NOT meet the mainnet-hard target"
+        );
+
+        // Register the proposer key so it is eligible (frozen window [0,0] at H=2) and
+        // (sole key => n=1) selected.
+        chain.proposer_registry.register(vrf_key, miner_pkh, 0);
+        assert_eq!(chain.proposer_registry.eligible_count(H), 1);
+
+        // (1) Valid selected assignment => demotion applies => PoW gate ACCEPTS.
+        assert!(
+            chain.proposer_demotion_applies(&block, H, None),
+            "demotion applies for the validly-selected proposer"
+        );
+        chain
+            .validate_block_header(&block, H, None)
+            .expect("connect_block PoW gate accepts the demoted-floor proposer block");
+
+        // (2) Identical block, assignment stripped => no demotion => full target => REJECT.
+        let mut stripped = block.clone();
+        {
+            let receipts = stripped.poawx_receipts.as_mut().expect("receipts present");
+            let ext = receipts[0].phase20_ext.as_mut().expect("phase20 ext present");
+            ext.proposer_assignment = None;
+        }
+        assert!(
+            !chain.proposer_demotion_applies(&stripped, H, None),
+            "no valid assignment => no demotion"
+        );
+        let err = chain
+            .validate_block_header(&stripped, H, None)
+            .expect_err("without a valid assignment the full network target is required");
+        assert!(
+            err.contains("proof-of-work"),
+            "expected full-target PoW rejection, got: {err}"
+        );
+
+        // (3) GATE OFF: unset the demotion gate. The SAME valid-selected-proposer block
+        // (the one accepted in step 1) is now REJECTED -- the full network target is
+        // enforced, i.e. no demotion behaviour is possible without the explicit gate.
+        std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+        assert!(
+            !chain.proposer_demotion_applies(&block, H, None),
+            "gate unset => demotion must not apply"
+        );
+        let err_off = chain
+            .validate_block_header(&block, H, None)
+            .expect_err("gate unset => full network target enforced");
+        assert!(
+            err_off.contains("proof-of-work"),
+            "gate unset must enforce full PoW, got: {err_off}"
+        );
+
+        for k in [
+            "IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT",
+            "IRIUM_POAWX_PROPOSER_FREEZE_DEPTH",
+            "IRIUM_POAWX_PROPOSER_ANTISPAM_BITS",
+            "IRIUM_POAWX_PROPOSER_VRF_REQUIRED",
+            "IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT",
+            "IRIUM_NETWORK",
+        ] {
+            std::env::remove_var(k);
+        }
     }
 
     #[test]

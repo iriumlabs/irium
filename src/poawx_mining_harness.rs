@@ -270,9 +270,12 @@ impl AllGatesIdentities {
     }
 
     /// Solo identities: one miner secret plays worker + finality member + all three
-    /// roles (compute/verify/support all == the miner pkh). Per-role assignment
-    /// secrets are domain-separated from the miner secret. The SUPPORT solver equals
-    /// hash160(miner pubkey) == the finality member pkh, so the committee validates.
+    /// roles (compute/verify/support all == the miner pkh). Each role's ASSIGNMENT key
+    /// is the miner secret itself, so solver_pkh == hash160(assignment_public_key) holds
+    /// for every contributor role -- satisfying the Option A contributor-role binding
+    /// rule (the same invariant `prove_self_solver` enforces; role_id keeps the three
+    /// VRF proofs distinct). The SUPPORT solver equals hash160(miner pubkey) == the
+    /// finality member pkh, so the committee validates.
     pub fn solo(miner_secret: &[u8; 32]) -> Result<Self, String> {
         let sk = SigningKey::from_bytes(miner_secret.into())
             .map_err(|_| "solo: bad miner key".to_string())?;
@@ -293,9 +296,9 @@ impl AllGatesIdentities {
             compute_solver: pkh,
             verify_solver: pkh,
             support_solver: pkh,
-            compute_assign: derive(b"compute"),
-            verify_assign: derive(b"verify"),
-            support_assign: derive(b"support"),
+            compute_assign: *miner_secret,
+            verify_assign: *miner_secret,
+            support_assign: *miner_secret,
             claim_seed: derive(b"claim"),
             worker_pkh_override: None,
             delegation: None,

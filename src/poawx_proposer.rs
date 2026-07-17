@@ -120,17 +120,31 @@ pub fn pow_demotion_activation_height() -> Option<u64> {
         .and_then(|v| v.trim().parse::<u64>().ok())
 }
 
+/// Compiled mainnet activation height for PoAW-X PoW demotion, analogous to
+/// `MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT`. `None` = hard-off on mainnet: no
+/// environment value can enable demotion on net 0. Set to `Some(H)` (a height
+/// past the then-current tip) ONLY for a coordinated demotion-activation release,
+/// after the change is devnet-proven under mainnet-parity gates.
+pub const MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT: Option<u64> = None;
+
+/// Pure mainnet-const evaluation for PoW demotion (param-driven for race-free
+/// tests): active iff the compiled mainnet height is set and reached.
+pub fn mainnet_pow_demotion_active(mainnet_activation: Option<u64>, height: u64) -> bool {
+    matches!(mainnet_activation, Some(h) if height >= h)
+}
+
 /// Master gate for PoW demotion, which changes block-header validity (a
-/// consensus rule). GENUINE mainnet hard-off: `network_id == 0` returns `false`
-/// unconditionally, so NO environment value can enable demotion on mainnet. This
-/// deliberately does NOT route through `poawx_effective_activation` (which returns
-/// `MAINNET_POAWX_ACTIVATION_HEIGHT` for net 0 and would make a feature active at
-/// height >= 50_000). On non-mainnet networks demotion is OFF unless
-/// `IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT` is explicitly set, and then only
-/// at or after that height. Param-driven for race-free tests.
+/// consensus rule). On mainnet (`network_id == 0`) the ENV is IGNORED: demotion is
+/// controlled solely by the compiled `MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT` const
+/// (`None` => hard-off), so no environment value can enable it. This deliberately
+/// does NOT route through `poawx_effective_activation` (which returns
+/// `MAINNET_POAWX_ACTIVATION_HEIGHT` for net 0). On non-mainnet networks demotion is
+/// OFF unless `IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT` is explicitly set, and
+/// then only at or after that height. Param-driven for race-free tests.
 pub fn pow_demotion_gate(network_id: u8, activation: Option<u64>, height: u64) -> bool {
     if network_id == 0 {
-        return false; // mainnet: hard-off, no env can enable it
+        // mainnet: env can NEVER enable demotion; only the compiled const can.
+        return mainnet_pow_demotion_active(MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, height);
     }
     matches!(activation, Some(h) if height >= h)
 }
@@ -734,12 +748,13 @@ mod tests {
 
     #[test]
     fn pow_demotion_gate_is_genuinely_mainnet_hard_off() {
-        // Unlike gates routed through `poawx_effective_activation` (which activate on
-        // mainnet at height >= 50_000), PoW demotion is HARD-off on mainnet at ANY
-        // height and for ANY env value -- it changes block-header validity.
-        assert!(!pow_demotion_gate(0, Some(1), 1)); // mainnet: off
-        assert!(!pow_demotion_gate(0, Some(1), 50_000)); // mainnet: still off at the PoAW-X height
-        assert!(!pow_demotion_gate(0, Some(1), 10_000_000)); // mainnet: off forever, env ignored
+        // On mainnet the ENV is IGNORED entirely: demotion is controlled solely by
+        // the compiled `MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT` const. With the
+        // shipped const (`None`) mainnet is hard-off at ANY height and ANY env value.
+        assert_eq!(MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, None); // shipped hard-off
+        assert!(!pow_demotion_gate(0, Some(1), 1)); // mainnet: off (const None)
+        assert!(!pow_demotion_gate(0, Some(1), 50_000)); // mainnet: off at the PoAW-X height too
+        assert!(!pow_demotion_gate(0, Some(1), 10_000_000)); // mainnet: env ignored, off (const None)
         assert!(!pow_demotion_gate(0, None, 10_000_000)); // mainnet: off, no env
         // non-mainnet: OFF unless explicitly activated, then on at/after the height.
         assert!(!pow_demotion_gate(2, None, 1)); // devnet unset => off
@@ -747,6 +762,21 @@ mod tests {
         assert!(!pow_demotion_gate(2, Some(10), 9)); // before activation => off
         assert!(pow_demotion_gate(2, Some(10), 10)); // at activation => on
         assert!(pow_demotion_gate(1, Some(1), 999)); // after activation => on
+    }
+
+    #[test]
+    fn mainnet_pow_demotion_const_controls_net0_activation() {
+        // The mainnet activation path is the compiled const, evaluated by the pure
+        // param-driven helper (testable without mutating the shipped const or env):
+        assert!(!mainnet_pow_demotion_active(None, 10_000_000)); // unset => off at any height
+        assert!(!mainnet_pow_demotion_active(Some(100), 99)); // before activation => off
+        assert!(mainnet_pow_demotion_active(Some(100), 100)); // at activation => on
+        assert!(mainnet_pow_demotion_active(Some(100), 101)); // after activation => on
+        // The gate wires the const into net 0 (env ignored); the shipped const is None.
+        assert_eq!(
+            pow_demotion_gate(0, Some(1), 10_000_000),
+            mainnet_pow_demotion_active(MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, 10_000_000)
+        );
     }
 
     #[test]

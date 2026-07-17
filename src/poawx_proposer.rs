@@ -125,7 +125,7 @@ pub fn pow_demotion_activation_height() -> Option<u64> {
 /// environment value can enable demotion on net 0. Set to `Some(H)` (a height
 /// past the then-current tip) ONLY for a coordinated demotion-activation release,
 /// after the change is devnet-proven under mainnet-parity gates.
-pub const MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT: Option<u64> = None;
+pub const MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT: Option<u64> = Some(58_242);
 
 /// Pure mainnet-const evaluation for PoW demotion (param-driven for race-free
 /// tests): active iff the compiled mainnet height is set and reached.
@@ -749,13 +749,14 @@ mod tests {
     #[test]
     fn pow_demotion_gate_is_genuinely_mainnet_hard_off() {
         // On mainnet the ENV is IGNORED entirely: demotion is controlled solely by
-        // the compiled `MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT` const. With the
-        // shipped const (`None`) mainnet is hard-off at ANY height and ANY env value.
-        assert_eq!(MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, None); // shipped hard-off
-        assert!(!pow_demotion_gate(0, Some(1), 1)); // mainnet: off (const None)
-        assert!(!pow_demotion_gate(0, Some(1), 50_000)); // mainnet: off at the PoAW-X height too
-        assert!(!pow_demotion_gate(0, Some(1), 10_000_000)); // mainnet: env ignored, off (const None)
-        assert!(!pow_demotion_gate(0, None, 10_000_000)); // mainnet: off, no env
+        // the compiled `MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT` const, now set to the
+        // v1.9.129 activation height. Off strictly before it, on at/after it.
+        assert_eq!(MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, Some(58_242)); // v1.9.129 activation
+        assert!(!pow_demotion_gate(0, Some(1), 1)); // mainnet: off well before H (env ignored)
+        assert!(!pow_demotion_gate(0, Some(1), 58_241)); // one block before H => off
+        assert!(pow_demotion_gate(0, Some(1), 58_242)); // at H => on
+        assert!(pow_demotion_gate(0, None, 58_242)); // on at H even with no env (const drives it)
+        assert!(pow_demotion_gate(0, Some(999), 60_000)); // after H => on, env irrelevant
         // non-mainnet: OFF unless explicitly activated, then on at/after the height.
         assert!(!pow_demotion_gate(2, None, 1)); // devnet unset => off
         assert!(!pow_demotion_gate(1, None, 1)); // testnet unset => off

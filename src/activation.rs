@@ -254,7 +254,7 @@ pub const MAINNET_POAWX_ACTIVATION_HEIGHT: Option<u64> = Some(50_000);
 /// PoAW-X receipts -- the pool paying each miner directly on-chain. `None` => off
 /// (pre-activation); `Some(H)` => active at height >= H. COORDINATED HARD FORK: every
 /// full node must run this binary before H or it rejects the delegated blocks and forks.
-pub const MAINNET_POAWX_DELEGATION_HEIGHT: Option<u64> = Some(57_794);
+pub const MAINNET_POAWX_DELEGATION_HEIGHT: Option<u64> = Some(57_920);
 
 /// True when mainnet PoAW-X is active at `height` (mainnet network AND height past
 /// the fixed activation height). Always false on testnet/devnet.

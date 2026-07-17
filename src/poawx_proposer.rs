@@ -416,7 +416,7 @@ pub fn audit_hardening_active(height: u64) -> bool {
 /// contributor-role solver binding. `None` => NOT live-active on mainnet -- the actual
 /// future, announced, coordinated activation is a SEPARATE deferred decision (mirrors the
 /// block-50000 discipline). Rig/devnet activate it low via the env var below for testing.
-pub const MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT: Option<u64> = Some(57_794);
+pub const MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT: Option<u64> = Some(57_920);
 
 pub fn contributor_role_binding_activation_height() -> Option<u64> {
     std::env::var("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT")

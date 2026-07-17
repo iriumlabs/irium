@@ -12509,6 +12509,118 @@ mod tests {
     }
 
     #[test]
+    fn all_gates_plus_contributor_binding_solo_connect_block() {
+        // REGRESSION for the 2026-07-17 mainnet halt (block 57,794): the all-gates solo
+        // builder, with CONTRIBUTOR_ROLE_BINDING additionally ACTIVE, must produce
+        // connect_block-accepted blocks. Pre-fix the contributor solvers had
+        // solver_pkh != hash160(assignment_public_key) and were rejected at
+        // poawx_candidate.rs -- exactly what halted mainnet. Post-fix (assignment key ==
+        // miner secret) the binding holds. Mirrors all_gates_solo_poawx_builder_connect_block
+        // plus the binding gate; connect_block itself runs the binding check.
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::seed_components_from_block;
+        use crate::poawx_mining_harness::build_solo_poawx_block_with_parent;
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TICKETS_REQUIRED", "1"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            ("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1"),
+        ];
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let secret = [0x4Du8; 32];
+        let cache = global_admission_cache();
+
+        let n_blocks = 3u64;
+        let mut prev = genesis_hash;
+        let mut parent_prev: Option<[u8; 32]> = None;
+        for h in 1..=n_blocks {
+            let parent_components = seed_components_from_block(st.chain.last());
+            let bits = st.target_for_height(h).bits;
+            let time = genesis.header.time + h as u32;
+            let proof = build_solo_poawx_block_with_parent(
+                &secret,
+                net,
+                h,
+                prev,
+                parent_prev,
+                bits,
+                time,
+                1,
+                parent_components,
+            )
+            .unwrap_or_else(|e| panic!("build H{h}: {e}"));
+
+            cache.clear();
+            cache.set_tip(h);
+            for adm in &proof.admissions {
+                assert_eq!(
+                    cache.ingest_bytes(adm),
+                    crate::poawx_gossip::GossipOutcome::AcceptedNew,
+                    "H{h}: admission ingested"
+                );
+            }
+            let before = st.height;
+            let blk_prev = prev;
+            let blk_hash = proof.block_hash;
+            st.connect_block(proof.block)
+                .unwrap_or_else(|e| panic!("connect_block H{h} (binding active) failed: {e}"));
+            assert_eq!(st.height, before + 1, "H{h}: tip advanced by one under binding");
+            parent_prev = Some(blk_prev);
+            prev = blk_hash;
+        }
+        assert!(
+            st.height >= 3,
+            "binding-active all-gates chain advanced to >= 3 (tip {})",
+            st.height
+        );
+
+        for (k, _v) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
     fn phase4_contributor_binding_rejects_mismatched_solver() {
         // Isolated proof of the rule at AssignmentProofV2::validate (dominance/ordering cannot
         // preempt it here): solver_pkh must == hash160(assignment_public_key) for a contributor

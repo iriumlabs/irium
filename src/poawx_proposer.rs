@@ -125,7 +125,25 @@ pub fn pow_demotion_activation_height() -> Option<u64> {
 /// environment value can enable demotion on net 0. Set to `Some(H)` (a height
 /// past the then-current tip) ONLY for a coordinated demotion-activation release,
 /// after the change is devnet-proven under mainnet-parity gates.
-pub const MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT: Option<u64> = Some(58_242);
+///
+/// REVERTED TO `None` 2026-07-18 (safety). v1.9.129 set this to `Some(58_242)`,
+/// which made demotion genuinely LIVE on mainnet. Demotion is not usable on a real
+/// network: only 1 of 5 PoW validation paths is demotion-aware (`connect_block`).
+/// Both P2P paths (`add_header`, `process_block`) and both restart paths
+/// (`parse_persisted_block_file`, `rebuild_startup_header_index`) validate against
+/// the DECLARED target, so a demoted block cannot propagate to peers and does not
+/// survive a restart. With the gate live, a floor-PoW (20-bit) block from a holder
+/// of an eligible proposer key would be accepted locally and orphaned by the
+/// network — a self-inflicted chain split.
+///
+/// No harm occurred: every block in 58242..=58778 was verified to satisfy the FULL
+/// target (537/537, tightest margin +0 bits), so reverting invalidates nothing and
+/// is strictly more conservative than the shipped behaviour.
+///
+/// Do NOT set this back to `Some(H)` until the propagation-layer work (Track 1C)
+/// lands and is proven on a MULTI-NODE devnet. See
+/// `docs/poawx-pow-demotion-mainnet-status.md`.
+pub const MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT: Option<u64> = None;
 
 /// Pure mainnet-const evaluation for PoW demotion (param-driven for race-free
 /// tests): active iff the compiled mainnet height is set and reached.
@@ -749,14 +767,15 @@ mod tests {
     #[test]
     fn pow_demotion_gate_is_genuinely_mainnet_hard_off() {
         // On mainnet the ENV is IGNORED entirely: demotion is controlled solely by
-        // the compiled `MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT` const, now set to the
-        // v1.9.129 activation height. Off strictly before it, on at/after it.
-        assert_eq!(MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, Some(58_242)); // v1.9.129 activation
-        assert!(!pow_demotion_gate(0, Some(1), 1)); // mainnet: off well before H (env ignored)
-        assert!(!pow_demotion_gate(0, Some(1), 58_241)); // one block before H => off
-        assert!(pow_demotion_gate(0, Some(1), 58_242)); // at H => on
-        assert!(pow_demotion_gate(0, None, 58_242)); // on at H even with no env (const drives it)
-        assert!(pow_demotion_gate(0, Some(999), 60_000)); // after H => on, env irrelevant
+        // the compiled `MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT` const, reverted to
+        // `None` on 2026-07-18 => hard-off at EVERY height, no env can enable it.
+        assert_eq!(MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, None); // reverted 2026-07-18 (safety)
+        assert!(!pow_demotion_gate(0, Some(1), 1)); // mainnet: off (env ignored)
+        assert!(!pow_demotion_gate(0, Some(1), 58_241)); // off before the old activation height
+        assert!(!pow_demotion_gate(0, Some(1), 58_242)); // off AT the old height (const is None)
+        assert!(!pow_demotion_gate(0, None, 58_242)); // off with no env either
+        assert!(!pow_demotion_gate(0, Some(999), 60_000)); // off far past it, env irrelevant
+        assert!(!pow_demotion_gate(0, Some(1), u64::MAX)); // off at any height whatsoever
         // non-mainnet: OFF unless explicitly activated, then on at/after the height.
         assert!(!pow_demotion_gate(2, None, 1)); // devnet unset => off
         assert!(!pow_demotion_gate(1, None, 1)); // testnet unset => off

@@ -193,6 +193,10 @@ static NEW_TIP_ANNOUNCED_COUNT: AtomicU64 = AtomicU64::new(0);
 static BLOCK_ANNOUNCE_PEERS_COUNT_TOTAL: AtomicU64 = AtomicU64::new(0);
 static BLOCK_REQUEST_COUNT: AtomicU64 = AtomicU64::new(0);
 static DUPLICATE_BLOCK_SUPPRESSED_COUNT: AtomicU64 = AtomicU64::new(0);
+/// Track 1C / C7: block requests that went undelivered past the timeout and were
+/// charged to the peer. Non-zero on a healthy node is expected under churn; a rate
+/// that tracks one peer is the signal this counter exists to expose.
+static BLOCK_REQUEST_TIMEOUT_COUNT: AtomicU64 = AtomicU64::new(0);
 static BLOCK_PROCESSING_MS_TOTAL: AtomicU64 = AtomicU64::new(0);
 static BLOCK_PROCESSING_SAMPLES: AtomicU64 = AtomicU64::new(0);
 static BLOCK_ANNOUNCE_DELAY_MS_TOTAL: AtomicU64 = AtomicU64::new(0);
@@ -1324,19 +1328,159 @@ async fn maybe_log_header_sync_state(
     );
 }
 
+/// Track 1C / C7: per-peer outstanding block-request state.
+///
+/// The map this lives in is keyed `HashMap<IpAddr, _>`, so a peer can have at most
+/// ONE outstanding block request *by the map's shape* — concurrency is capped at 1
+/// by construction. C7 deliberately does NOT add a second per-peer concurrency
+/// budget, which would be a second source of truth able to disagree with this one.
+///
+/// `fulfilled` is what makes timeout attribution possible at all. Before C7 the
+/// entry expired silently by cooldown, so a peer that never delivered paid nothing
+/// and re-qualified. The flag distinguishes "delivered" from "still owed"; marking
+/// it rather than removing the entry is what keeps the reaper idempotent (the
+/// penalty lands exactly once per request) and preserves the cooldown, which reads
+/// `sent_at`.
+#[derive(Debug, Clone, Copy)]
+struct BlockRequestState {
+    sent_at: Instant,
+    fulfilled: bool,
+}
+
+/// C7 knob: explicit ceiling on blocks a single peer may have outstanding.
+///
+/// Defaults to `MAX_BLOCKS_PER_REQUEST` (512, `protocol.rs:13`) — one full
+/// legitimate batch. This is a no-op for honest sync *by design*: it makes an
+/// invariant that was previously incidental (one request per peer, each capped at
+/// 512 by the protocol) explicit and enforced at the gate, so a later change to
+/// either half cannot silently widen it.
+fn max_blocks_inflight_per_peer() -> u32 {
+    std::env::var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER")
+        .ok()
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(MAX_BLOCKS_PER_REQUEST)
+        .clamp(1, MAX_BLOCKS_PER_REQUEST)
+}
+
+/// C7 knob: how long a block request may go undelivered before the peer is charged
+/// a failure.
+///
+/// Bandwidth-grounded, and deliberately NOT derived from `sync_cooldown_for`. That
+/// cooldown returns 1–5s and runs INVERTED to delivery size (gap >= 10,000 -> 1s),
+/// which is exactly when a legitimate response carries the full 512 blocks. A
+/// "3x cooldown" timeout would be ~3s during deep IBD and would mass-attribute
+/// failures to honest peers mid-sync, evicting them after 17 — manufacturing the
+/// outage this exists to prevent. The cooldown is a request-RATE limiter; this is a
+/// delivery-TIME budget. They are not convertible.
+fn block_request_timeout() -> Duration {
+    let secs = std::env::var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .unwrap_or(60);
+    Duration::from_secs(secs.clamp(5, 600))
+}
+
+/// C7 knob: percent of `max_peers()` held back from inbound accepts so the node can
+/// always dial out.
+///
+/// 20% (20 of 100) rather than 50%: mainnet carries real inbound community peers and
+/// a 50% reservation risked turning them away. Clamped at 50 so the reservation can
+/// never starve the inbound half it is meant to coexist with.
+fn reserved_outbound_slots_pct() -> usize {
+    std::env::var("IRIUM_P2P_RESERVED_OUTBOUND_SLOTS")
+        .ok()
+        .and_then(|v| v.parse::<usize>().ok())
+        .unwrap_or(20)
+        .min(50)
+}
+
+/// Inbound peer ceiling once the outbound reservation is taken out.
+fn inbound_peer_limit() -> usize {
+    let max = max_peers();
+    let reserved = max.saturating_mul(reserved_outbound_slots_pct()) / 100;
+    max.saturating_sub(reserved).max(1)
+}
+
+/// C7: a block body arrived from `ip`, so its outstanding request is satisfied and
+/// must not later be reaped as a timeout.
+async fn mark_block_request_fulfilled(
+    block_requests: &Arc<Mutex<HashMap<IpAddr, BlockRequestState>>>,
+    ip: IpAddr,
+) {
+    let mut guard = block_requests.lock().await;
+    if let Some(state) = guard.get_mut(&ip) {
+        state.fulfilled = true;
+    }
+}
+
+/// C7: charge a failure to every peer whose block request has gone undelivered past
+/// `block_request_timeout()`. Returns how many were charged.
+///
+/// Keyed by IP to match `trusted_anchor_peer_id` and every `is_banned` call site.
+/// Getting that keying wrong is not a cosmetic error — a `SocketAddr` key records
+/// the penalty against an identity ban enforcement never reads, and with ephemeral
+/// inbound ports it mints a fresh identity per connection. See the C7 handoff
+/// correction 0.2.
+async fn reap_timed_out_block_requests(
+    block_requests: &Arc<Mutex<HashMap<IpAddr, BlockRequestState>>>,
+    reputation: &Arc<Mutex<ReputationManager>>,
+) -> usize {
+    let timeout = block_request_timeout();
+    let now = Instant::now();
+    let mut timed_out: Vec<IpAddr> = Vec::new();
+    {
+        let mut guard = block_requests.lock().await;
+        for (ip, state) in guard.iter_mut() {
+            if !state.fulfilled && now.duration_since(state.sent_at) >= timeout {
+                // Mark before charging: the reaper runs from every connection's
+                // ping loop over the shared map, so idempotence is required, not
+                // merely tidy.
+                state.fulfilled = true;
+                timed_out.push(*ip);
+            }
+        }
+    }
+    if timed_out.is_empty() {
+        return 0;
+    }
+    BLOCK_REQUEST_TIMEOUT_COUNT.fetch_add(timed_out.len() as u64, Ordering::Relaxed);
+    let mut rep = reputation.lock().await;
+    for ip in &timed_out {
+        rep.record_failure(&ip.to_string());
+        P2PNode::log_event(
+            "warn",
+            "sync",
+            format!(
+                "block request to {} undelivered after {}s; failure recorded (score now {})",
+                ip,
+                timeout.as_secs(),
+                rep.score_of(&ip.to_string())
+            ),
+        );
+    }
+    timed_out.len()
+}
+
 async fn sync_block_request_allowed_for(
-    block_requests: &Arc<Mutex<HashMap<IpAddr, Instant>>>,
+    block_requests: &Arc<Mutex<HashMap<IpAddr, BlockRequestState>>>,
     ip: IpAddr,
     local_height: u64,
     peer_height: u64,
     start_hash: &[u8],
     count: u32,
 ) -> bool {
+    // C7: explicit per-peer inflight ceiling. Concurrency is already 1 per peer by
+    // the map's shape, so bounding a single request's count bounds the peer's total
+    // outstanding blocks. No-op at the default (count is MAX_BLOCKS_PER_REQUEST at
+    // every call site); enforced so it stays true.
+    if count > max_blocks_inflight_per_peer() {
+        return false;
+    }
     let cooldown = sync_cooldown_for(local_height, peer_height);
     let mut guard = block_requests.lock().await;
     let now = Instant::now();
     if let Some(last) = guard.get(&ip) {
-        if now.duration_since(*last) < cooldown {
+        if now.duration_since(last.sent_at) < cooldown {
             return false;
         }
     }
@@ -1364,7 +1508,13 @@ async fn sync_block_request_allowed_for(
         return false;
     }
 
-    guard.insert(ip, now);
+    guard.insert(
+        ip,
+        BlockRequestState {
+            sent_at: now,
+            fulfilled: false,
+        },
+    );
     true
 }
 
@@ -1899,7 +2049,7 @@ async fn maybe_request_sync(
     addr: SocketAddr,
     chain: &Option<Arc<StdMutex<ChainState>>>,
     sync_requests: &Arc<Mutex<HashMap<IpAddr, Instant>>>,
-    block_requests: &Arc<Mutex<HashMap<IpAddr, Instant>>>,
+    block_requests: &Arc<Mutex<HashMap<IpAddr, BlockRequestState>>>,
     peer_state: &Arc<Mutex<PeerSyncState>>,
 ) {
     let (peer_height, peer_tip) = {
@@ -2624,7 +2774,7 @@ pub struct P2PNode {
     reputation: Arc<Mutex<ReputationManager>>,
     accept_log: Arc<Mutex<HashMap<IpAddr, Instant>>>,
     sync_requests: Arc<Mutex<HashMap<IpAddr, Instant>>>,
-    block_requests: Arc<Mutex<HashMap<IpAddr, Instant>>>,
+    block_requests: Arc<Mutex<HashMap<IpAddr, BlockRequestState>>>,
     getblocks_seen: Arc<Mutex<HashMap<IpAddr, Instant>>>,
     getblocks_last: Arc<Mutex<HashMap<IpAddr, (Vec<u8>, u32, Instant)>>>,
     getblocks_genesis: Arc<Mutex<HashMap<IpAddr, Instant>>>,
@@ -3351,8 +3501,23 @@ impl P2PNode {
                         drop(log_guard);
 
                         let current = peers_arc.lock().await.len();
-                        if current >= max_peers() {
-                            Self::log_err(format!("Rejecting inbound {}: max peers reached", addr));
+                        // C7: hold back a slice of the peer table for outbound dials
+                        // so an inbound flood cannot fill every slot and leave the
+                        // node unable to reach an honest peer. Trusted seeds bypass
+                        // the reservation -- they are the recovery path it protects.
+                        let inbound_cap = if trusted {
+                            max_peers()
+                        } else {
+                            inbound_peer_limit()
+                        };
+                        if current >= inbound_cap {
+                            Self::log_err(format!(
+                                "Rejecting inbound {}: peer slots full ({}/{}, {}% reserved for outbound)",
+                                addr,
+                                current,
+                                inbound_cap,
+                                reserved_outbound_slots_pct()
+                            ));
                             continue;
                         }
                         if !trusted {
@@ -4467,6 +4632,8 @@ impl P2PNode {
         let ping_peer_state = peer_state.clone();
         let ping_sync_requests = self.sync_requests.clone();
         let ping_block_requests = self.block_requests.clone();
+        // C7: the reaper needs to charge non-delivery to the peer's reputation.
+        let ping_reputation = self.reputation.clone();
         let ping_peers_vec = self.peers.clone();
         let ping_connected_vec = self.connected.clone();
         tokio::spawn(async move {
@@ -4587,6 +4754,10 @@ impl P2PNode {
                         }
                     }
                 }
+                // C7: charge overdue block requests BEFORE issuing new ones, so a
+                // peer that is already delinquent is scored as such by the time the
+                // gate below decides whether to ask it for more.
+                reap_timed_out_block_requests(&ping_block_requests, &ping_reputation).await;
                 maybe_request_sync(
                     &ping_writer,
                     ping_addr,
@@ -6080,6 +6251,11 @@ impl P2PNode {
                     MessageType::Block => {
                         if let Some(ref chain_arc) = chain_for_sync {
                             if let Ok(payload) = BlockPayload::from_message(&msg) {
+                                // C7: the peer answered. Marked on ARRIVAL, not on
+                                // acceptance -- a body that arrives and fails
+                                // validation is a -50 via record_block, and must not
+                                // also be charged as a non-delivery.
+                                mark_block_request_fulfilled(&block_requests, addr.ip()).await;
                                 let peer_block_lock = peer_block_lock(addr.ip()).await;
                                 let _peer_block_guard = peer_block_lock.lock_owned().await;
                                 let decode_started = Instant::now();
@@ -7051,7 +7227,7 @@ async fn handle_incoming_with_sybil(
     directory: Arc<Mutex<PeerDirectory>>,
     reputation: Arc<Mutex<ReputationManager>>,
     sync_requests: Arc<Mutex<HashMap<IpAddr, Instant>>>,
-    block_requests: Arc<Mutex<HashMap<IpAddr, Instant>>>,
+    block_requests: Arc<Mutex<HashMap<IpAddr, BlockRequestState>>>,
     getblocks_seen: Arc<Mutex<HashMap<IpAddr, Instant>>>,
     getblocks_last: Arc<Mutex<HashMap<IpAddr, (Vec<u8>, u32, Instant)>>>,
     getblocks_genesis: Arc<Mutex<HashMap<IpAddr, Instant>>>,
@@ -7184,6 +7360,8 @@ async fn handle_incoming_with_sybil(
     let ping_peer_state = peer_state.clone();
     let ping_sync_requests = sync_requests.clone();
     let ping_block_requests = block_requests.clone();
+    // C7: see the P2PNode ping loop.
+    let ping_reputation = reputation.clone();
     let ping_peers_vec = peers.clone();
     let ping_connected_vec = connected.clone();
     tokio::spawn(async move {
@@ -7290,6 +7468,8 @@ async fn handle_incoming_with_sybil(
                     }
                 }
             }
+            // C7: see the P2PNode ping loop.
+            reap_timed_out_block_requests(&ping_block_requests, &ping_reputation).await;
             maybe_request_sync(
                 &ping_writer,
                 ping_addr,
@@ -8693,6 +8873,8 @@ async fn handle_incoming_with_sybil(
             MessageType::Block => {
                 if let Some(ref chain_arc) = chain {
                     if let Ok(payload) = BlockPayload::from_message(&msg) {
+                        // C7: see the outbound handler -- marked on arrival.
+                        mark_block_request_fulfilled(&block_requests, addr.ip()).await;
                         let decode_started = Instant::now();
                         let addr2 = addr;
                         let chain_arc2 = chain_arc.clone();
@@ -8887,7 +9069,17 @@ async fn handle_incoming_with_sybil(
 
                             if let Some(ok) = verdict {
                                 let mut rep = reputation2.lock().await;
-                                rep.record_block(&addr2.to_string(), ok);
+                                // C7 keying fix. This was `addr2.to_string()` -- a
+                                // SocketAddr, i.e. "ip:port". Every ban check is
+                                // IP-keyed (is_banned(&ip)), as is the outbound
+                                // path's trusted_anchor_peer_id, so the penalty was
+                                // recorded against an identity nothing reads; and
+                                // because inbound source ports are ephemeral, each
+                                // connection minted a fresh record. Inbound
+                                // invalid-block penalties were unbannable in
+                                // practice. Pre-existing bug; folded into C7 because
+                                // C7 exists to make attribution land.
+                                rep.record_block(&trusted_anchor_peer_id(addr2, false), ok);
                             }
                         });
                     }
@@ -9807,6 +9999,504 @@ mod tests {
         assert_eq!(
             dialable_multiaddr_from_advertised("[2001:db8::1]:38291"),
             None
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // Track 1C / C7 -- bounded peer request policy.
+    //
+    // Env vars are process-global; this project runs suites at
+    // --test-threads=1, and every test here restores what it sets.
+    // ------------------------------------------------------------------
+
+    use super::{
+        block_request_timeout, inbound_peer_limit, mark_block_request_fulfilled,
+        max_blocks_inflight_per_peer, reap_timed_out_block_requests, reserved_outbound_slots_pct,
+        sync_block_request_allowed_for, sync_cooldown_for, trusted_anchor_peer_id,
+        BlockRequestState,
+    };
+    use crate::reputation::{reputation_ban_score_threshold, ReputationManager};
+
+    fn c7_ip(last: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(198, 51, 100, last))
+    }
+
+    /// Isolate reputation state so no test can touch the real
+    /// peer_reputation.json. Returns the dir so the caller can clean it up.
+    ///
+    /// Must live under HOME: storage::state_dir refuses an IRIUM_STATE_DIR outside
+    /// it (process::exit) precisely so a stray env var cannot silently redirect
+    /// node state, so `std::env::temp_dir()` is not usable here.
+    fn c7_isolate_state(tag: &str) -> std::path::PathBuf {
+        let home = std::env::var("HOME").unwrap_or_else(|_| "/home/irium".to_string());
+        let dir = std::path::PathBuf::from(home)
+            .join("tmp")
+            .join(format!(".irium_c7_{}_{}", tag, std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        std::env::set_var("IRIUM_STATE_DIR", &dir);
+        dir
+    }
+
+    fn c7_release_state(dir: std::path::PathBuf) {
+        std::env::remove_var("IRIUM_STATE_DIR");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn c7_inflight_cap_defaults_to_max_blocks_per_request() {
+        std::env::remove_var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER");
+        assert_eq!(
+            max_blocks_inflight_per_peer(),
+            crate::protocol::MAX_BLOCKS_PER_REQUEST,
+            "the cap must default to one full legitimate batch, so it is a no-op for honest sync"
+        );
+    }
+
+    #[test]
+    fn c7_inflight_cap_is_env_tunable_and_clamped() {
+        std::env::set_var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER", "64");
+        assert_eq!(max_blocks_inflight_per_peer(), 64);
+        // Never above the protocol maximum: a larger value would be unservable
+        // anyway and would make the ceiling a lie.
+        std::env::set_var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER", "999999");
+        assert_eq!(
+            max_blocks_inflight_per_peer(),
+            crate::protocol::MAX_BLOCKS_PER_REQUEST
+        );
+        std::env::set_var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER", "0");
+        assert_eq!(max_blocks_inflight_per_peer(), 1);
+        std::env::remove_var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER");
+    }
+
+    #[tokio::test]
+    async fn c7_request_over_the_inflight_cap_is_refused() {
+        std::env::set_var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER", "16");
+        let map: Arc<Mutex<HashMap<IpAddr, BlockRequestState>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        let ip = c7_ip(10);
+        let start = [7u8; 32];
+        assert!(
+            !sync_block_request_allowed_for(&map, ip, 0, 100, &start, 17).await,
+            "a request above the per-peer ceiling must be refused"
+        );
+        assert!(
+            map.lock().await.is_empty(),
+            "a refused request must not record an outstanding entry"
+        );
+        std::env::remove_var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER");
+    }
+
+    #[test]
+    fn c7_block_request_timeout_defaults_to_60s_and_clamps() {
+        std::env::remove_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS");
+        assert_eq!(block_request_timeout(), Duration::from_secs(60));
+        std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "120");
+        assert_eq!(block_request_timeout(), Duration::from_secs(120));
+        std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "1");
+        assert_eq!(block_request_timeout(), Duration::from_secs(5));
+        std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "99999");
+        assert_eq!(block_request_timeout(), Duration::from_secs(600));
+        std::env::remove_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS");
+    }
+
+    /// The design's most re-derivable error, pinned as a test.
+    ///
+    /// `sync_cooldown_for` is a request-RATE limiter and runs INVERTED to delivery
+    /// size: the deeper the gap, the SHORTER it gets (1s at gap >= 10,000), which is
+    /// exactly when a legitimate response carries the full 512 blocks. Any future
+    /// "simplification" of the timeout into a multiple of the cooldown would produce
+    /// a ~3s delivery budget during deep IBD and mass-attribute failures to honest
+    /// peers mid-sync. This test fails if the timeout is ever made cooldown-derived.
+    #[test]
+    fn c7_timeout_is_bandwidth_grounded_not_a_cooldown_multiple() {
+        std::env::remove_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS");
+        std::env::remove_var("IRIUM_P2P_SYNC_COOLDOWN_SECS");
+
+        // The cooldown is inverted with respect to gap size -- confirm that is
+        // still true, since the argument depends on it.
+        let deep = sync_cooldown_for(0, 50_000);
+        let shallow = sync_cooldown_for(0, 20);
+        assert!(
+            deep < shallow,
+            "cooldown must shorten as the gap grows (got deep={:?} shallow={:?})",
+            deep,
+            shallow
+        );
+        assert_eq!(deep, Duration::from_secs(1), "deep-IBD cooldown is 1s");
+
+        // The timeout must NOT track it. A 3x-cooldown rule would give 3s here.
+        let timeout = block_request_timeout();
+        assert_eq!(timeout, Duration::from_secs(60));
+        assert!(
+            timeout >= deep * 20,
+            "delivery budget must be far larger than any cooldown multiple; \
+             timeout={:?} deep_cooldown={:?}",
+            timeout,
+            deep
+        );
+    }
+
+    #[test]
+    fn c7_reserved_outbound_slots_default_20_percent() {
+        std::env::remove_var("IRIUM_P2P_RESERVED_OUTBOUND_SLOTS");
+        std::env::set_var("IRIUM_P2P_MAX_PEERS", "100");
+        assert_eq!(reserved_outbound_slots_pct(), 20);
+        assert_eq!(
+            inbound_peer_limit(),
+            80,
+            "20 of 100 slots held back for outbound dials"
+        );
+        std::env::remove_var("IRIUM_P2P_MAX_PEERS");
+    }
+
+    #[test]
+    fn c7_reserved_outbound_slots_env_tunable_and_capped_at_half() {
+        std::env::set_var("IRIUM_P2P_MAX_PEERS", "100");
+        std::env::set_var("IRIUM_P2P_RESERVED_OUTBOUND_SLOTS", "40");
+        assert_eq!(inbound_peer_limit(), 60);
+        // The reservation must never starve the inbound half it coexists with.
+        std::env::set_var("IRIUM_P2P_RESERVED_OUTBOUND_SLOTS", "90");
+        assert_eq!(reserved_outbound_slots_pct(), 50);
+        assert_eq!(inbound_peer_limit(), 50);
+        std::env::set_var("IRIUM_P2P_RESERVED_OUTBOUND_SLOTS", "0");
+        assert_eq!(
+            inbound_peer_limit(),
+            100,
+            "0% reservation must reproduce the pre-C7 behaviour exactly"
+        );
+        std::env::remove_var("IRIUM_P2P_RESERVED_OUTBOUND_SLOTS");
+        std::env::remove_var("IRIUM_P2P_MAX_PEERS");
+    }
+
+    #[test]
+    fn c7_ban_threshold_unchanged_at_20() {
+        std::env::remove_var("IRIUM_REPUTATION_BAN_SCORE_THRESHOLD");
+        assert_eq!(
+            reputation_ban_score_threshold(),
+            20,
+            "C7 must not retune the ban threshold; the bound is calculated against 20"
+        );
+    }
+
+    /// The core of C7: a request that goes undelivered past the timeout is charged
+    /// to the peer. Before C7 the entry expired silently by cooldown and the peer
+    /// paid nothing.
+    #[tokio::test]
+    async fn c7_timed_out_request_charges_the_peer() {
+        let dir = c7_isolate_state("timeout");
+        std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "5");
+
+        let ip = c7_ip(20);
+        let map: Arc<Mutex<HashMap<IpAddr, BlockRequestState>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        map.lock().await.insert(
+            ip,
+            BlockRequestState {
+                // Older than the 5s timeout.
+                sent_at: Instant::now() - Duration::from_secs(30),
+                fulfilled: false,
+            },
+        );
+        let rep = Arc::new(Mutex::new(ReputationManager::new()));
+        let before = rep.lock().await.score_of(&ip.to_string());
+
+        let charged = reap_timed_out_block_requests(&map, &rep).await;
+        assert_eq!(charged, 1, "the overdue request must be charged");
+
+        let after = rep.lock().await.score_of(&ip.to_string());
+        assert_eq!(
+            after,
+            before - 5,
+            "a non-delivery is a record_failure, priced at -5"
+        );
+
+        std::env::remove_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS");
+        c7_release_state(dir);
+    }
+
+    /// The reaper runs from every connection's ping loop over one shared map, so a
+    /// single overdue request must be charged exactly once no matter how many times
+    /// the reaper sweeps. This is what marking (rather than removing) buys.
+    #[tokio::test]
+    async fn c7_timeout_penalty_is_idempotent_across_sweeps() {
+        let dir = c7_isolate_state("idem");
+        std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "5");
+
+        let ip = c7_ip(21);
+        let map: Arc<Mutex<HashMap<IpAddr, BlockRequestState>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        map.lock().await.insert(
+            ip,
+            BlockRequestState {
+                sent_at: Instant::now() - Duration::from_secs(30),
+                fulfilled: false,
+            },
+        );
+        let rep = Arc::new(Mutex::new(ReputationManager::new()));
+        let before = rep.lock().await.score_of(&ip.to_string());
+
+        assert_eq!(reap_timed_out_block_requests(&map, &rep).await, 1);
+        for _ in 0..5 {
+            assert_eq!(
+                reap_timed_out_block_requests(&map, &rep).await,
+                0,
+                "a already-charged request must not be charged again"
+            );
+        }
+        assert_eq!(rep.lock().await.score_of(&ip.to_string()), before - 5);
+
+        std::env::remove_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS");
+        c7_release_state(dir);
+    }
+
+    /// A peer that ANSWERED must never be charged a non-delivery, even if the body
+    /// it sent was invalid -- that case is priced at -50 by record_block, and
+    /// double-charging would corrupt the calibrated eviction bound.
+    #[tokio::test]
+    async fn c7_delivered_request_is_never_charged_as_a_timeout() {
+        let dir = c7_isolate_state("delivered");
+        std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "5");
+
+        let ip = c7_ip(22);
+        let map: Arc<Mutex<HashMap<IpAddr, BlockRequestState>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        map.lock().await.insert(
+            ip,
+            BlockRequestState {
+                sent_at: Instant::now() - Duration::from_secs(30),
+                fulfilled: false,
+            },
+        );
+        // The body arrives.
+        mark_block_request_fulfilled(&map, ip).await;
+
+        let rep = Arc::new(Mutex::new(ReputationManager::new()));
+        let before = rep.lock().await.score_of(&ip.to_string());
+        assert_eq!(
+            reap_timed_out_block_requests(&map, &rep).await,
+            0,
+            "a fulfilled request is not a timeout"
+        );
+        assert_eq!(rep.lock().await.score_of(&ip.to_string()), before);
+
+        std::env::remove_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS");
+        c7_release_state(dir);
+    }
+
+    /// A request still inside its delivery budget is not yet overdue.
+    #[tokio::test]
+    async fn c7_request_within_the_budget_is_not_charged() {
+        let dir = c7_isolate_state("young");
+        std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "600");
+
+        let ip = c7_ip(23);
+        let map: Arc<Mutex<HashMap<IpAddr, BlockRequestState>>> =
+            Arc::new(Mutex::new(HashMap::new()));
+        map.lock().await.insert(
+            ip,
+            BlockRequestState {
+                sent_at: Instant::now(),
+                fulfilled: false,
+            },
+        );
+        let rep = Arc::new(Mutex::new(ReputationManager::new()));
+        assert_eq!(reap_timed_out_block_requests(&map, &rep).await, 0);
+
+        std::env::remove_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS");
+        c7_release_state(dir);
+    }
+
+    /// NEGATIVE CONTROL for the keying fix (handoff correction 0.2).
+    ///
+    /// The inbound block handler recorded verdicts under `addr.to_string()` -- a
+    /// SocketAddr, "ip:port" -- while every ban check is IP-keyed. This test
+    /// demonstrates the consequence directly: penalties written under the old key
+    /// leave the peer unbanned no matter how many invalid blocks it sends, because
+    /// each ephemeral source port mints a fresh identity; penalties written under
+    /// the fixed key land on the identity `is_banned` actually reads.
+    ///
+    /// SCOPE, stated honestly: this exercises the keying property and the
+    /// reputation machinery, NOT the live inbound socket handler, which is not
+    /// reachable from a unit test. It proves the fix is correct and pins the
+    /// regression; it does not prove the handler calls it. That is what the
+    /// harness run and the eventual four-part proof are for.
+    #[test]
+    fn c7_keying_negative_control_inbound_penalties_must_reach_is_banned() {
+        let dir = c7_isolate_state("keying");
+        std::env::remove_var("IRIUM_REPUTATION_BAN_SCORE_THRESHOLD");
+
+        let ip = c7_ip(30);
+        let mut mgr = ReputationManager::new();
+
+        // --- OLD BEHAVIOUR: key by SocketAddr, with a fresh ephemeral port per
+        // connection, exactly as an inbound peer presents. ---
+        for port in [40001u16, 40002, 40003, 40004, 40005] {
+            let sock = SocketAddr::new(ip, port);
+            mgr.record_block(&sock.to_string(), false);
+        }
+        assert!(
+            !mgr.is_banned(&ip.to_string()),
+            "PRE-FIX FAILURE MODE: five invalid blocks left the peer unbanned, \
+             because the penalties landed on ip:port identities is_banned never reads"
+        );
+        for port in [40001u16, 40002, 40003, 40004, 40005] {
+            let sock = SocketAddr::new(ip, port);
+            assert!(
+                !mgr.is_banned(&sock.to_string()),
+                "and each ephemeral port carried only a single -50, never reaching \
+                 the threshold on its own either"
+            );
+        }
+
+        // --- FIXED BEHAVIOUR: key by IP, as the code now does. ---
+        let ip2 = c7_ip(31);
+        let mut mgr2 = ReputationManager::new();
+        for port in [40001u16, 40002] {
+            let sock = SocketAddr::new(ip2, port);
+            mgr2.record_block(&trusted_anchor_peer_id(sock, false), false);
+        }
+        // 100 - 2*50 = 0, which is below the threshold of 20.
+        assert!(
+            mgr2.is_banned(&ip2.to_string()),
+            "POST-FIX: two invalid blocks must evict a fresh peer, matching the \
+             design's stated bound"
+        );
+
+        c7_release_state(dir);
+    }
+
+    /// Confirms the keying fix used the SAME identity function as the outbound
+    /// path, so the two handlers can no longer score the same peer under two names.
+    #[test]
+    fn c7_both_block_paths_key_reputation_by_ip() {
+        let sock = SocketAddr::new(c7_ip(32), 51234);
+        assert_eq!(
+            trusted_anchor_peer_id(sock, false),
+            sock.ip().to_string(),
+            "the shared peer-id function must be IP-only"
+        );
+        assert_ne!(
+            trusted_anchor_peer_id(sock, false),
+            sock.to_string(),
+            "and must not be the SocketAddr form the inbound path used pre-C7"
+        );
+    }
+
+    /// WIRING GUARD -- the negative control for everything C7 connects.
+    ///
+    /// The behavioural tests above prove the C7 helpers are correct in isolation.
+    /// None of them would fail if the production call sites were reverted, because
+    /// those sites live inside async socket handlers and per-connection ping loops
+    /// that a unit test cannot reach. That gap is exactly where a "simplification"
+    /// would land without tripping anything, so it is pinned here at the source
+    /// level.
+    ///
+    /// SCOPE, stated honestly: this proves the calls are PRESENT and correctly
+    /// spelled. It does not prove they execute, and it is defeatable by anyone
+    /// editing the strings. It is a regression tripwire, not a proof of behaviour.
+    /// Behaviour is the harness's job.
+    #[test]
+    fn c7_wiring_guard_production_call_sites_are_connected() {
+        let src = include_str!("p2p.rs");
+        let marker = "\n#[cfg(test)]\nmod tests {";
+        let prod = src
+            .split_once(marker)
+            .map(|(before, _)| before)
+            .expect("p2p.rs test module header not found -- update this guard's marker");
+
+        // Keying fix (handoff correction 0.2). The old form must be gone and the
+        // shared IP-keyed identity function must be in its place.
+        assert!(
+            !prod.contains("record_block(&addr2.to_string()"),
+            "REVERTED: the inbound handler is keying reputation by SocketAddr again. \
+             Penalties will land on an ip:port identity is_banned never reads, and \
+             ephemeral ports make them unbannable. See handoff correction 0.2."
+        );
+        assert!(
+            prod.contains("record_block(&trusted_anchor_peer_id(addr2, false), ok)"),
+            "MISSING: the inbound handler must key reputation by IP via the same \
+             function the outbound path uses."
+        );
+
+        // Timeout attribution -- C7's actual fix. Must run from both ping loops.
+        assert_eq!(
+            prod.matches("reap_timed_out_block_requests(&ping_block_requests, &ping_reputation)")
+                .count(),
+            2,
+            "MISSING: the timeout reaper must be driven from BOTH ping loops \
+             (P2PNode:::: and the standalone connection handler). Without it a peer \
+             that never delivers pays nothing and re-qualifies on cooldown -- the \
+             precise hole C7 exists to close."
+        );
+
+        // Delivery marking -- without it the reaper charges honest peers.
+        assert_eq!(
+            prod.matches("mark_block_request_fulfilled(&block_requests,").count(),
+            2,
+            "MISSING: both Block handlers must mark the request fulfilled on ARRIVAL. \
+             Without this the reaper charges every peer that answered, including ones \
+             whose bodies validated."
+        );
+
+        // Reserved outbound slots. Counted, not merely present: a bare
+        // `contains("inbound_peer_limit()")` is satisfied by the function's own
+        // DEFINITION, so it still passes when the accept-path call is reverted --
+        // a hole found by running the negative control, not by reading the test.
+        // Definition + one call site == 2.
+        assert_eq!(
+            prod.matches("inbound_peer_limit()").count(),
+            2,
+            "REVERTED: expected the inbound_peer_limit definition plus exactly one \
+             call in the inbound accept path. If this is 1, the accept path is back \
+             to an unreserved cap and an inbound flood can strand the node."
+        );
+        assert!(
+            !prod.contains("if current >= max_peers() {"),
+            "REVERTED: the inbound accept path is back to the unreserved max_peers() \
+             cap, so an inbound flood can fill every slot and strand the node."
+        );
+
+        // Inflight ceiling.
+        assert!(
+            prod.contains("if count > max_blocks_inflight_per_peer() {"),
+            "MISSING: the per-peer inflight ceiling must be enforced at the request gate."
+        );
+    }
+
+    /// NO-DOUBLE-COUNTING GUARD.
+    ///
+    /// The C7 handoff prescribed adding record_block at the valid- and
+    /// invalid-delivery sites on the belief that neither existed. Both already did
+    /// (p2p.rs outbound and inbound Block handlers). Following that instruction
+    /// literally would have produced two record_block calls per delivery, doubling
+    /// every verdict and halving the eviction bound the design is calculated
+    /// against -- while passing every functional test, since the score would still
+    /// move in the right direction.
+    ///
+    /// This pins the call count at the source level. It is deliberately a source
+    /// assertion rather than a behavioural one: the failure mode is "someone adds a
+    /// second call", which no amount of exercising a single call site can detect.
+    #[test]
+    fn c7_exactly_two_record_block_call_sites_in_p2p() {
+        let src = include_str!("p2p.rs");
+        // Count in production code only: the test module below legitimately calls
+        // record_block on its own manager instances, and this test's own assertion
+        // string contains the needle. Split on the test module's exact header --
+        // a bare "#[cfg(test)]" needle would also match the comments and code in
+        // this very function.
+        let marker = "\n#[cfg(test)]\nmod tests {";
+        let prod = src
+            .split_once(marker)
+            .map(|(before, _)| before)
+            .expect("p2p.rs test module header not found -- update this guard's marker");
+        let calls = prod.matches(".record_block(").count();
+        assert_eq!(
+            calls, 2,
+            "expected exactly 2 record_block call sites (outbound + inbound Block \
+             handlers), found {}. If you are adding a third, re-read the C7 handoff \
+             correction 0.1: the sites the design told you to add ALREADY EXIST, and \
+             duplicating them double-counts every verdict.",
+            calls
         );
     }
 }

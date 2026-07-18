@@ -3455,24 +3455,55 @@ impl ChainState {
             return Err("duplicate block".to_string());
         }
 
+        // Track 1C / C3: this path can be PRECISE where C1 (header-only) and C2
+        // (stateless free fn) structurally could not. We hold the full body AND
+        // &mut self, so the same body-aware check validate_block_header runs is
+        // available here. Reuses that idiom verbatim -- no second implementation.
+        //
+        // `previous` MUST be the block's ACTUAL parent, not self.chain.last().
+        // connect_block can use the tip because it only ever appends to the tip, so
+        // tip == parent by construction. process_block is the FORK path: its whole
+        // purpose is storing non-tip blocks and driving reorgs, so the tip is
+        // frequently NOT the parent. Inside check_block_proposer, `previous` feeds
+        // expected_epoch_seed(..) (the VRF epoch seed) and parent_time (the round /
+        // slot). Passing the tip for a fork block derives the WRONG seed and WRONG
+        // parent_time, so check_block_proposer returns Ok(false), demotion silently
+        // does not apply, and the block is judged against the full target and
+        // rejected -- with nothing logged. Do NOT "simplify" this to match
+        // connect_block's pattern.
+        //
+        // The parent is guaranteed present: the orphan guard above returns early for
+        // any non-genesis block whose parent is not in block_store. Genesis yields
+        // None, which is correct.
+        let previous = self.block_store.get(&parent_hash);
+        let pow_target = if self.proposer_demotion_applies(&block, block_height, previous) {
+            crate::pow::floor_target(crate::poawx_proposer::proposer_anti_spam_bits())
+        } else {
+            block.header.target()
+        };
         let auxpow_active = self
             .params
             .auxpow_activation_height
             .map(|ah| block_height >= ah)
             .unwrap_or(false);
         if block.header.version & crate::auxpow::AUXPOW_VERSION_BIT != 0 && auxpow_active {
+            // AuxPoW (merged mining) is validated against the FULL target; a demoted
+            // proposer block does not carry AuxPoW and takes the branch below. Mirrors
+            // validate_block_header exactly.
             let header_bytes = block.header.serialize_for_height(block_height);
             let ap = block
                 .auxpow
                 .as_ref()
                 .ok_or_else(|| "AuxPoW block is missing AuxPoW data".to_string())?;
             crate::auxpow::validate(ap, &header_bytes, block.header.target())?;
-        } else if !meets_target(&hash, block.header.target())
+        } else if !meets_target(&hash, pow_target)
             && !whatsminer_compat_pow_hash_for_height(&block.header, block_height)
                 .as_ref()
-                .map(|h| meets_target(h, block.header.target()))
+                .map(|h| meets_target(h, pow_target))
                 .unwrap_or(false)
         {
+            // String kept verbatim: C5's loader quarantine matches the "proof-of-work"
+            // substring on this exact error.
             return Err("block does not satisfy proof-of-work target".to_string());
         }
 
@@ -16972,6 +17003,269 @@ mod proposer_consensus_tests {
             admitted.to_target(),
             crate::pow::floor_target(8).to_target(),
             "gate on => constant anti-spam floor"
+        );
+    }
+
+    // ---- Track 1C / C3: demotion-aware PoW in process_block -------------------
+    //
+    // Unlike C1 (header only) and C2 (stateless free fn), process_block holds the
+    // full body AND &mut self, so it reuses validate_block_header's body-aware
+    // idiom verbatim. The fixtures below deliberately place the block's parent in
+    // block_store WITHOUT making it the active tip, so every test runs the FORK
+    // path -- which is where wiring `previous` to self.chain.last() would silently
+    // corrupt the VRF seed and parent_time.
+    //
+    // Assertions are on whether the PoW gate rejected, not on full acceptance:
+    // C3 changes only the PoW gate, and a block can still fail later validators
+    // that C3 does not touch. Claiming "accepted" would over-state the change.
+
+    const C3_HARD_BITS: u32 = 0x1d00ffff;
+    const C3_H: u64 = 2;
+    const C3_POW_ERR: &str = "block does not satisfy proof-of-work target";
+
+    fn c3_env_on(on: bool) {
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "1");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_ANTISPAM_BITS", "8");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        if on {
+            std::env::set_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", "1");
+        } else {
+            std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+        }
+    }
+    fn c3_env_clear() {
+        for k in [
+            "IRIUM_NETWORK",
+            "IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT",
+            "IRIUM_POAWX_PROPOSER_VRF_REQUIRED",
+            "IRIUM_POAWX_PROPOSER_ANTISPAM_BITS",
+            "IRIUM_POAWX_PROPOSER_FREEZE_DEPTH",
+            "IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT",
+        ] {
+            std::env::remove_var(k);
+        }
+    }
+
+    /// Chain whose active tip is genesis, plus a height-1 parent living ONLY in
+    /// block_store. So tip != parent: the fork path, and the exact shape in which
+    /// `self.chain.last()` and the real parent diverge.
+    fn c3_chain_with_detached_parent() -> (ChainState, Block, [u8; 32]) {
+        let locked = crate::genesis::load_locked_genesis().expect("locked genesis");
+        let mut genesis = block_from_locked(&locked).expect("genesis block");
+        genesis.header.bits = C3_HARD_BITS;
+        let pow_limit = Target {
+            bits: C3_HARD_BITS,
+        };
+        let params = ChainParams {
+            genesis_block: genesis.clone(),
+            pow_limit,
+            htlcv1_activation_height: None,
+            mpsov1_activation_height: None,
+            lwma: LwmaParams::new(None, pow_limit),
+            lwma_v2: None,
+            auxpow_activation_height: None,
+            btc_spv: None,
+            ltc_spv: None,
+            htlc_btc_swap_v1_activation_height: None,
+            btc_swap_bech32_payment_activation_height: None,
+            htlc_ltc_swap_v1_activation_height: None,
+            swap_order_v1_activation_height: None,
+            ltc_swap_order_v1_activation_height: None,
+            coinbase_header_batch_activation_height: None,
+        };
+        let mut chain = ChainState::new(params);
+
+        let mut parent = genesis.clone();
+        parent.header.prev_hash = genesis.header.hash_for_height(0);
+        parent.header.time = genesis.header.time + 1;
+        let parent_hash = parent.header.hash_for_height(1);
+        chain.block_store.insert(parent_hash, parent.clone());
+        chain.heights.insert(parent_hash, 1);
+        chain.cumulative_work.insert(parent_hash, BigUint::zero());
+        assert_ne!(
+            parent_hash,
+            chain.tip_hash(),
+            "fixture invariant: parent must NOT be the active tip, or the test cannot \
+             distinguish block_store.get(parent) from chain.last()"
+        );
+        (chain, parent, parent_hash)
+    }
+
+    /// Demoted proposer block at height 2 off `parent_hash`. `seed_from` selects the
+    /// block used to derive the VRF epoch seed: the real parent (correct) or some
+    /// other block (what a `self.chain.last()` wiring would effectively produce).
+    fn c3_demoted_block(
+        chain: &mut ChainState,
+        parent_hash: [u8; 32],
+        seed_from: Option<&Block>,
+        register: bool,
+    ) -> Block {
+        let net = crate::activation::network_id_byte();
+        let secret = secret_n(1);
+        let seed = expected_epoch_seed(C3_H, parent_hash, seed_from);
+        let proof = prove(&secret, net, C3_H, seed);
+        let vrf_key = proof.assignment_public_key;
+        let miner_pkh = proof.solver_pkh;
+        if register {
+            chain.proposer_registry.register(vrf_key, miner_pkh, 0);
+            assert_eq!(chain.proposer_registry.eligible_count(C3_H), 1);
+        }
+        let ctx = ProposerCtx {
+            assignment: ProposerAssignmentV1 { round: 0, proof },
+        };
+        let dom = PersistentDominance::from_env();
+        let built = build_solo_poawx_block_with_proposer(
+            &secret,
+            net,
+            C3_H,
+            parent_hash,
+            None,
+            C3_HARD_BITS,
+            1_900_000_300,
+            1,
+            ([0u8; 32], [0u8; 32]),
+            &dom,
+            None,
+            Some(&ctx),
+            None,
+        )
+        .expect("build demoted proposer block");
+        built.block
+    }
+
+    fn c3_rejected_for_pow(r: &Result<(u64, [u8; 32]), String>) -> bool {
+        matches!(r, Err(e) if e == C3_POW_ERR)
+    }
+
+    /// (1) Demotion ACTIVE + valid selected assignment => the PoW gate does NOT
+    /// reject a floor-only block.
+    #[test]
+    fn c3_process_block_accepts_demoted_when_gate_on() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c3_env_on(true);
+        let (mut chain, parent, parent_hash) = c3_chain_with_detached_parent();
+        let block = c3_demoted_block(&mut chain, parent_hash, Some(&parent), true);
+        let hash = block.header.hash_for_height(C3_H);
+        assert!(
+            !meets_target(
+                &hash,
+                Target {
+                    bits: C3_HARD_BITS
+                }
+            ),
+            "precondition: block must FAIL the declared target, else demotion is not \
+             what is being tested"
+        );
+        let got = chain.process_block(block);
+        c3_env_clear();
+        assert!(
+            !c3_rejected_for_pow(&got),
+            "C3: demoted block must clear process_block's PoW gate; got {:?}",
+            got
+        );
+    }
+
+    /// (2) Demotion INACTIVE => the identical block is rejected on PoW. Legacy
+    /// behaviour, which is the mainnet path (activation const is None).
+    #[test]
+    fn c3_process_block_rejects_demoted_when_gate_off() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c3_env_on(true);
+        let (mut chain, parent, parent_hash) = c3_chain_with_detached_parent();
+        let block = c3_demoted_block(&mut chain, parent_hash, Some(&parent), true);
+        c3_env_on(false);
+        let got = chain.process_block(block);
+        c3_env_clear();
+        assert!(
+            c3_rejected_for_pow(&got),
+            "gate off => full target enforced, exactly as before C3; got {:?}",
+            got
+        );
+    }
+
+    /// (3) A block BELOW the anti-spam floor is rejected in BOTH modes, even with a
+    /// valid selected assignment. Demotion lowers the bar to the floor; it does not
+    /// remove it. Built as a genuine demoted block, then its nonce is tampered so the
+    /// hash falls under the floor -- the nonce does not affect the assignment, which
+    /// lives in the receipts, so this isolates the PoW gate.
+    #[test]
+    fn c3_process_block_rejects_sub_floor_block_in_both_modes() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let floor = crate::pow::floor_target(8);
+
+        c3_env_on(true);
+        let (mut chain_on, parent_on, ph_on) = c3_chain_with_detached_parent();
+        let mut block_on = c3_demoted_block(&mut chain_on, ph_on, Some(&parent_on), true);
+        while meets_target(&block_on.header.hash_for_height(C3_H), floor) {
+            block_on.header.nonce = block_on.header.nonce.wrapping_add(1);
+        }
+        assert!(
+            !meets_target(&block_on.header.hash_for_height(C3_H), floor),
+            "precondition: block must fail even the anti-spam floor"
+        );
+        let on = chain_on.process_block(block_on);
+
+        let (mut chain_off, parent_off, ph_off) = c3_chain_with_detached_parent();
+        let mut block_off = c3_demoted_block(&mut chain_off, ph_off, Some(&parent_off), true);
+        while meets_target(&block_off.header.hash_for_height(C3_H), floor) {
+            block_off.header.nonce = block_off.header.nonce.wrapping_add(1);
+        }
+        c3_env_on(false);
+        let off = chain_off.process_block(block_off);
+        c3_env_clear();
+
+        assert!(
+            c3_rejected_for_pow(&on),
+            "gate on must still reject a block below the floor; got {:?}",
+            on
+        );
+        assert!(
+            c3_rejected_for_pow(&off),
+            "gate off must reject it too; got {:?}",
+            off
+        );
+    }
+
+    /// (4) THE FORK TEST. process_block must derive `previous` from the block's real
+    /// parent (block_store), not from the active tip. Both blocks below are built at
+    /// the same height off the same parent hash and differ ONLY in which block seeded
+    /// the VRF proof. The parent-seeded one must clear the PoW gate; the tip-seeded
+    /// one must not. If `previous` were ever wired to self.chain.last(), this test
+    /// inverts -- which is precisely the silent-demotion-failure this track exists to
+    /// catch.
+    #[test]
+    fn c3_process_block_uses_real_parent_not_tip_for_previous() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c3_env_on(true);
+
+        let (mut chain_a, parent, parent_hash) = c3_chain_with_detached_parent();
+        let tip_block = chain_a.chain.last().cloned().expect("genesis tip");
+        assert_ne!(
+            tip_block.header.hash_for_height(0),
+            parent_hash,
+            "fixture invariant: tip and parent must differ"
+        );
+        let seeded_by_parent = c3_demoted_block(&mut chain_a, parent_hash, Some(&parent), true);
+        let got_parent = chain_a.process_block(seeded_by_parent);
+
+        let (mut chain_b, _p, ph_b) = c3_chain_with_detached_parent();
+        let seeded_by_tip = c3_demoted_block(&mut chain_b, ph_b, Some(&tip_block), true);
+        let got_tip = chain_b.process_block(seeded_by_tip);
+        c3_env_clear();
+
+        assert!(
+            !c3_rejected_for_pow(&got_parent),
+            "block seeded from the REAL parent must clear the PoW gate; got {:?}",
+            got_parent
+        );
+        assert!(
+            c3_rejected_for_pow(&got_tip),
+            "block seeded from the TIP must be rejected -- if this passes, previous is \
+             wired to chain.last() and demotion is silently applying to the wrong \
+             seed; got {:?}",
+            got_tip
         );
     }
 

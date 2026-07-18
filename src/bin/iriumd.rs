@@ -2878,9 +2878,20 @@ fn parse_persisted_block_file(
         if block.header.bits == 0 {
             return Err("header bits is zero".to_string());
         }
-        if !meets_target(&block.header.hash_for_height(height), block.header.target()) {
-            return Err("header hash does not meet declared target".to_string());
-        }
+        // Track 1C / C5: the declared-target PoW check that lived here was
+        // demotion-blind. A PoW-demoted block satisfies only floor_target, so it
+        // failed this check at PARSE time and was quarantined by the caller
+        // unconditionally (load_persisted_blocks matches Err(_) from this fn with
+        // no substring test) — i.e. before connect_block, the one demotion-aware
+        // validator, ever saw it. Measured cost on the 3-node harness: 127 of a
+        // node's own blocks destroyed and a 156 -> 29 rewind on restart.
+        //
+        // connect_block is now the sole PoW authority on this path. Quarantine of
+        // genuinely bad blocks is preserved: its rejection is
+        // "Block does not satisfy proof-of-work target", which matches the
+        // "proof-of-work" substring in load_persisted_blocks' quarantine list.
+        // The structural checks above (merkle, empty-tx, bits==0, genesis hash)
+        // still run here, so file corruption is still caught at parse time.
     }
 
     Ok((height, block))
@@ -30696,6 +30707,73 @@ mod tests {
         assert!(
             rrec[0].delegation.is_none(),
             "reloaded receipt stays mode-0"
+        );
+
+        std::env::remove_var("IRIUM_BLOCKS_DIR");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // Track 1C / C5 regression test.
+    //
+    // A PoW-demoted block satisfies only floor_target, never its declared target.
+    // Before C5, parse_persisted_block_file rejected exactly that shape, and
+    // load_persisted_blocks quarantines a parse Err UNCONDITIONALLY (no substring
+    // test) — so the block was physically moved to orphaned_<ts>/ before
+    // connect_block, the sole demotion-aware validator, ever saw it. That is the
+    // mechanism that destroyed 127 of a node's own blocks on the 3-node harness.
+    //
+    // This test builds precisely that block — meets floor_target(8), fails its
+    // declared target — and asserts it now survives the parse. The first assert is
+    // the precondition that makes the test meaningful: it pins the block as one the
+    // pre-C5 parser WOULD have rejected, so this test fails if C5 is ever reverted.
+    #[test]
+    fn c5_demoted_block_survives_persisted_parse() {
+        let _g = p18b_blocks_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let base = p18b_temp_blocks_dir("c5-demoted-parse");
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        std::env::set_var("IRIUM_BLOCKS_DIR", &base);
+
+        let mut block = p18b_mode1_block();
+        // Re-target to a hard (mainnet-shaped) declared target, then grind only to
+        // the anti-spam floor — the exact PoW profile of a demoted block.
+        block.header.bits = 0x1a01_cb25;
+        let floor = irium_node_rs::pow::floor_target(8);
+        block.header.nonce = 0;
+        while !meets_target(&block.header.hash_for_height(1), floor.clone()) {
+            block.header.nonce = block.header.nonce.wrapping_add(1);
+        }
+
+        let hash = block.header.hash_for_height(1);
+        assert!(
+            !meets_target(&hash, block.header.target()),
+            "precondition: block must FAIL its declared target, else this test \
+             proves nothing about C5"
+        );
+        assert!(
+            meets_target(&hash, floor),
+            "precondition: block must MEET the anti-spam floor (a demoted block, \
+             not garbage)"
+        );
+
+        irium_node_rs::storage::write_block_json_with_source(1, &block, None).unwrap();
+        let path = irium_node_rs::storage::blocks_dir().join("block_1.json");
+
+        let parsed = parse_persisted_block_file(&path, "");
+        assert!(
+            parsed.is_ok(),
+            "C5: a demoted block must survive parse so connect_block can judge it; \
+             got Err({:?}) — this is the 127-block-loss path",
+            parsed.as_ref().err()
+        );
+        let (h, reloaded) = parsed.unwrap();
+        assert_eq!(h, 1);
+        assert_eq!(
+            reloaded.header.hash_for_height(1),
+            hash,
+            "reloaded header must be byte-identical"
         );
 
         std::env::remove_var("IRIUM_BLOCKS_DIR");

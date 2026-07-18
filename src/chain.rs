@@ -434,7 +434,7 @@ impl ChainState {
             .connect_genesis(genesis.clone())
             .expect("valid genesis block");
         let genesis_hash = genesis.header.hash_for_height(0);
-        let work = ChainState::block_work(&genesis);
+        let work = state.block_work(&genesis, 0);
         state.block_store.insert(genesis_hash, genesis);
         state.heights.insert(genesis_hash, 0);
         state.cumulative_work.insert(genesis_hash, work.clone());
@@ -930,8 +930,72 @@ impl ChainState {
     }
 
     /// Work for a block based on its target (Bitcoin-style).
-    pub fn block_work(block: &Block) -> BigUint {
-        Self::work_for_target(block.header.target())
+    /// Track 1C / C6: the target whose difficulty this header actually DEMONSTRATED,
+    /// which is what its work must be credited from.
+    ///
+    /// The defect C6 fixes is that work was always derived from the DECLARED target,
+    /// never from the PoW actually achieved -- so a demoted block claimed ~2^55 of
+    /// work for ~2^20 of effort (~2^35 over-statement) and that number drove
+    /// selection.
+    ///
+    /// The rule is deliberately NOT "demotion is active at this height, so credit the
+    /// floor". That would credit floor work to every HONEST full-PoW block at a
+    /// demotion-active height, under-crediting real work by the same ~2^35 -- far
+    /// worse than the bug being fixed. Instead: credit whatever the hash actually
+    /// proves.
+    ///
+    /// The predicate here MUST mirror the one that ACCEPTED the block. Anywhere "why
+    /// we accepted it" and "what we credit it" can disagree is a latent fork:
+    ///   - AuxPoW blocks are satisfied via the merged-mining chain, not their own
+    ///     header hash, so they are credited DECLARED work.
+    ///   - whatsminer-compat blocks are satisfied via the compat hash, so that hash
+    ///     counts as demonstrating the declared target too.
+    ///
+    /// Header-derivable by construction, so add_header (header only) and
+    /// connect_block / process_block (body-aware) compute the SAME answer and cannot
+    /// disagree about a block's weight -- which a gate-based rule could not
+    /// guarantee.
+    ///
+    /// Gate off => always the declared target. With the gate off the floor branch is
+    /// in fact unreachable, since a block failing its declared target is rejected by
+    /// every validator long before work accounting; the gate is belt-and-braces and
+    /// makes the mainnet-inert property directly testable.
+    fn demonstrated_work_target(&self, header: &BlockHeader, height: u64) -> Target {
+        let declared = header.target();
+        if !crate::poawx_proposer::pow_demotion_active(height) {
+            return declared;
+        }
+        let auxpow_active = self
+            .params
+            .auxpow_activation_height
+            .map(|ah| height >= ah)
+            .unwrap_or(false);
+        if header.version & crate::auxpow::AUXPOW_VERSION_BIT != 0 && auxpow_active {
+            return declared;
+        }
+        let hash = header.hash_for_height(height);
+        if meets_target(&hash, declared)
+            || whatsminer_compat_pow_hash_for_height(header, height)
+                .as_ref()
+                .map(|h| meets_target(h, declared))
+                .unwrap_or(false)
+        {
+            return declared;
+        }
+        crate::pow::floor_target(crate::poawx_proposer::proposer_anti_spam_bits())
+    }
+
+    /// Work credited for `block` at `height`. `height` is required because the
+    /// demonstrated-work rule must hash the header, and the hash byte-order
+    /// convention is height-dependent.
+    ///
+    /// NOTE: accumulation (connect_block, process_block, add_header, rebuild_to_tip)
+    /// and SUBTRACTION (disconnect_tip_block) both route through here. They must stay
+    /// symmetric -- if one credits floor work and the other debits declared work,
+    /// total_work drifts permanently on every reorg across a demoted block, and the
+    /// drift survives restart.
+    pub fn block_work(&self, block: &Block, height: u64) -> BigUint {
+        Self::work_for_target(self.demonstrated_work_target(&block.header, height))
     }
 
     fn work_for_target(target: Target) -> BigUint {
@@ -995,7 +1059,7 @@ impl ChainState {
             .checked_add(subsidy_created)
             .ok_or_else(|| "Supply overflow".to_string())?;
 
-        let work = ChainState::block_work(&block);
+        let work = self.block_work(&block, expected_height);
         self.total_work += work;
         let hash = block.header.hash_for_height(expected_height);
         self.chain.push(block.clone());
@@ -1105,7 +1169,9 @@ impl ChainState {
         }
 
         self.issued = self.issued.saturating_sub(undo.subsidy_created);
-        let work = ChainState::block_work(&tip_block);
+        // Track 1C / C6: MUST use the same height connect_block credited this block
+        // at, or accumulation and subtraction disagree and total_work drifts.
+        let work = self.block_work(&tip_block, tip_height);
         if self.total_work >= work {
             self.total_work -= work;
         } else {
@@ -2639,13 +2705,13 @@ impl ChainState {
             return Err("header does not meet target".to_string());
         }
 
-        // NOTE (Track 1C, C6): work is still derived from the DECLARED target. For a
-        // demoted header admitted above that over-states real effort by ~2^35, and
-        // best_header_hash selects on this number. C6 replaces this with floor-derived
-        // work; until it lands the inflation is live on demotion-enabled networks and
-        // inert on mainnet (activation const is None). Do not treat C1 as complete
-        // without C6.
-        let work = parent_work + Self::work_for_target(header.target());
+        // Track 1C / C6: work is credited from the target this header actually
+        // DEMONSTRATED, not from its declared bits -- so a header admitted above via
+        // the floor banks floor work, while an honest full-PoW header at the same
+        // height still banks its full declared work. demonstrated_work_target is
+        // header-derivable, so this agrees exactly with what connect_block and
+        // process_block credit for the same block.
+        let work = parent_work + Self::work_for_target(self.demonstrated_work_target(&header, height));
         self.headers.insert(
             hash,
             HeaderWork {
@@ -2877,7 +2943,7 @@ impl ChainState {
         let (_fees, _coinbase_total, subsidy_created, _undo) =
             self.validate_and_apply_transactions(&block, 0, 0, false, Some(MAX_MONEY))?;
 
-        self.total_work = ChainState::block_work(&block);
+        self.total_work = self.block_work(&block, 0);
         let h = block.header.hash_for_height(0);
         self.chain.push(block);
         self.height = 1;
@@ -3410,7 +3476,7 @@ impl ChainState {
         }
         let genesis = &branch[0];
         new_state.connect_genesis(genesis.clone())?;
-        let mut cumulative = ChainState::block_work(genesis);
+        let mut cumulative = new_state.block_work(genesis, 0);
         let genesis_hash = genesis.header.hash_for_height(0);
         new_state.block_store.insert(genesis_hash, genesis.clone());
         new_state.heights.insert(genesis_hash, 0);
@@ -3422,7 +3488,7 @@ impl ChainState {
             if let Err(e) = new_state.connect_block(block.clone()) {
                 return Err(format!("failed applying block {}: {}", idx, e));
             }
-            cumulative += ChainState::block_work(block);
+            cumulative += new_state.block_work(block, idx as u64);
             let h = block.header.hash_for_height(idx as u64);
             new_state.block_store.insert(h, block.clone());
             new_state.heights.insert(h, idx as u64);
@@ -3520,7 +3586,7 @@ impl ChainState {
                 .cloned()
                 .unwrap_or_else(BigUint::zero)
         };
-        let cumulative = parent_work + ChainState::block_work(&block);
+        let cumulative = parent_work + self.block_work(&block, block_height);
         let height = parent_height + 1;
 
         if let Some(a) = &self.anchors {
@@ -17266,6 +17332,161 @@ mod proposer_consensus_tests {
              wired to chain.last() and demotion is silently applying to the wrong \
              seed; got {:?}",
             got_tip
+        );
+    }
+
+    // ---- Track 1C / C6: demonstrated-work accounting --------------------------
+    //
+    // Work is credited from the target the block actually DEMONSTRATED, never from
+    // its declared bits. Test (2) is the load-bearing one: it is the regression that
+    // proves the tempting gate-based rule ("demotion active => credit the floor")
+    // wrong, since that rule would under-credit every honest full-PoW block at a
+    // demotion-active height by the same ~2^35 it was meant to remove.
+
+    fn c6_floor_work() -> BigUint {
+        ChainState::work_for_target(crate::pow::floor_target(8))
+    }
+    fn c6_declared_work() -> BigUint {
+        ChainState::work_for_target(Target {
+            bits: C3_HARD_BITS,
+        })
+    }
+
+    /// (1) A demoted block (meets only the floor) is credited FLOOR work.
+    #[test]
+    fn c6_demoted_block_credited_floor_work() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c3_env_on(true);
+        let (mut chain, parent, ph) = c3_chain_with_detached_parent();
+        let block = c3_demoted_block(&mut chain, ph, Some(&parent), true);
+        let got = chain.block_work(&block, C3_H);
+        c3_env_clear();
+        assert_eq!(
+            got,
+            c6_floor_work(),
+            "demoted block must bank floor work, not its declared ~2^35 over-statement"
+        );
+        assert_ne!(got, c6_declared_work(), "must not bank declared work");
+    }
+
+    /// (2) THE REGRESSION TEST. An HONEST full-PoW block at a demotion-active height
+    /// is still credited its full DECLARED work. A gate-based rule would credit it
+    /// the floor and under-count real work by ~2^35 -- worse than the bug C6 fixes.
+    #[test]
+    fn c6_honest_full_pow_block_still_credited_declared_work() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c3_env_on(true);
+        let (chain, _parent, ph) = c3_chain_with_detached_parent();
+        assert!(
+            crate::poawx_proposer::pow_demotion_active(C3_H),
+            "precondition: demotion must be ACTIVE, else this proves nothing"
+        );
+        // Easy declared bits, ground to genuinely meet them: an honest miner who did
+        // the full work for the target it declares.
+        let mut header = BlockHeader {
+            version: 1,
+            prev_hash: ph,
+            merkle_root: [11u8; 32],
+            time: 1_900_000_400,
+            bits: 0x207f_ffff,
+            nonce: 0,
+        };
+        let declared = header.target();
+        while !meets_target(&header.hash_for_height(C3_H), declared) {
+            header.nonce = header.nonce.wrapping_add(1);
+        }
+        let got = ChainState::work_for_target(chain.demonstrated_work_target(&header, C3_H));
+        c3_env_clear();
+        assert_eq!(
+            got,
+            ChainState::work_for_target(declared),
+            "an honest full-PoW block must keep its full declared work even while \
+             demotion is active -- crediting the floor here would be the gate-based \
+             bug"
+        );
+    }
+
+    /// (3) An AuxPoW block is credited DECLARED work. Its own header hash does not
+    /// meet the declared target -- satisfaction comes from the merged-mining chain --
+    /// so the naive demonstrated-work rule would under-credit every merged-mined
+    /// block. "What we credit" must match "why we accepted".
+    #[test]
+    fn c6_auxpow_block_credited_declared_work() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c3_env_on(true);
+        let (mut chain, _parent, ph) = c3_chain_with_detached_parent();
+        chain.params.auxpow_activation_height = Some(1);
+        let mut header = BlockHeader {
+            version: 1 | crate::auxpow::AUXPOW_VERSION_BIT,
+            prev_hash: ph,
+            merkle_root: [12u8; 32],
+            time: 1_900_000_500,
+            bits: C3_HARD_BITS,
+            nonce: 0,
+        };
+        // Deliberately NOT ground: its own hash misses the hard declared target,
+        // exactly like a real merged-mined block.
+        while meets_target(&header.hash_for_height(C3_H), header.target()) {
+            header.nonce = header.nonce.wrapping_add(1);
+        }
+        let got = ChainState::work_for_target(chain.demonstrated_work_target(&header, C3_H));
+        c3_env_clear();
+        assert_eq!(
+            got,
+            c6_declared_work(),
+            "AuxPoW block must bank declared work; crediting the floor would gut \
+             merged mining"
+        );
+    }
+
+    /// (4) Gate OFF => declared work always, byte-identical to pre-C6. This is the
+    /// mainnet configuration (activation const is None).
+    #[test]
+    fn c6_gate_off_credits_declared_work() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c3_env_on(true);
+        let (mut chain, parent, ph) = c3_chain_with_detached_parent();
+        let block = c3_demoted_block(&mut chain, ph, Some(&parent), true);
+        c3_env_on(false);
+        let got = chain.block_work(&block, C3_H);
+        c3_env_clear();
+        assert_eq!(
+            got,
+            c6_declared_work(),
+            "gate off => declared work, exactly as before C6"
+        );
+    }
+
+    /// (5) SYMMETRY. Accumulation and subtraction must credit the SAME value for the
+    /// same block, or total_work drifts permanently across any reorg spanning a
+    /// demoted block -- and the drift survives restart. connect_block credits at
+    /// `expected_height`; disconnect_tip_block debits at `self.height - 1`. This pins
+    /// that those are the same height, and that both route through block_work, for a
+    /// demoted block where the two formulas would differ by ~2^35.
+    #[test]
+    fn c6_connect_and_disconnect_credit_identical_work() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c3_env_on(true);
+        let (mut chain, parent, ph) = c3_chain_with_detached_parent();
+        let block = c3_demoted_block(&mut chain, ph, Some(&parent), true);
+
+        // connect_block credits block_work(&block, expected_height) where
+        // expected_height == self.height at the time of the call.
+        let credited = chain.block_work(&block, C3_H);
+        // disconnect_tip_block debits block_work(&tip_block, self.height - 1). Model
+        // the post-connect state: height would be C3_H + 1, so tip_height == C3_H.
+        let debited = chain.block_work(&block, (C3_H + 1).saturating_sub(1));
+        c3_env_clear();
+
+        assert_eq!(
+            credited, debited,
+            "accumulation and subtraction must agree, or total_work drifts on reorg"
+        );
+        assert_eq!(
+            credited,
+            c6_floor_work(),
+            "and both must be the floor-derived value for a demoted block, not the \
+             declared one -- if this is declared work the symmetry is vacuous"
         );
     }
 

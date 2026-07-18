@@ -417,10 +417,21 @@ async fn enqueue_persist_block(height: u64, hash: [u8; 32], block: Block) {
 
 fn stateless_block_precheck(block: &Block, height: u64) -> Result<(), String> {
     let hash = block.header.hash_for_height(height);
-    if !meets_target(&hash, block.header.target())
+    // Track 1C / C2: precheck against the demotion-aware ADMISSION target, the same
+    // gate C1 applies at header admission. This function is deliberately STATELESS --
+    // a free fn over (block, height), run off the chain lock -- so it has no registry
+    // and no chain state, and therefore cannot call proposer_demotion_applies even
+    // though it holds the body. A constant floor is the only demotion-compatible
+    // check possible here; that is exactly why the tip-extension-only design died on
+    // this function and why the constant-floor design works. The real,
+    // assignment-checked verdict still comes later from connect_block.
+    // Gate off => block.header.target(), byte-identical to the legacy precheck.
+    let admission =
+        crate::poawx_proposer::header_admission_target(block.header.target(), height);
+    if !meets_target(&hash, admission)
         && !whatsminer_compat_pow_hash_for_height(&block.header, height)
             .as_ref()
-            .map(|h| meets_target(h, block.header.target()))
+            .map(|h| meets_target(h, admission))
             .unwrap_or(false)
     {
         return Err("pow precheck failed".to_string());
@@ -9270,10 +9281,11 @@ mod tests {
     use super::{
         attach_orphan_header_chain, block_request_cache_key, classify_outbound_dial_failure,
         dialable_multiaddr_from_advertised, orphan_headers_map, recent_orphan_header_hashes,
-        record_handshake_failure, store_orphan_header, take_orphan_header_children, P2PNode,
+        record_handshake_failure, stateless_block_precheck, store_orphan_header,
+        take_orphan_header_children, whatsminer_compat_pow_hash_for_height, P2PNode,
         RecentHashCache,
     };
-    use crate::block::BlockHeader;
+    use crate::block::{Block, BlockHeader};
     use crate::chain::{block_from_locked, ChainParams, ChainState};
     use crate::genesis::load_locked_genesis;
     use crate::pow::meets_target;
@@ -9288,6 +9300,137 @@ mod tests {
     fn orphan_test_lock() -> &'static StdMutex<()> {
         static LOCK: std::sync::OnceLock<StdMutex<()>> = std::sync::OnceLock::new();
         LOCK.get_or_init(|| StdMutex::new(()))
+    }
+
+    // ---- Track 1C / C2: gated floor-target admission in the STATELESS precheck ----
+    //
+    // stateless_block_precheck is a free fn over (block, height) run off the chain
+    // lock. It holds the body but has no registry and no chain state, so it cannot
+    // call proposer_demotion_applies; a constant floor is the only demotion-compatible
+    // check possible here. These tests pin both directions of the gate.
+    //
+    // prev_hash is [0u8; 32] so the merkle branch is skipped by the function's own
+    // rule, isolating the PoW branch -- the only branch C2 changes.
+
+    const C2_HARD_BITS: u32 = 0x1d00ffff;
+    const C2_HEIGHT: u64 = 77;
+
+    fn c2_env_lock() -> &'static StdMutex<()> {
+        static LOCK: std::sync::OnceLock<StdMutex<()>> = std::sync::OnceLock::new();
+        LOCK.get_or_init(|| StdMutex::new(()))
+    }
+
+    fn c2_set_gate(on: bool) {
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_ANTISPAM_BITS", "8");
+        // The irx1 precheck branch is env-gated; keep it off so only PoW is exercised.
+        std::env::remove_var("IRIUM_POAWX_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_MODE");
+        if on {
+            std::env::set_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", "1");
+        } else {
+            std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+        }
+    }
+    fn c2_clear_env() {
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_ANTISPAM_BITS");
+        std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+    }
+
+    /// `demoted == true`: meets the 8-bit floor, fails the hard declared target --
+    /// the PoW profile of a demoted block. `false`: meets neither. The whatsminer
+    /// fallback hash is held to the same condition, so neither test can pass or fail
+    /// through that path by accident.
+    fn c2_block(demoted: bool) -> Block {
+        let floor = crate::pow::floor_target(8);
+        let declared = crate::pow::Target {
+            bits: C2_HARD_BITS,
+        };
+        let mut block = Block {
+            header: BlockHeader {
+                version: 1,
+                prev_hash: [0u8; 32],
+                merkle_root: [5u8; 32],
+                time: 1_900_000_200,
+                bits: C2_HARD_BITS,
+                nonce: 0,
+            },
+            transactions: vec![],
+            auxpow: None,
+            poawx_receipts: None,
+        };
+        loop {
+            let h = block.header.hash_for_height(C2_HEIGHT);
+            let wm = whatsminer_compat_pow_hash_for_height(&block.header, C2_HEIGHT);
+            let wm_meets = |t: crate::pow::Target| {
+                wm.as_ref().map(|x| meets_target(x, t)).unwrap_or(false)
+            };
+            let meets_floor = meets_target(&h, floor) || wm_meets(floor);
+            let meets_declared = meets_target(&h, declared) || wm_meets(declared);
+            if demoted && meets_floor && !meets_declared {
+                return block;
+            }
+            if !demoted && !meets_floor {
+                return block;
+            }
+            block.header.nonce = block.header.nonce.wrapping_add(1);
+        }
+    }
+
+    /// (1) Demotion ACTIVE => a demoted body passes the stateless precheck.
+    #[test]
+    fn c2_precheck_admits_demoted_block_when_gate_on() {
+        let _g = c2_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        c2_set_gate(true);
+        let block = c2_block(true);
+        let got = stateless_block_precheck(&block, C2_HEIGHT);
+        c2_clear_env();
+        assert_eq!(
+            got,
+            Ok(()),
+            "C2: a demoted body must clear the stateless precheck, else the body is \
+             dropped after C1 already admitted its header"
+        );
+    }
+
+    /// (2) Demotion INACTIVE => the identical body is rejected. Legacy behaviour,
+    /// which is the mainnet path (activation const is None).
+    #[test]
+    fn c2_precheck_rejects_demoted_block_when_gate_off() {
+        let _g = c2_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        c2_set_gate(true);
+        let block = c2_block(true);
+        c2_set_gate(false);
+        let got = stateless_block_precheck(&block, C2_HEIGHT);
+        c2_clear_env();
+        assert_eq!(
+            got,
+            Err("pow precheck failed".to_string()),
+            "gate off => declared target enforced, exactly as before C2"
+        );
+    }
+
+    /// (3) Below the floor => rejected in BOTH modes. A lowered bar, not a removed one.
+    #[test]
+    fn c2_precheck_rejects_sub_floor_block_in_both_modes() {
+        let _g = c2_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        c2_set_gate(true);
+        let block = c2_block(false);
+        let on = stateless_block_precheck(&block, C2_HEIGHT);
+        c2_set_gate(false);
+        let off = stateless_block_precheck(&block, C2_HEIGHT);
+        c2_clear_env();
+        assert_eq!(
+            on,
+            Err("pow precheck failed".to_string()),
+            "gate on must still reject a body below the anti-spam floor"
+        );
+        assert_eq!(
+            off,
+            Err("pow precheck failed".to_string()),
+            "gate off must reject it too"
+        );
     }
 
     fn mine_header(mut header: BlockHeader) -> BlockHeader {

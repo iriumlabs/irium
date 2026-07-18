@@ -2798,8 +2798,76 @@ impl ChainState {
         }
     }
 
+    /// Track 1C / C4: block-first candidate selection.
+    ///
+    /// When demotion is possible, header WORK can no longer drive the fetch
+    /// decision. C6 made work honest -- a demoted block banks floor work (~2^20)
+    /// rather than declared (~2^55) -- and the consequence is that a demoted chain
+    /// accumulates work ~2^35 more slowly than a PoW chain. It would need ~3.4e10
+    /// blocks to out-weigh a SINGLE honest block. So under the old
+    /// `hw.work > self.total_work` rule a demoted chain is not merely disadvantaged,
+    /// it is structurally unselectable. C6 did not create that; it revealed it by
+    /// making the numbers truthful.
+    ///
+    /// So under the gate this answers a different question: not "is this chain
+    /// heavier?" but "is this a candidate worth FETCHING?". Adoption is still
+    /// decided afterwards, by `process_block` -> `proposer_rank_chain_better`, which
+    /// walks full bodies via find_reorg_path. Selection proposes; rank disposes.
+    ///
+    /// Ordering is by height, then by lowest hash -- mirroring the fork-choice
+    /// hardening tiebreak so every node converges on the same candidate. Height is
+    /// used only to pick what to DOWNLOAD; it is never a claim about validity, and
+    /// adoption remains rank-based, so this reintroduces no longest-chain lever.
+    ///
+    /// SECURITY: this deliberately removes the `hw.work > self.total_work` filter,
+    /// which incidentally acted as a DoS bound -- a header previously had to claim
+    /// more work than our whole chain before it could trigger a getblocks. Nothing
+    /// here replaces that bound. C7 (peer request policy) is the replacement, and
+    /// until it lands this is the most exposed point in the change set. Inert on
+    /// mainnet: MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT is None.
+    pub fn best_block_first_candidate(&self, require_adoptable: bool) -> Option<HeaderWork> {
+        let tip_height = self.height.saturating_sub(1);
+        let floor = self
+            .finalized_height
+            .max(tip_height.saturating_sub(crate::poawx_proposer::max_reorg_depth()));
+        let mut best: Option<HeaderWork> = None;
+        for hw in self.headers.values() {
+            // Only candidates that extend beyond our tip are worth fetching.
+            if hw.height <= tip_height {
+                continue;
+            }
+            let cand = hw.header.hash_for_height(hw.height);
+            if require_adoptable {
+                // GAP A must survive: never chase a chain we could never adopt.
+                match self.header_fork_ancestor_height(cand, floor) {
+                    Some(anc) if anc >= floor => {}
+                    _ => continue,
+                }
+            }
+            let take = match &best {
+                None => true,
+                Some(b) => {
+                    let b_hash = b.header.hash_for_height(b.height);
+                    hw.height > b.height || (hw.height == b.height && cand < b_hash)
+                }
+            };
+            if take {
+                best = Some(hw.clone());
+            }
+        }
+        best
+    }
+
     /// Best-work header entry if it beats the current chain tip.
+    ///
+    /// Track 1C / C4: under `block_first_selection_active` this delegates to
+    /// `best_block_first_candidate`. Gate off => the legacy work comparison below,
+    /// byte-identical. `best_header_hash` is deliberately NOT changed -- see the C4
+    /// commit message.
     pub fn best_header_if_better(&self) -> Option<HeaderWork> {
+        if crate::poawx_proposer::block_first_selection_active(self.height.saturating_sub(1)) {
+            return self.best_block_first_candidate(false);
+        }
         let mut best: Option<HeaderWork> = None;
         for hw in self.headers.values() {
             if hw.work > self.total_work && best.as_ref().map(|b| b.work < hw.work).unwrap_or(true)
@@ -2816,6 +2884,10 @@ impl ChainState {
     /// (e.g. a foreign/stale chain forking below the reorg cap, which would otherwise hijack
     /// sync). Returns None if no adoptable header beats our tip.
     pub fn best_adoptable_header_if_better(&self) -> Option<HeaderWork> {
+        // Track 1C / C4: block-first under the gate, keeping the adoptability floor.
+        if crate::poawx_proposer::block_first_selection_active(self.height.saturating_sub(1)) {
+            return self.best_block_first_candidate(true);
+        }
         let tip_height = self.height.saturating_sub(1);
         let floor = self
             .finalized_height
@@ -17333,6 +17405,161 @@ mod proposer_consensus_tests {
              seed; got {:?}",
             got_tip
         );
+    }
+
+    // ---- Track 1C / C4: block-first selection ---------------------------------
+    //
+    // After C6 a demoted chain banks floor work, so it can never out-weigh a PoW
+    // chain. These fixtures reproduce that shape: a candidate whose cumulative work
+    // is BELOW our total_work, which work-based selection rejects by construction
+    // and block-first selection must still fetch.
+
+    /// C4 env: activation at height 0, because these fixtures have a genesis-only
+    /// chain (tip_height == 0) and the gate is keyed on TIP height, mirroring how
+    /// fork_choice_hardening_active is used. With activation at 1 the gate is
+    /// correctly OFF at tip 0 -- which is right, and is what the first run caught.
+    fn c4_env_on(on: bool) {
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_ANTISPAM_BITS", "8");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "0");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1");
+        if on {
+            std::env::set_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", "0");
+        } else {
+            std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+        }
+    }
+    fn c4_env_clear() {
+        c3_env_clear();
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_VRF_REQUIRED");
+    }
+
+    /// Chain with an inflated total_work, plus one header at `height` carrying
+    /// `work` far below it. `linked` controls whether the header's parent is known,
+    /// which is what the adoptability floor filter keys on.
+    fn c4_chain(work_below: bool, linked: bool) -> (ChainState, [u8; 32]) {
+        let mut chain = c1_hard_chain();
+        let genesis_hash = chain.chain[0].header.hash_for_height(0);
+        // Our chain looks very heavy: the demoted candidate cannot compete on work.
+        if work_below {
+            chain.total_work = BigUint::from(1u64) << 200;
+        } else {
+            chain.total_work = BigUint::zero();
+        }
+        let mut hdr = BlockHeader {
+            version: 1,
+            prev_hash: if linked { genesis_hash } else { [42u8; 32] },
+            merkle_root: [21u8; 32],
+            time: 1_900_000_600,
+            bits: C1_HARD_BITS,
+            nonce: 7,
+        };
+        hdr.nonce = 7;
+        let hash = hdr.hash_for_height(1);
+        chain.headers.insert(
+            hash,
+            HeaderWork {
+                header: hdr,
+                height: 1,
+                work: BigUint::from(1u64) << 8, // floor-shaped, tiny
+            },
+        );
+        (chain, hash)
+    }
+
+    /// (1) Under the gate, a candidate that work-based selection rejects (its work
+    /// is below our total_work) IS selected for fetch.
+    #[test]
+    fn c4_selects_demoted_candidate_under_gate() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c4_env_on(true);
+        let (chain, hash) = c4_chain(true, true);
+        assert!(
+            crate::poawx_proposer::block_first_selection_active(chain.height.saturating_sub(1)),
+            "precondition: block-first must be active"
+        );
+        let got = chain.best_header_if_better();
+        c4_env_clear();
+        let got = got.expect("block-first must return a candidate work-based selection drops");
+        assert_eq!(got.header.hash_for_height(got.height), hash);
+    }
+
+    /// (2) Gate off => the legacy work comparison, byte-identical. The same
+    /// candidate is correctly NOT selected, because its work is below our tip's.
+    #[test]
+    fn c4_gate_off_is_work_based_and_unchanged() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c4_env_on(false);
+        let (chain, _hash) = c4_chain(true, true);
+        let got = chain.best_header_if_better();
+        c4_env_clear();
+        assert!(
+            got.is_none(),
+            "gate off must keep the legacy hw.work > total_work rule, which rejects \
+             this candidate; got {:?}",
+            got.map(|h| h.height)
+        );
+    }
+
+    /// (3) The GAP A adoptability floor must survive block-first selection: an
+    /// unlinked candidate (no known fork ancestor) is fetched by the unfiltered
+    /// selector but NOT by the adoptable one.
+    #[test]
+    fn c4_adoptability_floor_preserved_under_gate() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c4_env_on(true);
+        let (chain, _hash) = c4_chain(true, false); // unlinked parent
+        let unfiltered = chain.best_header_if_better();
+        let adoptable = chain.best_adoptable_header_if_better();
+        c4_env_clear();
+        assert!(
+            unfiltered.is_some(),
+            "unfiltered selector should still offer the candidate"
+        );
+        assert!(
+            adoptable.is_none(),
+            "adoptable selector must drop a candidate with no reachable fork \
+             ancestor -- chasing it would be the GAP A sync hijack"
+        );
+    }
+
+    /// (4) THE LIVELOCK GUARD. The selector's gate must never be true where the
+    /// ADOPTER's gate is false. process_block's do_reorg branch switches on
+    /// proposer_vrf_enforced; if block-first activated on demotion alone, the
+    /// demotion-on / VRF-off configuration would chase chains it then refuses to
+    /// adopt -- silent, and after C6 permanent, since a demoted chain never wins on
+    /// work.
+    #[test]
+    fn c4_selector_gate_never_outruns_adopter_gate() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        for (demotion, vrf) in [(true, true), (true, false), (false, true), (false, false)] {
+            std::env::set_var("IRIUM_NETWORK", "testnet");
+            if demotion {
+                std::env::set_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", "1");
+            } else {
+                std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+            }
+            if vrf {
+                std::env::set_var("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "1");
+                std::env::set_var("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1");
+            } else {
+                std::env::remove_var("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT");
+                std::env::remove_var("IRIUM_POAWX_PROPOSER_VRF_REQUIRED");
+            }
+            let selector = crate::poawx_proposer::block_first_selection_active(1);
+            let adopter = crate::poawx_proposer::proposer_vrf_enforced(1);
+            assert!(
+                !selector || adopter,
+                "selector active while adopter is work-based (demotion={} vrf={}) => \
+                 sync livelock",
+                demotion,
+                vrf
+            );
+        }
+        c3_env_clear();
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_VRF_REQUIRED");
     }
 
     // ---- Track 1C / C6: demonstrated-work accounting --------------------------

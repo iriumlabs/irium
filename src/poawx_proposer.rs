@@ -238,6 +238,21 @@ pub fn proposer_nonexclusive_active(height: u64) -> bool {
     )
 }
 
+/// Track 1C / C4: whether chain selection must be BLOCK-FIRST at `height`.
+///
+/// This is deliberately the SAME conjunction that makes demotion possible in
+/// `ChainState::proposer_demotion_applies` (minus the per-block assignment check,
+/// which selection cannot evaluate). Gating selection on `pow_demotion_active`
+/// alone would be a latent liveness bug: in the demotion-on / VRF-off
+/// configuration the SELECTOR would be rank-based while the ADOPTER
+/// (`process_block`'s do_reorg branch, which switches on `proposer_vrf_enforced`)
+/// stayed work-based. After C6 a demoted chain can never win on work, so the node
+/// would chase a chain it then refuses to adopt -- a silent sync livelock, not a
+/// crash. Selector and adopter must never be governed by different rules.
+pub fn block_first_selection_active(height: u64) -> bool {
+    pow_demotion_active(height) && proposer_vrf_enforced(height)
+}
+
 /// Track 1C / C1: the PoW target a HEADER must satisfy to be ADMITTED to the
 /// header index.
 ///

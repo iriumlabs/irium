@@ -3102,7 +3102,20 @@ fn rebuild_startup_header_index(
                 }
                 Err(e) => {
                     if e.contains("unknown parent") && synthetic_roots == 0 {
-                        if !meets_target(&hash, block.header.target()) {
+                        // Track 1C / C1 (folded in from C5's half 2): this check is
+                        // NOT redundant with add_header — add_header returns
+                        // "unknown parent" before it ever reaches its own PoW check,
+                        // so this is the SOLE PoW gate on synthetic-root admission and
+                        // deleting it would let a forged header become a chain root.
+                        // It was demotion-blind, so a demoted block was silently
+                        // skipped here on restart-after-gap. Same coarse admission gate
+                        // as add_header, via the one shared helper; the block still
+                        // faces connect_block in the loader's connect loop afterwards.
+                        let admission = irium_node_rs::poawx_proposer::header_admission_target(
+                            block.header.target(),
+                            h,
+                        );
+                        if !meets_target(&hash, admission) {
                             eprintln!(
                                 "[warn] startup header index skipped invalid PoW header at h={} hash= {}",
                                 h,
@@ -30778,6 +30791,107 @@ mod tests {
 
         std::env::remove_var("IRIUM_BLOCKS_DIR");
         let _ = std::fs::remove_dir_all(&base);
+    }
+
+    // Track 1C / C1 site 2: the synthetic-root branch of rebuild_startup_header_index
+    // (folded in from C5's half 2). This is the SOLE PoW gate on synthetic-root
+    // admission — add_header returns "unknown parent" before reaching its own PoW
+    // check — so it could not simply be deleted. It now shares add_header's coarse
+    // admission gate. Restart-after-gap is the path exercised here.
+    const C1S2_HARD_BITS: u32 = 0x1d00ffff;
+
+    fn c1s2_chain() -> ChainState {
+        let locked = load_locked_genesis().expect("locked genesis");
+        let mut genesis = block_from_locked(&locked).expect("genesis block");
+        genesis.header.bits = C1S2_HARD_BITS;
+        let pow_limit = Target {
+            bits: C1S2_HARD_BITS,
+        };
+        ChainState::new(ChainParams {
+            genesis_block: genesis,
+            pow_limit,
+            htlcv1_activation_height: None,
+            mpsov1_activation_height: None,
+            lwma: LwmaParams::new(None, pow_limit),
+            lwma_v2: None,
+            auxpow_activation_height: None,
+            btc_spv: None,
+            ltc_spv: None,
+            htlc_btc_swap_v1_activation_height: None,
+            btc_swap_bech32_payment_activation_height: None,
+            htlc_ltc_swap_v1_activation_height: None,
+            swap_order_v1_activation_height: None,
+            ltc_swap_order_v1_activation_height: None,
+            coinbase_header_batch_activation_height: None,
+        })
+    }
+
+    /// Orphaned demoted block at height 50: parent unknown (so add_header bails with
+    /// "unknown parent" and the synthetic-root branch is reached), meets floor(8),
+    /// fails the hard declared target.
+    fn c1s2_demoted_orphan() -> irium_node_rs::block::Block {
+        let mut block = p18b_mode1_block();
+        block.header.prev_hash = [9u8; 32];
+        block.header.bits = C1S2_HARD_BITS;
+        block.header.nonce = 0;
+        let floor = irium_node_rs::pow::floor_target(8);
+        while !meets_target(&block.header.hash_for_height(50), floor) {
+            block.header.nonce = block.header.nonce.wrapping_add(1);
+        }
+        assert!(
+            !meets_target(
+                &block.header.hash_for_height(50),
+                Target {
+                    bits: C1S2_HARD_BITS
+                }
+            ),
+            "precondition: orphan must FAIL its declared target"
+        );
+        block
+    }
+
+    fn c1s2_run(gate_on: bool) -> bool {
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_ANTISPAM_BITS", "8");
+        if gate_on {
+            std::env::set_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", "1");
+        } else {
+            std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+        }
+        let mut state = c1s2_chain();
+        let block = c1s2_demoted_orphan();
+        let hash = block.header.hash_for_height(50);
+        let candidates = vec![(50u64, std::path::PathBuf::from("block_50.json"), block)];
+        rebuild_startup_header_index(&mut state, &candidates, 0, 50, 0);
+        let admitted = state.headers.contains_key(&hash);
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_ANTISPAM_BITS");
+        std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+        admitted
+    }
+
+    #[test]
+    fn c1_synthetic_root_admits_demoted_header_when_gate_on() {
+        let _g = p18b_blocks_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(
+            c1s2_run(true),
+            "C1 site 2: a demoted orphan must be admitted as a synthetic root while \
+             demotion is possible; skipping it is the restart-after-gap data loss"
+        );
+    }
+
+    #[test]
+    fn c1_synthetic_root_rejects_demoted_header_when_gate_off() {
+        let _g = p18b_blocks_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        assert!(
+            !c1s2_run(false),
+            "gate off => declared target enforced at the synthetic-root site, exactly \
+             as before C1 (this is the mainnet path)"
+        );
     }
 
     fn pending_entry_c(height: u64, lane: &str, pkh_hex: &str) -> PoawxPendingReceipt {

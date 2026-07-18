@@ -238,6 +238,36 @@ pub fn proposer_nonexclusive_active(height: u64) -> bool {
     )
 }
 
+/// Track 1C / C1: the PoW target a HEADER must satisfy to be ADMITTED to the
+/// header index.
+///
+/// Header-only paths never see a body, so the proposer assignment that
+/// `ChainState::proposer_demotion_applies` requires is structurally unavailable
+/// here. That is why this gate is COARSE (height-only) where
+/// `validate_block_header` is PRECISE (body-aware), and the two must not be
+/// made to match: when demotion is possible at `height` we admit against the
+/// constant anti-spam floor and defer the real, assignment-checked verdict to
+/// `connect_block`.
+///
+/// A *constant* is the only demotion-compatible target a header-only path can
+/// evaluate — it needs no registry, no parent, no chain state. That is precisely
+/// why every header-derivable-rank design was rejected and why this one works.
+///
+/// Admission is deliberately permissive: it bounds nothing on its own. What
+/// bounds the resulting exposure is block-first selection (C4) and the peer
+/// request policy (C7). Do not read this function as a security boundary.
+///
+/// Gate off — which includes all of mainnet, where
+/// `MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT` is `None` — returns `declared`
+/// unchanged, so every caller stays byte-identical to its legacy behaviour.
+pub fn header_admission_target(declared: crate::pow::Target, height: u64) -> crate::pow::Target {
+    if pow_demotion_active(height) {
+        crate::pow::floor_target(proposer_anti_spam_bits())
+    } else {
+        declared
+    }
+}
+
 /// Pure cap: when `enforced`, the effective puzzle difficulty is capped at the
 /// anti-spam `floor` (never raised), so hashrate cannot be cranked up to matter;
 /// otherwise the configured value passes through verbatim.

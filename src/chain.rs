@@ -2625,10 +2625,26 @@ impl ChainState {
             .unwrap_or(false);
         if header.version & crate::auxpow::AUXPOW_VERSION_BIT != 0 && auxpow_active {
             // Full AuxPoW validation requires the complete block; deferred to process_block.
-        } else if !meets_target(&hash, header.target()) {
+        } else if !meets_target(
+            &hash,
+            // Track 1C / C1: admit against the demotion-aware ADMISSION target, not
+            // the declared one. We hold a header only, so the proposer assignment
+            // cannot be checked here; when demotion is possible at `height` this
+            // resolves to the constant anti-spam floor and the real verdict is
+            // deferred to connect_block's body-aware validate_block_header (which is
+            // NOT changed by C1 and stays precise). Gate off => `header.target()`,
+            // byte-identical to the legacy check.
+            crate::poawx_proposer::header_admission_target(header.target(), height),
+        ) {
             return Err("header does not meet target".to_string());
         }
 
+        // NOTE (Track 1C, C6): work is still derived from the DECLARED target. For a
+        // demoted header admitted above that over-states real effort by ~2^35, and
+        // best_header_hash selects on this number. C6 replaces this with floor-derived
+        // work; until it lands the inflation is live on demotion-enabled networks and
+        // inert on mainnet (activation const is None). Do not treat C1 as complete
+        // without C6.
         let work = parent_work + Self::work_for_target(header.target());
         self.headers.insert(
             hash,
@@ -16767,6 +16783,196 @@ mod proposer_consensus_tests {
             .expect("sole eligible winner accepted regardless of PoW");
         std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
         std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    // ---- Track 1C / C1: gated floor-target HEADER ADMISSION -------------------
+    //
+    // add_header holds a header only, so it cannot evaluate a proposer assignment
+    // and cannot replicate validate_block_header's precision. C1 therefore admits
+    // against a CONSTANT floor when demotion is possible at the height, deferring
+    // the real verdict to connect_block. These tests pin both directions of the
+    // gate and prove the gate-off path is unchanged.
+
+    const C1_HARD_BITS: u32 = 0x1d00ffff;
+
+    /// Fresh chain whose genesis carries a hard (mainnet-level) target, so
+    /// target_for_height(1) is genuinely unreachable by a CPU-ground header.
+    fn c1_hard_chain() -> ChainState {
+        let locked = crate::genesis::load_locked_genesis().expect("locked genesis");
+        let mut genesis = block_from_locked(&locked).expect("genesis block");
+        genesis.header.bits = C1_HARD_BITS;
+        let pow_limit = Target {
+            bits: C1_HARD_BITS,
+        };
+        let params = ChainParams {
+            genesis_block: genesis,
+            pow_limit,
+            htlcv1_activation_height: None,
+            mpsov1_activation_height: None,
+            lwma: crate::chain::LwmaParams::new(None, pow_limit),
+            lwma_v2: None,
+            auxpow_activation_height: None,
+            btc_spv: None,
+            ltc_spv: None,
+            htlc_btc_swap_v1_activation_height: None,
+            btc_swap_bech32_payment_activation_height: None,
+            htlc_ltc_swap_v1_activation_height: None,
+            swap_order_v1_activation_height: None,
+            ltc_swap_order_v1_activation_height: None,
+            coinbase_header_batch_activation_height: None,
+        };
+        ChainState::new(params)
+    }
+
+    /// Header at height 1 off `chain`'s tip. `demoted == true` grinds to the 8-bit
+    /// anti-spam floor while deliberately FAILING the hard declared target (the PoW
+    /// profile of a demoted block); `false` grinds to a hash meeting neither.
+    fn c1_header(chain: &ChainState, demoted: bool) -> BlockHeader {
+        let mut hdr = BlockHeader {
+            version: 1,
+            prev_hash: chain.tip_hash(),
+            merkle_root: [7u8; 32],
+            time: 1_900_000_100,
+            bits: C1_HARD_BITS,
+            nonce: 0,
+        };
+        let floor = crate::pow::floor_target(8);
+        let declared = Target {
+            bits: C1_HARD_BITS,
+        };
+        loop {
+            let h = hdr.hash_for_height(1);
+            let meets_floor = meets_target(&h, floor.clone());
+            let meets_declared = meets_target(&h, declared.clone());
+            // A hard-target hit is astronomically unlikely, but assert rather than
+            // assume: a header meeting the declared target would make the demoted
+            // case vacuous.
+            if demoted && meets_floor && !meets_declared {
+                return hdr;
+            }
+            if !demoted && !meets_floor {
+                return hdr;
+            }
+            hdr.nonce = hdr.nonce.wrapping_add(1);
+        }
+    }
+
+    fn c1_env_on() {
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_ANTISPAM_BITS", "8");
+        std::env::set_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", "1");
+    }
+    fn c1_env_off() {
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_ANTISPAM_BITS", "8");
+        std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+    }
+    fn c1_env_clear() {
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_ANTISPAM_BITS");
+        std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+    }
+
+    /// (1) Demotion ACTIVE => a floor-only header is ADMITTED.
+    #[test]
+    fn c1_add_header_admits_demoted_header_when_gate_on() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c1_env_on();
+        let mut chain = c1_hard_chain();
+        let hdr = c1_header(&chain, true);
+        let hash = hdr.hash_for_height(1);
+        assert!(
+            !meets_target(
+                &hash,
+                Target {
+                    bits: C1_HARD_BITS
+                }
+            ),
+            "precondition: header must FAIL the declared target"
+        );
+        let got = chain.add_header(hdr);
+        c1_env_clear();
+        assert_eq!(
+            got,
+            Ok(1),
+            "C1: floor-only header must be admitted while demotion is possible"
+        );
+    }
+
+    /// (2) Demotion INACTIVE => the identical header is REJECTED (legacy behaviour
+    /// preserved byte-for-byte; this is the mainnet path, where the activation
+    /// const is None).
+    #[test]
+    fn c1_add_header_rejects_demoted_header_when_gate_off() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c1_env_on();
+        let chain_probe = c1_hard_chain();
+        let hdr = c1_header(&chain_probe, true);
+        c1_env_off();
+        let mut chain = c1_hard_chain();
+        let got = chain.add_header(hdr);
+        c1_env_clear();
+        assert_eq!(
+            got,
+            Err("header does not meet target".to_string()),
+            "gate off => declared target enforced, exactly as before C1"
+        );
+    }
+
+    /// (3) A header meeting NEITHER floor nor declared target is rejected in BOTH
+    /// modes. Admission is a lowered bar, not a removed one.
+    #[test]
+    fn c1_add_header_rejects_sub_floor_header_in_both_modes() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        c1_env_on();
+        let probe = c1_hard_chain();
+        let hdr = c1_header(&probe, false);
+        assert!(
+            !meets_target(&hdr.hash_for_height(1), crate::pow::floor_target(8)),
+            "precondition: header must fail even the anti-spam floor"
+        );
+
+        let mut chain_on = c1_hard_chain();
+        let on = chain_on.add_header(hdr.clone());
+        c1_env_off();
+        let mut chain_off = c1_hard_chain();
+        let off = chain_off.add_header(hdr);
+        c1_env_clear();
+
+        assert_eq!(
+            on,
+            Err("header does not meet target".to_string()),
+            "gate on must still reject a header below the floor"
+        );
+        assert_eq!(
+            off,
+            Err("header does not meet target".to_string()),
+            "gate off must reject it too"
+        );
+    }
+
+    /// The shared helper itself: gate off returns the declared target verbatim, so
+    /// every caller is byte-identical to legacy; gate on returns the constant floor.
+    #[test]
+    fn c1_header_admission_target_resolves_by_gate() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let declared = Target {
+            bits: C1_HARD_BITS,
+        };
+        c1_env_off();
+        assert_eq!(
+            crate::poawx_proposer::header_admission_target(declared.clone(), 1).bits,
+            declared.bits,
+            "gate off => declared target unchanged"
+        );
+        c1_env_on();
+        let admitted = crate::poawx_proposer::header_admission_target(declared.clone(), 1);
+        c1_env_clear();
+        assert_eq!(
+            admitted.to_target(),
+            crate::pow::floor_target(8).to_target(),
+            "gate on => constant anti-spam floor"
+        );
     }
 
     #[test]

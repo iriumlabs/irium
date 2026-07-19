@@ -506,6 +506,19 @@ struct StatusResponse {
     /// ("normal"/"caution"/"defense"/"recovery"; "unknown" if the chain lock was
     /// busy). Advisory; reflects this node's observed signals, not a consensus value.
     poawx_adaptive_mode: String,
+    /// Batch 1 / OBS-1: the finality watermark that acts as the reorg floor.
+    /// `reorg_to_tip` refuses any reorg below it, and it also floors header
+    /// adoptability, orphan retention and p2p sync targeting. It advances only when
+    /// `block_finality_has_genuine_quorum` holds, which requires
+    /// `eligible_count >= min_finality_committee`. Until now it was observable from
+    /// nowhere, so a stalled watermark could not be distinguished from a healthy one.
+    /// `null` if the chain lock was busy.
+    poawx_finalized_height: Option<u64>,
+    /// Size of the frozen eligible-proposer set backing the finality quorum, so a
+    /// stalled `poawx_finalized_height` can be diagnosed directly. `null` if busy.
+    poawx_proposer_eligible_count: Option<u64>,
+    /// Minimum committee size the quorum check demands on this network.
+    poawx_min_finality_committee: u64,
 }
 
 #[derive(Serialize)]
@@ -3947,7 +3960,7 @@ async fn status(
         .as_ref()
         .map(|a| a.payload_digest().to_string());
 
-    let (height, best_header_tip, poawx_adaptive_mode) = match state.chain.try_lock() {
+    let (height, best_header_tip, poawx_adaptive_mode, poawx_finalized_height, poawx_proposer_eligible_count) = match state.chain.try_lock() {
         Ok(guard) => {
             let h = guard.tip_height();
             state.status_height_cache.store(h, Ordering::Relaxed);
@@ -3959,7 +3972,10 @@ async fn status(
             }
             // Gap 10: surface the node-local adaptive security posture.
             let mode = guard.adaptive_mode().as_str().to_string();
-            (h, best, mode)
+            // OBS-1: read the finality watermark and the set size that gates it.
+            let fin = Some(guard.finalized_height);
+            let elig = Some(guard.proposer_registry.eligible_count(h));
+            (h, best, mode, fin, elig)
         }
         Err(_) => {
             let h = state.status_height_cache.load(Ordering::Relaxed);
@@ -3972,6 +3988,8 @@ async fn status(
                 h,
                 cached_best_header_tip(h, &cached_hash, &state.genesis_hash),
                 "unknown".to_string(),
+                None,
+                None,
             )
         }
     };
@@ -4062,6 +4080,9 @@ async fn status(
         gap_healer_pending_count,
         fee_rate_sat_per_byte,
         poawx_adaptive_mode,
+        poawx_finalized_height,
+        poawx_proposer_eligible_count,
+        poawx_min_finality_committee: irium_node_rs::poawx_proposer::min_finality_committee(),
     }))
 }
 

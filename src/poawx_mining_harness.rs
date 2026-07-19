@@ -217,6 +217,33 @@ pub struct AllGatesProof {
 /// The PoAW-X identities an all-gates block needs. `dev()` reproduces the fixed
 /// devnet keys (byte-identical to the original harness); `solo()` derives every
 /// role from a single miner secret so a real solo miner plays all roles.
+/// C3: per-role collected artifacts. Each is the PUBLIC material a role-worker
+/// produced and submitted over the collection channel -- never a private key.
+///
+/// The assignment proof and the puzzle solution MUST travel together: the puzzle
+/// challenge binds both `solver_pkh` and `assignment_proof_digest`, so a solution is
+/// only valid against the challenge derived from that exact proof.
+#[derive(Debug, Clone, Default)]
+pub struct CollectedArtifacts {
+    pub compute: Option<crate::poawx_role_bundle::RoleBundleV1>,
+    pub verify: Option<crate::poawx_role_bundle::RoleBundleV1>,
+    pub support: Option<crate::poawx_role_bundle::RoleBundleV1>,
+}
+
+impl CollectedArtifacts {
+    pub fn for_role(&self, role: u8) -> Option<&crate::poawx_role_bundle::RoleBundleV1> {
+        match role {
+            r if r == ROLE_COMPUTE_CONTRIBUTOR => self.compute.as_ref(),
+            r if r == ROLE_VERIFY_CONTRIBUTOR => self.verify.as_ref(),
+            r if r == ROLE_SUPPORT_CONTRIBUTOR => self.support.as_ref(),
+            _ => None,
+        }
+    }
+    pub fn is_empty(&self) -> bool {
+        self.compute.is_none() && self.verify.is_none() && self.support.is_none()
+    }
+}
+
 pub struct AllGatesIdentities {
     pub worker_sk: SigningKey,
     pub member_sk: SigningKey,
@@ -229,6 +256,12 @@ pub struct AllGatesIdentities {
     /// Base entropy for the deterministic per-(height,role) hidden-precommit claim
     /// secret/nonce. Identity-bound so H-1 commit and H reveal derive identically.
     pub claim_seed: [u8; 32],
+    /// C3: pre-made PUBLIC artifacts collected from foreign role-workers, per role.
+    /// When present for a role, the builder uses that worker's own assignment proof,
+    /// claim reveal material and puzzle solution instead of deriving them from a
+    /// secret it does not and must not hold. `None` everywhere => byte-identical to
+    /// the pre-C3 behaviour.
+    pub collected: Option<CollectedArtifacts>,
     /// Stage D Step 5 (delegated/mode-1): when Some, the receipt `worker_pkh` (the
     /// PRIMARY payout) is this value (the miner's payout pkh) instead of
     /// hash160(worker_sk pubkey). None => solo/dev (worker == payee).
@@ -263,6 +296,7 @@ impl AllGatesIdentities {
             verify_assign: [8u8; 32],
             support_assign: [9u8; 32],
             claim_seed: [0x2Au8; 32],
+            collected: None,
             worker_pkh_override: None,
             delegation: None,
             revocations: None,
@@ -300,6 +334,7 @@ impl AllGatesIdentities {
             verify_assign: *miner_secret,
             support_assign: *miner_secret,
             claim_seed: derive(b"claim"),
+            collected: None,
             worker_pkh_override: None,
             delegation: None,
             revocations: None,
@@ -311,6 +346,30 @@ impl AllGatesIdentities {
     /// solver_pkh == hash160(assignment_public_key) -- satisfying the new contributor-role
     /// binding rule. The worker plays PRIMARY; the SUPPORT participant is the finality
     /// member (support_solver == hash160(member pubkey), as the committee requires).
+    /// C3: a builder that pays COLLECTED foreign workers. It holds only its own
+    /// worker secret; every contributor role is supplied as public artifacts that
+    /// arrived over the collection channel. The per-role secrets are set to the
+    /// worker's own secret purely as unused placeholders -- with `collected` present
+    /// they are never used to prove anything, which is exactly the property this
+    /// constructor exists to establish.
+    pub fn with_collected(
+        worker_secret: &[u8; 32],
+        collected: CollectedArtifacts,
+    ) -> Result<Self, String> {
+        let mut me = Self::solo(worker_secret)?;
+        if let Some(b) = collected.compute.as_ref() {
+            me.compute_solver = b.solver_pkh;
+        }
+        if let Some(b) = collected.verify.as_ref() {
+            me.verify_solver = b.solver_pkh;
+        }
+        if let Some(b) = collected.support.as_ref() {
+            me.support_solver = b.solver_pkh;
+        }
+        me.collected = Some(collected);
+        Ok(me)
+    }
+
     pub fn multi_participant(
         worker_secret: &[u8; 32],
         compute_secret: &[u8; 32],
@@ -341,6 +400,7 @@ impl AllGatesIdentities {
             verify_assign: *verify_secret,
             support_assign: *support_secret,
             claim_seed: derive(b"claim"),
+            collected: None,
             worker_pkh_override: None,
             delegation: None,
             revocations: None,
@@ -390,6 +450,7 @@ impl AllGatesIdentities {
             verify_assign: derive(b"verify"),
             support_assign: derive(b"support"),
             claim_seed: derive(b"claim"),
+            collected: None,
             worker_pkh_override: Some(delegation.miner_pkh()),
             delegation: Some(delegation),
             revocations: if revocations.is_empty() {
@@ -470,6 +531,43 @@ pub fn build_solo_poawx_block(
 /// are performed by three DISTINCT participant keys (each role solver == hash160 of its own
 /// VRF key), so the block is valid under the active contributor-role binding rule.
 #[allow(clippy::too_many_arguments)]
+/// C3: build a block that pays COLLECTED foreign role-workers.
+///
+/// Note the signature: the ONLY secret is the builder's own `worker_secret`. Every
+/// contributor role arrives as public artifacts from the collection channel. This is
+/// the property the pre-C3 builders could not express -- they all required each
+/// worker's private key, which a real collector can never have.
+#[allow(clippy::too_many_arguments)]
+pub fn build_collected_poawx_block_with_parent(
+    worker_secret: &[u8; 32],
+    collected: CollectedArtifacts,
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+    parent_seed_components: ([u8; 32], [u8; 32]),
+) -> Result<AllGatesProof, String> {
+    build_all_gates_block_with(
+        &AllGatesIdentities::with_collected(worker_secret, collected)?,
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+        parent_seed_components,
+        None,
+        None,
+        None,
+        None,
+        &default_cpu_nonce_solver,
+    )
+}
+
 pub fn build_multi_participant_poawx_block_with_parent(
     worker_secret: &[u8; 32],
     compute_secret: &[u8; 32],
@@ -864,7 +962,18 @@ fn build_all_gates_block_with(
                        dom: &PersistentDominance|
      -> Result<([AssignmentProofV2; 3], [RoleCandidate; 3], CandidateSet), String> {
         let mk = |secret: &[u8; 32], role: u8, solver: [u8; 20], ticket: [u8; 32]| {
-            let p = AssignmentProofV2::prove(secret, net, th, role, solver, ticket, sd)?;
+            // C3: for a COLLECTED role use the worker's own proof verbatim. The builder
+            // holds no secret for that worker and must not fabricate a proof on its
+            // behalf -- the proof IS the worker's attributable work.
+            let collected_proof = ids
+                .collected
+                .as_ref()
+                .and_then(|c| c.for_role(role))
+                .map(|b| b.assignment_proof.clone());
+            let p = match collected_proof {
+                Some(p) => p,
+                None => AssignmentProofV2::prove(secret, net, th, role, solver, ticket, sd)?,
+            };
             let w = dom.weight(DOMINANCE_BASE_WORK_SCORE, &solver, th);
             let c = RoleCandidate::from_assignment_v2(&p, PenaltyStatus::Clean.id(), w, [role; 32]);
             Ok::<_, String>((p, c))
@@ -931,7 +1040,30 @@ fn build_all_gates_block_with(
             prev_hash,
             profile,
         );
-        sols.push(solve_dev(&challenge).ok_or_else(|| "harness: puzzle solve failed".to_string())?);
+        // C3: a COLLECTED role supplies its own solved puzzle. The challenge above is
+        // already bound to that worker's solver_pkh and assignment_proof_digest, so the
+        // worker's solution is the only one that can verify against it. Verified here
+        // rather than trusted -- a mismatch is an assembly error, not a silent bad block.
+        let collected_sol = ids
+            .collected
+            .as_ref()
+            .and_then(|c| c.for_role(role))
+            .map(|b| b.puzzle_solution);
+        let sol = match collected_sol {
+            Some(s) => {
+                match crate::poawx_puzzle::verify_solution(&challenge, &s) {
+                    crate::poawx_puzzle::PuzzleVerificationResult::Valid => s,
+                    other => {
+                        return Err(format!(
+                            "harness: collected puzzle solution for role {role} does not \
+                             verify against its challenge: {other:?}"
+                        ))
+                    }
+                }
+            }
+            None => solve_dev(&challenge).ok_or_else(|| "harness: puzzle solve failed".to_string())?,
+        };
+        sols.push(sol);
     }
 
     // SUPPORT-committee finality proof finalizing the parent (block_hash = prev_hash).
@@ -957,8 +1089,14 @@ fn build_all_gates_block_with(
     // THIS block's precommit_root from the block itself (miner-independent).
     let precommit_root = if hp_active {
         let leaf = |role: u8, solver: [u8; 20]| -> [u8; 32] {
-            let s = derive_claim_secret(&claim_seed, height, role);
-            let n = derive_claim_nonce(&claim_seed, height, role);
+            // Must mirror the reveal path exactly, including collected material.
+            let (s, n) = match ids.collected.as_ref().and_then(|c| c.for_role(role)) {
+                Some(b) => (b.claim_secret, b.claim_nonce),
+                None => (
+                    derive_claim_secret(&claim_seed, height, role),
+                    derive_claim_nonce(&claim_seed, height, role),
+                ),
+            };
             let c = crate::poawx::role_precommit_commitment(&s, &n);
             crate::poawx::role_precommit_leaf(net, height, role, &solver, &c)
         };
@@ -980,13 +1118,22 @@ fn build_all_gates_block_with(
         let lane = crate::poawx::assign_lane(net, height, &prev_hash, role, 0);
         // Hidden-precommit reveal: derived secret/nonce + hiding commitment when the
         // gate is active; legacy fixed values + None otherwise (byte-identical).
-        let (secret, nonce) = if hp_active {
-            (
+        // C3: a COLLECTED role reveals the worker's OWN claim material, so the
+        // commitment committed in precommit_root and the reveal in the receipt agree
+        // with what that worker actually computed. Deriving from the builder's
+        // claim_seed would commit to material the worker never produced.
+        let collected_claim = ids
+            .collected
+            .as_ref()
+            .and_then(|c| c.for_role(role))
+            .map(|b| (b.claim_secret, b.claim_nonce));
+        let (secret, nonce) = match (hp_active, collected_claim) {
+            (true, Some((s, n))) => (s, n),
+            (true, None) => (
                 derive_claim_secret(&claim_seed, height, role),
                 derive_claim_nonce(&claim_seed, height, role),
-            )
-        } else {
-            ([0x02u8; 32], [0x01u8; 32])
+            ),
+            (false, _) => ([0x02u8; 32], [0x01u8; 32]),
         };
         let cd = crate::poawx::role_claim_digest(
             net,

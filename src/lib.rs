@@ -96,6 +96,7 @@ pub mod poawx_mining_harness;
 pub mod poawx_penalty;
 pub mod poawx_proposer;
 pub mod poawx_puzzle;
+pub mod poawx_role_bundle;
 pub mod poawx_ticket;
 pub mod pow;
 pub mod protocol;

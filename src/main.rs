@@ -50,6 +50,7 @@ mod poawx_mining_harness;
 mod poawx_penalty;
 mod poawx_proposer;
 mod poawx_puzzle;
+mod poawx_role_bundle;
 mod poawx_ticket;
 mod protocol;
 mod qr;

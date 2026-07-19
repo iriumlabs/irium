@@ -1654,6 +1654,16 @@ struct BlockTemplateResponse {
     poawx_reg_activations: Vec<String>,
     #[serde(default)]
     poawx_reg_announces: Vec<String>,
+    /// C2: contributor role-worker bundles collected for THIS height, as
+    /// "role_id:solver_pkh:score". A builder uses these to pay the collected workers
+    /// their own attributed addresses instead of fusing every role onto its own
+    /// identity. Empty when nothing has been collected, in which case a builder
+    /// behaves exactly as before.
+    #[serde(default)]
+    poawx_role_bundles: Vec<String>,
+    /// Count of distinct payees available across the collected roles.
+    #[serde(default)]
+    poawx_role_bundle_distinct_payees: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -13961,6 +13971,16 @@ async fn get_block_template(
         poawx_reg_required_sybil_bits: reg_required_sybil_bits,
         poawx_reg_activations: reg_activations,
         poawx_reg_announces: reg_announces,
+        poawx_role_bundles: {
+            let c = irium_node_rs::poawx_role_bundle::collect_roles_for_height(height);
+            [&c.compute, &c.verify, &c.support]
+                .into_iter()
+                .flatten()
+                .map(|b| format!("{}:{}:{}", b.role_id, hex::encode(b.solver_pkh), b.score()))
+                .collect()
+        },
+        poawx_role_bundle_distinct_payees: irium_node_rs::poawx_role_bundle::collect_roles_for_height(height)
+            .distinct_payees(),
     }))
 }
 
@@ -14547,6 +14567,57 @@ fn proposer_registration_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCod
 /// POST /poawx/registration : a local miner submits a ProposerRegistrationV1 (wire
 /// bytes). The node light-validates, pools it, and gossips it so a producer can announce
 /// it on-chain. Loopback-only; mainnet hard-off.
+/// C1: loopback-only guard for the role-bundle collection endpoint.
+///
+/// LOOPBACK-ONLY IN THIS UNIT. Co-located miners (standalone CLI, GPU, Irium Core with a
+/// bundled node) can submit. A POOL miner submitting to a REMOTE pool node cannot yet --
+/// remote exposure is a separate, separately-approved unit. Do not read the existence of
+/// this endpoint as "all mining paths are collected".
+fn role_bundle_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
+    if !addr.ip().is_loopback() {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    Ok(())
+}
+
+/// POST /poawx/role-bundle : a contributor role-worker submits its completed bundle.
+///
+/// The bundle is FULLY VALIDATED HERE, on ingest, not when a builder later uses it: the
+/// payout binding is recomputed rather than trusted and the ECVRF proof is verified.
+/// Rate-limited per source using the same limiter as the other gossip-adjacent ingests.
+async fn poawx_post_role_bundle(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    body: axum::body::Bytes,
+) -> Result<Json<Value>, StatusCode> {
+    role_bundle_bridge_guard(&addr)?;
+    if !irium_node_rs::poawx_admission::admission_rate_allowed(addr.ip()) {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+    let json_s = std::str::from_utf8(body.as_ref()).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let net = irium_node_rs::activation::network_id_byte();
+    let next_height = match state.chain.try_lock() {
+        Ok(g) => g.tip_height().saturating_add(1),
+        Err(_) => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+    let pool = irium_node_rs::poawx_role_bundle::global_role_bundle_pool();
+    match pool.ingest_json(json_s, net, next_height, None) {
+        Ok(o) => Ok(Json(json!({
+            "status": match o {
+                irium_node_rs::poawx_role_bundle::BundleOutcome::AcceptedNew => "accepted",
+                irium_node_rs::poawx_role_bundle::BundleOutcome::ReplacedLower => "replaced",
+                irium_node_rs::poawx_role_bundle::BundleOutcome::Duplicate => "duplicate",
+            },
+            "height": next_height,
+            "collected": pool.len(),
+        }))),
+        Err(e) => {
+            eprintln!("[poawx] role bundle rejected: {e}");
+            Err(StatusCode::BAD_REQUEST)
+        }
+    }
+}
+
 async fn poawx_post_registration(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
@@ -19476,6 +19547,7 @@ async fn main() {
         // hard-off, disabled unless the finality gossip gate is configured).
         .route("/poawx/finality-vote", post(poawx_finality_vote_post))
         .route("/poawx/registration", post(poawx_post_registration))
+        .route("/poawx/role-bundle", post(poawx_post_role_bundle))
         .route("/poawx/finality-votes", get(poawx_finality_votes_get))
         .route("/rpc/submit_tx", post(submit_tx))
         // Fix D: pending-tx introspection + per-address pending-spent

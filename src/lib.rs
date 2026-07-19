@@ -88,6 +88,7 @@ pub mod poawx_candidate;
 pub mod poawx_challenge;
 pub mod poawx_committed_admission;
 pub mod poawx_dominance;
+pub mod poawx_fairness;
 pub mod poawx_finality;
 pub mod poawx_gossip;
 pub mod poawx_miner_client;

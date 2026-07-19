@@ -6,7 +6,15 @@
 //! height, role, miner, seed) assignment picks one `PuzzleMode`; the assigned
 //! solver produces a compact `PuzzleSolutionV1` that every node can verify in
 //! bounded, deterministic, allocation-bounded, float-free time. No hardware-class
-//! assumptions: any miner may attempt any mode. Gated + mainnet hard-off.
+//! assumptions: any miner may attempt any mode.
+//!
+//! ⚠ MAINNET STATUS (corrected 2026-07-19): this module's gates are NOT "mainnet
+//! hard-off". They route through `activation::poawx_effective_activation`, which on
+//! `network_id == 0` IGNORES the env and substitutes the compiled
+//! `MAINNET_POAWX_ACTIVATION_HEIGHT = Some(50_000)`. Mainnet is far past that height,
+//! so these gates are ACTIVE in production. Any remaining "mainnet hard-off" wording
+//! below is stale. The authoritative, height-accurate check is
+//! `activation::mainnet_gate_truth`.
 #![allow(dead_code)]
 
 use sha2::{Digest, Sha256};
@@ -119,22 +127,71 @@ impl PuzzleDifficultyProfile {
     }
 }
 
-/// The active difficulty profile. `anchor_bits` is configurable only behind the
-/// testnet/devnet gate (`IRIUM_POAWX_PUZZLE_BITS`, clamped). Mainnet hard-off.
+/// Batch 1 / P2-A: the ONE place `anchor_bits` is resolved from the environment.
+///
+/// Two env vars historically configured the same field on opposite sides of consensus:
+/// the VALIDATOR read `IRIUM_POAWX_PUZZLE_BITS` (via `default_profile`) while the
+/// PRODUCER read `IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS`. `anchor_bits` is folded into
+/// `compute_challenge_digest` through `profile.serialize()`, so a node with only one of
+/// them set computed a DIFFERENT challenge digest from its peers and rejected otherwise
+/// valid blocks — a self-inflicted fork on a path that is enforcing mainnet block
+/// acceptance today. Both defaulted to 8, which is the only reason mainnet was consistent.
+///
+/// Both names are now accepted and resolve identically on both sides. If both are set and
+/// DISAGREE the value is rejected and the default is used, with a loud log line — an
+/// explicit, logged failure rather than a silent divergence (CLAUDE.md §9).
+pub fn configured_anchor_bits() -> Option<u8> {
+    // Parse as u32 then CAP at the hard bound, rather than as u8. A value above the
+    // bound (e.g. "9999") must clamp to MAX_ANCHOR_BITS on BOTH sides -- parsing as u8
+    // would make it unparseable and silently fall back to the default, which is exactly
+    // the validator/producer divergence this function exists to remove (the producer
+    // already capped; the validator's u8 parse did not). Only a genuinely unparseable
+    // value yields None, and the caller then fails closed.
+    let read = |k: &str| {
+        std::env::var(k)
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .and_then(|v| v.parse::<u32>().ok())
+            .map(|n| n.min(MAX_ANCHOR_BITS as u32) as u8)
+    };
+    let canonical = read("IRIUM_POAWX_PUZZLE_BITS");
+    let legacy = read("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
+    match (canonical, legacy) {
+        (Some(a), Some(b)) if a != b => {
+            eprintln!(
+                "[poawx] FATAL CONFIG: IRIUM_POAWX_PUZZLE_BITS={} disagrees with \
+                 IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS={}. These configure the SAME consensus \
+                 field; a mismatch forks this node off the network. Ignoring both and using \
+                 the default. Set one, or set both to the same value.",
+                a, b
+            );
+            None
+        }
+        (Some(a), _) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
+/// D1b: `anchor_bits` enters `compute_challenge_digest` via `profile.serialize()`, so it
+/// is a CONSENSUS input. Reading it from the environment on mainnet lets any operator who
+/// sets it compute a different challenge digest from the rest of the network and reject
+/// every otherwise-valid block -- a self-inflicted fork, on a path that is enforcing
+/// mainnet block acceptance today. The override is honoured on testnet/devnet only.
 pub fn default_profile() -> PuzzleDifficultyProfile {
     let mut p = PuzzleDifficultyProfile::default();
-    if let Some(b) = std::env::var("IRIUM_POAWX_PUZZLE_BITS")
-        .ok()
-        .and_then(|v| v.trim().parse::<u8>().ok())
-    {
-        p.anchor_bits = b;
+    if network_id_byte() != 0 {
+        if let Some(b) = configured_anchor_bits() {
+            p.anchor_bits = b;
+        }
     }
     p.clamped()
 }
 
 /// Like [`default_profile`] but with an explicit anchor-bits value (clamped), for
 /// callers that receive the bits authoritatively (e.g. from the node block template)
-/// instead of reading `IRIUM_POAWX_PUZZLE_BITS`. Mainnet-hard-off unchanged.
+/// instead of reading `IRIUM_POAWX_PUZZLE_BITS`. Clamping unchanged.
 pub fn profile_with_bits(anchor_bits: u8) -> PuzzleDifficultyProfile {
     let mut p = PuzzleDifficultyProfile::default();
     p.anchor_bits = anchor_bits;
@@ -464,7 +521,7 @@ pub fn verify_solution(c: &PuzzleChallengeV1, s: &PuzzleSolutionV1) -> PuzzleVer
     Valid
 }
 
-// ── Gates (param-driven pure logic; mainnet hard-off) ────────────────────────
+// ── Gates (param-driven pure logic; mainnet-ACTIVE at height >= 50_000) ────────────────────────
 
 pub fn puzzle_work_activation_height() -> Option<u64> {
     std::env::var("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT")
@@ -704,14 +761,128 @@ mod tests {
 
     #[test]
     fn gate_logic_pure_and_mainnet_off() {
-        assert!(!puzzle_work_gate(0, Some(1), 100), "mainnet hard-off");
+        assert!(!puzzle_work_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(puzzle_work_gate(1, Some(1), 100));
         assert!(!puzzle_work_gate(1, None, 100));
         assert!(puzzle_work_enforced_gate(1, Some(1), true, 100));
         assert!(!puzzle_work_enforced_gate(1, Some(1), false, 100));
         assert!(
             !puzzle_work_enforced_gate(0, Some(1), true, 100),
-            "mainnet hard-off"
+            "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
         );
+    }
+}
+
+#[cfg(test)]
+mod p2a_anchor_bits_unification {
+    use super::*;
+
+    fn clear() {
+        std::env::remove_var("IRIUM_POAWX_PUZZLE_BITS");
+        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
+    }
+
+    /// D1b gates the env override to non-mainnet, so any test asserting that
+    /// `default_profile()` HONOURS the override must state a network. Before D1b these
+    /// tests relied on the default, which is mainnet.
+    fn devnet() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+    }
+
+    /// The whole point of P2-A: BOTH names resolve identically, so the validator
+    /// (`default_profile`) and the producer can no longer disagree about `anchor_bits`.
+    #[test]
+    fn either_env_name_resolves_identically() {
+        devnet();
+        clear();
+        assert_eq!(configured_anchor_bits(), None, "unset => default");
+        std::env::set_var("IRIUM_POAWX_PUZZLE_BITS", "12");
+        assert_eq!(configured_anchor_bits(), Some(12));
+        assert_eq!(default_profile().anchor_bits, 12);
+        clear();
+        // the legacy producer-side name must now reach the VALIDATOR too -- this is the
+        // divergence that previously forked a node off the network.
+        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "12");
+        assert_eq!(configured_anchor_bits(), Some(12));
+        assert_eq!(default_profile().anchor_bits, 12);
+        clear();
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// Agreeing values are accepted; disagreeing values are REJECTED (fail loud, not
+    /// silently pick one) so a misconfigured node cannot quietly fork itself.
+    #[test]
+    fn conflicting_values_are_rejected_not_silently_resolved() {
+        clear();
+        std::env::set_var("IRIUM_POAWX_PUZZLE_BITS", "10");
+        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "10");
+        assert_eq!(configured_anchor_bits(), Some(10), "agreeing => accepted");
+        std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "11");
+        assert_eq!(
+            configured_anchor_bits(),
+            None,
+            "disagreeing => rejected, falls back to default rather than picking a side"
+        );
+        assert_eq!(
+            default_profile().anchor_bits,
+            PuzzleDifficultyProfile::default().anchor_bits,
+            "a rejected mismatch must land on the default, identically on every node"
+        );
+        clear();
+    }
+
+    /// Mainnet has neither var set, which is why the historical split never bit.
+    #[test]
+    fn unset_matches_the_live_mainnet_configuration() {
+        clear();
+        assert_eq!(
+            default_profile().anchor_bits,
+            PuzzleDifficultyProfile::default().anchor_bits
+        );
+    }
+}
+
+#[cfg(test)]
+mod p2a_cap_regression {
+    use super::*;
+    /// Regression: an over-large value must CAP identically on both sides, not fall back
+    /// to the default. Parsing as u8 made "9999" unparseable on the validator side while
+    /// the producer capped it to 24 -- the exact divergence P2-A removes.
+    #[test]
+    fn over_large_value_caps_rather_than_failing() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
+        std::env::set_var("IRIUM_POAWX_PUZZLE_BITS", "9999");
+        assert_eq!(configured_anchor_bits(), Some(MAX_ANCHOR_BITS));
+        assert_eq!(default_profile().anchor_bits, MAX_ANCHOR_BITS);
+        std::env::set_var("IRIUM_POAWX_PUZZLE_BITS", "not-a-number");
+        assert_eq!(configured_anchor_bits(), None, "malformed still fails closed");
+        std::env::remove_var("IRIUM_POAWX_PUZZLE_BITS");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+}
+
+#[cfg(test)]
+mod d1b_anchor_bits_is_not_env_tunable_on_mainnet {
+    use super::*;
+
+    /// D1b: `anchor_bits` enters the challenge digest, so an env-tunable value on
+    /// mainnet lets one node compute a different digest and reject every valid block.
+    #[test]
+    fn mainnet_ignores_the_env_override_devnet_honours_it() {
+        std::env::set_var("IRIUM_POAWX_PUZZLE_BITS", "17");
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        assert_eq!(
+            default_profile().anchor_bits,
+            PuzzleDifficultyProfile::default().anchor_bits,
+            "mainnet must ignore the env override -- it is a consensus input"
+        );
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        assert_eq!(
+            default_profile().anchor_bits, 17,
+            "devnet must still honour the override"
+        );
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_PUZZLE_BITS");
     }
 }

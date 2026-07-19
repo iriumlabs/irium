@@ -14186,22 +14186,32 @@ const POAWX_MAX_DIFFICULTY_BITS: u32 = 24;
 ///   Invalid string -> 0  (fail-closed: active-mode callers will reject)
 ///   > MAX          -> capped at POAWX_MAX_DIFFICULTY_BITS (24)
 fn poawx_puzzle_difficulty_bits() -> u32 {
-    match std::env::var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS")
-        .ok()
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        None => POAWX_DEFAULT_DIFFICULTY_BITS,
-        Some(v) => match v.parse::<u32>() {
-            Ok(n) => n.min(POAWX_MAX_DIFFICULTY_BITS),
-            Err(_) => {
+    // P2-A: resolve through the SAME function the validator uses
+    // (`poawx_puzzle::configured_anchor_bits`), so the producer and the validator can no
+    // longer disagree about `anchor_bits`. That value is folded into the challenge digest,
+    // so a divergence here forks this node off the network. Both env names are accepted;
+    // a mismatch between them is rejected and logged there.
+    //
+    // The fail-closed behaviour for a MALFORMED value is preserved: `configured_anchor_bits`
+    // returns None for an unparseable value, which is indistinguishable from "unset", so we
+    // re-check explicitly and keep returning 0 in that case.
+    let raw_set = ["IRIUM_POAWX_PUZZLE_BITS", "IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS"]
+        .iter()
+        .filter_map(|k| std::env::var(k).ok())
+        .map(|v| v.trim().to_string())
+        .find(|v| !v.is_empty());
+    match irium_node_rs::poawx_puzzle::configured_anchor_bits() {
+        Some(b) => (b as u32).min(POAWX_MAX_DIFFICULTY_BITS),
+        None => match raw_set {
+            Some(v) => {
                 eprintln!(
-                    "[poawx] IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS invalid: {:?}; failing closed",
+                    "[poawx] puzzle difficulty bits {:?} unusable (malformed or conflicting); \
+                     failing closed",
                     v
                 );
                 0
             }
+            None => POAWX_DEFAULT_DIFFICULTY_BITS,
         },
     }
 }

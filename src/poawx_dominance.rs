@@ -697,3 +697,68 @@ mod tests {
         assert_eq!(d1.digest(), d2.digest(), "digest is order-independent");
     }
 }
+
+#[cfg(test)]
+mod d2a_reorg_symmetry_audit {
+    use super::*;
+
+    /// D2a FINDING. `apply_event` calls `prune`; `revert_event` does NOT restore what
+    /// prune removed. So the pair is NOT an exact inverse in general: reverting a block
+    /// whose apply pruned a bucket cannot bring that bucket back.
+    ///
+    /// This is SAFE today only because pruning retains far more history than any reorg
+    /// can reach:
+    ///
+    ///   retained span = (lookback - 1 + PRUNE_MARGIN_WINDOWS) * window
+    ///                 = (2 - 1 + 8) * 2016 = 18,144 blocks
+    ///   max reorg     = DEFAULT_MAX_REORG_DEPTH_MAINNET = 1,000 blocks
+    ///
+    /// 18,144 >> 1,000, so a reorg can never disconnect a block old enough for its
+    /// bucket to have been pruned, and the asymmetry is unreachable.
+    ///
+    /// That safety rests on an invariant nothing currently asserts, between parameters
+    /// that are independently env-tunable (window, lookback, max reorg depth). This test
+    /// pins the relationship so shrinking the window or raising the reorg cap fails here
+    /// rather than silently making dominance state reorg-divergent -- which, because
+    /// weights are re-derived and compared in connect_block, would surface as nodes
+    /// rejecting each other's blocks.
+    #[test]
+    fn prune_retention_must_exceed_max_reorg_depth() {
+        let window = DEFAULT_ANTI_DOMINATION_WINDOW;
+        let lookback = DEFAULT_ANTI_DOMINATION_LOOKBACK;
+        let retained_windows = lookback.saturating_sub(1) + PRUNE_MARGIN_WINDOWS;
+        let retained_blocks = retained_windows.saturating_mul(window);
+        let max_reorg = crate::poawx_proposer::DEFAULT_MAX_REORG_DEPTH_MAINNET;
+        assert!(
+            retained_blocks > max_reorg,
+            "dominance prune retains {retained_blocks} blocks but a reorg may reach \
+             {max_reorg}; apply/revert is not an exact inverse across a prune, so this \
+             would make dominance state diverge after a deep reorg"
+        );
+        // Keep a generous margin rather than a bare inequality.
+        assert!(
+            retained_blocks >= max_reorg.saturating_mul(4),
+            "retention margin too thin: {retained_blocks} vs {max_reorg}"
+        );
+    }
+
+    /// The other half of D2a: within reach of a reorg, apply/revert IS exact.
+    #[test]
+    fn apply_then_revert_is_exact_within_reorg_reach() {
+        let mut d = PersistentDominance::new(DEFAULT_ANTI_DOMINATION_WINDOW, DEFAULT_ANTI_DOMINATION_LOOKBACK);
+        let pkh = [0x5u8; 20];
+        let before = d.digest();
+        for h in 1..=50u64 {
+            d.apply_event(pkh, RoleRewardKind::Primary, 1_000, h);
+        }
+        assert_ne!(d.digest(), before, "fixture vacuous: applies changed nothing");
+        for h in (1..=50u64).rev() {
+            d.revert_event(pkh, RoleRewardKind::Primary, 1_000, h);
+        }
+        assert_eq!(
+            d.digest(),
+            before,
+            "apply/revert must be an exact inverse within reorg reach"
+        );
+    }
+}

@@ -33,6 +33,7 @@ use std::sync::{Mutex, OnceLock};
 
 use crate::poawx_candidate::AssignmentProofV2;
 use crate::poawx_puzzle::PuzzleSolutionV1;
+use crate::poawx_finality::FinalityVoteV1;
 use crate::poawx_ticket::TicketProof;
 
 /// Hard bound on pooled bundles. Small: bundles are height-scoped and pruned, and only
@@ -70,6 +71,14 @@ pub struct RoleBundleV1 {
     pub claim_nonce: [u8; 32],
     pub commitment_hash: [u8; 32],
     pub claim_digest: [u8; 32],
+    /// R4: SUPPORT doubles as the FINALITY COMMITTEE MEMBER, so a collected SUPPORT
+    /// worker must supply its own signed finality vote -- the builder holds no key for
+    /// it. `None` for COMPUTE/VERIFY, which have no committee role.
+    ///
+    /// The vote binds to the PARENT block (block_hash = prev_hash), not to the block
+    /// under construction, so a worker can produce it at bundle-build time without
+    /// circularity.
+    pub finality_vote: Option<FinalityVoteV1>,
 }
 
 fn hex_field(v: &serde_json::Value, k: &str) -> Result<Vec<u8>, String> {
@@ -128,6 +137,13 @@ impl RoleBundleV1 {
                 "claim.commitment_hash",
             )?,
             claim_digest: fixed::<32>(hex_field(claim, "claim_digest")?, "claim.claim_digest")?,
+            finality_vote: match v.get("finality_vote").and_then(|x| x.as_str()) {
+                Some(h) => Some(FinalityVoteV1::deserialize(
+                    &hex::decode(h)
+                        .map_err(|e| format!("role bundle: finality_vote not hex: {e}"))?,
+                )?),
+                None => None,
+            },
         })
     }
 
@@ -146,6 +162,7 @@ impl RoleBundleV1 {
         expected_network: u8,
         expected_height: u64,
         expected_seed: Option<[u8; 32]>,
+        expected_parent: Option<[u8; 32]>,
     ) -> Result<(), String> {
         if self.network_id != expected_network {
             return Err("role bundle: wrong network".to_string());
@@ -181,6 +198,61 @@ impl RoleBundleV1 {
         self.assignment_proof
             .validate(expected_network, expected_height)
             .map_err(|e| format!("role bundle: {e}"))?;
+        self.validate_finality_vote(expected_network, expected_height, expected_parent)?;
+        Ok(())
+    }
+
+    /// R4: a SUPPORT bundle MUST carry a valid, self-signed finality vote; any other
+    /// role must not carry one. Every field is recomputed or re-derived, never trusted.
+    fn validate_finality_vote(
+        &self,
+        expected_network: u8,
+        expected_height: u64,
+        expected_parent: Option<[u8; 32]>,
+    ) -> Result<(), String> {
+        let is_support = self.role_id == crate::poawx::ROLE_SUPPORT_CONTRIBUTOR;
+        let v = match (&self.finality_vote, is_support) {
+            (Some(_), false) => {
+                return Err("role bundle: finality vote on a non-SUPPORT role".to_string())
+            }
+            (None, true) => {
+                return Err("role bundle: SUPPORT bundle missing its finality vote".to_string())
+            }
+            (None, false) => return Ok(()),
+            (Some(v), true) => v,
+        };
+        if v.network_id != expected_network {
+            return Err("role bundle: finality vote wrong network".to_string());
+        }
+        if v.target_height != expected_height {
+            return Err("role bundle: finality vote wrong height".to_string());
+        }
+        if v.vote_type != crate::poawx_finality::FinalityVoteType::Commit.id() {
+            return Err("role bundle: finality vote is not a Commit".to_string());
+        }
+        // The member identity must be the worker's own, derived not declared.
+        if v.member_pkh != hash160(&v.member_pubkey) {
+            return Err("role bundle: finality vote member pkh not derived from its pubkey"
+                .to_string());
+        }
+        if v.member_pkh != self.solver_pkh {
+            return Err("role bundle: finality vote member pkh != solver pkh".to_string());
+        }
+        // The vote finalizes the PARENT, so it must name the parent we expect.
+        if let Some(parent) = expected_parent {
+            if v.block_hash != parent {
+                return Err("role bundle: finality vote wrong parent block hash".to_string());
+            }
+        }
+        // Bind the vote to the worker's OWN ticket. The chain does NOT enforce this --
+        // FinalityProofV1::validate never cross-checks ticket_digest against anything
+        // external, so the field is signed but otherwise free. Binding it here keeps a
+        // collected bundle internally coherent rather than merely self-consistent.
+        if v.ticket_digest != self.ticket_proof.ticket_digest {
+            return Err("role bundle: finality vote ticket digest != bundle ticket".to_string());
+        }
+        v.verify(expected_network, expected_height, &v.block_hash)
+            .map_err(|e| format!("role bundle: finality vote {e}"))?;
         Ok(())
     }
 }
@@ -217,8 +289,9 @@ impl NodeRoleBundlePool {
         expected_network: u8,
         expected_height: u64,
         expected_seed: Option<[u8; 32]>,
+        expected_parent: Option<[u8; 32]>,
     ) -> Result<BundleOutcome, String> {
-        bundle.validate(expected_network, expected_height, expected_seed)?;
+        bundle.validate(expected_network, expected_height, expected_seed, expected_parent)?;
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if expected_height > g.height {
             g.height = expected_height;
@@ -254,6 +327,7 @@ impl NodeRoleBundlePool {
         expected_network: u8,
         expected_height: u64,
         expected_seed: Option<[u8; 32]>,
+        expected_parent: Option<[u8; 32]>,
     ) -> Result<BundleOutcome, String> {
         // TIER 1 -- per source. Cheap, and it runs BEFORE validation so that the cost of
         // validating is itself protected.
@@ -262,13 +336,13 @@ impl NodeRoleBundlePool {
         }
         // TIER 2 -- validation. Counted so a test can prove tier 1 short-circuits it.
         VALIDATIONS_PERFORMED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        bundle.validate(expected_network, expected_height, expected_seed)?;
+        bundle.validate(expected_network, expected_height, expected_seed, expected_parent)?;
         // TIER 3 -- per identity, only ever reached by an identity that already cost a
         // real ECVRF prove.
         if !identity_rate_allowed(&bundle.solver_pkh) {
             return Err("role bundle: identity rate limited".to_string());
         }
-        self.ingest(bundle, expected_network, expected_height, expected_seed)
+        self.ingest(bundle, expected_network, expected_height, expected_seed, expected_parent)
     }
 
     pub fn ingest_json(
@@ -277,9 +351,10 @@ impl NodeRoleBundlePool {
         expected_network: u8,
         expected_height: u64,
         expected_seed: Option<[u8; 32]>,
+        expected_parent: Option<[u8; 32]>,
     ) -> Result<BundleOutcome, String> {
         let b = RoleBundleV1::from_json(json)?;
-        self.ingest(b, expected_network, expected_height, expected_seed)
+        self.ingest(b, expected_network, expected_height, expected_seed, expected_parent)
     }
 
     /// Highest-scoring collected bundle for `role_id` at the pool's current height.
@@ -447,6 +522,7 @@ mod tests {
     const NET: u8 = 2; // devnet
     const H: u64 = 42;
     const SEED: [u8; 32] = [0x5Au8; 32];
+    const PARENT: [u8; 32] = [0x11u8; 32];
 
     /// Build a genuinely valid bundle for `secret` in `role`, in the exact JSON shape
     /// `poawx-role-worker` emits, so the fixture exercises the real parser.
@@ -461,9 +537,28 @@ mod tests {
         let pkh = proof.solver_pkh;
         let apk = proof.assignment_public_key;
         let ticket = TicketProof::new(
-            NET, height, [0x11u8; 32], role, pkh, height, height + 100, apk, [0x22u8; 32], 0,
+            NET, height, PARENT, role, pkh, height, height + 100, apk, [0x22u8; 32], 0,
         );
         let sol = PuzzleSolutionV1 { mode: 0, nonce: 7, proof_digest: [0x33u8; 32] };
+        // R4: a SUPPORT bundle must carry the worker's own signed finality vote.
+        let fv = if role == crate::poawx::ROLE_SUPPORT_CONTRIBUTOR {
+            let sk = k256::ecdsa::SigningKey::from_bytes((&secret).into()).unwrap();
+            Some(hex::encode(
+                crate::poawx_finality::FinalityVoteV1::signed(
+                    &sk,
+                    NET,
+                    height,
+                    PARENT,
+                    [0u8; 32],
+                    0,
+                    ticket.ticket_digest,
+                    crate::poawx_finality::FinalityVoteType::Commit,
+                )
+                .serialize(),
+            ))
+        } else {
+            None
+        };
         serde_json::json!({
             "network_id": NET, "target_height": height, "role_id": role, "role": "compute",
             "solver_pkh": hex::encode(pkh),
@@ -478,6 +573,7 @@ mod tests {
                 "commitment_hash": hex::encode([0x66u8; 32]),
                 "claim_digest": hex::encode([0x77u8; 32]),
             },
+            "finality_vote": fv,
         })
         .to_string()
     }
@@ -485,7 +581,7 @@ mod tests {
     #[test]
     fn valid_bundle_parses_and_validates() {
         let b = RoleBundleV1::from_json(&bundle_json(0x01, ROLE_COMPUTE_CONTRIBUTOR)).expect("parse");
-        b.validate(NET, H, Some(SEED)).expect("must validate");
+        b.validate(NET, H, Some(SEED), None).expect("must validate");
         // and the payout binding genuinely holds
         assert_eq!(b.solver_pkh, hash160(&b.assignment_public_key));
     }
@@ -498,16 +594,16 @@ mod tests {
 
         let mut b = ok.clone();
         b.network_id = NET + 1;
-        assert!(b.validate(NET, H, None).unwrap_err().contains("wrong network"));
+        assert!(b.validate(NET, H, None, None).unwrap_err().contains("wrong network"));
 
         let mut b = ok.clone();
         b.target_height = H + 1;
-        assert!(b.validate(NET, H, None).unwrap_err().contains("wrong height"));
+        assert!(b.validate(NET, H, None, None).unwrap_err().contains("wrong height"));
 
         let mut b = ok.clone();
         b.role_id = crate::poawx_proposer::ROLE_PROPOSER;
         assert!(b
-            .validate(NET, H, None)
+            .validate(NET, H, None, None)
             .unwrap_err()
             .contains("not a collectable contributor role"));
 
@@ -515,20 +611,20 @@ mod tests {
         let mut b = ok.clone();
         b.solver_pkh[0] ^= 0xff;
         assert!(b
-            .validate(NET, H, None)
+            .validate(NET, H, None, None)
             .unwrap_err()
             .contains("solver pkh not derived from assignment key"));
 
         let mut b = ok.clone();
         b.assignment_proof.role_id = ROLE_VERIFY_CONTRIBUTOR;
         assert!(b
-            .validate(NET, H, None)
+            .validate(NET, H, None, None)
             .unwrap_err()
             .contains("assignment proof role mismatch"));
 
         let mut b = ok.clone();
         assert!(b
-            .validate(NET, H, Some([0x00u8; 32]))
+            .validate(NET, H, Some([0x00u8; 32]), None)
             .unwrap_err()
             .contains("wrong seed"));
         let _ = &mut b;
@@ -536,7 +632,7 @@ mod tests {
         // a tampered ECVRF proof must fail the curve check, not slip through
         let mut b = ok.clone();
         b.assignment_proof.vrf_output[0] ^= 0xff;
-        assert!(b.validate(NET, H, Some(SEED)).is_err());
+        assert!(b.validate(NET, H, Some(SEED), None).is_err());
     }
 
     #[test]
@@ -544,8 +640,8 @@ mod tests {
         let pool = NodeRoleBundlePool::default();
         let a = RoleBundleV1::from_json(&bundle_json(0x03, ROLE_COMPUTE_CONTRIBUTOR)).unwrap();
         let b = RoleBundleV1::from_json(&bundle_json(0x04, ROLE_COMPUTE_CONTRIBUTOR)).unwrap();
-        assert_eq!(pool.ingest(a.clone(), NET, H, Some(SEED)).unwrap(), BundleOutcome::AcceptedNew);
-        assert_eq!(pool.ingest(b.clone(), NET, H, Some(SEED)).unwrap(), BundleOutcome::AcceptedNew);
+        assert_eq!(pool.ingest(a.clone(), NET, H, Some(SEED), None).unwrap(), BundleOutcome::AcceptedNew);
+        assert_eq!(pool.ingest(b.clone(), NET, H, Some(SEED), None).unwrap(), BundleOutcome::AcceptedNew);
         // two DISTINCT competitors for the same role are both held; best_for_role picks
         // the higher self-VRF score, matching on-chain best_for_role ordering.
         let best = pool.best_for_role(ROLE_COMPUTE_CONTRIBUTOR, H).unwrap();
@@ -553,7 +649,7 @@ mod tests {
         assert_eq!(best.solver_pkh, expect.solver_pkh);
         assert_eq!(pool.len(), 2);
         // resubmitting the same worker is a duplicate, not growth
-        assert_eq!(pool.ingest(a.clone(), NET, H, Some(SEED)).unwrap(), BundleOutcome::Duplicate);
+        assert_eq!(pool.ingest(a.clone(), NET, H, Some(SEED), None).unwrap(), BundleOutcome::Duplicate);
         assert_eq!(pool.len(), 2);
         // A bundle genuinely targeting an OLDER height is refused as stale. Note the
         // bundle must really be for H-1: validate() checks target_height first, so
@@ -563,7 +659,7 @@ mod tests {
         let old_b = RoleBundleV1::from_json(&bundle_json_at(0x03, ROLE_COMPUTE_CONTRIBUTOR, H - 1))
             .unwrap();
         assert!(pool
-            .ingest(old_b, NET, H - 1, Some(SEED))
+            .ingest(old_b, NET, H - 1, Some(SEED), None)
             .unwrap_err()
             .contains("stale height"));
         // advancing the height clears everything: bundles are height-bound
@@ -581,7 +677,7 @@ mod tests {
             (0x07, ROLE_SUPPORT_CONTRIBUTOR),
         ] {
             let b = RoleBundleV1::from_json(&bundle_json(sk, role)).unwrap();
-            pool.ingest(b, NET, H, Some(SEED)).unwrap();
+            pool.ingest(b, NET, H, Some(SEED), None).unwrap();
         }
         let c = CollectedRoles {
             compute: pool.best_for_role(ROLE_COMPUTE_CONTRIBUTOR, H),
@@ -635,7 +731,7 @@ mod r1_r2_r3_tests {
         let mut exhausted = false;
         for _ in 0..10_000 {
             if pool
-                .ingest_tiered(src, b.clone(), NET, H, Some(SEED))
+                .ingest_tiered(src, b.clone(), NET, H, Some(SEED), None)
                 .err()
                 .map(|e| e.contains("source rate limited"))
                 .unwrap_or(false)
@@ -648,7 +744,7 @@ mod r1_r2_r3_tests {
         // With tier 1 now rejecting, validation must NOT run.
         let before = VALIDATIONS_PERFORMED.load(Ordering::Relaxed);
         let err = pool
-            .ingest_tiered(src, b, NET, H, Some(SEED))
+            .ingest_tiered(src, b, NET, H, Some(SEED), None)
             .expect_err("must still be source-limited");
         assert!(err.contains("source rate limited"), "got: {err}");
         assert_eq!(
@@ -668,7 +764,7 @@ mod r1_r2_r3_tests {
         let mut identity_limited = false;
         // A different source every time, so tier 1 is always fresh.
         for i in 0..(IDENTITY_RATE_MAX + 4) {
-            let r = pool.ingest_tiered(ip(100 + i as u8), b.clone(), NET, H, Some(SEED));
+            let r = pool.ingest_tiered(ip(100 + i as u8), b.clone(), NET, H, Some(SEED), None);
             if let Err(e) = r {
                 if e.contains("identity rate limited") {
                     identity_limited = true;
@@ -690,10 +786,10 @@ mod r1_r2_r3_tests {
         let pool = NodeRoleBundlePool::default();
         let noisy = valid_bundle(0x23);
         for i in 0..(IDENTITY_RATE_MAX + 4) {
-            let _ = pool.ingest_tiered(ip(150 + i as u8), noisy.clone(), NET, H, Some(SEED));
+            let _ = pool.ingest_tiered(ip(150 + i as u8), noisy.clone(), NET, H, Some(SEED), None);
         }
         let quiet = valid_bundle(0x24);
-        let r = pool.ingest_tiered(ip(200), quiet, NET, H, Some(SEED));
+        let r = pool.ingest_tiered(ip(200), quiet, NET, H, Some(SEED), None);
         assert!(
             !matches!(&r, Err(e) if e.contains("identity rate limited")),
             "a quiet worker was limited because a different one flooded: {r:?}"
@@ -713,5 +809,123 @@ mod r1_r2_r3_tests {
         std::env::set_var("IRIUM_POAWX_ROLE_BUNDLE_PUBLIC", "0");
         assert!(!role_bundle_public_submission_enabled(), "only \"1\" enables it");
         std::env::remove_var("IRIUM_POAWX_ROLE_BUNDLE_PUBLIC");
+    }
+}
+
+#[cfg(test)]
+mod r4_finality_vote_tests {
+    use super::*;
+    use crate::poawx::{ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR};
+    use crate::poawx_finality::{FinalityVoteType, FinalityVoteV1};
+
+    const NET: u8 = 2;
+    const H: u64 = 42;
+    const SEED: [u8; 32] = [0x5Au8; 32];
+    const PARENT: [u8; 32] = [0x11u8; 32];
+
+    fn support_bundle(b: u8) -> RoleBundleV1 {
+        RoleBundleV1::from_json(&super::tests::bundle_json(b, ROLE_SUPPORT_CONTRIBUTOR))
+            .expect("parse")
+    }
+
+    #[test]
+    fn valid_support_bundle_with_its_own_vote_validates() {
+        let b = support_bundle(0x31);
+        b.validate(NET, H, Some(SEED), Some(PARENT))
+            .expect("SUPPORT bundle with its own vote must validate");
+        let v = b.finality_vote.as_ref().expect("vote present");
+        assert_eq!(v.member_pkh, b.solver_pkh, "the voter IS the paid worker");
+    }
+
+    /// Each malformation asserts its SPECIFIC error. A test that accepts any error
+    /// passes for the wrong reason.
+    #[test]
+    fn each_vote_malformation_is_rejected_with_its_own_reason() {
+        let ok = support_bundle(0x32);
+
+        // SUPPORT without a vote at all
+        let mut b = ok.clone();
+        b.finality_vote = None;
+        assert!(b
+            .validate(NET, H, Some(SEED), Some(PARENT))
+            .unwrap_err()
+            .contains("SUPPORT bundle missing its finality vote"));
+
+        // a non-SUPPORT role carrying one
+        let mut b = RoleBundleV1::from_json(&super::tests::bundle_json(
+            0x33,
+            ROLE_COMPUTE_CONTRIBUTOR,
+        ))
+        .unwrap();
+        b.finality_vote = ok.finality_vote.clone();
+        assert!(b
+            .validate(NET, H, Some(SEED), Some(PARENT))
+            .unwrap_err()
+            .contains("finality vote on a non-SUPPORT role"));
+
+        // bad signature
+        let mut b = ok.clone();
+        b.finality_vote.as_mut().unwrap().signature[0] ^= 0xff;
+        assert!(b
+            .validate(NET, H, Some(SEED), Some(PARENT))
+            .unwrap_err()
+            .contains("finality vote"));
+
+        // member_pkh not derived from member_pubkey
+        let mut b = ok.clone();
+        b.finality_vote.as_mut().unwrap().member_pkh[0] ^= 0xff;
+        assert!(b
+            .validate(NET, H, Some(SEED), Some(PARENT))
+            .unwrap_err()
+            .contains("member pkh not derived from its pubkey"));
+
+        // member_pkh valid but belonging to a DIFFERENT worker than the payee
+        let other = support_bundle(0x34);
+        let mut b = ok.clone();
+        b.finality_vote = other.finality_vote.clone();
+        assert!(b
+            .validate(NET, H, Some(SEED), Some(PARENT))
+            .unwrap_err()
+            .contains("member pkh != solver pkh"));
+
+        // wrong height
+        let mut b = ok.clone();
+        b.finality_vote.as_mut().unwrap().target_height = H + 1;
+        assert!(b
+            .validate(NET, H, Some(SEED), Some(PARENT))
+            .unwrap_err()
+            .contains("finality vote wrong height"));
+
+        // wrong parent block hash
+        let mut b = ok.clone();
+        b.finality_vote.as_mut().unwrap().block_hash = [0x99u8; 32];
+        assert!(b
+            .validate(NET, H, Some(SEED), Some(PARENT))
+            .unwrap_err()
+            .contains("wrong parent block hash"));
+
+        // wrong vote type
+        let mut b = ok.clone();
+        b.finality_vote.as_mut().unwrap().vote_type =
+            FinalityVoteType::Commit.id().wrapping_add(1);
+        assert!(b
+            .validate(NET, H, Some(SEED), Some(PARENT))
+            .unwrap_err()
+            .contains("not a Commit"));
+
+        // THE FLAGGED BUG SITE: ticket_digest unbound from the worker's real ticket.
+        // The chain does NOT enforce this -- FinalityProofV1::validate never cross-checks
+        // it -- so a vote with a foreign ticket digest still verifies cryptographically.
+        // Ingest binds it so a collected bundle is coherent, not merely self-consistent.
+        let mut b = ok.clone();
+        let sk = k256::ecdsa::SigningKey::from_bytes(&[0x32u8; 32].into()).unwrap();
+        b.finality_vote = Some(FinalityVoteV1::signed(
+            &sk, NET, H, PARENT, [0u8; 32], 0, [0xEEu8; 32], FinalityVoteType::Commit,
+        ));
+        let e = b.validate(NET, H, Some(SEED), Some(PARENT)).unwrap_err();
+        assert!(
+            e.contains("ticket digest != bundle ticket"),
+            "a validly-signed vote over a FOREIGN ticket digest must still be rejected; got: {e}"
+        );
     }
 }

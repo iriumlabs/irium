@@ -636,6 +636,25 @@ pub fn simulate_role_worker_bundle(
         network_id, height, prev_hash, role, solver, height, height + 100_000, apk,
         [0x22u8; 32], PenaltyStatus::Clean.id(),
     );
+    // R4: SUPPORT doubles as the finality committee member, so it signs its OWN vote
+    // with the same key that owns its payout. The vote finalizes the PARENT
+    // (block_hash = prev_hash), so no knowledge of the block under construction is
+    // needed. Its ticket_digest is the worker's real ticket, keeping the bundle
+    // internally coherent.
+    let finality_vote = if role == ROLE_SUPPORT_CONTRIBUTOR {
+        Some(FinalityVoteV1::signed(
+            &sk,
+            network_id,
+            height,
+            prev_hash,
+            [0u8; 32],
+            0,
+            ticket.ticket_digest,
+            FinalityVoteType::Commit,
+        ))
+    } else {
+        None
+    };
     Ok(crate::poawx_role_bundle::RoleBundleV1 {
         network_id,
         target_height: height,
@@ -650,6 +669,7 @@ pub fn simulate_role_worker_bundle(
         claim_nonce: nonce,
         commitment_hash: crate::poawx::role_precommit_commitment(&secret, &nonce),
         claim_digest: [0u8; 32],
+        finality_vote,
     })
 }
 
@@ -1154,6 +1174,19 @@ fn build_all_gates_block_with(
     // SUPPORT-committee finality proof finalizing the parent (block_hash = prev_hash).
     let (num, den) = finality_threshold();
     let mut fproof = FinalityProofV1::new(net, height, prev_hash, [0u8; 32], 0, num, den);
+    // R4: when SUPPORT is COLLECTED, the committee member is that worker, not the
+    // builder, and the builder holds no key for it. Use the worker's own signed vote
+    // verbatim -- reconstructing it is impossible and re-signing it with member_sk
+    // would produce a vote from a non-committee member, which is exactly how the C3
+    // proof first failed.
+    if let Some(v) = ids
+        .collected
+        .as_ref()
+        .and_then(|c| c.for_role(ROLE_SUPPORT_CONTRIBUTOR))
+        .and_then(|b| b.finality_vote.clone())
+    {
+        fproof.push(v);
+    } else {
     fproof.push(FinalityVoteV1::signed(
         member_sk,
         net,
@@ -1164,6 +1197,7 @@ fn build_all_gates_block_with(
         [0x11u8; 32],
         FinalityVoteType::Commit,
     ));
+    }
     fproof.sort_canonical();
 
     // Fix A1: hidden-precommit root committing THIS block's OWN role-claim leaves

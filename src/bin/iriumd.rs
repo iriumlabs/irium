@@ -14649,8 +14649,14 @@ async fn poawx_post_role_bundle(
     role_bundle_bridge_guard(&addr)?;
     let json_s = std::str::from_utf8(body.as_ref()).map_err(|_| StatusCode::BAD_REQUEST)?;
     let net = irium_node_rs::activation::network_id_byte();
-    let next_height = match state.chain.try_lock() {
-        Ok(g) => g.tip_height().saturating_add(1),
+    // R4: the SUPPORT finality vote binds to the PARENT block, so ingest needs it to
+    // check the vote names the parent we actually expect.
+    let (next_height, parent_hash) = match state.chain.try_lock() {
+        Ok(g) => {
+            let tip = g.tip_height();
+            let ph = g.chain.last().map(|b| b.header.hash_for_height(tip));
+            (tip.saturating_add(1), ph)
+        }
         Err(_) => return Err(StatusCode::SERVICE_UNAVAILABLE),
     };
     let pool = irium_node_rs::poawx_role_bundle::global_role_bundle_pool();
@@ -14661,7 +14667,7 @@ async fn poawx_post_role_bundle(
             return Err(StatusCode::BAD_REQUEST);
         }
     };
-    match pool.ingest_tiered(addr.ip(), parsed, net, next_height, None) {
+    match pool.ingest_tiered(addr.ip(), parsed, net, next_height, None, parent_hash) {
         Ok(o) => Ok(Json(json!({
             "status": match o {
                 irium_node_rs::poawx_role_bundle::BundleOutcome::AcceptedNew => "accepted",

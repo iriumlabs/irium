@@ -11914,7 +11914,7 @@ mod tests {
         let _ = ks;
         // Each collected bundle is self-validating public material -- no secrets.
         for b in [&collected.compute, &collected.verify].into_iter().flatten() {
-            b.validate(net, 2, Some(seed2)).expect("collected bundle validates");
+            b.validate(net, 2, Some(seed2), Some(h1_hash)).expect("collected bundle validates");
         }
 
         let pc2 = seed_components_from_block(st.chain.last());
@@ -11960,7 +11960,8 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
-    /// R1-R3 PROOF: two INDEPENDENT remote workers submit across a simulated source
+    /// R1-R4 COMPLETION PROOF: THREE independent remote workers (COMPUTE, VERIFY and
+    /// SUPPORT) submit across a simulated source
     /// boundary, both are collected through the tiered ingest path, and the assembled
     /// block is accepted by connect_block paying both.
     ///
@@ -11969,7 +11970,7 @@ mod tests {
     /// source addresses, passing per-source limiting, full validation, and per-identity
     /// limiting before ever being poolable.
     #[test]
-    fn r1_r3_two_remote_workers_collected_and_assembled() {
+    fn r1_r4_three_remote_workers_collected_and_assembled() {
         use crate::poawx_admission::global_admission_cache;
         use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
         use crate::poawx_mining_harness::{
@@ -12025,16 +12026,25 @@ mod tests {
         };
         let b_compute = mk(&kc, crate::poawx::ROLE_COMPUTE_CONTRIBUTOR, [0x11u8; 32]);
         let b_verify = mk(&kv, crate::poawx::ROLE_VERIFY_CONTRIBUTOR, [0x12u8; 32]);
+        // R4: SUPPORT now carries its OWN finality vote, so it is collectable too.
+        let b_support = mk(&ks, crate::poawx::ROLE_SUPPORT_CONTRIBUTOR, [0x13u8; 32]);
+        assert!(
+            b_support.finality_vote.is_some(),
+            "a SUPPORT bundle must carry its own committee vote"
+        );
 
         // THE BOUNDARY: they arrive over the tiered ingest path from DISTINCT sources.
         let pool = global_role_bundle_pool();
         pool.prune_below(2);
         let src_a = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
         let src_b = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 9));
-        pool.ingest_tiered(src_a, b_compute, net, 2, Some(seed2))
+        pool.ingest_tiered(src_a, b_compute, net, 2, Some(seed2), Some(h1_hash))
             .expect("remote worker A accepted");
-        pool.ingest_tiered(src_b, b_verify, net, 2, Some(seed2))
+        pool.ingest_tiered(src_b, b_verify, net, 2, Some(seed2), Some(h1_hash))
             .expect("remote worker B accepted");
+        let src_c = IpAddr::V4(Ipv4Addr::new(192, 0, 2, 5));
+        pool.ingest_tiered(src_c, b_support, net, 2, Some(seed2), Some(h1_hash))
+            .expect("remote worker C (SUPPORT) accepted");
 
         // Collected purely from what arrived over the wire -- no local secrets consulted.
         let got_c: RoleBundleV1 = pool
@@ -12045,10 +12055,14 @@ mod tests {
             .expect("verify collected from the pool");
         assert_eq!(got_c.solver_pkh, cpkh);
         assert_eq!(got_v.solver_pkh, vpkh);
+        let got_s: RoleBundleV1 = pool
+            .best_for_role(crate::poawx::ROLE_SUPPORT_CONTRIBUTOR, 2)
+            .expect("support collected from the pool");
+        let spkh = got_s.solver_pkh;
         let collected = CollectedArtifacts {
             compute: Some(got_c),
             verify: Some(got_v),
-            support: None,
+            support: Some(got_s),
         };
 
         let pc2 = seed_components_from_block(st.chain.last());
@@ -12069,7 +12083,13 @@ mod tests {
         assert_eq!(st.tip_height(), 2);
         assert_eq!(cb.outputs[2].script_pubkey, crate::tx::p2pkh_script(&cpkh), "COMPUTE -> remote worker A");
         assert_eq!(cb.outputs[3].script_pubkey, crate::tx::p2pkh_script(&vpkh), "VERIFY -> remote worker B");
-        assert_ne!(cpkh, vpkh, "two genuinely independent remote workers");
+        assert_eq!(cb.outputs[4].script_pubkey, crate::tx::p2pkh_script(&spkh), "SUPPORT -> remote worker C");
+        let distinct: std::collections::BTreeSet<_> = [cpkh, vpkh, spkh].into_iter().collect();
+        assert_eq!(distinct.len(), 3, "three genuinely independent remote workers");
+        assert!(
+            !distinct.contains(&pkh_of(&skf(&worker))),
+            "no collected role may be paid to the builder"
+        );
         pool.prune_below(3);
         for (k, _) in gates {
             std::env::remove_var(k);

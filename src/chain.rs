@@ -11786,6 +11786,243 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
+    /// The mainnet-faithful gate set the C3 proofs run under: every PoAW-X gate active
+    /// AND the contributor-role-binding rule active, matching the existing rig tests.
+    fn c3_gate_set() -> [(&'static str, &'static str); 32] {
+        [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_WINDOW", "64"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_NUM", "1"),
+            ("IRIUM_POAWX_FINALITY_THRESHOLD_DEN", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_COMMITTED_ADMISSION_WINDOW", "64"),
+            ("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_TRUE_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_MULTISOURCE_SEED_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_HIDDEN_PRECOMMIT_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PENALTY_STATE_REQUIRED", "1"),
+            ("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "999999"),
+        ]
+    }
+
+    /// C3 PROOF: a block assembled ONLY from collected public artifacts is accepted by
+    /// connect_block and pays the collected workers their own addresses.
+    ///
+    /// The builder is handed `CollectedArtifacts` and its OWN worker secret. It never
+    /// receives any contributor's private key -- that is the property every pre-C3
+    /// builder could not express, and the property real collection requires.
+    ///
+    /// The fixture is deliberately NOT simplified around the dominance dependency. It
+    /// runs to height 2 so that block 1's rewards make the dominance weights non-uniform,
+    /// and the workers compute their artifacts against the SAME snapshot the builder
+    /// uses -- exactly as a real worker would, reading it from its node. The puzzle
+    /// challenge is bound to sha256(candidate.serialize()) and the candidate carries its
+    /// dominance weight, so a disagreement here would break assembly. The companion
+    /// negative control proves that.
+    #[test]
+    fn c3_block_assembled_from_collected_artifacts_only() {
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_collected_poawx_block_with_parent, build_multi_participant_poawx_block_with_parent,
+            simulate_role_worker_bundle, CollectedArtifacts,
+        };
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = c3_gate_set();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        let pkh_of = |sk: &k256::ecdsa::SigningKey| -> [u8; 20] {
+            hash160(sk.verifying_key().to_encoded_point(true).as_bytes())
+        };
+        let (worker, kc, kv, ks) = ([0x4Du8; 32], [0x61u8; 32], [0x62u8; 32], [0x63u8; 32]);
+        let worker_pkh = pkh_of(&skf(&worker));
+        let (cpkh, vpkh, spkh) = (pkh_of(&skf(&kc)), pkh_of(&skf(&kv)), pkh_of(&skf(&ks)));
+
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let cache = global_admission_cache();
+
+        // ---- H1: an ordinary multi-participant block, so H2's dominance is NON-UNIFORM.
+        let pc1 = seed_components_from_block(st.chain.last());
+        let bits1 = st.target_for_height(1).bits;
+        let p1 = build_multi_participant_poawx_block_with_parent(
+            &worker, &kc, &kv, &ks, net, 1, genesis_hash, None, bits1,
+            genesis.header.time + 1, 1, pc1,
+        )
+        .expect("build H1");
+        cache.clear();
+        cache.set_tip(1);
+        for a in &p1.admissions {
+            let _ = cache.ingest_bytes(a);
+        }
+        let h1_hash = p1.block_hash;
+        st.connect_block(p1.block).expect("connect H1");
+        assert_eq!(st.tip_height(), 1);
+
+        // ---- H2: workers produce artifacts against the node's REAL dominance snapshot.
+        let dom = st.dominance.clone();
+        let parent = st.chain.last().cloned().expect("parent");
+        let seed2 = expected_epoch_seed(2, h1_hash, Some(&parent));
+        let profile = crate::poawx_puzzle::default_profile();
+        let mk_bundle = |sec: &[u8; 32], role: u8, td: [u8; 32]| {
+            simulate_role_worker_bundle(sec, net, 2, role, td, seed2, h1_hash, &dom, profile)
+                .unwrap_or_else(|e| panic!("worker bundle role {role}: {e}"))
+        };
+        // COMPUTE and VERIFY are collected from foreign workers. SUPPORT is deliberately
+        // NOT collected here, and that is a finding rather than a convenience:
+        //
+        //   SUPPORT doubles as the FINALITY COMMITTEE MEMBER. The block's finality vote
+        //   is signed by `AllGatesIdentities.member_sk` and the committee is derived from
+        //   the block's SUPPORT candidate, so a collected SUPPORT worker would have to
+        //   supply its own finality VOTE as well -- which the builder cannot produce on
+        //   its behalf and which poawx-role-worker does not currently emit. Collecting
+        //   SUPPORT therefore needs a bundle-format extension, tracked separately.
+        //
+        // Two collected roles still establish the property under test: a block assembled
+        // from public artifacts alone, paying multiple distinct workers.
+        let collected = CollectedArtifacts {
+            compute: Some(mk_bundle(&kc, crate::poawx::ROLE_COMPUTE_CONTRIBUTOR, [0x11u8; 32])),
+            verify: Some(mk_bundle(&kv, crate::poawx::ROLE_VERIFY_CONTRIBUTOR, [0x12u8; 32])),
+            support: None,
+        };
+        let _ = ks;
+        // Each collected bundle is self-validating public material -- no secrets.
+        for b in [&collected.compute, &collected.verify].into_iter().flatten() {
+            b.validate(net, 2, Some(seed2)).expect("collected bundle validates");
+        }
+
+        let pc2 = seed_components_from_block(st.chain.last());
+        let bits2 = st.target_for_height(2).bits;
+        // THE POINT: only `worker` is secret here. The three contributors are public data.
+        let p2 = build_collected_poawx_block_with_parent(
+            &worker, collected, net, 2, h1_hash, Some(genesis_hash), bits2,
+            genesis.header.time + 2, 1, pc2, Some(&dom),
+        )
+        .expect("assemble H2 from collected artifacts only");
+        let cb = p2.block.transactions[0].clone();
+        cache.clear();
+        cache.set_tip(2);
+        for a in &p2.admissions {
+            let _ = cache.ingest_bytes(a);
+        }
+        st.connect_block(p2.block)
+            .expect("connect_block must ACCEPT a block assembled from collected artifacts");
+        assert_eq!(st.tip_height(), 2, "collected-artifact block landed");
+
+        // ---- the coinbase pays the collected workers, not the builder ----
+        assert_eq!(cb.outputs[1].script_pubkey, crate::tx::p2pkh_script(&worker_pkh), "PRIMARY -> builder");
+        assert_eq!(cb.outputs[2].script_pubkey, crate::tx::p2pkh_script(&cpkh), "COMPUTE -> collected worker");
+        assert_eq!(cb.outputs[3].script_pubkey, crate::tx::p2pkh_script(&vpkh), "VERIFY -> collected worker");
+        let _ = spkh;
+        // The two COLLECTED roles are paid to workers whose secrets the builder never had.
+        let collected_payees: std::collections::BTreeSet<_> =
+            (2..=3usize).map(|i| cb.outputs[i].script_pubkey.clone()).collect();
+        assert_eq!(collected_payees.len(), 2, "two DISTINCT collected payees");
+        assert!(
+            !collected_payees.contains(&crate::tx::p2pkh_script(&worker_pkh)),
+            "a collected role must NOT be paid to the builder"
+        );
+        let payees: std::collections::BTreeSet<_> =
+            (1..=4usize).map(|i| cb.outputs[i].script_pubkey.clone()).collect();
+        assert!(payees.len() >= 3, "block pays multiple distinct participants");
+        for i in 1..=4usize {
+            assert!(cb.outputs[i].value > 0, "coinbase output {i} funded");
+        }
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// NEGATIVE CONTROL for the dominance-agreement dependency found while scoping C3.
+    /// A worker that computes its artifacts against a DIFFERENT dominance view produces
+    /// a puzzle solution bound to a different candidate digest, and assembly must fail
+    /// LOUDLY rather than emit a block that would be rejected on-chain.
+    #[test]
+    fn c3_dominance_disagreement_breaks_assembly_explicitly() {
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_collected_poawx_block_with_parent, simulate_role_worker_bundle, CollectedArtifacts,
+        };
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = c3_gate_set();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let (worker, kc) = ([0x4Du8; 32], [0x71u8; 32]);
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let seed1 = expected_epoch_seed(1, genesis_hash, None);
+        let profile = crate::poawx_puzzle::default_profile();
+
+        // A dominance view the builder does NOT share: the worker believes this pkh has
+        // already earned, so it computes a different weight, hence a different candidate
+        // digest, hence a puzzle solution bound to a challenge the builder never derives.
+        let mut skewed = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        let sk = k256::ecdsa::SigningKey::from_bytes(&kc.into()).unwrap();
+        let cpkh = hash160(sk.verifying_key().to_encoded_point(true).as_bytes());
+        skewed.apply_event(cpkh, crate::poawx_dominance::RoleRewardKind::Primary, 5_000_000_000, 1);
+
+        let bundle = simulate_role_worker_bundle(
+            &kc, net, 1, crate::poawx::ROLE_COMPUTE_CONTRIBUTOR, [0x11u8; 32], seed1,
+            genesis_hash, &skewed, profile,
+        )
+        .expect("worker builds against its own (skewed) view");
+        let collected = CollectedArtifacts { compute: Some(bundle), ..Default::default() };
+        let pc = seed_components_from_block(st.chain.last());
+        let bits = st.target_for_height(1).bits;
+        // Builder uses the EMPTY (true) dominance view -> weights disagree.
+        let res = build_collected_poawx_block_with_parent(
+            &worker, collected, net, 1, genesis_hash, None, bits,
+            genesis.header.time + 1, 1, pc, None,
+        );
+        let err = match res {
+            Err(e) => e,
+            Ok(_) => panic!("assembly MUST fail when the worker's dominance view disagrees"),
+        };
+        assert!(
+            err.contains("does not verify against its challenge"),
+            "must fail with the specific challenge-mismatch error, got: {err}"
+        );
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     #[test]
     #[ignore] // rig: reads REAL role-worker bundles from IRIUM_M3_DIR and lands their attributed identities on-chain
     fn phase4_real_worker_bundles_land_block_distinct_recipients() {

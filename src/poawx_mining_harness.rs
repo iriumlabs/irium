@@ -549,6 +549,7 @@ pub fn build_collected_poawx_block_with_parent(
     time: u32,
     receipt_difficulty_bits: u32,
     parent_seed_components: ([u8; 32], [u8; 32]),
+    dominance_override: Option<&PersistentDominance>,
 ) -> Result<AllGatesProof, String> {
     build_all_gates_block_with(
         &AllGatesIdentities::with_collected(worker_secret, collected)?,
@@ -560,12 +561,96 @@ pub fn build_collected_poawx_block_with_parent(
         time,
         receipt_difficulty_bits,
         parent_seed_components,
-        None,
+        dominance_override,
         None,
         None,
         None,
         &default_cpu_nonce_solver,
     )
+}
+
+/// TEST/RIG SUPPORT: reproduce exactly what an independent role-worker computes, so a
+/// fixture can hand a builder ONLY public artifacts.
+///
+/// This deliberately mirrors `build_roles`' `mk` and the puzzle loop rather than
+/// inventing a parallel derivation -- the whole point is that the worker and the builder
+/// must agree. In particular the candidate carries its DOMINANCE WEIGHT and the
+/// effective score derived from it, and the puzzle challenge is bound to
+/// `sha256(candidate.serialize())`. A worker computing a different weight therefore
+/// produces a solution that cannot verify against the builder's challenge.
+#[allow(clippy::too_many_arguments)]
+pub fn simulate_role_worker_bundle(
+    worker_secret: &[u8; 32],
+    network_id: u8,
+    height: u64,
+    role: u8,
+    ticket_digest: [u8; 32],
+    epoch_seed: [u8; 32],
+    prev_hash: [u8; 32],
+    dominance: &PersistentDominance,
+    profile: crate::poawx_puzzle::PuzzleDifficultyProfile,
+) -> Result<crate::poawx_role_bundle::RoleBundleV1, String> {
+    let sk = SigningKey::from_bytes(worker_secret.into()).map_err(|_| "bad key".to_string())?;
+    let pt = sk.verifying_key().to_encoded_point(true);
+    let solver = hash160(pt.as_bytes());
+    let mut apk = [0u8; 33];
+    apk.copy_from_slice(pt.as_bytes());
+
+    let proof = AssignmentProofV2::prove(
+        worker_secret, network_id, height, role, solver, ticket_digest, epoch_seed,
+    )?;
+    let w = dominance.weight(DOMINANCE_BASE_WORK_SCORE, &solver, height);
+    let cand = RoleCandidate::from_assignment_v2(&proof, PenaltyStatus::Clean.id(), w, [role; 32]);
+    let cdg: [u8; 32] = {
+        let mut h = Sha256::new();
+        h.update(cand.serialize());
+        h.finalize().into()
+    };
+    let challenge = crate::poawx_puzzle::PuzzleChallengeV1::build(
+        network_id,
+        height,
+        role,
+        cand.solver_pkh,
+        cand.ticket_digest,
+        cand.assignment_proof_digest,
+        cdg,
+        prev_hash,
+        profile,
+    );
+    let sol = crate::poawx_puzzle::solve_dev(&challenge)
+        .ok_or_else(|| "worker: puzzle solve failed".to_string())?;
+
+    // The worker's own claim material, derived from its own key.
+    let mk = |tag: &[u8]| -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(b"IRIUM_ROLE_WORKER_CLAIM_V1");
+        h.update(tag);
+        h.update(worker_secret);
+        h.update(height.to_le_bytes());
+        h.update([role]);
+        h.finalize().into()
+    };
+    let secret = mk(b"secret");
+    let nonce = mk(b"nonce");
+    let ticket = crate::poawx_ticket::TicketProof::new(
+        network_id, height, prev_hash, role, solver, height, height + 100_000, apk,
+        [0x22u8; 32], PenaltyStatus::Clean.id(),
+    );
+    Ok(crate::poawx_role_bundle::RoleBundleV1 {
+        network_id,
+        target_height: height,
+        role_id: role,
+        solver_pkh: solver,
+        assignment_public_key: apk,
+        assignment_proof: proof,
+        ticket_proof: ticket,
+        puzzle_solution: sol,
+        lane_id: crate::poawx::assign_lane(network_id, height, &prev_hash, role, 0).id(),
+        claim_secret: secret,
+        claim_nonce: nonce,
+        commitment_hash: crate::poawx::role_precommit_commitment(&secret, &nonce),
+        claim_digest: [0u8; 32],
+    })
 }
 
 pub fn build_multi_participant_poawx_block_with_parent(

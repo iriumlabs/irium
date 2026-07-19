@@ -619,9 +619,34 @@ pub fn proposer_registration_gossip_enabled() -> bool {
 /// Node-local pool of gossiped proposer registrations awaiting on-chain announcement.
 /// Gossip ingest is LIGHT (claimed sybil bits + self-signature + dedup); the full
 /// anchor-bound validation runs at block inclusion (connect_block). Mainnet hard-off.
+/// A0: minimum anchor-height advance before a refresh of an already-pooled key is
+/// treated as new and rebroadcast. Below this the record is still updated (the pool
+/// keeps the freshest anchor) but the outcome is `Duplicate`, so it does not
+/// re-amplify. Without this a squatter re-anchors its keys every block and each
+/// refresh fans out to every peer at zero cost.
+pub const PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA: u64 = 8;
+
+/// A pooled registration plus its ARRIVAL SEQUENCE.
+///
+/// A0: announce candidates were previously taken in `BTreeMap` key order, i.e.
+/// lexicographically by VRF public key, so the 8 per-block announce slots always went
+/// to the numerically smallest keys. Grinding a vanity key beginning `0x02 0x00 0x00...`
+/// is cheap and entirely independent of the sybil PoW, so one party could permanently
+/// occupy the head of every node's candidate list and starve every honest registrant at
+/// any submission rate. `seq` makes selection first-come-first-served instead.
+#[derive(Debug, Clone)]
+struct PooledRegistration {
+    /// Arrival order. PRESERVED across refreshes on purpose: if a refresh re-stamped
+    /// this, a squatter could hold the head of the queue indefinitely by re-anchoring,
+    /// which is the same capture A0 exists to remove.
+    seq: u64,
+    reg: crate::poawx::ProposerRegistrationV1,
+}
+
 #[derive(Default)]
 pub struct NodeProposerRegistrationPool {
-    pending: Mutex<BTreeMap<[u8; 33], crate::poawx::ProposerRegistrationV1>>,
+    pending: Mutex<BTreeMap<[u8; 33], PooledRegistration>>,
+    next_seq: std::sync::atomic::AtomicU64,
 }
 
 impl NodeProposerRegistrationPool {
@@ -650,21 +675,35 @@ impl NodeProposerRegistrationPool {
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         match pending.get(&reg.vrf_pubkey) {
             // already have an equal-or-fresher anchor for this key: ignore.
-            Some(existing) if reg.anchor_height <= existing.anchor_height => {
+            Some(existing) if reg.anchor_height <= existing.reg.anchor_height => {
                 return GossipOutcome::Duplicate;
             }
-            // a fresher anchor for a known key: refresh + rebroadcast so the network
-            // converges on the newest (non-stale) registration for the key.
-            Some(_) => {
-                pending.insert(reg.vrf_pubkey, reg);
-                return GossipOutcome::AcceptedNew;
+            // A fresher anchor for a known key. Keep the freshest record so the pool
+            // never offers a stale anchor, but only treat it as NEW (and therefore
+            // rebroadcast) when the anchor advanced meaningfully -- see A2 above.
+            // `seq` is deliberately carried over so a refresh cannot jump the queue.
+            Some(existing) => {
+                let seq = existing.seq;
+                let advanced = reg
+                    .anchor_height
+                    .saturating_sub(existing.reg.anchor_height)
+                    >= PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA;
+                pending.insert(reg.vrf_pubkey, PooledRegistration { seq, reg });
+                return if advanced {
+                    GossipOutcome::AcceptedNew
+                } else {
+                    GossipOutcome::Duplicate
+                };
             }
             None => {}
         }
         if pending.len() >= PROPOSER_REG_POOL_MAX {
             return GossipOutcome::Rejected("registration: pool full".to_string());
         }
-        pending.insert(reg.vrf_pubkey, reg);
+        let seq = self
+            .next_seq
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        pending.insert(reg.vrf_pubkey, PooledRegistration { seq, reg });
         GossipOutcome::AcceptedNew
     }
 
@@ -684,7 +723,13 @@ impl NodeProposerRegistrationPool {
         }
         let bytes = reg.serialize();
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        pending.insert(reg.vrf_pubkey, reg);
+        let seq = match pending.get(&reg.vrf_pubkey) {
+            Some(existing) => existing.seq, // never let a resubmit jump the queue
+            None => self
+                .next_seq
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+        };
+        pending.insert(reg.vrf_pubkey, PooledRegistration { seq, reg });
         bytes
     }
 
@@ -696,12 +741,14 @@ impl NodeProposerRegistrationPool {
         exclude: &BTreeSet<[u8; 33]>,
     ) -> Vec<crate::poawx::ProposerRegistrationV1> {
         let pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
-        pending
+        // A0: FIRST-COME-FIRST-SERVED by arrival sequence. Iterating the BTreeMap
+        // directly would return lexicographic public-key order, which is grindable.
+        let mut c: Vec<&PooledRegistration> = pending
             .values()
-            .filter(|r| !exclude.contains(&r.vrf_pubkey))
-            .take(max)
-            .cloned()
-            .collect()
+            .filter(|p| !exclude.contains(&p.reg.vrf_pubkey))
+            .collect();
+        c.sort_by_key(|p| p.seq);
+        c.into_iter().take(max).map(|p| p.reg.clone()).collect()
     }
 
     pub fn forget(&self, keys: &[[u8; 33]]) {
@@ -936,9 +983,29 @@ mod tests {
             pool.ingest_bytes(&r0.serialize()),
             crate::poawx_gossip::GossipOutcome::AcceptedNew
         ));
-        // fresher anchor (5 > 0) => refresh + rebroadcast.
+        // A2 CONTRACT CHANGE: a fresher anchor still REFRESHES the stored record (so the
+        // pool converges on the newest, as before), but it only counts as AcceptedNew --
+        // and therefore rebroadcasts -- when the anchor advanced by at least
+        // PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA. Previously ANY advance rebroadcast, which
+        // let a squatter re-anchor every block and fan out to every peer for free.
+        // Here 5 - 0 = 5 < 8, so it is a silent refresh.
         assert!(matches!(
             pool.ingest_bytes(&r5.serialize()),
+            crate::poawx_gossip::GossipOutcome::Duplicate
+        ));
+        // ...but convergence is preserved: the stored record IS the fresher one.
+        let held = pool.announce_candidates(1, &BTreeSet::new());
+        assert_eq!(
+            held[0].anchor_height, 5,
+            "sub-threshold refresh must still update the stored record"
+        );
+        // A large enough advance does rebroadcast.
+        let r20 = crate::poawx::ProposerRegistrationV1::build_signed(
+            &[0x7u8; 32], net, 5 + PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA, &[0x9u8; 32], 0,
+        )
+        .unwrap();
+        assert!(matches!(
+            pool.ingest_bytes(&r20.serialize()),
             crate::poawx_gossip::GossipOutcome::AcceptedNew
         ));
         // older/equal anchor => duplicate (no downgrade).
@@ -1021,5 +1088,132 @@ mod tests {
         reg.unregister(&k, 21);
         assert_eq!(reg.len(), 0); // exact inverse => fully removed
         assert!(!reg.is_eligible_with(&k, 24, fd, ew));
+    }
+}
+
+#[cfg(test)]
+mod a0_a2_registration_fairness {
+    use super::*;
+    use crate::poawx::ProposerRegistrationV1;
+
+    fn reg_for(secret_byte: u8, anchor_height: u64, net: u8) -> ProposerRegistrationV1 {
+        ProposerRegistrationV1::build_signed(&[secret_byte; 32], net, anchor_height, &[0x9u8; 32], 0)
+            .expect("build_signed")
+    }
+
+    /// A0: announce slots must be first-come-first-served, NOT ordered by public key.
+    /// Before this fix the 8 slots always went to the numerically smallest keys, so a
+    /// cheap vanity key (independent of the sybil PoW) captured every node's list.
+    #[test]
+    fn announce_order_is_arrival_not_key_order() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let pool = NodeProposerRegistrationPool::default();
+
+        // Insert several keys, then check arrival order != key order for this sample,
+        // so the test cannot pass by coincidence.
+        let mut arrival: Vec<[u8; 33]> = Vec::new();
+        for b in [0x51u8, 0x22, 0x77, 0x13, 0x66] {
+            let r = reg_for(b, 0, net);
+            arrival.push(r.vrf_pubkey);
+            assert!(matches!(
+                pool.ingest_bytes(&r.serialize()),
+                crate::poawx_gossip::GossipOutcome::AcceptedNew
+            ));
+        }
+        let mut key_sorted = arrival.clone();
+        key_sorted.sort();
+        assert_ne!(
+            arrival, key_sorted,
+            "fixture is vacuous: arrival order happens to equal key order"
+        );
+
+        let got: Vec<[u8; 33]> = pool
+            .announce_candidates(5, &BTreeSet::new())
+            .into_iter()
+            .map(|r| r.vrf_pubkey)
+            .collect();
+        assert_eq!(got, arrival, "candidates must be in ARRIVAL order");
+        assert_ne!(got, key_sorted, "candidates must NOT be in public-key order");
+
+        // And the head of the queue is the FIRST arrival, not the smallest key.
+        let smallest = key_sorted[0];
+        let first_arrival = arrival[0];
+        if smallest != first_arrival {
+            let head = pool.announce_candidates(1, &BTreeSet::new());
+            assert_eq!(head[0].vrf_pubkey, first_arrival);
+            assert_ne!(head[0].vrf_pubkey, smallest, "smallest key must not capture the slot");
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// A2: a refresh only counts as new (and so rebroadcasts) when the anchor advanced
+    /// meaningfully. Otherwise a squatter re-anchors every block and each refresh fans
+    /// out to every peer for free.
+    #[test]
+    fn small_refresh_does_not_rebroadcast_large_one_does() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let pool = NodeProposerRegistrationPool::default();
+        let base = reg_for(0x31, 100, net);
+        assert!(matches!(
+            pool.ingest_bytes(&base.serialize()),
+            crate::poawx_gossip::GossipOutcome::AcceptedNew
+        ));
+        // advance by less than the minimum delta => updated but NOT rebroadcast
+        let small = reg_for(0x31, 100 + PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA - 1, net);
+        assert!(
+            matches!(
+                pool.ingest_bytes(&small.serialize()),
+                crate::poawx_gossip::GossipOutcome::Duplicate
+            ),
+            "sub-threshold refresh must not re-amplify"
+        );
+        // advance by at least the minimum delta => genuinely new
+        let big = reg_for(0x31, 100 + PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA * 2, net);
+        assert!(matches!(
+            pool.ingest_bytes(&big.serialize()),
+            crate::poawx_gossip::GossipOutcome::AcceptedNew
+        ));
+        // an older anchor is still ignored outright
+        let older = reg_for(0x31, 50, net);
+        assert!(matches!(
+            pool.ingest_bytes(&older.serialize()),
+            crate::poawx_gossip::GossipOutcome::Duplicate
+        ));
+        assert_eq!(pool.len(), 1, "refreshes must not grow the pool");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// A0 anti-gaming: a refresh must NOT re-stamp arrival order, or a squatter holds
+    /// the head of the queue forever by re-anchoring -- the same capture A0 removes.
+    #[test]
+    fn refresh_does_not_jump_the_queue() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let pool = NodeProposerRegistrationPool::default();
+        // Warm-up arrival so `first` does NOT land on seq 0. Without this, a control
+        // that re-stamps a refresh to seq 0 merely TIES with `first` and the assertion
+        // can pass by accident of tie-break order -- i.e. the test would be vacuous.
+        let warm = reg_for(0x40, 100, net);
+        pool.ingest_bytes(&warm.serialize());
+        let first = reg_for(0x41, 100, net);
+        let second = reg_for(0x42, 100, net);
+        pool.ingest_bytes(&first.serialize());
+        pool.ingest_bytes(&second.serialize());
+        // `second` refreshes aggressively; it must still stay behind `first`.
+        for d in 1..=5u64 {
+            let bump = reg_for(0x42, 100 + d * PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA * 2, net);
+            pool.ingest_bytes(&bump.serialize());
+        }
+        let got: Vec<[u8; 33]> = pool
+            .announce_candidates(3, &BTreeSet::new())
+            .into_iter()
+            .map(|r| r.vrf_pubkey)
+            .collect();
+        assert_eq!(got[0], warm.vrf_pubkey, "warm-up must remain first");
+        assert_eq!(got[1], first.vrf_pubkey, "refreshing must not jump the queue");
+        assert_eq!(got[2], second.vrf_pubkey, "the refresher must stay last");
+        std::env::remove_var("IRIUM_NETWORK");
     }
 }

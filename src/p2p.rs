@@ -6680,8 +6680,12 @@ impl P2PNode {
                             if let Ok(p) =
                                 crate::protocol::PoawxProposerRegistrationPayload::from_message(&msg)
                             {
-                                if crate::poawx_proposer::global_proposer_reg_pool()
-                                    .ingest_bytes(&p.reg_bytes)
+                                // A1: rate-limit registration ingest per source IP, exactly as the
+                                // candidate-admission arm above already does. Registration gossip is
+                                // remotely reachable and was the only unlimited gossip ingest path.
+                                if crate::poawx_admission::admission_rate_allowed(addr.ip())
+                                    && crate::poawx_proposer::global_proposer_reg_pool()
+                                        .ingest_bytes(&p.reg_bytes)
                                     .should_rebroadcast()
                                 {
                                     let bytes = crate::protocol::PoawxProposerRegistrationPayload {
@@ -9165,8 +9169,10 @@ async fn handle_incoming_with_sybil(
                     if let Ok(p) =
                         crate::protocol::PoawxProposerRegistrationPayload::from_message(&msg)
                     {
-                        if crate::poawx_proposer::global_proposer_reg_pool()
-                            .ingest_bytes(&p.reg_bytes)
+                        // A1: rate-limit registration ingest per source IP (see site above).
+                        if crate::poawx_admission::admission_rate_allowed(addr.ip())
+                            && crate::poawx_proposer::global_proposer_reg_pool()
+                                .ingest_bytes(&p.reg_bytes)
                             .should_rebroadcast()
                         {
                             let bytes = crate::protocol::PoawxProposerRegistrationPayload {

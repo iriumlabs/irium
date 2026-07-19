@@ -1409,6 +1409,13 @@ impl ChainState {
         let parent_time = previous.map(|b| b.header.time).unwrap_or(0);
         let n = self.proposer_registry.eligible_count(height);
         let round_interval = crate::poawx_proposer::proposer_round_interval_secs();
+        // N1: when active, eligibility / sortition / round-timing are PROPOSER-PRIVILEGE
+        // rules, not BLOCK-VALIDITY rules. Failing one confers no proposer status
+        // (`continue` => this assignment does not set `had_assignment`), so the block is
+        // judged on its own PoW exactly as an assignment-less block already is. Ships
+        // inert (`MAINNET_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT == None`).
+        // Structural/integrity checks above are UNCHANGED and still reject.
+        let nonexclusive = crate::poawx_proposer::proposer_nonexclusive_active(height);
         let mut had_assignment = false;
         for r in receipts {
             let ext = r.phase20_ext.as_ref().ok_or_else(|| {
@@ -1491,6 +1498,12 @@ impl ChainState {
                     .proposer_registry
                     .is_eligible(&pa.proof.assignment_public_key, height)
             {
+                // N1: an ineligible key is not a protocol violation -- it just is not a
+                // proposer. Excluding it from block production is what created the
+                // self-perpetuating n==1 lockout.
+                if nonexclusive {
+                    continue;
+                }
                 // Fix #9: surface the registered-key mismatch. List the eligible proposer
                 // pkhs so an operator can immediately see that their miner is signing with a
                 // key that is not in the frozen-registered set (the silent 0-yield cause).
@@ -1511,6 +1524,14 @@ impl ChainState {
             let priority = crate::poawx_proposer::proposer_priority(&pa.proof.vrf_output);
             let tau = crate::poawx_proposer::proposer_threshold(n, pa.round);
             if priority >= tau {
+                // N1: not being selected this round confers no proposer status; it does
+                // not invalidate the block. This also removes a live fragility for the
+                // INCUMBENT: once a second key becomes eligible, tau drops to
+                // u64::MAX / n and the incumbent would otherwise have its own blocks
+                // rejected whenever it missed the round-0 cut.
+                if nonexclusive {
+                    continue;
+                }
                 return Err(format!(
                     "proposer: not selected at round {} (priority {} >= threshold {})",
                     pa.round, priority, tau
@@ -1520,6 +1541,12 @@ impl ChainState {
             let min_t =
                 crate::poawx_proposer::min_time_for_round(parent_time, pa.round, round_interval);
             if block.header.time < min_t {
+                // N1: claiming a round before it opens confers no proposer status. Round
+                // timing exists to stop a proposer taking the demotion floor early; with
+                // no status conferred there is nothing to take early.
+                if nonexclusive {
+                    continue;
+                }
                 return Err(format!(
                     "proposer: round {} too early (time {} < required {})",
                     pa.round, block.header.time, min_t
@@ -17627,6 +17654,349 @@ mod proposer_consensus_tests {
         );
         std::env::remove_var("IRIUM_NETWORK");
     }
+    // ---- N1: non-exclusive proposer eligibility -------------------------------
+    //
+    // The n==1 lockout: with exactly one eligible key, sortition saturates
+    // (tau == u64::MAX) while the `n > 0` guard switches the eligibility test ON, so
+    // that one key is the only key that may produce a block. Under the N1 gate,
+    // eligibility / sortition / round-timing confer PROPOSER STATUS rather than
+    // BLOCK VALIDITY: failing one yields Ok(false), and the block is judged on its
+    // own PoW. Structural/integrity failures are UNCHANGED and still reject.
+
+    /// The exact n==1 lockout scenario: one OTHER key eligible, block signed by a
+    /// different key. Both gate directions asserted in one test so the negative
+    /// control cannot drift away from the positive case.
+    #[test]
+    fn n1_ineligible_proposer_is_non_fatal_under_gate() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let tmpl = ext_skeleton(net);
+        let mut other_key = [0u8; 33];
+        other_key[0] = 0x02;
+        other_key[1] = 0xEE;
+
+        // gate OFF (env unset) => today's behaviour: hard rejection.
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
+        let proof = prove(&secret_n(1), net, height, seed);
+        let block = block_with_proof(&tmpl, prev_hash, height, proof, 0, 5_000);
+        let mut cs = base_chain();
+        cs.proposer_registry.register(other_key, [0x7Au8; 20], 0);
+        assert_eq!(cs.proposer_registry.eligible_count(height), 1, "n==1 setup");
+        let err = cs
+            .check_block_proposer(&block, height, None)
+            .expect_err("gate off: ineligible proposer must still be rejected");
+        assert!(err.contains("not eligible"), "got: {err}");
+
+        // gate ON => same block, same registry: no proposer status, but NOT invalid.
+        std::env::set_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT", "0");
+        let proof2 = prove(&secret_n(1), net, height, seed);
+        let block2 = block_with_proof(&tmpl, prev_hash, height, proof2, 0, 5_000);
+        let mut cs2 = base_chain();
+        cs2.proposer_registry.register(other_key, [0x7Au8; 20], 0);
+        assert_eq!(
+            cs2.check_block_proposer(&block2, height, None),
+            Ok(false),
+            "gate on: ineligible proposer confers no status but does not invalidate"
+        );
+        // and the block-level validator therefore accepts it.
+        cs2.validate_block_proposer(&block2, height, None)
+            .expect("gate on: block is valid on its own PoW");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// Pool-equivalence: the incumbent (sole eligible key, the mainnet situation)
+    /// must behave IDENTICALLY with the gate off and on. This is the regression
+    /// guard for "does deploying this disrupt current block production".
+    #[test]
+    fn incumbent_eligible_proposer_is_unchanged_by_the_gate() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let tmpl = ext_skeleton(net);
+        for gate in [false, true] {
+            if gate {
+                std::env::set_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT", "0");
+            } else {
+                std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
+            }
+            let proof = prove(&secret_n(1), net, height, seed);
+            let key = proof.assignment_public_key;
+            let pkh = proof.solver_pkh;
+            let block = block_with_proof(&tmpl, prev_hash, height, proof, 0, 5_000);
+            let mut cs = base_chain();
+            cs.proposer_registry.register(key, pkh, 0);
+            assert_eq!(cs.proposer_registry.eligible_count(height), 1);
+            assert_eq!(
+                cs.check_block_proposer(&block, height, None),
+                Ok(true),
+                "incumbent must keep full proposer status (gate={gate})"
+            );
+        }
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// Sortition miss: eligible key, large eligible set, priority above the round-0
+    /// cut. Gate off rejects; gate on confers no status. This is also the incumbent's
+    /// own failure mode once a second key registers (tau drops to u64::MAX / n).
+    #[test]
+    fn unselected_sortition_is_non_fatal_under_gate() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let n_big = 100u64;
+        let tau0 = proposer_threshold(n_big, 0);
+        let mut k = 0u64;
+        let secret = loop {
+            let pr = prove(&secret_n(k + 1), net, height, seed);
+            if proposer_priority(&pr.vrf_output) >= tau0 {
+                break secret_n(k + 1);
+            }
+            k += 1;
+            assert!(k < 10_000);
+        };
+        let tmpl = ext_skeleton(net);
+        // registry: the block's own key IS eligible, plus 99 others => n=100.
+        let fill = |cs: &mut ChainState, key: [u8; 33], pkh: [u8; 20]| {
+            cs.proposer_registry.register(key, pkh, 0);
+            for i in 0..99u32 {
+                let mut dk = [0u8; 33];
+                dk[0] = 0x02;
+                dk[1..5].copy_from_slice(&i.to_le_bytes());
+                cs.proposer_registry.register(dk, [i as u8; 20], 0);
+            }
+        };
+
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
+        let proof = prove(&secret, net, height, seed);
+        let (key, pkh) = (proof.assignment_public_key, proof.solver_pkh);
+        let block = block_with_proof(&tmpl, prev_hash, height, proof, 0, 5_000);
+        let mut cs = base_chain();
+        fill(&mut cs, key, pkh);
+        assert_eq!(cs.proposer_registry.eligible_count(height), 100);
+        let err = cs
+            .check_block_proposer(&block, height, None)
+            .expect_err("gate off: non-selected proposer must still be rejected");
+        assert!(err.contains("not selected"), "got: {err}");
+
+        std::env::set_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT", "0");
+        let proof2 = prove(&secret, net, height, seed);
+        let block2 = block_with_proof(&tmpl, prev_hash, height, proof2, 0, 5_000);
+        let mut cs2 = base_chain();
+        fill(&mut cs2, key, pkh);
+        assert_eq!(
+            cs2.check_block_proposer(&block2, height, None),
+            Ok(false),
+            "gate on: missing the sortition cut confers no status, block still valid"
+        );
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// Round claimed before it opens: gate off rejects, gate on confers no status.
+    /// n==1 so sortition saturates and the round-timing check is genuinely reached.
+    #[test]
+    fn early_round_is_non_fatal_under_gate() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_ROUND_INTERVAL_SECS", "120");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let tmpl = ext_skeleton(net);
+        // previous = None => parent_time 0; round 1 opens at 120; claim it at t=5.
+        // t=5 also keeps the stall gap far below the liveness-recovery floor.
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
+        let proof = prove(&secret_n(3), net, height, seed);
+        let (key, pkh) = (proof.assignment_public_key, proof.solver_pkh);
+        let block = block_with_proof(&tmpl, prev_hash, height, proof, 1, 5);
+        let mut cs = base_chain();
+        cs.proposer_registry.register(key, pkh, 0);
+        let err = cs
+            .check_block_proposer(&block, height, None)
+            .expect_err("gate off: early round must still be rejected");
+        assert!(err.contains("too early"), "got: {err}");
+
+        std::env::set_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT", "0");
+        let proof2 = prove(&secret_n(3), net, height, seed);
+        let block2 = block_with_proof(&tmpl, prev_hash, height, proof2, 1, 5);
+        let mut cs2 = base_chain();
+        cs2.proposer_registry.register(key, pkh, 0);
+        assert_eq!(
+            cs2.check_block_proposer(&block2, height, None),
+            Ok(false),
+            "gate on: an early round confers no status, block still valid"
+        );
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_ROUND_INTERVAL_SECS");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// SAFETY CONTROL: the gate must relax POLICY only. Every structural/integrity
+    /// failure still rejects WITH THE GATE ON, and never via a policy message.
+    #[test]
+    fn structural_failures_still_reject_with_the_gate_on() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT", "0");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let tmpl = ext_skeleton(net);
+        let secret = secret_n(1);
+        let base = prove(&secret, net, height, seed);
+        let (key, pkh) = (base.assignment_public_key, base.solver_pkh);
+
+        // Every proof below is INTERNALLY VALID (built via the real prover), so it
+        // survives `proof.validate()` and genuinely reaches the specific check under
+        // test. A tampered-bytes mutation would instead be caught by proof validation
+        // and would prove nothing about the individual checks -- an earlier draft of
+        // this test made exactly that mistake and passed while asserting nothing.
+        let mk = |role: u8, solver: [u8; 20], ticket: [u8; 32], sd: [u8; 32]| {
+            AssignmentProofV2::prove(&secret, net, height, role, solver, ticket, sd)
+                .expect("prove")
+        };
+        let other_seed = [0x11u8; 32];
+        assert_ne!(other_seed, seed, "the wrong-seed case must actually differ");
+        let cases: Vec<(&str, AssignmentProofV2, &str)> = vec![
+            (
+                "wrong seed",
+                mk(ROLE_PROPOSER, pkh, [0u8; 32], other_seed),
+                "assignment proof wrong seed",
+            ),
+            (
+                "wrong role",
+                mk(crate::poawx::ROLE_COMPUTE_CONTRIBUTOR, pkh, [0u8; 32], seed),
+                "assignment proof wrong role",
+            ),
+            (
+                "non-canonical ticket digest",
+                mk(ROLE_PROPOSER, pkh, [0x01u8; 32], seed),
+                "non-canonical ticket digest",
+            ),
+            (
+                "solver pkh not derived from vrf key",
+                mk(ROLE_PROPOSER, [0xABu8; 20], [0u8; 32], seed),
+                "solver pkh not derived from vrf key",
+            ),
+        ];
+        for (label, proof, want) in cases {
+            assert!(
+                proof.validate(net, height).is_ok(),
+                "{label}: proof must be internally valid, else the case is vacuous"
+            );
+            let block = block_with_proof(&tmpl, prev_hash, height, proof, 0, 5_000);
+            let mut cs = base_chain();
+            cs.proposer_registry.register(key, pkh, 0);
+            let err = cs
+                .check_block_proposer(&block, height, None)
+                .expect_err(&format!("{label}: must still reject with the gate on"));
+            assert!(
+                err.contains(want),
+                "{label}: expected the structural message {want:?}, got: {err}"
+            );
+        }
+        // mode-0: proposer must be the block worker. Valid proof, tampered worker_pkh.
+        let proof = prove(&secret, net, height, seed);
+        let mut block = block_with_proof(&tmpl, prev_hash, height, proof, 0, 5_000);
+        let mut rs = block.poawx_receipts.clone().expect("receipts");
+        rs[0].worker_pkh = [0xCDu8; 20];
+        block.poawx_receipts = Some(rs);
+        let mut cs = base_chain();
+        cs.proposer_registry.register(key, pkh, 0);
+        let err = cs
+            .check_block_proposer(&block, height, None)
+            .expect_err("proposer != worker must still reject with the gate on");
+        assert!(
+            err.contains("proposer is not the block worker"),
+            "expected the worker-binding message, got: {err}"
+        );
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// The gate must never confer PoW demotion. Demotion still requires Ok(true) AND
+    /// `pow_demotion_active`, whose mainnet const remains None at every height.
+    #[test]
+    fn gate_never_enables_pow_demotion() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
+        std::env::set_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT", "0");
+        let net = crate::activation::network_id_byte();
+        let height = 2u64;
+        let prev_hash = [0x55u8; 32];
+        let seed = expected_epoch_seed(height, prev_hash, None);
+        let tmpl = ext_skeleton(net);
+        let proof = prove(&secret_n(1), net, height, seed);
+        let block = block_with_proof(&tmpl, prev_hash, height, proof, 0, 5_000);
+        let mut cs = base_chain();
+        let mut other_key = [0u8; 33];
+        other_key[0] = 0x02;
+        other_key[1] = 0xEE;
+        cs.proposer_registry.register(other_key, [0x7Au8; 20], 0);
+        assert!(
+            !cs.proposer_demotion_applies(&block, height, None),
+            "an ineligible proposer must never get demotion, gate or no gate"
+        );
+        // mainnet demotion remains hard-off at every height, env irrelevant.
+        assert_eq!(crate::poawx_proposer::MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, None);
+        for h in [0u64, 50_000, 59_426, u64::MAX] {
+            assert!(!crate::poawx_proposer::pow_demotion_gate(0, Some(1), h));
+        }
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// The change SHIPS INERT: the compiled mainnet const is None, mainnet ignores the
+    /// env entirely, and an unset env is off on every network.
+    #[test]
+    fn gate_ships_inert_and_mainnet_ignores_env() {
+        assert_eq!(
+            crate::poawx_proposer::MAINNET_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT,
+            None,
+            "N1 must ship inert"
+        );
+        // mainnet: env can NEVER enable it while the const is None.
+        for h in [0u64, 50_000, 59_426, u64::MAX] {
+            assert!(!crate::poawx_proposer::proposer_nonexclusive_gate(0, Some(1), h));
+            assert!(!crate::poawx_proposer::proposer_nonexclusive_gate(0, None, h));
+        }
+        // non-mainnet: off unless explicitly set, then on at/after the height.
+        assert!(!crate::poawx_proposer::proposer_nonexclusive_gate(2, None, 1_000));
+        assert!(!crate::poawx_proposer::proposer_nonexclusive_gate(2, Some(10), 9));
+        assert!(crate::poawx_proposer::proposer_nonexclusive_gate(2, Some(10), 10));
+        assert!(crate::poawx_proposer::proposer_nonexclusive_gate(1, Some(1), 999));
+        // the pure mainnet-const helper, independent of the shipped value.
+        assert!(!crate::poawx_proposer::mainnet_proposer_nonexclusive_active(None, u64::MAX));
+        assert!(!crate::poawx_proposer::mainnet_proposer_nonexclusive_active(Some(100), 99));
+        assert!(crate::poawx_proposer::mainnet_proposer_nonexclusive_active(Some(100), 100));
+    }
+
 }
 
 #[cfg(test)]

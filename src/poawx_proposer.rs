@@ -173,6 +173,71 @@ pub fn pow_demotion_active(height: u64) -> bool {
     pow_demotion_gate(network_id_byte(), pow_demotion_activation_height(), height)
 }
 
+// ── non-exclusive proposer eligibility (N1) ──────────────────────────────────
+//
+// Fixes the n==1 exclusionary lockout: with exactly one eligible key,
+// `proposer_threshold(1, r)` saturates to `u64::MAX` (sortition admits everyone)
+// while `check_block_proposer`'s `n > 0` guard switches the eligibility test ON --
+// so the single eligible key is the ONLY key that may produce a block, and every
+// other miner's block is rejected outright. It is self-perpetuating: a newcomer's
+// key becomes eligible only by appearing in a block it produced, which it cannot
+// produce while ineligible.
+//
+// Under this gate, eligibility / sortition / round-timing stop being BLOCK-VALIDITY
+// rules and become PROPOSER-PRIVILEGE rules: failing them yields "no proposer status"
+// (`Ok(false)`) instead of `Err`, so the block stands or falls on its own PoW alone,
+// exactly as a block carrying no assignment already does. Structural/integrity
+// failures (bad VRF proof, wrong seed/role, non-canonical ticket digest, solver-pkh
+// mismatch, proposer != worker, delegation-v2 mismatch) are UNCHANGED and still `Err`.
+//
+// This is a RELAXATION of block validity: blocks that were rejected become accepted.
+// The fork risk therefore runs new->old (an upgraded node accepts a block a
+// non-upgraded node rejects), so it must not switch on merely by deploying a binary.
+/// Compiled mainnet activation height for non-exclusive proposer eligibility.
+/// `None` => the fix ships INERT: behaviour is byte-identical to pre-N1 on every
+/// network until this const is deliberately set in a later, reviewed release.
+pub const MAINNET_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT: Option<u64> = None;
+
+pub fn proposer_nonexclusive_activation_height() -> Option<u64> {
+    std::env::var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+/// Pure mainnet-const evaluation (param-driven for race-free tests).
+pub fn mainnet_proposer_nonexclusive_active(
+    mainnet_activation: Option<u64>,
+    height: u64,
+) -> bool {
+    matches!(mainnet_activation, Some(h) if height >= h)
+}
+
+/// Master gate. Modelled EXACTLY on `pow_demotion_gate`: on mainnet
+/// (`network_id == 0`) the ENV is IGNORED and only the compiled const can enable
+/// this. It deliberately does NOT route through `poawx_effective_activation`, which
+/// substitutes `MAINNET_POAWX_ACTIVATION_HEIGHT` (`Some(50_000)`) for net 0 and would
+/// therefore activate the change instantly on deploy, mainnet already being past that
+/// height. That substitution is exactly how the PoAW-X gate set came to be live on
+/// mainnet without a deliberate activation step; this gate must not repeat it.
+pub fn proposer_nonexclusive_gate(network_id: u8, activation: Option<u64>, height: u64) -> bool {
+    if network_id == 0 {
+        return mainnet_proposer_nonexclusive_active(
+            MAINNET_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT,
+            height,
+        );
+    }
+    matches!(activation, Some(h) if height >= h)
+}
+
+/// Whether eligibility/sortition/round-timing are non-exclusionary at `height`.
+pub fn proposer_nonexclusive_active(height: u64) -> bool {
+    proposer_nonexclusive_gate(
+        network_id_byte(),
+        proposer_nonexclusive_activation_height(),
+        height,
+    )
+}
+
 /// Pure cap: when `enforced`, the effective puzzle difficulty is capped at the
 /// anti-spam `floor` (never raised), so hashrate cannot be cranked up to matter;
 /// otherwise the configured value passes through verbatim.

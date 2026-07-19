@@ -6,11 +6,19 @@
 //! `FinalityVoteV1` (real **secp256k1 ECDSA** over a domain-separated vote digest —
 //! the same signing primitive used by `Delegation`), and a `FinalityProofV1` bundles
 //! a threshold of votes finalizing a block. Deterministic, bounded, no floats, no
-//! network/wall-clock in verification. Gated + mainnet hard-off; does NOT touch chain
+//! network/wall-clock in verification. Gated + mainnet-ACTIVE at height >= 50_000; does NOT touch chain
 //! PoW / LWMA-144.
 //!
 //! The proof in a block finalizes the block's PARENT (`block_hash = the carrying
 //! block's prev_hash`), so votes are over an already-known hash (no circularity).
+//!
+//! ⚠ MAINNET STATUS (corrected 2026-07-19): this module's gates are NOT "mainnet
+//! hard-off". They route through `activation::poawx_effective_activation`, which on
+//! `network_id == 0` IGNORES the env and substitutes the compiled
+//! `MAINNET_POAWX_ACTIVATION_HEIGHT = Some(50_000)`. Mainnet is far past that height,
+//! so these gates are ACTIVE in production. Any remaining "mainnet hard-off" wording
+//! below is stale. The authoritative, height-accurate check is
+//! `activation::mainnet_gate_truth`.
 #![allow(dead_code)]
 
 use sha2::{Digest, Sha256};
@@ -473,7 +481,7 @@ impl FinalityProofV1 {
     }
 }
 
-// ── Gates (param-driven; mainnet hard-off) ───────────────────────────────────
+// ── Gates (param-driven; mainnet-ACTIVE at height >= 50_000) ───────────────────────────────────
 
 pub fn finality_committee_activation_height() -> Option<u64> {
     std::env::var("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT")
@@ -1162,7 +1170,7 @@ mod tests {
     fn gate_logic_pure_and_mainnet_off() {
         assert!(
             !finality_committee_gate(0, Some(1), 100),
-            "mainnet hard-off"
+            "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
         );
         assert!(finality_committee_gate(1, Some(1), 100));
         assert!(!finality_committee_gate(1, None, 100));
@@ -1170,7 +1178,7 @@ mod tests {
         assert!(!finality_committee_enforced_gate(1, Some(1), false, 100));
         assert!(
             !finality_committee_enforced_gate(0, Some(1), true, 100),
-            "mainnet hard-off"
+            "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
         );
     }
 }

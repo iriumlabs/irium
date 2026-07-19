@@ -718,7 +718,7 @@ mod tests {
     #[test]
     fn ticket_gate_logic_pure() {
         // pure gate (no global env mutation -> race-free under parallel tests).
-        assert!(!tickets_gate(0, Some(1), 100), "mainnet hard-off");
+        assert!(!tickets_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(tickets_gate(1, Some(1), 100), "testnet active");
         assert!(!tickets_gate(1, None, 100), "no activation -> off");
         assert!(!tickets_gate(1, Some(50), 10), "below activation -> off");

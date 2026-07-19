@@ -12,7 +12,15 @@
 //! HONEST LIMITATION: this does NOT prove offline / never-gossiped miners existed.
 //! It makes the admitted set chain-committed before selection (removing the
 //! per-node-cache divergence at selection time and the silent-omission attack at
-//! `H`). Deterministic, bounded, no floats, no wall-clock. Gated + mainnet hard-off.
+//! `H`). Deterministic, bounded, no floats, no wall-clock. Gated + mainnet-ACTIVE at height >= 50_000.
+//!
+//! ⚠ MAINNET STATUS (corrected 2026-07-19): this module's gates are NOT "mainnet
+//! hard-off". They route through `activation::poawx_effective_activation`, which on
+//! `network_id == 0` IGNORES the env and substitutes the compiled
+//! `MAINNET_POAWX_ACTIVATION_HEIGHT = Some(50_000)`. Mainnet is far past that height,
+//! so these gates are ACTIVE in production. Any remaining "mainnet hard-off" wording
+//! below is stale. The authoritative, height-accurate check is
+//! `activation::mainnet_gate_truth`.
 #![allow(dead_code)]
 
 use sha2::{Digest, Sha256};
@@ -255,7 +263,7 @@ pub fn admission_epoch_seed(parent_prev_hash: Option<[u8; 32]>, block_prev_hash:
     }
 }
 
-// ── Gap 3: multi-source assignment seed (gated; mainnet hard-off) ─────────────
+// ── Gap 3: multi-source assignment seed (gated; mainnet-ACTIVE at height >= 50_000) ─────────────
 //
 // The legacy assignment seed (above) is the single grandparent hash, which a
 // party mining consecutive blocks can grind. When the multi-source gate is
@@ -380,7 +388,7 @@ pub fn expected_epoch_seed(
     resolve_epoch_seed_parts(target_height, base, fin, pre)
 }
 
-// ── Gates (param-driven; mainnet hard-off) ───────────────────────────────────
+// ── Gates (param-driven; mainnet-ACTIVE at height >= 50_000) ───────────────────────────────────
 
 pub fn committed_admission_window() -> u64 {
     std::env::var("IRIUM_POAWX_COMMITTED_ADMISSION_WINDOW")
@@ -534,7 +542,7 @@ mod tests {
     fn gate_logic_pure_and_mainnet_off() {
         assert!(
             !committed_admission_gate(0, Some(1), 100),
-            "mainnet hard-off"
+            "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
         );
         assert!(committed_admission_gate(1, Some(1), 100));
         assert!(!committed_admission_gate(1, None, 100));
@@ -542,13 +550,13 @@ mod tests {
         assert!(!committed_admission_enforced_gate(1, Some(1), false, 100));
         assert!(
             !committed_admission_enforced_gate(0, Some(1), true, 100),
-            "mainnet hard-off"
+            "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
         );
     }
 
     #[test]
     fn multisource_seed_gate_pure() {
-        assert!(!multisource_seed_gate(0, Some(1), 100), "mainnet hard-off");
+        assert!(!multisource_seed_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(multisource_seed_gate(1, Some(1), 100));
         assert!(!multisource_seed_gate(1, None, 100));
         assert!(!multisource_seed_gate(1, Some(50), 10));

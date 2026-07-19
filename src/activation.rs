@@ -1142,4 +1142,116 @@ mod tests {
         );
         std::env::remove_var("IRIUM_BTC_SWAP_BECH32_PAYMENT_ACTIVATION_HEIGHT");
     }
+
+    /// Batch 1 / D2: the `*_required()` functions hardcode `true` for mainnet, so
+    /// enforcement arms with ZERO operator configuration once the height gate is open.
+    /// Lives here (not in `mainnet_gate_truth`) because it mutates env and must share
+    /// this module's `env_lock`.
+    #[test]
+    fn poawx_required_flags_are_hardcoded_true_on_mainnet() {
+        let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        assert!(crate::poawx_dominance::anti_domination_required());
+        assert!(crate::poawx_puzzle::puzzle_work_required());
+        assert!(crate::poawx_finality::finality_committee_required());
+        assert!(crate::poawx_admission::candidate_admission_required());
+        assert!(crate::poawx_candidate::candidate_set_required());
+        assert!(crate::poawx_penalty::penalty_state_required());
+        assert!(crate::poawx_proposer::proposer_vrf_required());
+        // Tickets are the one genuine exception: proofs stay off on mainnet.
+        assert!(!crate::poawx_ticket::tickets_required());
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+}
+
+/// Mainnet gate truth.
+///
+/// Every gate that routes through [`poawx_effective_activation`] IGNORES the env on
+/// `network_id == 0` and substitutes the compiled `MAINNET_POAWX_ACTIVATION_HEIGHT`
+/// (`Some(50_000)`). Mainnet passed that height long ago, so those gates are ACTIVE in
+/// production right now.
+///
+/// This module exists because that was not true of the test suite. Every per-module gate
+/// test asserted "mainnet hard-off" while probing heights 1, 5, 10 or 100 — all below
+/// 50,000 — so they passed by accident of fixture height and certified the opposite of
+/// production behaviour. These tests pin the REAL behaviour at REAL mainnet heights.
+///
+/// All assertions are param-driven (the network id is passed, not read from env), so this
+/// module is race-free and needs no env lock.
+#[cfg(test)]
+mod mainnet_gate_truth {
+    use super::*;
+
+    /// A height comfortably past the mainnet activation, and past the live tip.
+    const MAINNET_LIVE: u64 = 60_000;
+
+    #[test]
+    fn effective_activation_ignores_env_on_mainnet() {
+        assert_eq!(MAINNET_POAWX_ACTIVATION_HEIGHT, Some(50_000));
+        // Whatever the env says, mainnet gets the compiled height.
+        for env in [None, Some(1u64), Some(u64::MAX)] {
+            assert_eq!(
+                poawx_effective_activation(0, env),
+                MAINNET_POAWX_ACTIVATION_HEIGHT,
+                "mainnet must ignore the env activation ({env:?})"
+            );
+        }
+        // Non-mainnet uses the env value verbatim.
+        assert_eq!(poawx_effective_activation(2, Some(7)), Some(7));
+        assert_eq!(poawx_effective_activation(2, None), None);
+    }
+
+    /// The load-bearing test: every gate routed through `poawx_effective_activation` is ON
+    /// at a live mainnet height. If any of these ever flips to `false`, a consensus rule
+    /// that mainnet is currently enforcing has been silently disabled.
+    #[test]
+    fn every_routed_gate_is_on_at_a_live_mainnet_height() {
+        let h = MAINNET_LIVE;
+        let gates: [(&str, bool); 10] = [
+            ("anti_domination", crate::poawx_dominance::anti_domination_gate(0, None, h)),
+            ("puzzle_work", crate::poawx_puzzle::puzzle_work_gate(0, None, h)),
+            ("finality_committee", crate::poawx_finality::finality_committee_gate(0, None, h)),
+            ("adaptive_mode", crate::poawx_adaptive::adaptive_mode_gate(0, None, h)),
+            ("fraud_proof", crate::poawx_challenge::fraud_proof_gate(0, None, h)),
+            ("penalty_state", crate::poawx_penalty::penalty_gate(0, None, h)),
+            ("multisource_seed", crate::poawx_committed_admission::multisource_seed_gate(0, None, h)),
+            ("phase21d", crate::poawx_candidate::poawx_phase21d_gate(0, None, h)),
+            ("proposer_vrf", crate::poawx_proposer::proposer_vrf_gate(0, None, h)),
+            ("fork_choice_hardening", crate::poawx_proposer::fork_choice_hardening_gate(0, None, h)),
+        ];
+        let off: Vec<&str> = gates.iter().filter(|(_, v)| !*v).map(|(n, _)| *n).collect();
+        assert!(
+            off.is_empty(),
+            "these gates are ENFORCING on mainnet today but the code says otherwise: {off:?}"
+        );
+    }
+
+    /// The activation boundary is exactly 50,000 — off below, on at and above.
+    #[test]
+    fn mainnet_activation_boundary_is_exact() {
+        assert!(!crate::poawx_dominance::anti_domination_gate(0, None, 49_999));
+        assert!(crate::poawx_dominance::anti_domination_gate(0, None, 50_000));
+        assert!(!crate::poawx_puzzle::puzzle_work_gate(0, None, 49_999));
+        assert!(crate::poawx_puzzle::puzzle_work_gate(0, None, 50_000));
+        assert!(!crate::poawx_finality::finality_committee_gate(0, None, 49_999));
+        assert!(crate::poawx_finality::finality_committee_gate(0, None, 50_000));
+        assert!(!crate::poawx_proposer::proposer_vrf_gate(0, None, 49_999));
+        assert!(crate::poawx_proposer::proposer_vrf_gate(0, None, 50_000));
+    }
+
+    /// CONTRAST: PoW demotion is the one gate that is genuinely mainnet-hard-off, because
+    /// it does NOT route through `poawx_effective_activation` — it reads a compiled const
+    /// that is `None`, so no env and no height can enable it. This is the pattern any
+    /// future mainnet-off gate must follow.
+    #[test]
+    fn pow_demotion_is_the_one_genuinely_hard_off_gate() {
+        assert_eq!(crate::poawx_proposer::MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, None);
+        for h in [0u64, 49_999, 50_000, MAINNET_LIVE, u64::MAX] {
+            assert!(
+                !crate::poawx_proposer::pow_demotion_gate(0, Some(1), h),
+                "demotion must be off at every mainnet height, env irrelevant (h={h})"
+            );
+        }
+    }
 }

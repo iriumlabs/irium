@@ -12,8 +12,16 @@
 //! miner private key is ever required to build it.
 //!
 //! Everything here is integer/fixed-point only (no floats), saturating arithmetic,
-//! gated, and **mainnet hard-off** via `crate::activation::network_id_byte() == 0`.
+//! gated, and **mainnet-ACTIVE at height >= 50_000** via `crate::activation::network_id_byte() == 0`.
 //! It does NOT touch chain difficulty / LWMA-144.
+//!
+//! ⚠ MAINNET STATUS (corrected 2026-07-19): this module's gates are NOT "mainnet
+//! hard-off". They route through `activation::poawx_effective_activation`, which on
+//! `network_id == 0` IGNORES the env and substitutes the compiled
+//! `MAINNET_POAWX_ACTIVATION_HEIGHT = Some(50_000)`. Mainnet is far past that height,
+//! so these gates are ACTIVE in production. Any remaining "mainnet hard-off" wording
+//! below is stale. The authoritative, height-accurate check is
+//! `activation::mainnet_gate_truth`.
 #![allow(dead_code)]
 
 use sha2::{Digest, Sha256};
@@ -507,7 +515,7 @@ impl CandidateSet {
     }
 }
 
-// ── Gates (param-driven pure logic; mainnet hard-off) ────────────────────────
+// ── Gates (param-driven pure logic; mainnet-ACTIVE at height >= 50_000) ────────────────────────
 
 pub fn candidate_set_activation_height() -> Option<u64> {
     std::env::var("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT")
@@ -1351,8 +1359,8 @@ mod tests {
         assert!(true_vrf_enforced(5));
         assert!(!true_vrf_active(4), "below activation");
         std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(!true_vrf_active(5), "mainnet hard-off");
-        assert!(!true_vrf_enforced(5), "mainnet hard-off");
+        assert!(!true_vrf_active(5), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
+        assert!(!true_vrf_enforced(5), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         std::env::remove_var("IRIUM_NETWORK");
         std::env::remove_var("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_POAWX_TRUE_VRF_REQUIRED");
@@ -1360,7 +1368,7 @@ mod tests {
 
     #[test]
     fn gate_logic_pure() {
-        assert!(!poawx_phase21d_gate(0, Some(1), 100), "mainnet hard-off");
+        assert!(!poawx_phase21d_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(poawx_phase21d_gate(1, Some(1), 100));
         assert!(!poawx_phase21d_gate(1, None, 100));
         assert!(!poawx_phase21d_gate(1, Some(200), 100));
@@ -1368,7 +1376,7 @@ mod tests {
         assert!(!poawx_phase21d_enforced_gate(1, Some(1), false, 100));
         assert!(
             !poawx_phase21d_enforced_gate(0, Some(1), true, 100),
-            "mainnet hard-off"
+            "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
         );
     }
 }

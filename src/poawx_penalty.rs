@@ -1,4 +1,4 @@
-//! Phase 21A: PoAW-X penalty / fraud state primitives (data-only, gated, mainnet hard-off).
+//! Phase 21A: PoAW-X penalty / fraud state primitives (data-only, gated, mainnet-ACTIVE at height >= 50_000).
 //!
 //! Tracks per-miner penalty state so high-trust role assignment (e.g. the
 //! finality/SUPPORT role) can be withheld from misbehaving identities. This is a
@@ -9,6 +9,14 @@
 //! `Slashed` (id 5): applied by [`PersistentPenalty::apply_slash`] when a
 //! verified [`crate::poawx_challenge::FraudProofV1`] is accepted in
 //! `connect_block`, and reverted on `disconnect_tip_block`. Mainnet hard-off.
+//!
+//! ⚠ MAINNET STATUS (corrected 2026-07-19): this module's gates are NOT "mainnet
+//! hard-off". They route through `activation::poawx_effective_activation`, which on
+//! `network_id == 0` IGNORES the env and substitutes the compiled
+//! `MAINNET_POAWX_ACTIVATION_HEIGHT = Some(50_000)`. Mainnet is far past that height,
+//! so these gates are ACTIVE in production. Any remaining "mainnet hard-off" wording
+//! below is stale. The authoritative, height-accurate check is
+//! `activation::mainnet_gate_truth`.
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -536,7 +544,7 @@ mod tests {
 
     #[test]
     fn penalty_gate_logic_pure() {
-        assert!(!penalty_gate(0, Some(1), 100), "mainnet hard-off");
+        assert!(!penalty_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(
             penalty_gate(1, Some(1), 100),
             "testnet active at/after height"

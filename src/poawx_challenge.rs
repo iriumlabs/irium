@@ -15,8 +15,16 @@
 //! anti-domination pattern.
 //!
 //! No floats; saturating/integer only; bounded deserialization; domain-separated
-//! digest; mainnet hard-off (`network_id == 0` => every gate false). The proof is
+//! digest; mainnet-ACTIVE at height >= 50_000 (`network_id == 0` => every gate false). The proof is
 //! carried as a trailing-optional `FRD1` section inside `Phase20ReceiptExt`.
+//!
+//! ⚠ MAINNET STATUS (corrected 2026-07-19): this module's gates are NOT "mainnet
+//! hard-off". They route through `activation::poawx_effective_activation`, which on
+//! `network_id == 0` IGNORES the env and substitutes the compiled
+//! `MAINNET_POAWX_ACTIVATION_HEIGHT = Some(50_000)`. Mainnet is far past that height,
+//! so these gates are ACTIVE in production. Any remaining "mainnet hard-off" wording
+//! below is stale. The authoritative, height-accurate check is
+//! `activation::mainnet_gate_truth`.
 #![allow(dead_code)]
 
 use crate::activation::network_id_byte;
@@ -261,7 +269,7 @@ fn verify_finality_equivocation(
     })
 }
 
-// ── Gates (env, mainnet hard-off) — mirror poawx_dominance/poawx_penalty ──────
+// ── Gates (env, mainnet-ACTIVE at height >= 50_000) — mirror poawx_dominance/poawx_penalty ──────
 
 /// Activation height for fraud-proof enforcement (env-gated; mainnet hard-off).
 pub fn fraud_proof_activation_height() -> Option<u64> {
@@ -510,7 +518,7 @@ mod tests {
 
     #[test]
     fn gate_logic_pure() {
-        assert!(!fraud_proof_gate(0, Some(1), 100), "mainnet hard-off");
+        assert!(!fraud_proof_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(fraud_proof_gate(1, Some(1), 100));
         assert!(!fraud_proof_gate(1, None, 100));
         assert!(!fraud_proof_gate(1, Some(50), 10));
@@ -522,7 +530,7 @@ mod tests {
         assert!(!fraud_proof_enforced_gate(1, Some(1), false, 100));
         assert!(
             !fraud_proof_enforced_gate(0, Some(1), true, 100),
-            "mainnet hard-off"
+            "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
         );
         assert!(!fraud_proof_enforced_gate(1, None, true, 100));
         assert!(!fraud_proof_enforced_gate(1, Some(200), true, 100));

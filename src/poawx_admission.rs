@@ -13,6 +13,14 @@
 //! only; public-network admission-window tuning is future work. Mainnet hard-off.
 //!
 //! Integer/fixed-point only; no floats; no LWMA/PoW interaction.
+//!
+//! ⚠ MAINNET STATUS (corrected 2026-07-19): this module's gates are NOT "mainnet
+//! hard-off". They route through `activation::poawx_effective_activation`, which on
+//! `network_id == 0` IGNORES the env and substitutes the compiled
+//! `MAINNET_POAWX_ACTIVATION_HEIGHT = Some(50_000)`. Mainnet is far past that height,
+//! so these gates are ACTIVE in production. Any remaining "mainnet hard-off" wording
+//! below is stale. The authoritative, height-accurate check is
+//! `activation::mainnet_gate_truth`.
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -1014,7 +1022,7 @@ mod tests {
     fn gate_logic_pure_and_mainnet_off() {
         assert!(
             !candidate_admission_gate(0, Some(1), 100),
-            "mainnet hard-off"
+            "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
         );
         assert!(candidate_admission_gate(1, Some(1), 100));
         assert!(!candidate_admission_gate(1, None, 100));
@@ -1022,7 +1030,7 @@ mod tests {
         assert!(!candidate_admission_enforced_gate(1, Some(1), false, 100));
         assert!(
             !candidate_admission_enforced_gate(0, Some(1), true, 100),
-            "mainnet hard-off"
+            "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
         );
     }
 

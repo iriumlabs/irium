@@ -9587,7 +9587,7 @@ mod tests {
         assert!(phase20_production_active(5), "both active at height");
         // mainnet hard-off even with both env set.
         std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(!phase20_production_active(10), "mainnet hard-off");
+        assert!(!phase20_production_active(10), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         std::env::remove_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_NETWORK");
@@ -9825,7 +9825,7 @@ mod tests {
         // (22) mainnet hard-off: the SAME multi-role block is not production-validated
         // (mainnet skips PoAW-X receipt validation entirely) => no enforcement.
         std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(!phase20_production_active(height), "mainnet hard-off");
+        assert!(!phase20_production_active(height), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(
             validate_poawx_block_receipts(&ok, height, Some(&parent)).is_ok(),
             "mainnet must skip phase20 production enforcement"
@@ -9932,7 +9932,7 @@ mod tests {
         std::env::set_var("IRIUM_NETWORK", "mainnet");
         assert!(
             !crate::poawx_dominance::anti_domination_enforced(1),
-            "mainnet hard-off"
+            "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
         );
 
         std::env::remove_var("IRIUM_NETWORK");
@@ -14076,7 +14076,7 @@ mod tests {
 
         // mainnet hard-off.
         std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(!true_vrf_enforced(1), "mainnet hard-off");
+        assert!(!true_vrf_enforced(1), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
 
         std::env::remove_var("IRIUM_NETWORK");
         std::env::remove_var("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT");
@@ -14248,7 +14248,7 @@ mod tests {
 
         // mainnet hard-off.
         std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(!committed_admission_enforced(3), "mainnet hard-off");
+        assert!(!committed_admission_enforced(3), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
 
         std::env::remove_var("IRIUM_NETWORK");
         std::env::remove_var("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT");
@@ -14489,7 +14489,7 @@ mod tests {
 
         // mainnet hard-off.
         std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(!finality_committee_enforced(1), "mainnet hard-off");
+        assert!(!finality_committee_enforced(1), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
 
         std::env::remove_var("IRIUM_NETWORK");
         std::env::remove_var("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT");
@@ -14641,7 +14641,7 @@ mod tests {
 
         // mainnet hard-off.
         std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(!puzzle_work_enforced(1), "mainnet hard-off");
+        assert!(!puzzle_work_enforced(1), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
 
         std::env::remove_var("IRIUM_NETWORK");
         std::env::remove_var("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT");
@@ -14782,7 +14782,7 @@ mod tests {
 
         // mainnet hard-off.
         std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(!candidate_admission_enforced(height), "mainnet hard-off");
+        assert!(!candidate_admission_enforced(height), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
 
         cache.clear();
         std::env::remove_var("IRIUM_NETWORK");
@@ -14910,7 +14910,7 @@ mod tests {
 
         // mainnet hard-off.
         std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(!candidate_set_enforced(1), "mainnet hard-off");
+        assert!(!candidate_set_enforced(1), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
 
         std::env::remove_var("IRIUM_NETWORK");
         std::env::remove_var("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT");
@@ -15504,7 +15504,7 @@ mod tests {
 
         // (18) mainnet hard-off.
         std::env::set_var("IRIUM_NETWORK", "mainnet");
-        assert!(!hidden_precommit_active(2), "mainnet hard-off");
+        assert!(!hidden_precommit_active(2), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         std::env::set_var("IRIUM_NETWORK", "testnet");
 
         std::env::remove_var("IRIUM_NETWORK");

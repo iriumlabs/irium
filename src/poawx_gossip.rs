@@ -664,7 +664,7 @@ mod tests {
         // mainnet (IRIUM_NETWORK unset -> id 0) even with gossip flag -> still off.
         std::env::set_var("IRIUM_POAWX_ROLE_GOSSIP_ENABLED", "1");
         std::env::remove_var("IRIUM_NETWORK");
-        assert!(!role_gossip_enabled(), "mainnet hard-off");
+        assert!(!role_gossip_enabled(), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(matches!(
             cache.ingest_precommit_bytes(&pc),
             GossipOutcome::Rejected(_)

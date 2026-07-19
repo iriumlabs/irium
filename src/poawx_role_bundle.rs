@@ -245,6 +245,32 @@ impl NodeRoleBundlePool {
         }
     }
 
+    /// R1: the full tiered path. `src` is the submitting source. Ordering is asserted
+    /// by `tier1_rejection_never_reaches_validation`.
+    pub fn ingest_tiered(
+        &self,
+        src: std::net::IpAddr,
+        bundle: RoleBundleV1,
+        expected_network: u8,
+        expected_height: u64,
+        expected_seed: Option<[u8; 32]>,
+    ) -> Result<BundleOutcome, String> {
+        // TIER 1 -- per source. Cheap, and it runs BEFORE validation so that the cost of
+        // validating is itself protected.
+        if !crate::poawx_admission::admission_rate_allowed(src) {
+            return Err("role bundle: source rate limited".to_string());
+        }
+        // TIER 2 -- validation. Counted so a test can prove tier 1 short-circuits it.
+        VALIDATIONS_PERFORMED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        bundle.validate(expected_network, expected_height, expected_seed)?;
+        // TIER 3 -- per identity, only ever reached by an identity that already cost a
+        // real ECVRF prove.
+        if !identity_rate_allowed(&bundle.solver_pkh) {
+            return Err("role bundle: identity rate limited".to_string());
+        }
+        self.ingest(bundle, expected_network, expected_height, expected_seed)
+    }
+
     pub fn ingest_json(
         &self,
         json: &str,
@@ -309,6 +335,71 @@ impl NodeRoleBundlePool {
     }
 }
 
+// ── R1: per-identity rate limiting (tier 3) ─────────────────────────────────
+//
+// TIER ORDERING IS THE DESIGN, and reversing it defeats the purpose:
+//   1. per-SOURCE (cheap)   -- guards the cost of validation itself
+//   2. VALIDATE             -- recompute the payout binding, verify the ECVRF
+//   3. per-IDENTITY         -- guards POOL SLOTS, and only ever sees identities that
+//                              already cost a real ECVRF prove (~1089us measured on
+//                              this host), so minting identities is not free
+//
+// Limiting by identity FIRST would be useless: garbage carries no valid solver_pkh, so
+// the identity limiter would never engage and validation would become the DoS surface.
+// Validating first without a source gate makes validation itself the attack.
+//
+// This also resolves the aggregator caveat carried from A1: a pool relaying for 500
+// miners is ONE source but 500 identities, so it needs headroom at tier 1 while tier 3
+// keeps any single worker from monopolising pool slots.
+
+const IDENTITY_RATE_WINDOW_SECS: u64 = 60;
+const IDENTITY_RATE_MAX: u32 = 8;
+
+struct IdentityRate {
+    window_start: std::time::Instant,
+    count: u32,
+}
+
+fn identity_rate_map() -> &'static Mutex<BTreeMap<[u8; 20], IdentityRate>> {
+    static M: OnceLock<Mutex<BTreeMap<[u8; 20], IdentityRate>>> = OnceLock::new();
+    M.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+/// Monotonic (`Instant`) sliding window per identity. Deliberately NOT the generic
+/// `rate_limiter::RateLimiter`, which is keyed on wall-clock `SystemTime` -- a clock
+/// jump would reset every bucket.
+pub fn identity_rate_allowed(solver_pkh: &[u8; 20]) -> bool {
+    let now = std::time::Instant::now();
+    let window = std::time::Duration::from_secs(IDENTITY_RATE_WINDOW_SECS);
+    let mut m = identity_rate_map().lock().unwrap_or_else(|e| e.into_inner());
+    if m.len() > 8192 {
+        m.retain(|_, r| now.duration_since(r.window_start) < window);
+    }
+    let e = m.entry(*solver_pkh).or_insert(IdentityRate {
+        window_start: now,
+        count: 0,
+    });
+    if now.duration_since(e.window_start) >= window {
+        e.window_start = now;
+        e.count = 0;
+    }
+    e.count = e.count.saturating_add(1);
+    e.count <= IDENTITY_RATE_MAX
+}
+
+/// Test observability: how many times a bundle actually reached VALIDATION. Lets a test
+/// assert that a tier-1 rejection never paid the validation cost, rather than inferring it.
+pub static VALIDATIONS_PERFORMED: std::sync::atomic::AtomicU64 =
+    std::sync::atomic::AtomicU64::new(0);
+
+/// R2: whether the submission endpoint accepts non-loopback sources. Default OFF --
+/// an operator must deliberately opt in. Ships inert.
+pub fn role_bundle_public_submission_enabled() -> bool {
+    std::env::var("IRIUM_POAWX_ROLE_BUNDLE_PUBLIC")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false)
+}
+
 static GLOBAL_ROLE_BUNDLE_POOL: OnceLock<NodeRoleBundlePool> = OnceLock::new();
 
 pub fn global_role_bundle_pool() -> &'static NodeRoleBundlePool {
@@ -359,7 +450,7 @@ mod tests {
 
     /// Build a genuinely valid bundle for `secret` in `role`, in the exact JSON shape
     /// `poawx-role-worker` emits, so the fixture exercises the real parser.
-    fn bundle_json(secret_byte: u8, role: u8) -> String {
+    pub(super) fn bundle_json(secret_byte: u8, role: u8) -> String {
         bundle_json_at(secret_byte, role, H)
     }
 
@@ -506,5 +597,121 @@ mod tests {
         let c = collect_roles_for_height(u64::MAX); // nothing ever ingested at this height
         assert!(c.is_empty());
         assert_eq!(c.distinct_payees(), 0);
+    }
+}
+
+#[cfg(test)]
+mod r1_r2_r3_tests {
+    use super::*;
+    use crate::poawx::ROLE_COMPUTE_CONTRIBUTOR;
+    use std::net::{IpAddr, Ipv4Addr};
+    use std::sync::atomic::Ordering;
+
+    const NET: u8 = 2;
+    const H: u64 = 42;
+    const SEED: [u8; 32] = [0x5Au8; 32];
+
+    fn ip(n: u8) -> IpAddr {
+        IpAddr::V4(Ipv4Addr::new(10, 0, 0, n))
+    }
+
+    fn valid_bundle(secret_byte: u8) -> RoleBundleV1 {
+        RoleBundleV1::from_json(&super::tests::bundle_json(
+            secret_byte,
+            ROLE_COMPUTE_CONTRIBUTOR,
+        ))
+        .expect("parse")
+    }
+
+    /// R1 ORDERING -- the load-bearing property. A tier-1 (source) rejection must
+    /// short-circuit BEFORE validation, so a flood never buys an ECVRF verify. Asserted
+    /// directly against a validation counter rather than inferred from timing.
+    #[test]
+    fn tier1_rejection_never_reaches_validation() {
+        let pool = NodeRoleBundlePool::default();
+        let src = ip(11);
+        let b = valid_bundle(0x21);
+        // Exhaust tier 1 for this source.
+        let mut exhausted = false;
+        for _ in 0..10_000 {
+            if pool
+                .ingest_tiered(src, b.clone(), NET, H, Some(SEED))
+                .err()
+                .map(|e| e.contains("source rate limited"))
+                .unwrap_or(false)
+            {
+                exhausted = true;
+                break;
+            }
+        }
+        assert!(exhausted, "tier 1 never engaged; the limiter is not wired");
+        // With tier 1 now rejecting, validation must NOT run.
+        let before = VALIDATIONS_PERFORMED.load(Ordering::Relaxed);
+        let err = pool
+            .ingest_tiered(src, b, NET, H, Some(SEED))
+            .expect_err("must still be source-limited");
+        assert!(err.contains("source rate limited"), "got: {err}");
+        assert_eq!(
+            VALIDATIONS_PERFORMED.load(Ordering::Relaxed),
+            before,
+            "a tier-1 rejection paid for validation -- the tiers are in the wrong order"
+        );
+    }
+
+    /// R1 INDEPENDENCE -- the identity limiter must bite even when every request comes
+    /// from a FRESH source, which is exactly the aggregator case: one pool relaying for
+    /// many workers, or one worker spread across many addresses.
+    #[test]
+    fn identity_limit_engages_independently_of_source_limit() {
+        let pool = NodeRoleBundlePool::default();
+        let b = valid_bundle(0x22);
+        let mut identity_limited = false;
+        // A different source every time, so tier 1 is always fresh.
+        for i in 0..(IDENTITY_RATE_MAX + 4) {
+            let r = pool.ingest_tiered(ip(100 + i as u8), b.clone(), NET, H, Some(SEED));
+            if let Err(e) = r {
+                if e.contains("identity rate limited") {
+                    identity_limited = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            identity_limited,
+            "identity limiting never engaged across distinct sources -- one identity can \
+             monopolise pool slots by rotating addresses"
+        );
+    }
+
+    /// The identity limiter must be per identity, not global: a DIFFERENT worker is
+    /// unaffected by another's exhaustion.
+    #[test]
+    fn identity_limit_is_per_identity_not_global() {
+        let pool = NodeRoleBundlePool::default();
+        let noisy = valid_bundle(0x23);
+        for i in 0..(IDENTITY_RATE_MAX + 4) {
+            let _ = pool.ingest_tiered(ip(150 + i as u8), noisy.clone(), NET, H, Some(SEED));
+        }
+        let quiet = valid_bundle(0x24);
+        let r = pool.ingest_tiered(ip(200), quiet, NET, H, Some(SEED));
+        assert!(
+            !matches!(&r, Err(e) if e.contains("identity rate limited")),
+            "a quiet worker was limited because a different one flooded: {r:?}"
+        );
+    }
+
+    /// R2 -- public submission is OFF unless an operator opts in. Default loopback.
+    #[test]
+    fn public_submission_defaults_off_and_is_opt_in() {
+        std::env::remove_var("IRIUM_POAWX_ROLE_BUNDLE_PUBLIC");
+        assert!(
+            !role_bundle_public_submission_enabled(),
+            "public submission must default OFF"
+        );
+        std::env::set_var("IRIUM_POAWX_ROLE_BUNDLE_PUBLIC", "1");
+        assert!(role_bundle_public_submission_enabled());
+        std::env::set_var("IRIUM_POAWX_ROLE_BUNDLE_PUBLIC", "0");
+        assert!(!role_bundle_public_submission_enabled(), "only \"1\" enables it");
+        std::env::remove_var("IRIUM_POAWX_ROLE_BUNDLE_PUBLIC");
     }
 }

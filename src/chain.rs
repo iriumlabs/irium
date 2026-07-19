@@ -11960,6 +11960,123 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
+    /// R1-R3 PROOF: two INDEPENDENT remote workers submit across a simulated source
+    /// boundary, both are collected through the tiered ingest path, and the assembled
+    /// block is accepted by connect_block paying both.
+    ///
+    /// This is C3's proof extended across the network boundary R2 opens: the bundles do
+    /// not appear in the pool by fiat, they arrive via `ingest_tiered` from two distinct
+    /// source addresses, passing per-source limiting, full validation, and per-identity
+    /// limiting before ever being poolable.
+    #[test]
+    fn r1_r3_two_remote_workers_collected_and_assembled() {
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_collected_poawx_block_with_parent, build_multi_participant_poawx_block_with_parent,
+            simulate_role_worker_bundle, CollectedArtifacts,
+        };
+        use crate::poawx_role_bundle::{global_role_bundle_pool, RoleBundleV1};
+        use std::net::{IpAddr, Ipv4Addr};
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = c3_gate_set();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let skf = |b: &[u8; 32]| k256::ecdsa::SigningKey::from_bytes(b.into()).unwrap();
+        let pkh_of = |sk: &k256::ecdsa::SigningKey| -> [u8; 20] {
+            hash160(sk.verifying_key().to_encoded_point(true).as_bytes())
+        };
+        let (worker, kc, kv, ks) = ([0x4Du8; 32], [0x81u8; 32], [0x82u8; 32], [0x83u8; 32]);
+        let (cpkh, vpkh) = (pkh_of(&skf(&kc)), pkh_of(&skf(&kv)));
+
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let cache = global_admission_cache();
+
+        // H1 so H2's dominance is non-uniform, as in the C3 proof.
+        let pc1 = seed_components_from_block(st.chain.last());
+        let bits1 = st.target_for_height(1).bits;
+        let p1 = build_multi_participant_poawx_block_with_parent(
+            &worker, &kc, &kv, &ks, net, 1, genesis_hash, None, bits1,
+            genesis.header.time + 1, 1, pc1,
+        )
+        .expect("build H1");
+        cache.clear();
+        cache.set_tip(1);
+        for a in &p1.admissions {
+            let _ = cache.ingest_bytes(a);
+        }
+        let h1_hash = p1.block_hash;
+        st.connect_block(p1.block).expect("connect H1");
+
+        // Two workers build against the node's dominance snapshot, as R3 serves it.
+        let dom = st.dominance.clone();
+        let parent = st.chain.last().cloned().expect("parent");
+        let seed2 = expected_epoch_seed(2, h1_hash, Some(&parent));
+        let profile = crate::poawx_puzzle::default_profile();
+        let mk = |sec: &[u8; 32], role: u8, td: [u8; 32]| {
+            simulate_role_worker_bundle(sec, net, 2, role, td, seed2, h1_hash, &dom, profile)
+                .expect("worker bundle")
+        };
+        let b_compute = mk(&kc, crate::poawx::ROLE_COMPUTE_CONTRIBUTOR, [0x11u8; 32]);
+        let b_verify = mk(&kv, crate::poawx::ROLE_VERIFY_CONTRIBUTOR, [0x12u8; 32]);
+
+        // THE BOUNDARY: they arrive over the tiered ingest path from DISTINCT sources.
+        let pool = global_role_bundle_pool();
+        pool.prune_below(2);
+        let src_a = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 7));
+        let src_b = IpAddr::V4(Ipv4Addr::new(198, 51, 100, 9));
+        pool.ingest_tiered(src_a, b_compute, net, 2, Some(seed2))
+            .expect("remote worker A accepted");
+        pool.ingest_tiered(src_b, b_verify, net, 2, Some(seed2))
+            .expect("remote worker B accepted");
+
+        // Collected purely from what arrived over the wire -- no local secrets consulted.
+        let got_c: RoleBundleV1 = pool
+            .best_for_role(crate::poawx::ROLE_COMPUTE_CONTRIBUTOR, 2)
+            .expect("compute collected from the pool");
+        let got_v: RoleBundleV1 = pool
+            .best_for_role(crate::poawx::ROLE_VERIFY_CONTRIBUTOR, 2)
+            .expect("verify collected from the pool");
+        assert_eq!(got_c.solver_pkh, cpkh);
+        assert_eq!(got_v.solver_pkh, vpkh);
+        let collected = CollectedArtifacts {
+            compute: Some(got_c),
+            verify: Some(got_v),
+            support: None,
+        };
+
+        let pc2 = seed_components_from_block(st.chain.last());
+        let bits2 = st.target_for_height(2).bits;
+        let p2 = build_collected_poawx_block_with_parent(
+            &worker, collected, net, 2, h1_hash, Some(genesis_hash), bits2,
+            genesis.header.time + 2, 1, pc2, Some(&dom),
+        )
+        .expect("assemble H2 from REMOTELY collected artifacts");
+        let cb = p2.block.transactions[0].clone();
+        cache.clear();
+        cache.set_tip(2);
+        for a in &p2.admissions {
+            let _ = cache.ingest_bytes(a);
+        }
+        st.connect_block(p2.block)
+            .expect("connect_block must ACCEPT a block built from remotely collected work");
+        assert_eq!(st.tip_height(), 2);
+        assert_eq!(cb.outputs[2].script_pubkey, crate::tx::p2pkh_script(&cpkh), "COMPUTE -> remote worker A");
+        assert_eq!(cb.outputs[3].script_pubkey, crate::tx::p2pkh_script(&vpkh), "VERIFY -> remote worker B");
+        assert_ne!(cpkh, vpkh, "two genuinely independent remote workers");
+        pool.prune_below(3);
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     /// NEGATIVE CONTROL for the dominance-agreement dependency found while scoping C3.
     /// A worker that computes its artifacts against a DIFFERENT dominance view produces
     /// a puzzle solution bound to a different candidate digest, and assembly must fail

@@ -14574,10 +14574,66 @@ fn proposer_registration_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCod
 /// remote exposure is a separate, separately-approved unit. Do not read the existence of
 /// this endpoint as "all mining paths are collected".
 fn role_bundle_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
-    if !addr.ip().is_loopback() {
+    // R2: non-loopback sources are refused unless an operator has explicitly opted in.
+    // Default remains loopback-only, so this ships inert. R1's tiered limiting is the
+    // precondition for ever enabling it.
+    if !addr.ip().is_loopback()
+        && !irium_node_rs::poawx_role_bundle::role_bundle_public_submission_enabled()
+    {
         return Err(StatusCode::FORBIDDEN);
     }
     Ok(())
+}
+
+/// R3: GET /poawx/role-work — everything an independent contributor needs to build a
+/// bundle, WITHOUT holding an authenticated mining-template session.
+///
+/// The dominance snapshot is included deliberately and is not optional: per C3's
+/// finding, a worker computing against a different dominance view produces a bundle
+/// whose puzzle solution cannot verify against the builder's challenge, and it fails
+/// silently at assembly time. Shipping the other parameters without it would invite
+/// exactly that failure.
+async fn poawx_get_role_work(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, StatusCode> {
+    role_bundle_bridge_guard(&addr)?;
+    if !irium_node_rs::poawx_admission::admission_rate_allowed(addr.ip()) {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+    let g = match state.chain.try_lock() {
+        Ok(g) => g,
+        Err(_) => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    };
+    let tip = g.tip_height();
+    let height = tip.saturating_add(1);
+    let prev_hash = g
+        .chain
+        .last()
+        .map(|b| b.header.hash_for_height(tip))
+        .unwrap_or_else(|| {
+            let mut o = [0u8; 32];
+            if let Ok(b) = hex::decode(&state.genesis_hash) {
+                if b.len() == 32 {
+                    o.copy_from_slice(&b);
+                }
+            }
+            o
+        });
+    let parent = g.chain.last().cloned();
+    let epoch_seed =
+        irium_node_rs::poawx_committed_admission::expected_epoch_seed(height, prev_hash, parent.as_ref());
+    let dominance = hex::encode(g.dominance_bytes());
+    drop(g);
+    Ok(Json(json!({
+        "height": height,
+        "prev_hash": hex::encode(prev_hash),
+        "epoch_seed": hex::encode(epoch_seed),
+        "puzzle_anchor_bits": irium_node_rs::poawx_puzzle::default_profile().anchor_bits,
+        "sybil_bits": irium_node_rs::poawx_ticket::effective_sybil_bits(),
+        "dominance_snapshot": dominance,
+        "note": "dominance_snapshot is REQUIRED: build against it or the puzzle solution will not verify at assembly",
+    })))
 }
 
 /// POST /poawx/role-bundle : a contributor role-worker submits its completed bundle.
@@ -14591,9 +14647,6 @@ async fn poawx_post_role_bundle(
     body: axum::body::Bytes,
 ) -> Result<Json<Value>, StatusCode> {
     role_bundle_bridge_guard(&addr)?;
-    if !irium_node_rs::poawx_admission::admission_rate_allowed(addr.ip()) {
-        return Err(StatusCode::TOO_MANY_REQUESTS);
-    }
     let json_s = std::str::from_utf8(body.as_ref()).map_err(|_| StatusCode::BAD_REQUEST)?;
     let net = irium_node_rs::activation::network_id_byte();
     let next_height = match state.chain.try_lock() {
@@ -14601,7 +14654,14 @@ async fn poawx_post_role_bundle(
         Err(_) => return Err(StatusCode::SERVICE_UNAVAILABLE),
     };
     let pool = irium_node_rs::poawx_role_bundle::global_role_bundle_pool();
-    match pool.ingest_json(json_s, net, next_height, None) {
+    let parsed = match irium_node_rs::poawx_role_bundle::RoleBundleV1::from_json(json_s) {
+        Ok(b) => b,
+        Err(e) => {
+            eprintln!("[poawx] role bundle parse rejected: {e}");
+            return Err(StatusCode::BAD_REQUEST);
+        }
+    };
+    match pool.ingest_tiered(addr.ip(), parsed, net, next_height, None) {
         Ok(o) => Ok(Json(json!({
             "status": match o {
                 irium_node_rs::poawx_role_bundle::BundleOutcome::AcceptedNew => "accepted",
@@ -19548,6 +19608,7 @@ async fn main() {
         .route("/poawx/finality-vote", post(poawx_finality_vote_post))
         .route("/poawx/registration", post(poawx_post_registration))
         .route("/poawx/role-bundle", post(poawx_post_role_bundle))
+        .route("/poawx/role-work", get(poawx_get_role_work))
         .route("/poawx/finality-votes", get(poawx_finality_votes_get))
         .route("/rpc/submit_tx", post(submit_tx))
         // Fix D: pending-tx introspection + per-address pending-spent

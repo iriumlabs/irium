@@ -18,20 +18,49 @@ is **not** an operator setting and cannot be enabled or disabled by configuratio
 > **Operators and miners must upgrade to iriumd v1.9.119 (or later) before block 50,000.** A node
 > still running an older binary will reject post-activation blocks and fall off the canonical chain.
 
+## Current status (updated 2026-07-19)
+
+The consensus **gates** listed below are active on mainnet from block 50,000 and are enforced by
+every node: proposer selection validation, proposer registration, anti-domination, assigned puzzle
+work, the finality committee, and candidate admission. Blocks that do not satisfy them are rejected.
+
+Two things described in this document are **not yet live**, and this section previously implied
+otherwise:
+
+- **The 55/22/13/10 split is produced on-chain, but all four outputs currently pay the same
+  recipient.** Every block's coinbase does carry four outputs in exactly 55/22/13/10 proportion — but
+  they resolve to a single participant, not four distinct contributors, because role assignment
+  currently resolves to one identity. The split is real; the distribution across separate parties is
+  not yet.
+- **Block proposal is currently concentrated in one producer.** Proposal is limited to proposers
+  already carrying eligibility, and onboarding for new independent proposers is **not yet available**.
+  If you are mining, you are contributing hashrate through a pool, not proposing blocks yourself.
+
+**PoW demotion is not active on mainnet.** A selected proposer does not get a reduced proof-of-work
+target; every block must meet the full network target.
+
+We are treating the proposal-concentration limitation as a defect to fix, not as intended behaviour.
+This section will be updated when that changes.
+
 ## What PoAW-X adds
 
 1. **VRF proposer selection** — each block has a verifiably-selected proposer chosen by a Verifiable
    Random Function, not just whoever finds the proof of work first.
 2. **Multi-role reward split** — the block reward is split across four contribution roles.
 3. **Anti-domination** — per-identity weighting over a rolling 2016-block window discourages any
-   single identity from dominating proposal.
-4. **Distributed finality** — a registered committee provides 2/3-threshold finality votes.
+   single identity from dominating proposal (the weighting is enforced; note that block proposal on
+   mainnet is currently concentrated in a single producer, see Current status).
+4. **Distributed finality** — a registered committee provides 2/3-threshold finality votes (the
+   finality gate is enforced; a broad multi-party committee is not yet operating in production).
 5. **Consensus security gates** — hidden role-precommit, sybil tickets, committed admission,
    deterministic receipts, equivocation and lane-validation checks.
 
 ## Reward distribution (55 / 22 / 13 / 10)
 
-From block 50,000, each block's coinbase splits the block reward across four roles:
+From block 50,000, each block's coinbase does split the reward across four outputs in the
+proportions below. **Note that on mainnet today all four outputs currently pay a single
+participant** — role assignment resolves to one identity, so the split is produced but not yet
+distributed across distinct contributors.
 
 | Role | Share |
 |------|-------|

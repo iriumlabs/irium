@@ -14554,7 +14554,15 @@ async fn poawx_post_registration(
 ) -> Result<Json<Value>, StatusCode> {
     proposer_registration_bridge_guard(&addr)?;
     let pool = irium_node_rs::poawx_proposer::global_proposer_reg_pool();
-    match pool.ingest_bytes(body.as_ref()) {
+    // A4: recompute the sybil digest against the real anchor block (via the chain), not
+    // the peer-supplied field; fail closed if we lack that height.
+    match pool.ingest_bytes(body.as_ref(), |h| {
+        state
+            .chain
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .anchor_hash_at(h)
+    }) {
         irium_node_rs::poawx_gossip::GossipOutcome::AcceptedNew => {
             if let Some(ref p2p) = state.p2p {
                 p2p.broadcast_proposer_registration(body.as_ref()).await;

@@ -447,6 +447,17 @@ impl ChainState {
         self.height.saturating_sub(1)
     }
 
+    /// Canonical hash of the block at `height` on this node's chain, or `None` if the
+    /// node does not have that height yet. This is the anchor hash the sybil-work digest
+    /// binds to; the registration gossip pool uses it to RECOMPUTE the digest at ingest
+    /// (A4) instead of trusting the peer-supplied `sybil_digest` field, and connect_block
+    /// resolves the same value for its authoritative check.
+    pub fn anchor_hash_at(&self, height: u64) -> Option<[u8; 32]> {
+        self.chain
+            .get(height as usize)
+            .map(|b| b.header.hash_for_height(height))
+    }
+
     pub fn median_time_past(&self) -> u32 {
         let count = self.chain.len().min(11);
         if count == 0 {

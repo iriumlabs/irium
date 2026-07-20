@@ -6685,8 +6685,17 @@ impl P2PNode {
                                 // remotely reachable and was the only unlimited gossip ingest path.
                                 if crate::poawx_admission::admission_rate_allowed(addr.ip())
                                     && crate::poawx_proposer::global_proposer_reg_pool()
-                                        .ingest_bytes(&p.reg_bytes)
-                                    .should_rebroadcast()
+                                        .ingest_bytes(&p.reg_bytes, |h| {
+                                            // A4: recompute the sybil digest against the
+                                            // real anchor block; None (we lack that height)
+                                            // fails the registration closed.
+                                            chain_for_sync.as_ref().and_then(|c| {
+                                                c.lock()
+                                                    .unwrap_or_else(|e| e.into_inner())
+                                                    .anchor_hash_at(h)
+                                            })
+                                        })
+                                        .should_rebroadcast()
                                 {
                                     let bytes = crate::protocol::PoawxProposerRegistrationPayload {
                                         reg_bytes: p.reg_bytes,
@@ -9172,8 +9181,16 @@ async fn handle_incoming_with_sybil(
                         // A1: rate-limit registration ingest per source IP (see site above).
                         if crate::poawx_admission::admission_rate_allowed(addr.ip())
                             && crate::poawx_proposer::global_proposer_reg_pool()
-                                .ingest_bytes(&p.reg_bytes)
-                            .should_rebroadcast()
+                                .ingest_bytes(&p.reg_bytes, |h| {
+                                    // A4: recompute the sybil digest against the real
+                                    // anchor; without the chain / that height, fail closed.
+                                    chain.as_ref().and_then(|c| {
+                                        c.lock()
+                                            .unwrap_or_else(|e| e.into_inner())
+                                            .anchor_hash_at(h)
+                                    })
+                                })
+                                .should_rebroadcast()
                         {
                             let bytes = crate::protocol::PoawxProposerRegistrationPayload {
                                 reg_bytes: p.reg_bytes,

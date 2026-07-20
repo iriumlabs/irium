@@ -650,7 +650,11 @@ pub struct NodeProposerRegistrationPool {
 }
 
 impl NodeProposerRegistrationPool {
-    pub fn ingest_bytes(&self, bytes: &[u8]) -> crate::poawx_gossip::GossipOutcome {
+    pub fn ingest_bytes(
+        &self,
+        bytes: &[u8],
+        resolve_anchor: impl Fn(u64) -> Option<[u8; 32]>,
+    ) -> crate::poawx_gossip::GossipOutcome {
         use crate::poawx_gossip::GossipOutcome;
         if !proposer_registration_gossip_enabled() {
             return GossipOutcome::Rejected("registration gossip disabled".to_string());
@@ -663,14 +667,31 @@ impl NodeProposerRegistrationPool {
             Err(e) => return GossipOutcome::Rejected(e),
         };
         let net = crate::activation::network_id_byte();
-        if !crate::poawx_ticket::meets_sybil_target(
-            &reg.sybil_digest,
-            crate::poawx_ticket::effective_sybil_bits(),
-        ) {
-            return GossipOutcome::Rejected("registration: insufficient sybil work".to_string());
-        }
-        if !reg.signature_ok(net) {
-            return GossipOutcome::Rejected("registration: bad signature".to_string());
+        // A4: independently RECOMPUTE the sybil digest from the anchor block instead of
+        // trusting the peer-supplied `sybil_digest` field. The old check called
+        // `meets_sybil_target(&reg.sybil_digest, ...)` directly, so a peer could set
+        // `sybil_digest` to any value that trivially clears the target (e.g. all zeros),
+        // self-sign it, and pay ZERO proof-of-work -- a ~2^bits (~10^6 at 20 bits)
+        // cost asymmetry versus an honest registrant, who must grind the nonce until
+        // `compute_sybil_digest()` clears the target. `validate()` recomputes the digest
+        // from (anchor_hash, pkh, key, nonce), rejects if it does not equal the field,
+        // checks it meets the target, AND verifies the self-signature.
+        //
+        // Recomputation needs the anchor block. If we cannot resolve it (we are behind
+        // that height, or the peer pinned a future/unknown anchor), FAIL CLOSED -- a peer
+        // must not be able to skip verification by choosing an anchor we do not hold.
+        let anchor_hash = match resolve_anchor(reg.anchor_height) {
+            Some(h) => h,
+            None => {
+                return GossipOutcome::Rejected(
+                    "registration: anchor unavailable; cannot verify sybil work".to_string(),
+                )
+            }
+        };
+        if let Err(e) =
+            reg.validate(net, &anchor_hash, crate::poawx_ticket::effective_sybil_bits())
+        {
+            return GossipOutcome::Rejected(e);
         }
         let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
         match pending.get(&reg.vrf_pubkey) {
@@ -708,16 +729,25 @@ impl NodeProposerRegistrationPool {
     }
 
     /// Local submit (RPC path): store + return the wire bytes to gossip.
-    pub fn submit(&self, reg: crate::poawx::ProposerRegistrationV1) -> Vec<u8> {
+    pub fn submit(
+        &self,
+        reg: crate::poawx::ProposerRegistrationV1,
+        resolve_anchor: impl Fn(u64) -> Option<[u8; 32]>,
+    ) -> Vec<u8> {
         // Fix #14: re-validate before inserting into the local pool so the RPC path cannot inject
         // an unsigned / insufficient-sybil-work registration that the block builder would then
         // offer as an announce candidate (self-built invalid block). Mirrors ingest_bytes; an
         // invalid submission returns empty bytes (nothing is pooled or rebroadcast).
+        // A4: the sybil digest is RECOMPUTED against the anchor (see ingest_bytes), not
+        // trusted from the field; an unverifiable or under-worked registration pools nothing.
         let net = crate::activation::network_id_byte();
-        if !crate::poawx_ticket::meets_sybil_target(
-            &reg.sybil_digest,
-            crate::poawx_ticket::effective_sybil_bits(),
-        ) || !reg.signature_ok(net)
+        let anchor_hash = match resolve_anchor(reg.anchor_height) {
+            Some(h) => h,
+            None => return Vec::new(),
+        };
+        if reg
+            .validate(net, &anchor_hash, crate::poawx_ticket::effective_sybil_bits())
+            .is_err()
         {
             return Vec::new();
         }
@@ -980,7 +1010,7 @@ mod tests {
         let r5 = crate::poawx::ProposerRegistrationV1::build_signed(&[0x7u8; 32], net, 5, &[0x9u8; 32], 0)
             .unwrap();
         assert!(matches!(
-            pool.ingest_bytes(&r0.serialize()),
+            pool.ingest_bytes(&r0.serialize(), |_h| Some([0x9u8; 32])),
             crate::poawx_gossip::GossipOutcome::AcceptedNew
         ));
         // A2 CONTRACT CHANGE: a fresher anchor still REFRESHES the stored record (so the
@@ -990,7 +1020,7 @@ mod tests {
         // let a squatter re-anchor every block and fan out to every peer for free.
         // Here 5 - 0 = 5 < 8, so it is a silent refresh.
         assert!(matches!(
-            pool.ingest_bytes(&r5.serialize()),
+            pool.ingest_bytes(&r5.serialize(), |_h| Some([0x9u8; 32])),
             crate::poawx_gossip::GossipOutcome::Duplicate
         ));
         // ...but convergence is preserved: the stored record IS the fresher one.
@@ -1005,12 +1035,12 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(
-            pool.ingest_bytes(&r20.serialize()),
+            pool.ingest_bytes(&r20.serialize(), |_h| Some([0x9u8; 32])),
             crate::poawx_gossip::GossipOutcome::AcceptedNew
         ));
         // older/equal anchor => duplicate (no downgrade).
         assert!(matches!(
-            pool.ingest_bytes(&r0.serialize()),
+            pool.ingest_bytes(&r0.serialize(), |_h| Some([0x9u8; 32])),
             crate::poawx_gossip::GossipOutcome::Duplicate
         ));
         assert_eq!(pool.len(), 1);
@@ -1027,17 +1057,17 @@ mod tests {
                 .unwrap();
         let bytes = reg.serialize();
         assert!(matches!(
-            pool.ingest_bytes(&bytes),
+            pool.ingest_bytes(&bytes, |_h| Some([0x9u8; 32])),
             crate::poawx_gossip::GossipOutcome::AcceptedNew
         ));
         assert!(matches!(
-            pool.ingest_bytes(&bytes),
+            pool.ingest_bytes(&bytes, |_h| Some([0x9u8; 32])),
             crate::poawx_gossip::GossipOutcome::Duplicate
         ));
         let mut bad = reg.clone();
         bad.signature[0] ^= 0xff;
         assert!(matches!(
-            pool.ingest_bytes(&bad.serialize()),
+            pool.ingest_bytes(&bad.serialize(), |_h| Some([0x9u8; 32])),
             crate::poawx_gossip::GossipOutcome::Rejected(_)
         ));
         assert_eq!(pool.len(), 1);
@@ -1117,7 +1147,7 @@ mod a0_a2_registration_fairness {
             let r = reg_for(b, 0, net);
             arrival.push(r.vrf_pubkey);
             assert!(matches!(
-                pool.ingest_bytes(&r.serialize()),
+                pool.ingest_bytes(&r.serialize(), |_h| Some([0x9u8; 32])),
                 crate::poawx_gossip::GossipOutcome::AcceptedNew
             ));
         }
@@ -1157,14 +1187,14 @@ mod a0_a2_registration_fairness {
         let pool = NodeProposerRegistrationPool::default();
         let base = reg_for(0x31, 100, net);
         assert!(matches!(
-            pool.ingest_bytes(&base.serialize()),
+            pool.ingest_bytes(&base.serialize(), |_h| Some([0x9u8; 32])),
             crate::poawx_gossip::GossipOutcome::AcceptedNew
         ));
         // advance by less than the minimum delta => updated but NOT rebroadcast
         let small = reg_for(0x31, 100 + PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA - 1, net);
         assert!(
             matches!(
-                pool.ingest_bytes(&small.serialize()),
+                pool.ingest_bytes(&small.serialize(), |_h| Some([0x9u8; 32])),
                 crate::poawx_gossip::GossipOutcome::Duplicate
             ),
             "sub-threshold refresh must not re-amplify"
@@ -1172,13 +1202,13 @@ mod a0_a2_registration_fairness {
         // advance by at least the minimum delta => genuinely new
         let big = reg_for(0x31, 100 + PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA * 2, net);
         assert!(matches!(
-            pool.ingest_bytes(&big.serialize()),
+            pool.ingest_bytes(&big.serialize(), |_h| Some([0x9u8; 32])),
             crate::poawx_gossip::GossipOutcome::AcceptedNew
         ));
         // an older anchor is still ignored outright
         let older = reg_for(0x31, 50, net);
         assert!(matches!(
-            pool.ingest_bytes(&older.serialize()),
+            pool.ingest_bytes(&older.serialize(), |_h| Some([0x9u8; 32])),
             crate::poawx_gossip::GossipOutcome::Duplicate
         ));
         assert_eq!(pool.len(), 1, "refreshes must not grow the pool");
@@ -1196,15 +1226,15 @@ mod a0_a2_registration_fairness {
         // that re-stamps a refresh to seq 0 merely TIES with `first` and the assertion
         // can pass by accident of tie-break order -- i.e. the test would be vacuous.
         let warm = reg_for(0x40, 100, net);
-        pool.ingest_bytes(&warm.serialize());
+        pool.ingest_bytes(&warm.serialize(), |_h| Some([0x9u8; 32]));
         let first = reg_for(0x41, 100, net);
         let second = reg_for(0x42, 100, net);
-        pool.ingest_bytes(&first.serialize());
-        pool.ingest_bytes(&second.serialize());
+        pool.ingest_bytes(&first.serialize(), |_h| Some([0x9u8; 32]));
+        pool.ingest_bytes(&second.serialize(), |_h| Some([0x9u8; 32]));
         // `second` refreshes aggressively; it must still stay behind `first`.
         for d in 1..=5u64 {
             let bump = reg_for(0x42, 100 + d * PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA * 2, net);
-            pool.ingest_bytes(&bump.serialize());
+            pool.ingest_bytes(&bump.serialize(), |_h| Some([0x9u8; 32]));
         }
         let got: Vec<[u8; 33]> = pool
             .announce_candidates(3, &BTreeSet::new())
@@ -1214,6 +1244,131 @@ mod a0_a2_registration_fairness {
         assert_eq!(got[0], warm.vrf_pubkey, "warm-up must remain first");
         assert_eq!(got[1], first.vrf_pubkey, "refreshing must not jump the queue");
         assert_eq!(got[2], second.vrf_pubkey, "the refresher must stay last");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+}
+
+#[cfg(test)]
+mod a4_sybil_recompute {
+    use super::*;
+    use crate::poawx::ProposerRegistrationV1;
+
+    /// Fixed anchor hash the tests build/verify against.
+    const ANCHOR: [u8; 32] = [0x9u8; 32];
+
+    /// A validly-SIGNED registration whose `sybil_digest` is FABRICATED (all zeros,
+    /// which clears any target for free) instead of the real hash of its inputs. This is
+    /// exactly what an attacker submits to pay ~0 proof-of-work. `build_signed` cannot
+    /// produce it (it grinds a real digest), so we self-sign a hand-set digest directly.
+    fn forged_zero_digest_reg(secret_byte: u8, anchor_height: u64, net: u8) -> ProposerRegistrationV1 {
+        use k256::ecdsa::signature::hazmat::PrehashSigner;
+        let secret = [secret_byte; 32];
+        let sk = k256::ecdsa::SigningKey::from_slice(&secret).unwrap();
+        let vk = sk.verifying_key();
+        let pt = vk.to_encoded_point(true);
+        let mut vrf_pubkey = [0u8; 33];
+        vrf_pubkey.copy_from_slice(pt.as_bytes());
+        let mut reg = ProposerRegistrationV1 {
+            vrf_pubkey,
+            anchor_height,
+            sybil_nonce: [0u8; 32],
+            sybil_digest: [0u8; 32], // forged: 256 leading zeros => clears any target for free
+            signature: [0u8; 64],
+        };
+        let sig: k256::ecdsa::Signature = sk.sign_prehash(&reg.signing_digest(net)).unwrap();
+        reg.signature.copy_from_slice(&sig.to_bytes());
+        reg
+    }
+
+    fn honest_reg(secret_byte: u8, anchor_height: u64, net: u8) -> ProposerRegistrationV1 {
+        ProposerRegistrationV1::build_signed(
+            &[secret_byte; 32],
+            net,
+            anchor_height,
+            &ANCHOR,
+            crate::poawx_ticket::effective_sybil_bits(),
+        )
+        .expect("build_signed")
+    }
+
+    /// THE A4 CONTROL. The forged registration passes BOTH checks the pre-A4 ingest used
+    /// (`meets_sybil_target` on the field + `signature_ok`), so it was ACCEPTED with zero
+    /// PoW -- the ~2^bits asymmetry. With the anchor resolvable, ingest now RECOMPUTES the
+    /// digest, finds it does not match, and REJECTS. Reverting `ingest_bytes` to the
+    /// field-check makes this test pass a forged registration again.
+    #[test]
+    fn forged_zero_digest_rejected_but_passes_the_old_field_check() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let pool = NodeProposerRegistrationPool::default();
+        let forged = forged_zero_digest_reg(0x51, 10, net);
+
+        // Exactly what the OLD ingest checked -- both true, so pre-A4 it was accepted.
+        assert!(
+            crate::poawx_ticket::meets_sybil_target(
+                &forged.sybil_digest,
+                crate::poawx_ticket::effective_sybil_bits()
+            ),
+            "forged all-zero digest trivially clears the target -- this is the free-PoW hole"
+        );
+        assert!(forged.signature_ok(net), "forged reg is validly self-signed");
+
+        // NEW: recompute against the real anchor rejects it.
+        let outcome = pool.ingest_bytes(&forged.serialize(), |_h| Some(ANCHOR));
+        assert!(
+            matches!(&outcome, crate::poawx_gossip::GossipOutcome::Rejected(e) if e.contains("mismatch")),
+            "forged digest must be rejected by recompute, got {outcome:?}"
+        );
+        assert_eq!(pool.len(), 0, "nothing forged may enter the pool");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// An honestly-ground registration is accepted when the anchor recomputes to match.
+    #[test]
+    fn honest_registration_with_matching_anchor_is_accepted() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let pool = NodeProposerRegistrationPool::default();
+        let reg = honest_reg(0x22, 10, net);
+        assert!(matches!(
+            pool.ingest_bytes(&reg.serialize(), |_h| Some(ANCHOR)),
+            crate::poawx_gossip::GossipOutcome::AcceptedNew
+        ));
+        assert_eq!(pool.len(), 1);
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// Fail-closed: if the node cannot resolve the anchor (it is behind that height, or a
+    /// peer pinned a future/unknown anchor), the registration is rejected -- a peer must
+    /// not be able to skip verification by choosing an anchor we do not hold.
+    #[test]
+    fn unresolvable_anchor_fails_closed() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let pool = NodeProposerRegistrationPool::default();
+        let reg = honest_reg(0x33, 10, net);
+        let outcome = pool.ingest_bytes(&reg.serialize(), |_h| None);
+        assert!(
+            matches!(&outcome, crate::poawx_gossip::GossipOutcome::Rejected(e) if e.contains("anchor unavailable")),
+            "unknown anchor must fail closed, got {outcome:?}"
+        );
+        assert_eq!(pool.len(), 0);
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// The digest binds to a SPECIFIC anchor block: an honest registration verified
+    /// against the wrong anchor recomputes to a different digest and is rejected.
+    #[test]
+    fn honest_registration_against_wrong_anchor_is_rejected() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let pool = NodeProposerRegistrationPool::default();
+        let reg = honest_reg(0x44, 10, net); // built against ANCHOR
+        let outcome = pool.ingest_bytes(&reg.serialize(), |_h| Some([0xAAu8; 32]));
+        assert!(
+            matches!(&outcome, crate::poawx_gossip::GossipOutcome::Rejected(e) if e.contains("mismatch")),
+            "wrong-anchor recompute must reject, got {outcome:?}"
+        );
         std::env::remove_var("IRIUM_NETWORK");
     }
 }

@@ -14593,6 +14593,34 @@ fn role_bundle_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
 /// whose puzzle solution cannot verify against the builder's challenge, and it fails
 /// silently at assembly time. Shipping the other parameters without it would invite
 /// exactly that failure.
+/// DEV/TEST-ONLY: return the pool's full, validated collected role bundles for the next
+/// height so a genuinely SEPARATE proposer process can assemble a block from them (the
+/// R1-R4 collection channel exercised end-to-end with real processes). Loopback-guarded
+/// and refused on mainnet (network_id == 0).
+async fn poawx_get_collected_bundles(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, StatusCode> {
+    role_bundle_bridge_guard(&addr)?;
+    if irium_node_rs::activation::network_id_byte() == 0 {
+        return Err(StatusCode::FORBIDDEN);
+    }
+    let height = {
+        let g = match state.chain.try_lock() {
+            Ok(g) => g,
+            Err(_) => return Err(StatusCode::SERVICE_UNAVAILABLE),
+        };
+        g.tip_height().saturating_add(1)
+    };
+    let pool = irium_node_rs::poawx_role_bundle::global_role_bundle_pool();
+    let bundles: Vec<Value> = pool
+        .collected_for_height(height)
+        .iter()
+        .filter_map(|b| serde_json::from_str::<Value>(&b.to_json()).ok())
+        .collect();
+    Ok(Json(json!({ "height": height, "bundles": bundles })))
+}
+
 async fn poawx_get_role_work(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
@@ -19615,6 +19643,7 @@ async fn main() {
         .route("/poawx/registration", post(poawx_post_registration))
         .route("/poawx/role-bundle", post(poawx_post_role_bundle))
         .route("/poawx/role-work", get(poawx_get_role_work))
+        .route("/poawx/collected-bundles", get(poawx_get_collected_bundles))
         .route("/poawx/finality-votes", get(poawx_finality_votes_get))
         .route("/rpc/submit_tx", post(submit_tx))
         // Fix D: pending-tx introspection + per-address pending-spent

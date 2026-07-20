@@ -147,6 +147,33 @@ impl RoleBundleV1 {
         })
     }
 
+    /// Inverse of `from_json` (round-trips). Used by the dev-only collected-bundles
+    /// endpoint so a genuinely SEPARATE proposer process can rebuild the block from the
+    /// pool's validated bundles without holding any worker's key. Non-mainnet/test use.
+    pub fn to_json(&self) -> String {
+        let mut o = serde_json::json!({
+            "network_id": self.network_id,
+            "target_height": self.target_height,
+            "role_id": self.role_id,
+            "solver_pkh": hex::encode(self.solver_pkh),
+            "assignment_public_key": hex::encode(self.assignment_public_key),
+            "assignment_proof": hex::encode(self.assignment_proof.serialize()),
+            "ticket_proof": hex::encode(self.ticket_proof.serialize()),
+            "puzzle_solution": hex::encode(self.puzzle_solution.serialize()),
+            "claim": {
+                "lane_id": self.lane_id,
+                "secret": hex::encode(self.claim_secret),
+                "nonce": hex::encode(self.claim_nonce),
+                "commitment_hash": hex::encode(self.commitment_hash),
+                "claim_digest": hex::encode(self.claim_digest),
+            },
+        });
+        if let Some(v) = &self.finality_vote {
+            o["finality_vote"] = serde_json::Value::String(hex::encode(v.serialize()));
+        }
+        serde_json::to_string(&o).unwrap()
+    }
+
     /// The self-VRF score used to resolve competition between workers for one role,
     /// matching `best_for_role`'s ordering.
     pub fn score(&self) -> u64 {

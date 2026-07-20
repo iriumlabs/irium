@@ -1650,4 +1650,153 @@ mod tests {
             "builder accepts known mainnet network id"
         );
     }
+
+    // ── Role-worker / builder dominance-weight agreement (height-2 fix) ───────────
+    //
+    // Shared setup for the two puzzle-challenge tests below: a real assignment proof, a
+    // dominance state in which the solver was already rewarded once (so its weight at the
+    // NEXT height falls below the empty baseline of 1000), and the pieces both the worker
+    // and the collected-builder feed into the per-role puzzle challenge.
+    fn dominance_weight_fixture(
+    ) -> (AssignmentProofV2, [u8; 20], u64, u64, [u8; 32], crate::poawx_puzzle::PuzzleDifficultyProfile)
+    {
+        let net = 0u8;
+        let height = 2u64;
+        let role = ROLE_COMPUTE_CONTRIBUTOR;
+        let secret = [7u8; 32];
+        let seed = [0x33u8; 32];
+        let a_ticket = [0x11u8 + role; 32];
+        let proof = AssignmentProofV2::prove_self_solver(&secret, net, height, role, a_ticket, seed)
+            .expect("assignment proof");
+        let solver_pkh = proof.solver_pkh;
+
+        // Node-authoritative dominance: credit the solver a reward at height 1 so that at
+        // height 2 it carries recent reward share and its fairness weight is below 1000.
+        let mut node_dom = PersistentDominance::from_env();
+        node_dom.apply_event(solver_pkh, RoleRewardKind::Compute, block_reward(1), 1);
+        let node_weight = node_dom.weight(DOMINANCE_BASE_WORK_SCORE, &solver_pkh, height);
+
+        // The worker parses the SAME snapshot the endpoint ships (dominance_bytes ==
+        // to_bytes) and must derive the identical weight -- this is the round-trip lock.
+        let snapshot = node_dom.to_bytes();
+        let worker_dom = PersistentDominance::from_bytes(&snapshot).expect("snapshot round-trip");
+        assert_eq!(
+            worker_dom.to_bytes(),
+            snapshot,
+            "dominance snapshot round-trips through from_bytes byte-identically"
+        );
+        let worker_weight = worker_dom.weight(DOMINANCE_BASE_WORK_SCORE, &solver_pkh, height);
+        assert_eq!(
+            worker_weight, node_weight,
+            "worker-computed weight (from the shipped snapshot) equals the node weight"
+        );
+        assert!(
+            node_weight < 1000,
+            "a previously-rewarded solver's weight is below the empty baseline at height >= 2 (got {node_weight})"
+        );
+
+        let profile = crate::poawx_puzzle::profile_with_bits(8);
+        (proof, solver_pkh, node_weight, height as u64, [0x55u8; 32], profile)
+    }
+
+    fn role_puzzle_challenge(
+        proof: &AssignmentProofV2,
+        weight: u64,
+        height: u64,
+        prev_hash: [u8; 32],
+        profile: crate::poawx_puzzle::PuzzleDifficultyProfile,
+    ) -> PuzzleChallengeV1 {
+        let role = ROLE_COMPUTE_CONTRIBUTOR;
+        let cand =
+            RoleCandidate::from_assignment_v2(proof, PenaltyStatus::Clean.id(), weight, [role; 32]);
+        let cdg: [u8; 32] = {
+            let mut h = Sha256::new();
+            h.update(cand.serialize());
+            h.finalize().into()
+        };
+        PuzzleChallengeV1::build(
+            0,
+            height,
+            role,
+            cand.solver_pkh,
+            cand.ticket_digest,
+            cand.assignment_proof_digest,
+            cdg,
+            prev_hash,
+            profile,
+        )
+    }
+
+    #[test]
+    fn worker_and_builder_agree_on_puzzle_challenge_at_height_two() {
+        // The fix: with the node-authoritative dominance weight on BOTH sides, the worker's
+        // solved puzzle verifies against the builder's rebuilt challenge at height >= 2.
+        let (proof, _pkh, node_weight, height, prev, profile) = dominance_weight_fixture();
+        let worker_challenge = role_puzzle_challenge(&proof, node_weight, height, prev, profile);
+        let builder_challenge = role_puzzle_challenge(&proof, node_weight, height, prev, profile);
+        let worker_sol = solve_dev(&worker_challenge).expect("worker solves its puzzle");
+        match crate::poawx_puzzle::verify_solution(&builder_challenge, &worker_sol) {
+            crate::poawx_puzzle::PuzzleVerificationResult::Valid => {}
+            other => panic!("expected Valid against the builder's challenge, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn hardcoded_weight_breaks_puzzle_verification_at_height_two() {
+        // Prove-the-break: the OLD behaviour (candidate built with the hardcoded 1000) yields
+        // a different candidate digest than the node-weight candidate at height >= 2, so the
+        // worker's solution against its 1000-challenge fails against the builder's real
+        // challenge with exactly the "proof digest mismatch" we observed on devnet-mp.
+        let (proof, _pkh, node_weight, height, prev, profile) = dominance_weight_fixture();
+        assert_ne!(node_weight, 1000, "fixture must have a non-baseline weight to be meaningful");
+        let broken_challenge = role_puzzle_challenge(&proof, 1000, height, prev, profile);
+        let builder_challenge = role_puzzle_challenge(&proof, node_weight, height, prev, profile);
+        let broken_sol = solve_dev(&broken_challenge).expect("worker solves its (wrong) puzzle");
+        match crate::poawx_puzzle::verify_solution(&builder_challenge, &broken_sol) {
+            crate::poawx_puzzle::PuzzleVerificationResult::Invalid(m) => {
+                assert!(m.contains("proof digest mismatch"), "unexpected reason: {m}")
+            }
+            other => panic!("expected Invalid(proof digest mismatch), got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn seed_non_divergence_endpoint_matches_builder_at_height_two() {
+        // Lock that the /poawx/role-work seed (expected_epoch_seed) and the collected-builder's
+        // reconstruction (admission_epoch_seed grandparent base + seed_components_from_block,
+        // which is exactly what /rpc/block emits) are the SAME seed for a real parent block at
+        // height >= 2. This documents that the seed was never the divergence and stops a future
+        // refactor from silently reintroducing a real split.
+        use crate::poawx_committed_admission::{
+            expected_epoch_seed, multisource_seed_active, resolve_epoch_seed_parts_with,
+            seed_components_from_block,
+        };
+        let parent = build_devnet_all_gates_block(0, 1, [0x44u8; 32], None, 0x207fffff, 1, 1)
+            .expect("build a real devnet parent block")
+            .block;
+        let prev = parent.header.hash_for_height(1); // the prev_hash for height 2
+        let (fin, pre) = seed_components_from_block(Some(&parent));
+        assert!(
+            fin != [0u8; 32] || pre != [0u8; 32],
+            "a real parent block contributes nonzero seed components"
+        );
+
+        let h = 2u64;
+        let gate = multisource_seed_active(h);
+        let endpoint_seed = expected_epoch_seed(h, prev, Some(&parent));
+        let builder_base = admission_epoch_seed(Some(parent.header.prev_hash), prev);
+        let builder_seed = resolve_epoch_seed_parts_with(gate, h, builder_base, fin, pre);
+        assert_eq!(
+            endpoint_seed, builder_seed,
+            "endpoint and builder derive an identical seed at height 2 -- the seed is not the divergence"
+        );
+
+        // When the multi-source gate is active, the parent's components genuinely change the
+        // seed away from the legacy base -- both sides just compute that change identically.
+        assert_ne!(
+            resolve_epoch_seed_parts_with(true, h, builder_base, fin, pre),
+            builder_base,
+            "with multisource active a real parent's components change the seed"
+        );
+    }
 }

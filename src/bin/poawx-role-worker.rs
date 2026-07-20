@@ -15,6 +15,7 @@ use irium_node_rs::poawx::{
     ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
 };
 use irium_node_rs::poawx_candidate::{AssignmentProofV2, RoleCandidate};
+use irium_node_rs::poawx_dominance::{PersistentDominance, DOMINANCE_BASE_WORK_SCORE};
 use irium_node_rs::poawx_penalty::PenaltyStatus;
 use irium_node_rs::poawx_puzzle::{profile_with_bits, solve_dev, verify_solution, PuzzleChallengeV1};
 use irium_node_rs::poawx_ticket::{grind_sybil_nonce, TicketProof};
@@ -59,30 +60,51 @@ fn main() -> Result<(), String> {
     payout_pubkey.copy_from_slice(VerifyingKey::from(&sk).to_encoded_point(true).as_bytes());
     let payout_pkh = hash160(&payout_pubkey);
 
-    // ---- fetch the node template (isolated rig) ----
+    // ---- fetch the R3 role-work params (works regardless of proposer-VRF: the epoch
+    //      seed used for role assignments is provided here, not the proposer-VRF seed) ----
     let base = std::env::var("IRIUM_NODE_RPC").unwrap_or_else(|_| "http://127.0.0.1:38500".into());
     let token = std::env::var("IRIUM_RPC_TOKEN").unwrap_or_default();
     let client = reqwest::blocking::Client::new();
     let t: serde_json::Value = client
-        .get(format!("{base}/rpc/getblocktemplate"))
+        .get(format!("{base}/poawx/role-work"))
         .bearer_auth(&token)
         .send()
-        .map_err(|e| format!("template fetch: {e}"))?
+        .map_err(|e| format!("role-work fetch: {e}"))?
         .json()
-        .map_err(|e| format!("template json: {e}"))?;
-    let height = t["height"].as_u64().ok_or("template: no height")?;
-    let prev_hash = h32(t["prev_hash"].as_str().ok_or("template: no prev_hash")?);
+        .map_err(|e| format!("role-work json: {e}"))?;
+    let height = t["height"].as_u64().ok_or("role-work: no height")?;
+    let prev_hash = h32(t["prev_hash"].as_str().ok_or("role-work: no prev_hash")?);
     let seed = h32(
-        t["poawx_proposer_seed"]
+        t["epoch_seed"]
             .as_str()
-            .ok_or("template: no poawx_proposer_seed (epoch seed) -- proposer-VRF must be active")?,
+            .ok_or("role-work: no epoch_seed")?,
     );
-    let puzzle_bits = t["poawx_puzzle_anchor_bits"].as_u64().unwrap_or(8) as u8;
-    let sybil_bits = t["poawx_effective_sybil_bits"].as_u64().unwrap_or(8) as u32;
+    let puzzle_bits = t["puzzle_anchor_bits"].as_u64().unwrap_or(8) as u8;
+    let sybil_bits = t["sybil_bits"].as_u64().unwrap_or(8) as u32;
     let profile = profile_with_bits(puzzle_bits);
     let epoch = height;
 
-    println!("[role-worker] role={role_name} height={height} net={net} payout_pkh={} sybil_bits={sybil_bits} puzzle_bits={puzzle_bits}", hex::encode(payout_pkh));
+    // Node-authoritative dominance: the candidate's `dominance_weight` is consensus-validated
+    // (chain.rs `validate_block_dominance_weights`) against the node's persisted dominance, and
+    // it is serialized into the candidate whose SHA-256 digest seeds the puzzle challenge. So it
+    // MUST be derived from the node's snapshot, never hardcoded. Hardcoding 1000 happens to equal
+    // the node weight only when dominance is empty (height 1: fairness_weight = 1000*1000/1000);
+    // at height >= 2 the parent block credits reward share to the solver pkhs, the node weight
+    // falls below 1000, and the worker's puzzle challenge stops matching the builder's rebuilt
+    // one -> "proof digest mismatch" at assembly. The endpoint ships this snapshot precisely so
+    // the worker can build against it (see role-work's dominance note).
+    let dominance = PersistentDominance::from_bytes(
+        &hex::decode(
+            t["dominance_snapshot"]
+                .as_str()
+                .ok_or("role-work: no dominance_snapshot")?
+                .trim(),
+        )
+        .map_err(|e| format!("dominance_snapshot hex: {e}"))?,
+    )?;
+    let dominance_weight = dominance.weight(DOMINANCE_BASE_WORK_SCORE, &payout_pkh, height);
+
+    println!("[role-worker] role={role_name} height={height} net={net} payout_pkh={} sybil_bits={sybil_bits} puzzle_bits={puzzle_bits} dominance_weight={dominance_weight}", hex::encode(payout_pkh));
 
     // ---- 1. real sybil ticket (bound to prev_hash + payout identity) ----
     let nonce = if sybil_bits > 0 {
@@ -101,7 +123,8 @@ fn main() -> Result<(), String> {
     //     assignment ticket_digest mirrors the accepted harness pattern (per-role constant).
     let a_ticket = [(0x11u8 + role); 32];
     let proof = AssignmentProofV2::prove_self_solver(&secret, net, height, role, a_ticket, seed)?;
-    let cand = RoleCandidate::from_assignment_v2(&proof, PenaltyStatus::Clean.id(), 1000, [role; 32]);
+    let cand =
+        RoleCandidate::from_assignment_v2(&proof, PenaltyStatus::Clean.id(), dominance_weight, [role; 32]);
 
     // ---- 3. real assigned puzzle solution (the genuine role WORK) ----
     let cdg: [u8; 32] = Sha256::digest(cand.serialize()).into();
@@ -157,9 +180,30 @@ fn main() -> Result<(), String> {
         return Err("precommit commitment mismatch".into());
     }
 
-    // ---- 6. emit the payout-bound bundle (for the Phase-3 collection channel) ----
+    // ---- 6. R4: SUPPORT doubles as the finality committee member, so it self-signs its
+    //         OWN finality vote (the builder holds no key for it). The vote finalizes the
+    //         PARENT (block_hash = prev_hash), bound to this worker's real ticket_digest.
+    let finality_vote = if role == ROLE_SUPPORT_CONTRIBUTOR {
+        let v = irium_node_rs::poawx_finality::FinalityVoteV1::signed(
+            &sk,
+            net,
+            height,
+            prev_hash,
+            [0u8; 32],
+            0,
+            ticket.ticket_digest,
+            irium_node_rs::poawx_finality::FinalityVoteType::Commit,
+        );
+        // self-verify the vote binds correctly before emitting
+        v.verify(net, height, &prev_hash)?;
+        Some(v)
+    } else {
+        None
+    };
+
+    // ---- 7. emit the payout-bound bundle (for the Phase-3 collection channel) ----
     println!("[role-worker] ALL ARTIFACTS SELF-VERIFIED. Phase-1 binding holds: solver_pkh == hash160(assignment_public_key) == payout_pkh.");
-    let bundle = serde_json::json!({
+    let mut bundle = serde_json::json!({
         "network_id": net, "target_height": height, "role_id": role, "role": role_name,
         "solver_pkh": hex::encode(payout_pkh),
         "assignment_public_key": hex::encode(payout_pubkey),
@@ -172,6 +216,9 @@ fn main() -> Result<(), String> {
             "commitment_hash": hex::encode(commitment), "claim_digest": hex::encode(claim_digest),
         },
     });
+    if let Some(v) = &finality_vote {
+        bundle["finality_vote"] = serde_json::Value::String(hex::encode(v.serialize()));
+    }
     println!("{}", serde_json::to_string_pretty(&bundle).unwrap());
     Ok(())
 }

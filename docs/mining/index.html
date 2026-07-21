@@ -891,7 +891,7 @@ GitHub</a>
     verifyBtn.addEventListener('click', () => {
       const address = (verifyInput.value || '').trim();
       if (!address) return;
-      window.open('https://api.iriumlabs.org/api/pool/account/' + encodeURIComponent(address), '_blank', 'noopener');
+      window.open('https://api.irium.org/api/pool/account/' + encodeURIComponent(address), '_blank', 'noopener');
     });
   }
   async function refreshPoolStatusBox() {

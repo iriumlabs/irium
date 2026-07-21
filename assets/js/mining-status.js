@@ -1,7 +1,7 @@
 // Live mining metrics widget (hashrate + difficulty + difficulty change).
 // Safe to include on any page: it only updates elements that exist.
 
-const DEFAULT_API_BASE = "https://api.iriumlabs.org/api";
+const DEFAULT_API_BASE = "https://api.irium.org/api";
 const CORS_PROXIES = ["", "https://api.allorigins.win/raw?url="]; // best-effort
 const FETCH_TIMEOUT_MS = 15000;
 

@@ -1,7 +1,7 @@
 // Irium Block Explorer JavaScript with CORS Proxy
-const DEFAULT_API_BASE = 'https://api.iriumlabs.org/api';
+const DEFAULT_API_BASE = 'https://api.irium.org/api';
 const PRIORITY_API_BASES = [
-  'https://api.iriumlabs.org/api',
+  'https://api.irium.org/api',
   '/api',
   '/api'
 ];
@@ -591,7 +591,7 @@ function timeAgo(timestamp) {
 
 // ── Settlement Explorer API ──────────────────────────────────────────────────
 
-const SETTLEMENT_API_BASE = 'https://api.iriumlabs.org';
+const SETTLEMENT_API_BASE = 'https://api.irium.org';
 
 async function fetchSettlementJson(path) {
   const url = SETTLEMENT_API_BASE + path;

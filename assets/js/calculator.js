@@ -1,7 +1,7 @@
 // Irium Mining Calculator
 const BLOCK_REWARD = 50; // IRM per block
 const BLOCK_TIME = 600; // seconds (10 minutes)
-const DEFAULT_API_BASE = 'https://api.iriumlabs.org/api';
+const DEFAULT_API_BASE = 'https://api.irium.org/api';
 const CORS_PROXIES = ['', 'https://api.allorigins.win/raw?url='];
 const FETCH_TIMEOUT_MS = 8000;
 

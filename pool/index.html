@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Irium Pool | SHA-256d Mining Pool</title>
-<meta name="description" content="Mine IRM on the official Irium SHA-256d Stratum pool. 0% fee, direct coinbase payout, ASIC / CPU / GPU / solo — pool.iriumlabs.org.">
+<meta name="description" content="Mine IRM on the official Irium SHA-256d Stratum pool. 0% fee, direct coinbase payout, ASIC / CPU / GPU / solo — pool.irium.org.">
 <link rel="stylesheet" href="/style.css?v=9">
 <link rel="icon" type="image/png" href="/assets/irium-logo-alt-transparent.png?v=1">
 <style>
@@ -481,33 +481,33 @@ body {
   <section class="hero-block">
     <div class="hero-inner">
       <div>
-        <div class="hero-live"><span class="dot"></span> Public Stratum Pool — pool.iriumlabs.org</div>
+        <div class="hero-live"><span class="dot"></span> Public Stratum Pool — pool.irium.org</div>
         <h1 class="hero-h1">Irium Mining Pool</h1>
         <p class="hero-sub">SHA-256d · 0% fee · Direct coinbase payout · ASIC / CPU / GPU / Solo. Every SHA-256d miner that can mine Bitcoin can mine IRM with no hardware changes.</p>
         <div class="ep-stack">
           <div class="ep-row">
             <span class="ep-tag asic">ASIC &nbsp;3333</span>
-            <div class="ep-val" id="ep-asic">stratum+tcp://pool.iriumlabs.org:3333</div>
+            <div class="ep-val" id="ep-asic">stratum+tcp://pool.irium.org:3333</div>
             <button class="copy-btn" data-ep="ep-asic">Copy</button>
           </div>
           <div class="ep-row">
             <span class="ep-tag cpugpu">CPU/GPU &nbsp;3335</span>
-            <div class="ep-val" id="ep-cpugpu">stratum+tcp://pool.iriumlabs.org:3335</div>
+            <div class="ep-val" id="ep-cpugpu">stratum+tcp://pool.irium.org:3335</div>
             <button class="copy-btn" data-ep="ep-cpugpu">Copy</button>
           </div>
           <div class="ep-row">
             <span class="ep-tag solo">Solo &nbsp;3336</span>
-            <div class="ep-val" id="ep-solo">stratum+tcp://pool.iriumlabs.org:3336</div>
+            <div class="ep-val" id="ep-solo">stratum+tcp://pool.irium.org:3336</div>
             <button class="copy-btn" data-ep="ep-solo">Copy</button>
           </div>
           <div class="ep-row">
             <span class="ep-tag fw">FW bypass &nbsp;443</span>
-            <div class="ep-val" id="ep-fw">stratum+tcp://pool.iriumlabs.org:443</div>
+            <div class="ep-val" id="ep-fw">stratum+tcp://pool.irium.org:443</div>
             <button class="copy-btn" data-ep="ep-fw">Copy</button>
           </div>
           <div class="ep-row">
             <span class="ep-tag fb">Fallback &nbsp;80</span>
-            <div class="ep-val" id="ep-fb">stratum+tcp://pool.iriumlabs.org:80</div>
+            <div class="ep-val" id="ep-fb">stratum+tcp://pool.irium.org:80</div>
             <button class="copy-btn" data-ep="ep-fb">Copy</button>
           </div>
         </div>
@@ -549,7 +549,7 @@ body {
     <!-- Stratum telemetry -->
     <article class="panel">
       <h3>Live Stratum Telemetry</h3>
-      <p class="panel-sub">Real-time data from <code>api.iriumlabs.org/api/pool/stats</code> — refreshes every 15 s.</p>
+      <p class="panel-sub">Real-time data from <code>api.irium.org/api/pool/stats</code> — refreshes every 15 s.</p>
       <div class="port-grid">
         <div class="port-panel">
           <h4 class="asic">ASIC · :3333</h4>
@@ -689,7 +689,7 @@ body {
         <div class="cfg-card">
           <h4>ASIC Firmware (any SHA-256d)</h4>
           <pre id="cfg-asic">Algorithm: SHA-256d
-Pool URL:  stratum+tcp://pool.iriumlabs.org:3333
+Pool URL:  stratum+tcp://pool.irium.org:3333
 Worker:    YOUR_IRM_ADDRESS.rig1
 Password:  x</pre>
           <button class="copy-btn" data-copy="cfg-asic">Copy</button>
@@ -697,7 +697,7 @@ Password:  x</pre>
         <div class="cfg-card">
           <h4>CPU Miner — cpuminer-opt (Linux/macOS)</h4>
           <pre id="cfg-cpu">./cpuminer -a sha256d \
-  -o stratum+tcp://pool.iriumlabs.org:3335 \
+  -o stratum+tcp://pool.irium.org:3335 \
   -u YOUR_IRM_ADDRESS.cpu1 \
   -p x -t 4</pre>
           <button class="copy-btn" data-copy="cfg-cpu">Copy</button>
@@ -705,7 +705,7 @@ Password:  x</pre>
         <div class="cfg-card">
           <h4>CPU Miner — cpuminer-opt (Windows)</h4>
           <pre id="cfg-win">.\cpuminer-avx2.exe -a sha256d ^
-  -o stratum+tcp://pool.iriumlabs.org:3335 ^
+  -o stratum+tcp://pool.irium.org:3335 ^
   -u YOUR_IRM_ADDRESS.cpu1 ^
   -p x -t 4</pre>
           <button class="copy-btn" data-copy="cfg-win">Copy</button>
@@ -754,7 +754,7 @@ Password:  x</pre>
       <ul class="meta-list">
         <li><span class="k">Port 3333 blocked by ISP</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Use port 443 — same Stratum, plain TCP via sslh. Disable TLS in miner config.</span></li>
         <li><span class="k">Port 443 also blocked</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Use port 80 — second fallback.</span></li>
-        <li><span class="k">Shares rejected (stale)</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Check your internet latency to pool.iriumlabs.org. Use <code>ping pool.iriumlabs.org</code>.</span></li>
+        <li><span class="k">Shares rejected (stale)</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Check your internet latency to pool.irium.org. Use <code>ping pool.irium.org</code>.</span></li>
         <li><span class="k">Firmware auto-enables TLS on port 443</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Find the SSL/TLS toggle in your miner UI and disable it explicitly.</span></li>
         <li><span class="k">Reward not received</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Coinbase outputs mature after 100 blocks (~3 h). Check the lookup tool above.</span></li>
         <li><span class="k">Get help</span><span class="v"><a href="https://t.me/iriumlabs" target="_blank" rel="noopener" style="color:#9bb5ff;">Telegram ↗</a></span></li>

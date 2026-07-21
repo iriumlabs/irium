@@ -13102,7 +13102,7 @@ fn handle_feed_list(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-const BOOTSTRAP_FEEDS: &[&str] = &["https://api.iriumlabs.org/offers/feed"];
+const BOOTSTRAP_FEEDS: &[&str] = &["https://api.irium.org/offers/feed"];
 
 fn handle_feed_bootstrap(args: &[String]) -> Result<(), String> {
     if !args.is_empty() {

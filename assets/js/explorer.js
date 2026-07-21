@@ -38,7 +38,7 @@ function getApiBases() {
   bases.push(DEFAULT_API_BASE);
   if (location && location.origin) {
     bases.push(location.origin + '/api');
-    if (location.hostname && location.hostname !== 'www.iriumlabs.org') {
+    if (location.hostname && location.hostname !== 'www.irium.org') {
       bases.push('/api');
     }
   }

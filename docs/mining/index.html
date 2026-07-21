@@ -564,26 +564,26 @@
     <div class="x-panel" id="irium-official-pool">
       <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>IRIUM OFFICIAL POOL</div></div>
       <ul class="m-list">
-        <li><b>ASIC / modern firmware:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
-        <li><b>CPU/GPU software miners:</b> <code>stratum+tcp://pool.iriumlabs.org:3335</code></li>
-        <li><b>Solo mining (full reward to finder):</b> <code>stratum+tcp://pool.iriumlabs.org:3336</code></li>
-        <li><b>Firewall bypass (ISP blocks high ports):</b> <code>stratum+tcp://pool.iriumlabs.org:443</code> — plain TCP only, <em>not</em> TLS</li>
-        <li><b>Second fallback:</b> <code>stratum+tcp://pool.iriumlabs.org:80</code></li>
+        <li><b>ASIC / modern firmware:</b> <code>stratum+tcp://pool.irium.org:3333</code></li>
+        <li><b>CPU/GPU software miners:</b> <code>stratum+tcp://pool.irium.org:3335</code></li>
+        <li><b>Solo mining (full reward to finder):</b> <code>stratum+tcp://pool.irium.org:3336</code></li>
+        <li><b>Firewall bypass (ISP blocks high ports):</b> <code>stratum+tcp://pool.irium.org:443</code> — plain TCP only, <em>not</em> TLS</li>
+        <li><b>Second fallback:</b> <code>stratum+tcp://pool.irium.org:80</code></li>
         <li><b>Algorithm:</b> SHA-256d &nbsp;|&nbsp; <b>Fee:</b> 0% (direct coinbase payout)</li>
-        <li><b>Stats:</b> <code>https://pool.iriumlabs.org/stats</code> &nbsp;|&nbsp; <b>Stats JSON:</b> <code>http://pool.iriumlabs.org:3337/stats</code></li>
+        <li><b>Stats:</b> <code>https://pool.irium.org/stats</code> &nbsp;|&nbsp; <b>Stats JSON:</b> <code>http://pool.irium.org:3337/stats</code></li>
       </ul>
       <p class="m-muted" style="margin-top:8px;"><b>Recommended miners:</b> Irium CPU/GPU miner (bundled in Irium Core v1.0.77), ASIC SHA-256d hardware, T-Rex, lolMiner, NBMiner, cpuminer-opt. Mining secures the live settlement base layer.</p>
       <div class="m-step" style="margin-top:12px;">
         <div class="m-step-head"><span class="m-step-num">1</span><span class="m-step-title">Example CPU miner command</span></div>
         <pre class="m-cmd"><code>./irium-miner \
---pool stratum+tcp://pool.iriumlabs.org:3335 \
+--pool stratum+tcp://pool.irium.org:3335 \
 --user YOUR_IRIUM_WALLET \
 --threads 4</code></pre>
       </div>
       <div class="m-step" style="margin-top:12px;">
         <div class="m-step-head"><span class="m-step-num">2</span><span class="m-step-title">Example ASIC configuration</span></div>
         <ul class="m-list">
-          <li><b>Pool URL:</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
+          <li><b>Pool URL:</b> <code>stratum+tcp://pool.irium.org:3333</code></li>
           <li><b>Worker:</b> <code>YOUR_IRIUM_WALLET</code></li>
           <li><b>Password:</b> <code>x</code></li>
         </ul>
@@ -603,10 +603,10 @@
 <div class="x-panel" id="asic-pool-quick-config">
       <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l4 8h-8l4-8zm0 20l-4-8h8l-4 8z"/></svg>ASIC / Pool Quick Config</div></div>
       <div class="m-copy-grid">
-        <div class="m-copy-row"><span class="m-copy-label">ASIC (port 3333)</span><code class="m-copy-value" id="pool-url">stratum+tcp://pool.iriumlabs.org:3333</code><button class="m-copy-btn" data-copy-target="pool-url">Copy</button></div>
-        <div class="m-copy-row"><span class="m-copy-label">CPU/GPU (port 3335)</span><code class="m-copy-value" id="pool-software">stratum+tcp://pool.iriumlabs.org:3335</code><button class="m-copy-btn" data-copy-target="pool-software">Copy</button></div>
-        <div class="m-copy-row"><span class="m-copy-label">Solo (port 3336)</span><code class="m-copy-value" id="pool-solo">stratum+tcp://pool.iriumlabs.org:3336</code><button class="m-copy-btn" data-copy-target="pool-solo">Copy</button></div>
-        <div class="m-copy-row"><span class="m-copy-label">Fallback (port 443)</span><code class="m-copy-value" id="pool-fw">stratum+tcp://pool.iriumlabs.org:443</code><button class="m-copy-btn" data-copy-target="pool-fw">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">ASIC (port 3333)</span><code class="m-copy-value" id="pool-url">stratum+tcp://pool.irium.org:3333</code><button class="m-copy-btn" data-copy-target="pool-url">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">CPU/GPU (port 3335)</span><code class="m-copy-value" id="pool-software">stratum+tcp://pool.irium.org:3335</code><button class="m-copy-btn" data-copy-target="pool-software">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">Solo (port 3336)</span><code class="m-copy-value" id="pool-solo">stratum+tcp://pool.irium.org:3336</code><button class="m-copy-btn" data-copy-target="pool-solo">Copy</button></div>
+        <div class="m-copy-row"><span class="m-copy-label">Fallback (port 443)</span><code class="m-copy-value" id="pool-fw">stratum+tcp://pool.irium.org:443</code><button class="m-copy-btn" data-copy-target="pool-fw">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Worker Format</span><code class="m-copy-value" id="pool-worker">YOUR_IRM_ADDRESS.worker1</code><button class="m-copy-btn" data-copy-target="pool-worker">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Password</span><code class="m-copy-value" id="pool-pass">x</code><button class="m-copy-btn" data-copy-target="pool-pass">Copy</button></div>
         <div class="m-copy-row"><span class="m-copy-label">Fee</span><code class="m-copy-value" id="pool-mode">0% — full 50 IRM block reward paid directly to the miner's IRM address</code><button class="m-copy-btn" data-copy-target="pool-mode">Copy</button></div>
@@ -615,8 +615,8 @@
       <div class="m-step" style="margin-top:12px;">
         <div class="m-step-head"><span class="m-step-num">A</span><span class="m-step-title">Antminer / Whatsminer Example</span></div>
         <ul class="m-list">
-          <li><b>Pool 1 (Primary):</b> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
-          <li><b>CPU/GPU software miners:</b> <code>stratum+tcp://pool.iriumlabs.org:3335</code></li>
+          <li><b>Pool 1 (Primary):</b> <code>stratum+tcp://pool.irium.org:3333</code></li>
+          <li><b>CPU/GPU software miners:</b> <code>stratum+tcp://pool.irium.org:3335</code></li>
           <li><b>Worker:</b> <code>YOUR_IRM_ADDRESS.worker1</code></li>
           <li><b>Password:</b> <code>x</code></li>
         </ul>
@@ -630,9 +630,9 @@
       <div class="x-head"><div class="x-title"><svg class="x-ico" viewBox="0 0 24 24" fill="currentColor"><path d="M9 16.17l-3.88-3.88L3.7 13.7 9 19l12-12-1.41-1.41z"/></svg>Verify You’re Mining</div></div>
       <p class="m-muted">After starting your miner, verify activity using your wallet address.</p>
       <ul class="m-list">
-        <li><code>https://api.iriumlabs.org/api/pool/account/YOUR_IRM_ADDRESS</code></li>
-        <li><code>https://api.iriumlabs.org/api/pool/stats</code></li>
-        <li><code>https://api.iriumlabs.org/api/pool/workers?window=144&amp;limit=20</code></li>
+        <li><code>https://api.irium.org/api/pool/account/YOUR_IRM_ADDRESS</code></li>
+        <li><code>https://api.irium.org/api/pool/stats</code></li>
+        <li><code>https://api.irium.org/api/pool/workers?window=144&amp;limit=20</code></li>
       </ul>
       <p class="m-muted" style="margin-top:8px;">Expect accepted shares to increase, your worker/address to appear in pool stats, and <code>blocks_found</code>/<code>payout</code> history for your address when applicable.</p>
       <div class="m-verify-row">
@@ -677,8 +677,8 @@ sudo journalctl -u iriumd -f</code></pre></article>
     <div class="step-card">
       <div class="step-head"><span class="step-num">★</span><span class="step-title">Mine via Irium Public Pool (SOLO)</span></div>
       <ul class="muted">
-        <li><strong>ASIC / Modern Endpoint:</strong> <code>stratum+tcp://pool.iriumlabs.org:3333</code></li>
-        <li><strong>CPU/GPU Endpoint:</strong> <code>stratum+tcp://pool.iriumlabs.org:3335</code></li>
+        <li><strong>ASIC / Modern Endpoint:</strong> <code>stratum+tcp://pool.irium.org:3333</code></li>
+        <li><strong>CPU/GPU Endpoint:</strong> <code>stratum+tcp://pool.irium.org:3335</code></li>
         <li><strong>Username:</strong> <code>IRM_ADDRESS.worker1</code></li>
         <li><strong>Password:</strong> <code>x</code></li>
         <li><strong>Mode:</strong> SOLO (if a block is found, reward pays to the IRM address in the username).</li>

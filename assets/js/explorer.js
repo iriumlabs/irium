@@ -2,8 +2,8 @@
 const DEFAULT_API_BASE = 'https://api.iriumlabs.org/api';
 const PRIORITY_API_BASES = [
   'https://api.iriumlabs.org/api',
-  'https://www.iriumlabs.org/api',
-  'https://iriumlabs.org/api'
+  '/api',
+  '/api'
 ];
 const CORS_PROXIES = ['', 'https://api.allorigins.win/raw?url='];
 const FETCH_TIMEOUT_MS = 15000;
@@ -39,7 +39,7 @@ function getApiBases() {
   if (location && location.origin) {
     bases.push(location.origin + '/api');
     if (location.hostname && location.hostname !== 'www.iriumlabs.org') {
-      bases.push('https://www.iriumlabs.org/api');
+      bases.push('/api');
     }
   }
   const deduped = [];

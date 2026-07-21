@@ -19,7 +19,7 @@ We are building the pool infrastructure now and looking for operators who want t
 — Ready-to-deploy Stratum server in the repo: `pool/irium-stratum` (handles both standard and merged mining automatically)
 — Complete pool operator documentation: https://github.com/iriumlabs/irium/blob/main/docs/POOL-OPERATOR.md
 — Merged mining technical guide: https://github.com/iriumlabs/irium/blob/main/docs/MERGED-MINING.md
-— Official listing on iriumlabs.org once your pool is verified
+— Official listing on irium.org once your pool is verified
 
 **Block reward:** 50 IRM per block. First halving at block 210,000. Chain is at height 20,299 — still early.
 

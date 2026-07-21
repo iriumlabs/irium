@@ -4,7 +4,7 @@
 
 [![Release](https://img.shields.io/github/v/release/iriumlabs/irium?label=release&color=green)](https://github.com/iriumlabs/irium/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-lightgrey)](LICENSE)
-[![Mainnet](https://img.shields.io/badge/Mainnet-Live-brightgreen)](https://www.iriumlabs.org)
+[![Mainnet](https://img.shields.io/badge/Mainnet-Live-brightgreen)](https://www.irium.org)
 
 ---
 
@@ -76,11 +76,11 @@ SHA-256d consensus. No premine. No admin keys. 100,000,000 IRM total supply (96.
 | Default P2P port | 38291 |
 | Default RPC / explorer port | 38300 |
 | `/status` lightweight port | 8080 (loopback only by default) |
-| Official pool — CPU/GPU | `stratum+tcp://pool.iriumlabs.org:3335` |
-| Official pool — ASIC | `stratum+tcp://pool.iriumlabs.org:3333` |
-| Official pool — firewall bypass | `stratum+tcp://pool.iriumlabs.org:443` (sslh-multiplexed; for environments blocking high ports) |
-| Official pool — solo | `stratum+tcp://pool.iriumlabs.org:3336` (full 50 IRM coinbase payout directly to the block finder; 0% pool fee) |
-| Public pool stats proxy | `http://pool.iriumlabs.org:3337/stats` |
+| Official pool — CPU/GPU | `stratum+tcp://pool.irium.org:3335` |
+| Official pool — ASIC | `stratum+tcp://pool.irium.org:3333` |
+| Official pool — firewall bypass | `stratum+tcp://pool.irium.org:443` (sslh-multiplexed; for environments blocking high ports) |
+| Official pool — solo | `stratum+tcp://pool.irium.org:3336` (full 50 IRM coinbase payout directly to the block finder; 0% pool fee) |
+| Public pool stats proxy | `http://pool.irium.org:3337/stats` |
 
 ---
 
@@ -185,12 +185,12 @@ The node connects to the Irium network automatically. On first run it uses the s
 |---------|----------------|
 | Solo CPU | `irium-miner --address Q<your-address>` |
 | Solo GPU | `irium-miner-gpu --address Q<your-address>` (build with `--features gpu`) |
-| Pool — CPU/GPU | Point any Stratum v1 miner at `stratum+tcp://pool.iriumlabs.org:3335`, worker `Q<your-address>` |
-| Pool — ASIC | Point any SHA-256 ASIC at `stratum+tcp://pool.iriumlabs.org:3333`, worker `Q<your-address>` |
-| Pool — fallback (port 3333 blocked) | `stratum+tcp://pool.iriumlabs.org:443` — same Stratum protocol on HTTPS port to bypass ISP filtering (notably in China) |
+| Pool — CPU/GPU | Point any Stratum v1 miner at `stratum+tcp://pool.irium.org:3335`, worker `Q<your-address>` |
+| Pool — ASIC | Point any SHA-256 ASIC at `stratum+tcp://pool.irium.org:3333`, worker `Q<your-address>` |
+| Pool — fallback (port 3333 blocked) | `stratum+tcp://pool.irium.org:443` — same Stratum protocol on HTTPS port to bypass ISP filtering (notably in China) |
 
-Public pool stats live at [https://pool.iriumlabs.org/stats](https://pool.iriumlabs.org/stats) and at the raw proxy
-`http://pool.iriumlabs.org:3337/stats` (CORS-enabled JSON with active miners, accepted shares, blocks found, current
+Public pool stats live at [https://pool.irium.org/stats](https://pool.irium.org/stats) and at the raw proxy
+`http://pool.irium.org:3337/stats` (CORS-enabled JSON with active miners, accepted shares, blocks found, current
 share difficulty, and a rolling-window hashrate estimate per profile).
 
 After block 23,500 activates Fix 2a, every SHA-256d miner (ASIC, GPU, CPU)

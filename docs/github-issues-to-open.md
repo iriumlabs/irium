@@ -52,10 +52,10 @@ Docker images for iriumd and irium-miner are built in the GitHub Actions release
 
 ## Mining and Pool Infrastructure
 
-**Title:** List community mining pools on iriumlabs.org once operators apply
+**Title:** List community mining pools on irium.org once operators apply
 **Labels:** community
 **Body:**
-The pool operator guide (docs/POOL-OPERATOR.md) and recruitment outreach content are in place. Once community pool operators apply via Telegram or GitHub Issues, add verified pools to the mining page at iriumlabs.org/docs/mining/. Minimum requirements: public Stratum endpoint, at least one valid block submitted to mainnet.
+The pool operator guide (docs/POOL-OPERATOR.md) and recruitment outreach content are in place. Once community pool operators apply via Telegram or GitHub Issues, add verified pools to the mining page at irium.org/docs/mining/. Minimum requirements: public Stratum endpoint, at least one valid block submitted to mainnet.
 
 ---
 

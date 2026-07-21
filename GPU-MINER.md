@@ -15,7 +15,7 @@ cargo build --release --features gpu --bin irium-miner-gpu
 
 ```bash
 ./target/release/irium-miner-gpu \
-  --pool   stratum+tcp://pool.iriumlabs.org:3333 \
+  --pool   stratum+tcp://pool.irium.org:3333 \
   --wallet <your_address>
 ```
 
@@ -69,7 +69,7 @@ The combined hashrate is displayed every 10 seconds.
 All flags can also be set via environment variables or a `.env` / `miner.env` / `irium.env` file:
 
 ```
-IRIUM_STRATUM_URL=stratum+tcp://pool.iriumlabs.org:3333
+IRIUM_STRATUM_URL=stratum+tcp://pool.irium.org:3333
 IRIUM_MINER_ADDRESS=PxkXHsFZo2sbAfo2EeKdpdrFsZigDzbxqu
 IRIUM_NODE_RPC=http://192.168.1.58:38300
 IRIUM_GPU_DEVICES=0,1,2,3    # comma-separated; overrides IRIUM_GPU_DEVICE

@@ -15,7 +15,7 @@ with P or Q). It is saved to mine-config.txt next to the script so
 you only enter it once. Mining auto-restarts if it crashes.
 
 GPU scripts connect to the official Irium pool at
-stratum+tcp://pool.iriumlabs.org:3335 in SOLO payout mode -- when one
+stratum+tcp://pool.irium.org:3335 in SOLO payout mode -- when one
 of your shares meets the network target, the FULL block reward
 (currently 50 IRM) lands at your wallet address. No pool fee.
 

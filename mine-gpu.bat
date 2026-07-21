@@ -10,14 +10,14 @@ REM Drop this file alongside irium-miner-gpu.exe and double-click.
 REM First run: asks for your Irium wallet address and saves it to
 REM mine-config.txt next to the binary. Subsequent runs read the
 REM address from there. Connects to the official Irium pool at
-REM pool.iriumlabs.org:3335 (CPU/GPU profile). Auto-restarts on
+REM pool.irium.org:3335 (CPU/GPU profile). Auto-restarts on
 REM crash with a 5-second cool-down. Close the window to stop.
 REM ---------------------------------------------------------------
 
 set "SCRIPT_DIR=%~dp0"
 set "MINER_EXE=%SCRIPT_DIR%irium-miner-gpu.exe"
 set "CONFIG_FILE=%SCRIPT_DIR%mine-config.txt"
-set "POOL_URL=stratum+tcp://pool.iriumlabs.org:3335"
+set "POOL_URL=stratum+tcp://pool.irium.org:3335"
 
 if not exist "%MINER_EXE%" (
     color 0C
@@ -48,7 +48,7 @@ if not defined WALLET (
     echo  ----------------------------------------------------------------
     echo.
     echo  You will mine SHA-256d shares against the Irium official pool
-    echo  ^(pool.iriumlabs.org^). When one of your shares meets the
+    echo  ^(pool.irium.org^). When one of your shares meets the
     echo  network target, the FULL block reward goes to YOUR address.
     echo  There is no pool fee.
     echo.

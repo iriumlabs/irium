@@ -46,7 +46,7 @@ on the bundled miner. The macOS scripts additionally remove the
 block the unsigned binary on first launch.
 
 **GPU scripts** connect to the official Irium pool at
-`stratum+tcp://pool.iriumlabs.org:3335`. Direct-payout mode: when one
+`stratum+tcp://pool.irium.org:3335`. Direct-payout mode: when one
 of your shares meets the network target, the full 50 IRM block reward
 goes directly to the address you used as your worker name. Zero fees.
 
@@ -104,7 +104,7 @@ Upgrade before block 50,000 — older miners/nodes will reject post-activation b
 
 ## Pool endpoints (official pool)
 
-`pool.iriumlabs.org` is the DNS hostname for the official Irium pool.
+`pool.irium.org` is the DNS hostname for the official Irium pool.
 
 **Unified direct-payout model:** every port runs the same payout
 behaviour. When one of your shares meets the network target, the
@@ -127,11 +127,11 @@ coinbase has no valid output for you**.
 
 **Password:** literally `x` (the conventional Stratum no-op password).
 
-**Live stats:** [https://pool.iriumlabs.org/stats](https://pool.iriumlabs.org/stats)
+**Live stats:** [https://pool.irium.org/stats](https://pool.irium.org/stats)
 shows active miners, accepted/rejected shares, blocks found, and a
 rolling 15-minute hashrate estimate. The raw CORS-enabled JSON proxy
-is at `http://pool.iriumlabs.org:3337/stats` and per-miner detail at
-`http://pool.iriumlabs.org:3337/miners`.
+is at `http://pool.irium.org:3337/stats` and per-miner detail at
+`http://pool.irium.org:3337/miners`.
 
 **Hashrate estimation:** the stats-proxy computes a per-miner hashrate
 over the rolling 15-minute share window using each worker's live
@@ -151,7 +151,7 @@ Bitaxe (Antminer S19-compatible firmware) web UI:
 
 | Field | Value |
 |-------|-------|
-| Stratum URL | `pool.iriumlabs.org` |
+| Stratum URL | `pool.irium.org` |
 | Stratum Port | `3333` (try `443` if your ISP blocks 3333) |
 | Stratum User | `<YOUR_IRM_ADDRESS>.bitaxe1` |
 | Stratum Password | `x` |
@@ -165,7 +165,7 @@ For S19/S21 firmware, the equivalent commit fields are:
 
 | BraiinsOS / Vnish / Stock firmware | Value |
 |---|---|
-| Pool URL | `stratum+tcp://pool.iriumlabs.org:3333` |
+| Pool URL | `stratum+tcp://pool.irium.org:3333` |
 | Worker | `<YOUR_IRM_ADDRESS>.rig1` |
 | Password | `x` |
 
@@ -173,7 +173,7 @@ For S19/S21 firmware, the equivalent commit fields are:
 
 ```
 t-rex -a sha256d \
-      -o stratum+tcp://pool.iriumlabs.org:3335 \
+      -o stratum+tcp://pool.irium.org:3335 \
       -u <YOUR_IRM_ADDRESS>.gpu1 \
       -p x
 ```
@@ -182,7 +182,7 @@ t-rex -a sha256d \
 
 ```
 lolMiner --algo SHA256D \
-         --pool stratum+tcp://pool.iriumlabs.org:3335 \
+         --pool stratum+tcp://pool.irium.org:3335 \
          --user <YOUR_IRM_ADDRESS>.gpu1 \
          --pass x
 ```
@@ -191,7 +191,7 @@ lolMiner --algo SHA256D \
 
 ```
 nbminer -a sha256d \
-        -o stratum+tcp://pool.iriumlabs.org:3335 \
+        -o stratum+tcp://pool.irium.org:3335 \
         -u <YOUR_IRM_ADDRESS>.gpu1 \
         -p x
 ```
@@ -200,7 +200,7 @@ nbminer -a sha256d \
 
 ```
 cpuminer-opt -a sha256d \
-             -o stratum+tcp://pool.iriumlabs.org:3335 \
+             -o stratum+tcp://pool.irium.org:3335 \
              -u <YOUR_IRM_ADDRESS>.cpu1 \
              -p x \
              -t <NUM_THREADS>
@@ -210,7 +210,7 @@ cpuminer-opt -a sha256d \
 
 ```
 irium-miner-gpu \
-  --pool stratum+tcp://pool.iriumlabs.org:3335 \
+  --pool stratum+tcp://pool.irium.org:3335 \
   --wallet <YOUR_IRM_ADDRESS>
 ```
 
@@ -232,7 +232,7 @@ that deep-packet-inspection systems pass it through.
 For any miner, simply swap the port:
 
 ```
-stratum+tcp://pool.iriumlabs.org:443     # works even when 3333/3335 fail
+stratum+tcp://pool.irium.org:443     # works even when 3333/3335 fail
 ```
 
 If 443 also fails, the issue is likely DNS-level filtering — see the
@@ -334,7 +334,7 @@ eligible automatically with no further action.
 ## Verifying a miner is producing blocks
 
 Pool stats: every accepted share appears in the
-[https://pool.iriumlabs.org/stats](https://pool.iriumlabs.org/stats)
+[https://pool.irium.org/stats](https://pool.irium.org/stats)
 counters within ~30 seconds. Confirmed blocks land in the `blocks_found`
 field.
 
@@ -362,7 +362,7 @@ target block time).
 | Miner connects but submits zero shares | Worker name missing or wrong format | Use `<IRM_ADDRESS>.<worker>` exactly |
 | `stratum+tcp` connect refused on 3333 | ISP block | Switch to port 443 |
 | Many `rejected_low_difficulty` shares | Hardware below baseline diff | Use port 3335 (lower baseline) instead of 3333 |
-| Many `rejected_stale` shares | High network latency or miner clock skew | Sync system clock (NTP); check round-trip latency to `pool.iriumlabs.org` |
+| Many `rejected_stale` shares | High network latency or miner clock skew | Sync system clock (NTP); check round-trip latency to `pool.irium.org` |
 | Block found but no reward credit yet | Coinbase maturity (100 blocks ≈ 3 hours) | Wait; or `irium-wallet history <address>` to see unmatured coinbase |
 | Pre-fork: standard SHA-256d miner finds shares but no blocks | Header hashing differs pre-Fix-2a | Wait for block 22,888; or use bundled `irium-miner` until then |
 

@@ -60,7 +60,7 @@ This document is ready to copy and send to exchange listing teams, pool aggregat
 - Marketplace: on-chain OTC offer feed and agreement execution
 - Reputation system: on-chain outcome tracking per seller pubkey
 - REST API on every node: balance queries, block/tx lookup, mempool, offer feed
-- Public Stratum pool: `pool.iriumlabs.org:3333` (ASIC), `:3335` (CPU/GPU)
+- Public Stratum pool: `pool.irium.org:3333` (ASIC), `:3335` (CPU/GPU)
 - Docker images: `ghcr.io/iriumlabs/irium:latest`
 - Pre-built release binaries: Linux x86_64/ARM64, macOS Intel/ARM, Windows
 
@@ -80,11 +80,11 @@ The full AuxPoW implementation is in the current codebase. See `docs/MERGED-MINI
 
 | Resource | URL |
 |----------|-----|
-| Website | https://www.iriumlabs.org |
+| Website | https://www.irium.org |
 | GitHub | https://github.com/iriumlabs/irium |
 | Whitepaper | https://github.com/iriumlabs/irium/blob/main/docs/WHITEPAPER.md |
-| Block explorer | https://www.iriumlabs.org/explorer |
-| Public pool | https://www.iriumlabs.org/pool |
+| Block explorer | https://www.irium.org/explorer |
+| Public pool | https://www.irium.org/pool |
 | Telegram | https://t.me/iriumlabs |
 | RPC API reference | https://github.com/iriumlabs/irium/blob/main/docs/API.md |
 | Wallet CLI reference | https://github.com/iriumlabs/irium/blob/main/docs/WALLET-CLI.md |

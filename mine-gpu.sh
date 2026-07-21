@@ -4,14 +4,14 @@
 # Drop next to irium-miner-gpu and run: ./mine-gpu.sh
 # First run prompts for your Irium wallet address and saves it to
 # mine-config.txt. Subsequent runs read from there. Connects to the
-# official Irium pool at pool.iriumlabs.org:3335 in SOLO payout mode.
+# official Irium pool at pool.irium.org:3335 in SOLO payout mode.
 # Auto-restarts on crash with a 5s cool-down. Ctrl+C to stop.
 
 set -u
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 MINER_BIN="${SCRIPT_DIR}/irium-miner-gpu"
 CONFIG_FILE="${SCRIPT_DIR}/mine-config.txt"
-POOL_URL="stratum+tcp://pool.iriumlabs.org:3335"
+POOL_URL="stratum+tcp://pool.irium.org:3335"
 
 if [ ! -x "${MINER_BIN}" ]; then
     if [ -f "${MINER_BIN}" ]; then
@@ -39,7 +39,7 @@ if [ -z "${WALLET}" ]; then
     echo "----------------------------------------------------------------"
     echo
     echo "You will mine SHA-256d shares against the Irium official pool"
-    echo "(pool.iriumlabs.org). When one of your shares meets the network"
+    echo "(pool.irium.org). When one of your shares meets the network"
     echo "target, the FULL block reward goes to YOUR Irium address."
     echo "There is no pool fee."
     echo

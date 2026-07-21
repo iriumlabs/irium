@@ -15,7 +15,7 @@ REM The bundled irium-miner is a SOLO miner - it talks to a local
 REM iriumd instance (default http://127.0.0.1:38300). Start the
 REM Irium Core desktop app first OR run iriumd yourself before
 REM launching this script. For pool CPU mining install cpuminer-opt
-REM separately and point it at stratum+tcp://pool.iriumlabs.org:3335.
+REM separately and point it at stratum+tcp://pool.irium.org:3335.
 REM Auto-restarts on crash with a 5-second cool-down.
 REM ---------------------------------------------------------------
 

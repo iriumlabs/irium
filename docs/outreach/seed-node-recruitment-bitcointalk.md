@@ -59,8 +59,8 @@ Only verified community nodes with confirmed uptime are added.
 
 **Links**
 - GitHub: https://github.com/iriumlabs/irium
-- Website: https://www.iriumlabs.org
-- Network status: https://www.iriumlabs.org/status/
+- Website: https://www.irium.org
+- Network status: https://www.irium.org/status/
 - Seed node guide: https://github.com/iriumlabs/irium/blob/main/docs/SEED-NODE.md
 - Telegram: https://t.me/iriumlabs
 

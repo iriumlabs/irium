@@ -9,7 +9,7 @@
 # The bundled irium-miner is SOLO-mode only, so this connects to a
 # local iriumd at http://127.0.0.1:38300 — start iriumd yourself or
 # run the Irium Core desktop app first. For pool CPU mining install
-# cpuminer-opt and point it at stratum+tcp://pool.iriumlabs.org:3335.
+# cpuminer-opt and point it at stratum+tcp://pool.irium.org:3335.
 # Auto-restarts on crash with a 5s cool-down. Ctrl+C to stop.
 #
 # If macOS blocks the script: run

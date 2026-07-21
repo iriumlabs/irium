@@ -191,7 +191,7 @@ starts syncing, check its status:
 curl http://127.0.0.1:38300/status
 ```
 
-You will see the current block height and peer count. The node is synced when `height` matches the network tip. Network status is also visible at [iriumlabs.org](https://www.iriumlabs.org).
+You will see the current block height and peer count. The node is synced when `height` matches the network tip. Network status is also visible at [irium.org](https://www.irium.org).
 
 Check your balance:
 
@@ -247,20 +247,20 @@ Pool mining splits the reward across many miners so you get small payments regul
 
 | Hardware | Pool endpoint |
 |----------|--------------|
-| CPU or GPU | `stratum+tcp://pool.iriumlabs.org:3335` |
-| ASIC | `stratum+tcp://pool.iriumlabs.org:3333` |
-| Behind ISP that blocks 3333/3335 (notably China) | `stratum+tcp://pool.iriumlabs.org:443` — same Stratum protocol on the HTTPS port to bypass filtering |
-| Solo (full 50 IRM coinbase to block finder, 0% pool fee) | `stratum+tcp://pool.iriumlabs.org:3336` |
+| CPU or GPU | `stratum+tcp://pool.irium.org:3335` |
+| ASIC | `stratum+tcp://pool.irium.org:3333` |
+| Behind ISP that blocks 3333/3335 (notably China) | `stratum+tcp://pool.irium.org:443` — same Stratum protocol on the HTTPS port to bypass filtering |
+| Solo (full 50 IRM coinbase to block finder, 0% pool fee) | `stratum+tcp://pool.irium.org:3336` |
 
 For the bundled GPU miner:
 
 ```bash
 irium-miner-gpu \
-  --pool stratum+tcp://pool.iriumlabs.org:3335 \
+  --pool stratum+tcp://pool.irium.org:3335 \
   --wallet <YOUR_ADDRESS>
 ```
 
-Your `<YOUR_ADDRESS>` is also your worker name — the pool credits payouts directly to it. Live pool stats (active miners, blocks found, rolling-window hashrate per profile) are available at `http://pool.iriumlabs.org:3337/stats` and are surfaced in the desktop app's Explorer tab.
+Your `<YOUR_ADDRESS>` is also your worker name — the pool credits payouts directly to it. Live pool stats (active miners, blocks found, rolling-window hashrate per profile) are available at `http://pool.irium.org:3337/stats` and are surfaced in the desktop app's Explorer tab.
 
 ---
 

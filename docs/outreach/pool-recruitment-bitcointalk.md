@@ -70,7 +70,7 @@ Pool operator guide: https://github.com/iriumlabs/irium/blob/main/docs/POOL-OPER
 
 **We Are Seeking Community Pool Operators**
 
-If you operate a SHA-256d pool or have the infrastructure to run one, we want to list your pool on iriumlabs.org.
+If you operate a SHA-256d pool or have the infrastructure to run one, we want to list your pool on irium.org.
 
 Requirements:
 - Public Stratum endpoint, reachable and responding
@@ -87,7 +87,7 @@ To register interest:
 **Links**
 
 - GitHub: https://github.com/iriumlabs/irium
-- Website: https://www.iriumlabs.org
+- Website: https://www.irium.org
 - Telegram: https://t.me/iriumlabs
 - Pool operator guide: https://github.com/iriumlabs/irium/blob/main/docs/POOL-OPERATOR.md
 - Merged mining guide: https://github.com/iriumlabs/irium/blob/main/docs/MERGED-MINING.md

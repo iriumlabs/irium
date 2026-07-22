@@ -19308,17 +19308,21 @@ mod proposer_consensus_tests {
     /// The change SHIPS INERT: the compiled mainnet const is None, mainnet ignores the
     /// env entirely, and an unset env is off on every network.
     #[test]
-    fn gate_ships_inert_and_mainnet_ignores_env() {
+    fn gate_active_on_mainnet_at_activation_height() {
+        // N1-CORRECTED to match the deployed line (7a74dfc): the const is set, so mainnet
+        // enables the gate at/after H with the env ignored. Preserves live N1 behavior.
+        const H: u64 = 59_900;
         assert_eq!(
             crate::poawx_proposer::MAINNET_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT,
-            None,
-            "N1 must ship inert"
+            Some(H),
+            "N1 activation height baked in"
         );
-        // mainnet: env can NEVER enable it while the const is None.
-        for h in [0u64, 50_000, 59_426, u64::MAX] {
-            assert!(!crate::poawx_proposer::proposer_nonexclusive_gate(0, Some(1), h));
-            assert!(!crate::poawx_proposer::proposer_nonexclusive_gate(0, None, h));
-        }
+        // mainnet: off strictly below H, on at/after H, and the env is IGNORED either way.
+        assert!(!crate::poawx_proposer::proposer_nonexclusive_gate(0, Some(1), H - 1));
+        assert!(!crate::poawx_proposer::proposer_nonexclusive_gate(0, None, H - 1));
+        assert!(crate::poawx_proposer::proposer_nonexclusive_gate(0, None, H));
+        assert!(crate::poawx_proposer::proposer_nonexclusive_gate(0, Some(u64::MAX), H));
+        assert!(crate::poawx_proposer::proposer_nonexclusive_gate(0, None, u64::MAX));
         // non-mainnet: off unless explicitly set, then on at/after the height.
         assert!(!crate::poawx_proposer::proposer_nonexclusive_gate(2, None, 1_000));
         assert!(!crate::poawx_proposer::proposer_nonexclusive_gate(2, Some(10), 9));

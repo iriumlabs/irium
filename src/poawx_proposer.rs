@@ -196,7 +196,7 @@ pub fn pow_demotion_active(height: u64) -> bool {
 /// Compiled mainnet activation height for non-exclusive proposer eligibility.
 /// `None` => the fix ships INERT: behaviour is byte-identical to pre-N1 on every
 /// network until this const is deliberately set in a later, reviewed release.
-pub const MAINNET_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT: Option<u64> = None;
+pub const MAINNET_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT: Option<u64> = Some(59_900);
 
 pub fn proposer_nonexclusive_activation_height() -> Option<u64> {
     std::env::var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT")

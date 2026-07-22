@@ -333,6 +333,12 @@ pub struct ChainState {
     /// `disconnect_tip_block`, and rebuilt deterministically by chain replay.
     /// 0 when finality is off => no protection (behavior identical to pre-fix).
     pub finalized_height: u64,
+    /// V2 fix: set true if a reorg's connect failed AND the rollback to the prior chain
+    /// also failed, leaving in-memory state possibly inconsistent. Once set,
+    /// `connect_block` and `reorg_to_tip` refuse to advance the tip (safe halt) so the
+    /// node cannot build on a corrupted chain. It clears only on a fresh state rebuild
+    /// (restart / chain replay), which reconstructs state deterministically from disk.
+    pub reorg_rollback_poisoned: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -428,6 +434,7 @@ impl ChainState {
             adaptive_mode: crate::poawx_adaptive::AdaptiveMode::Normal,
             reorg_signal: 0,
             finalized_height: 0,
+            reorg_rollback_poisoned: false,
         };
         let genesis = state.params.genesis_block.clone();
         state
@@ -1008,6 +1015,13 @@ impl ChainState {
     }
     #[allow(dead_code)]
     pub fn connect_block(&mut self, block: Block) -> Result<(), String> {
+        if self.reorg_rollback_poisoned {
+            return Err("chain halted (safe stop): a prior reorg rollback failed and left \
+                        in-memory state possibly inconsistent; tip advancement is refused \
+                        until the node is restarted (which rebuilds state from disk). \
+                        Operator intervention required."
+                .to_string());
+        }
         let expected_height = self.height;
         let previous = self.chain.last();
         self.validate_block_header(&block, expected_height, previous)?;
@@ -2584,6 +2598,11 @@ impl ChainState {
     }
 
     fn reorg_to_tip(&mut self, new_tip: [u8; 32]) -> Result<(), String> {
+        if self.reorg_rollback_poisoned {
+            return Err("chain halted (safe stop): prior reorg rollback failed; refusing to \
+                        reorg until restart. Operator intervention required."
+                .to_string());
+        }
         let (ancestor_height, new_branch) = self.find_reorg_path(new_tip)?;
         let current_tip_height = self.tip_height();
         if ancestor_height >= current_tip_height {
@@ -2631,13 +2650,38 @@ impl ChainState {
         let mut connected_new: Vec<Block> = Vec::new();
         for block in &new_branch {
             if let Err(e) = self.connect_block(block.clone()) {
+                // V2 fix: roll back to the prior chain, but do NOT discard rollback
+                // errors. Disconnect any newly-connected blocks, then reconnect the old
+                // branch. If ANY rollback step fails, in-memory state may be inconsistent
+                // -- poison the chain so no further tip advancement can build on a corrupted
+                // state (safe halt), and surface it loudly rather than silently continuing
+                // on a possibly-truncated chain.
+                let mut rollback_ok = true;
                 for _ in 0..connected_new.len() {
-                    let _ = self.disconnect_tip_block();
+                    if let Err(re) = self.disconnect_tip_block() {
+                        eprintln!("[reorg][FATAL] rollback disconnect failed: {}", re);
+                        rollback_ok = false;
+                    }
                 }
                 for old in disconnected.iter().rev() {
-                    let _ = self.connect_block(old.clone());
+                    if let Err(re) = self.connect_block(old.clone()) {
+                        eprintln!("[reorg][FATAL] rollback reconnect failed: {}", re);
+                        rollback_ok = false;
+                    }
                 }
-                return Err(format!("reorg connect failed: {}", e));
+                if !rollback_ok {
+                    self.reorg_rollback_poisoned = true;
+                    eprintln!(
+                        "[reorg][FATAL] reorg rollback FAILED after connect error -- chain \
+                         state may be inconsistent. Halting tip advancement (safe stop); \
+                         operator intervention / restart required."
+                    );
+                    return Err(format!(
+                        "reorg connect failed ({}) AND rollback failed -- chain HALTED (safe stop)",
+                        e
+                    ));
+                }
+                return Err(format!("reorg connect failed: {} (rolled back cleanly)", e));
             }
             connected_new.push(block.clone());
         }
@@ -3553,6 +3597,7 @@ impl ChainState {
             adaptive_mode: crate::poawx_adaptive::AdaptiveMode::Normal,
             reorg_signal: 0,
             finalized_height: 0,
+            reorg_rollback_poisoned: false,
         };
 
         let branch = self.gather_branch_to_genesis(tip_hash)?;

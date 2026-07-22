@@ -18779,6 +18779,144 @@ mod proposer_consensus_tests {
         clear_sib_env();
     }
 
+    // ---- V1: rank fork-choice length/height floor + V2: reorg safe-halt ----
+    // The floor gate is env-driven on non-mainnet (mainnet uses the compiled const,
+    // which ships None => inert). These run on devnet and set
+    // IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT to activate the floor.
+
+    /// Push `n` minimal blocks off genesis directly into the chain (a decision-layer
+    /// fixture; connect_block is not exercised). Leaves the tip at height `n`.
+    fn push_minimal_chain(cs: &mut ChainState, n: u64) {
+        let mut prev = cs.chain[0].header.hash_for_height(0);
+        for h in 1..=n {
+            let b = minimal_block(prev, 5000 + h as u32);
+            let hh = b.header.hash_for_height(h);
+            cs.block_store.insert(hh, b.clone());
+            cs.heights.insert(hh, h);
+            cs.chain.push(b);
+            prev = hh;
+        }
+        cs.height = cs.chain.len() as u64;
+    }
+
+    // Control 1: a SHORTER better-ranked branch must NOT trigger a deep rewind.
+    #[test]
+    fn v1_floor_blocks_shorter_better_ranked_branch() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let mut cs = base_chain();
+        push_minimal_chain(&mut cs, 3); // current tip height 3
+        // Candidate: one BETTER-ranked block at height 1 (child of genesis) => shorter fork.
+        let cand = proposer_block_h1(&secret_n(1), 2, [7u8; 32], 0);
+        let cand_h = cand.header.hash_for_height(1);
+        cs.block_store.insert(cand_h, cand.clone());
+        cs.heights.insert(cand_h, 1);
+        // Non-vacuous: WITHOUT the floor, the better-ranked shorter branch WINS (the V1 bug).
+        std::env::remove_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT");
+        assert!(
+            cs.proposer_rank_chain_better(cand_h).unwrap(),
+            "non-vacuous: without the floor a better-ranked shorter branch wins (the V1 bug)"
+        );
+        // WITH the floor active, the shorter branch is BLOCKED regardless of rank.
+        std::env::set_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT", "1");
+        assert!(
+            !cs.proposer_rank_chain_better(cand_h).unwrap(),
+            "V1: a candidate shorter than the current chain must never win on rank"
+        );
+        std::env::remove_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    // Control 2: an equal-height sibling fork is still decided by rank (floor unaffected).
+    #[test]
+    fn v1_floor_allows_equal_height_sibling_by_rank() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT", "1");
+        let mut cs = base_chain();
+        let gh = cs.chain[0].header.hash_for_height(0);
+        // tip = a WORSE-ranked (minimal) height-1 block.
+        let worse = minimal_block(gh, 111);
+        let wh = worse.header.hash_for_height(1);
+        cs.block_store.insert(wh, worse.clone());
+        cs.heights.insert(wh, 1);
+        cs.chain.push(worse);
+        cs.height = cs.chain.len() as u64;
+        // candidate = a BETTER-ranked equal-height sibling.
+        let better = proposer_block_h1(&secret_n(1), 2, [7u8; 32], 0);
+        let bh = better.header.hash_for_height(1);
+        cs.block_store.insert(bh, better.clone());
+        cs.heights.insert(bh, 1);
+        assert!(
+            cs.proposer_rank_chain_better(bh).unwrap(),
+            "V1: an equal-height better-ranked sibling still wins with the floor active"
+        );
+        std::env::remove_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    // Control 3: a legitimately LONGER better-ranked chain is still adopted (floor unaffected).
+    #[test]
+    fn v1_floor_allows_longer_better_ranked_chain() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT", "1");
+        let mut cs = base_chain();
+        let gh = cs.chain[0].header.hash_for_height(0);
+        // current: 1 minimal block (tip height 1).
+        let cur = minimal_block(gh, 222);
+        let ch = cur.header.hash_for_height(1);
+        cs.block_store.insert(ch, cur.clone());
+        cs.heights.insert(ch, 1);
+        cs.chain.push(cur);
+        cs.height = cs.chain.len() as u64;
+        // candidate: a LONGER (2-block) fork, better-ranked at height 1.
+        let c1 = proposer_block_h1(&secret_n(1), 2, [7u8; 32], 0);
+        let c1h = c1.header.hash_for_height(1);
+        let c2 = minimal_block(c1h, 333);
+        let c2h = c2.header.hash_for_height(2);
+        cs.block_store.insert(c1h, c1);
+        cs.heights.insert(c1h, 1);
+        cs.block_store.insert(c2h, c2);
+        cs.heights.insert(c2h, 2);
+        assert!(
+            cs.proposer_rank_chain_better(c2h).unwrap(),
+            "V1: a longer better-ranked chain is still adopted with the floor active"
+        );
+        std::env::remove_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    // Control 4 (V2): the poison flag safe-halts tip advancement (no silent truncation).
+    #[test]
+    fn v2_poison_flag_safe_halts_tip_advancement() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let mut cs = base_chain();
+        cs.reorg_rollback_poisoned = true;
+        let blk = minimal_block(cs.chain[0].header.hash_for_height(0), 1);
+        let e = cs.connect_block(blk).unwrap_err();
+        assert!(
+            e.contains("halted") && e.contains("safe stop"),
+            "poisoned connect_block must safe-halt, got: {e}"
+        );
+        let e2 = cs.reorg_to_tip([9u8; 32]).unwrap_err();
+        assert!(
+            e2.contains("halted") && e2.contains("safe stop"),
+            "poisoned reorg_to_tip must safe-halt, got: {e2}"
+        );
+    }
+
+    // Gate purity: ships INERT on mainnet (const None, env ignored); env-driven elsewhere.
+    #[test]
+    fn v1_floor_gate_pure_inert_on_mainnet() {
+        use crate::poawx_proposer::rank_length_floor_gate as g;
+        assert!(!g(0, Some(1), 1_000_000), "mainnet: const None => never active, env ignored");
+        assert!(!g(0, Some(50_000), 60_000), "mainnet inert");
+        assert!(g(2, Some(50_000), 60_000), "devnet honors env at/after height");
+        assert!(!g(2, None, 60_000), "devnet off without env");
+        assert!(!g(2, Some(50_000), 40_000), "devnet off below activation");
+    }
+
     // ---- Stage D Step 3: delegation-aware proposer-VRF (validate_block_proposer) ----
 
     /// Compressed secp256k1 signing key for a raw scalar produced by `secret_n`.

@@ -2530,6 +2530,19 @@ impl ChainState {
             .get(start..=tip_height as usize)
             .map(|s| s.iter().collect())
             .unwrap_or_default();
+        // V1 fix (gated): length/height floor. Rank decides COMPETING TIPS, never a
+        // deep short rewind. A candidate whose tip is BELOW the current tip height (it
+        // brings fewer blocks than it would disconnect) can never win on rank alone --
+        // otherwise a single better-ranked block at a sub-tip height rewinds every block
+        // down to its fork point (bounded only by the max-reorg-depth cap). Longer-or-
+        // equal candidates fall through to the rank comparison unchanged, so equal-height
+        // sibling forks and legitimate longer chains are unaffected. Gate off (mainnet
+        // until a coordinated activation height) => byte-identical legacy behavior.
+        if crate::poawx_proposer::rank_length_floor_active(tip_height)
+            && candidate_branch.len() < current_branch.len()
+        {
+            return Ok(false);
+        }
         let shared = candidate_branch.len().min(current_branch.len());
         for i in 0..shared {
             let cr = Self::block_proposer_rank(&candidate_branch[i]);

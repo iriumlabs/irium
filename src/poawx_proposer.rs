@@ -173,6 +173,43 @@ pub fn pow_demotion_active(height: u64) -> bool {
     pow_demotion_gate(network_id_byte(), pow_demotion_activation_height(), height)
 }
 
+// ── V1 fix: rank-fork-choice length/height floor (gated) ──────────────────────
+//
+// Closes the "one better-ranked block rewinds up to 1000 blocks" gap: rank fork
+// choice (`proposer_rank_chain_better`) decides at the first differing height with no
+// length floor, so a single better-ranked block at a sub-tip height could reorg every
+// block down to its fork point. Once this gate is active a candidate branch SHORTER
+// than the current chain can never win a rank reorg; equal-height sibling forks and
+// legitimate longer chains are unaffected. This TIGHTENS validity (rejects reorgs
+// previously accepted), so it must arrive inert and switch on only at a coordinated,
+// reviewed activation height -- never merely by deploying a binary.
+/// Compiled mainnet activation height for the rank-fork-choice length floor.
+/// `None` => ships INERT: byte-identical to pre-fix on every network until this const
+/// is deliberately set in a later, reviewed release. Modeled EXACTLY on
+/// `pow_demotion_gate`: on mainnet (net 0) the ENV is IGNORED; only this const enables it.
+pub const MAINNET_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT: Option<u64> = None;
+
+pub fn rank_length_floor_activation_height() -> Option<u64> {
+    std::env::var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+/// Pure gate (param-driven for race-free tests). Mainnet: env ignored, only the
+/// compiled const enables it. Non-mainnet: env-driven, off unless explicitly set.
+pub fn rank_length_floor_gate(network_id: u8, activation: Option<u64>, height: u64) -> bool {
+    if network_id == 0 {
+        return matches!(MAINNET_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT, Some(h) if height >= h);
+    }
+    matches!(activation, Some(h) if height >= h)
+}
+
+/// Whether the rank-fork-choice length floor is active at `height`. Ships inert on
+/// every network until deliberately activated.
+pub fn rank_length_floor_active(height: u64) -> bool {
+    rank_length_floor_gate(network_id_byte(), rank_length_floor_activation_height(), height)
+}
+
 // ── non-exclusive proposer eligibility (N1) ──────────────────────────────────
 //
 // Fixes the n==1 exclusionary lockout: with exactly one eligible key,

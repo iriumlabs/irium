@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use axum::{
-    extract::{ConnectInfo, Form, Path, Query, State},
+    extract::{ConnectInfo, Form, Path, Query, RawQuery, State},
     http::{
         header::{AUTHORIZATION, CONTENT_DISPOSITION, CONTENT_TYPE},
         HeaderMap, HeaderValue, StatusCode,
@@ -3081,7 +3081,50 @@ async fn blockhash(
     Path(hash): Path<String>,
 ) -> Result<Json<Value>, StatusCode> {
     check_rate(&state, &addr, &headers)?;
-    proxy_json(&state, &format!("/rpc/block_by_hash?hash={}", hash)).await
+    let mut b = proxy_value(&state, &format!("/rpc/block_by_hash?hash={}", hash)).await?;
+    enrich_miner_address(&mut b);
+    Ok(Json(b))
+}
+
+// Enriched pass-throughs for the node's RAW /rpc block endpoints. The irium.org
+// static explorer's detail modal fetches `/rpc/blocks?from=H&count=1` and
+// `/rpc/block_by_hash?hash=..`, which proxy straight to the node (null
+// miner_address). These mirror the node response verbatim and only fill in the
+// derived first-P2PKH miner_address. Display-only; zero consensus effect.
+async fn rpc_blocks_enriched(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    RawQuery(q): RawQuery,
+) -> Result<Json<Value>, StatusCode> {
+    check_rate(&state, &addr, &headers)?;
+    let path = match q {
+        Some(q) if !q.is_empty() => format!("/rpc/blocks?{}", q),
+        _ => "/rpc/blocks".to_string(),
+    };
+    let mut v = proxy_value(&state, &path).await?;
+    if let Some(arr) = v.get_mut("blocks").and_then(|b| b.as_array_mut()) {
+        for b in arr.iter_mut() {
+            enrich_miner_address(b);
+        }
+    }
+    Ok(Json(v))
+}
+
+async fn rpc_block_by_hash_enriched(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    RawQuery(q): RawQuery,
+) -> Result<Json<Value>, StatusCode> {
+    check_rate(&state, &addr, &headers)?;
+    let path = match q {
+        Some(q) if !q.is_empty() => format!("/rpc/block_by_hash?{}", q),
+        _ => "/rpc/block_by_hash".to_string(),
+    };
+    let mut v = proxy_value(&state, &path).await?;
+    enrich_miner_address(&mut v);
+    Ok(Json(v))
 }
 
 async fn tx(
@@ -3775,6 +3818,8 @@ fn build_app(state: AppState) -> Router {
         .route("/api/block/:height", get(block))
         .route("/blockhash/:hash", get(blockhash))
         .route("/api/blockhash/:hash", get(blockhash))
+        .route("/rpc/blocks", get(rpc_blocks_enriched))
+        .route("/rpc/block_by_hash", get(rpc_block_by_hash_enriched))
         .route("/tx/:txid", get(tx))
         .route("/api/tx/:txid", get(tx))
         .route("/address/:address", get(address))

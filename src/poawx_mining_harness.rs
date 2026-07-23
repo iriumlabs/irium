@@ -275,6 +275,30 @@ pub struct AllGatesIdentities {
     /// the block's RVK1 ext section (a producer revoking miners' delegations on-chain).
     /// None for solo/dev and for delegated blocks that carry no revocation.
     pub revocations: Option<Vec<crate::poawx::DelegationRevocationV1>>,
+    /// Multi-member finality committee (devnet build-out): extra SUPPORT-role candidates
+    /// (BEYOND the selected support winner) to inject into the candidate set, plus their
+    /// signed finality votes to inject into the block's finality proof. This is what lets
+    /// a builder assemble a genuine >=16-member finality committee so the node's
+    /// `block_finality_has_genuine_quorum` can advance `finalized_height`. The support
+    /// winner (support_solver / member_sk) must be chosen by the caller as the
+    /// `best_for_role(SUPPORT)` (max effective score) member, so it stays selected. Empty
+    /// => byte-identical to the single-member behaviour. Mainnet-hard-off (devnet tool).
+    pub extra_support_candidates: Vec<crate::poawx_candidate::RoleCandidate>,
+    pub extra_finality_votes: Vec<crate::poawx_finality::FinalityVoteV1>,
+    /// Step 2 (§6 shared distribution): extra COMPUTE and VERIFY candidates (beyond the
+    /// role winners) injected into the candidate set, so the VERIFY "Other Valid Workers"
+    /// 13% pool has multiple payees to fan out to and the COMPUTE winner rotates by VRF
+    /// among a real pool. Validated by scoring + dominance (phase21d) like support extras.
+    /// Empty => single compute/verify winner (Step-1 behaviour). Mainnet-hard-off.
+    pub extra_compute_candidates: Vec<crate::poawx_candidate::RoleCandidate>,
+    pub extra_verify_candidates: Vec<crate::poawx_candidate::RoleCandidate>,
+    /// Step 3 (§6 sybil-resistant admission): the ECVRF assignment proofs + sybil
+    /// tickets for the NON-WINNER VERIFY/SUPPORT pool members (parallel to
+    /// extra_verify_candidates + extra_support_candidates), carried in the block's PLA1
+    /// section so the node verifies every PAID pool member. Empty => no pool-admission
+    /// section (pre-Step-3 behaviour). Mainnet-hard-off.
+    pub pool_assignment_proofs: Vec<crate::poawx_candidate::AssignmentProofV2>,
+    pub pool_tickets: Vec<crate::poawx_ticket::TicketProof>,
 }
 
 impl AllGatesIdentities {
@@ -300,6 +324,12 @@ impl AllGatesIdentities {
             worker_pkh_override: None,
             delegation: None,
             revocations: None,
+            extra_support_candidates: Vec::new(),
+            extra_finality_votes: Vec::new(),
+            extra_compute_candidates: Vec::new(),
+            extra_verify_candidates: Vec::new(),
+            pool_assignment_proofs: Vec::new(),
+            pool_tickets: Vec::new(),
         })
     }
 
@@ -338,6 +368,12 @@ impl AllGatesIdentities {
             worker_pkh_override: None,
             delegation: None,
             revocations: None,
+            extra_support_candidates: Vec::new(),
+            extra_finality_votes: Vec::new(),
+            extra_compute_candidates: Vec::new(),
+            extra_verify_candidates: Vec::new(),
+            pool_assignment_proofs: Vec::new(),
+            pool_tickets: Vec::new(),
         })
     }
 
@@ -404,6 +440,12 @@ impl AllGatesIdentities {
             worker_pkh_override: None,
             delegation: None,
             revocations: None,
+            extra_support_candidates: Vec::new(),
+            extra_finality_votes: Vec::new(),
+            extra_compute_candidates: Vec::new(),
+            extra_verify_candidates: Vec::new(),
+            pool_assignment_proofs: Vec::new(),
+            pool_tickets: Vec::new(),
         })
     }
 
@@ -458,6 +500,12 @@ impl AllGatesIdentities {
             } else {
                 Some(revocations)
             },
+            extra_support_candidates: Vec::new(),
+            extra_finality_votes: Vec::new(),
+            extra_compute_candidates: Vec::new(),
+            extra_verify_candidates: Vec::new(),
+            pool_assignment_proofs: Vec::new(),
+            pool_tickets: Vec::new(),
         })
     }
 }
@@ -941,6 +989,70 @@ pub fn build_multi_participant_poawx_block_with_proposer(
     )
 }
 
+/// Build a mined all-gates block carrying a GENUINE multi-member SUPPORT finality
+/// committee, so the node's `block_finality_has_genuine_quorum` can advance
+/// `finalized_height`. `worker/compute/verify` are the proposer + compute/verify role
+/// winners; `support_winner_secret` is the max-effective-score committee member (so it
+/// stays `best_for_role(SUPPORT)` and carries the real VRF proof the true-VRF gate
+/// verifies); `extra_support_candidates` are the OTHER committee members' SUPPORT
+/// candidates (validated by scoring + dominance only) and `extra_finality_votes` their
+/// signed Commit votes. All committee members must be registered proposer keys so their
+/// votes count toward the genuine quorum. Mainnet-hard-off (devnet build-out tool).
+#[allow(clippy::too_many_arguments)]
+pub fn build_committee_poawx_block_with_proposer(
+    worker_secret: &[u8; 32],
+    compute_winner_secret: &[u8; 32],
+    verify_winner_secret: &[u8; 32],
+    support_winner_secret: &[u8; 32],
+    extra_support_candidates: Vec<crate::poawx_candidate::RoleCandidate>,
+    extra_finality_votes: Vec<crate::poawx_finality::FinalityVoteV1>,
+    extra_compute_candidates: Vec<crate::poawx_candidate::RoleCandidate>,
+    extra_verify_candidates: Vec<crate::poawx_candidate::RoleCandidate>,
+    pool_assignment_proofs: Vec<crate::poawx_candidate::AssignmentProofV2>,
+    pool_tickets: Vec<crate::poawx_ticket::TicketProof>,
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+    parent_seed_components: ([u8; 32], [u8; 32]),
+    dominance: &PersistentDominance,
+    node_gates: Option<&NodeGateFlags>,
+    proposer_ctx: Option<&ProposerCtx>,
+    registration_section: Option<&crate::poawx::ProposerRegistrationSection>,
+) -> Result<AllGatesProof, String> {
+    let mut ids = AllGatesIdentities::multi_participant(
+        worker_secret,
+        compute_winner_secret,
+        verify_winner_secret,
+        support_winner_secret,
+    )?;
+    ids.extra_support_candidates = extra_support_candidates;
+    ids.extra_finality_votes = extra_finality_votes;
+    ids.extra_compute_candidates = extra_compute_candidates;
+    ids.extra_verify_candidates = extra_verify_candidates;
+    ids.pool_assignment_proofs = pool_assignment_proofs;
+    ids.pool_tickets = pool_tickets;
+    build_all_gates_block_with(
+        &ids,
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+        parent_seed_components,
+        Some(dominance),
+        node_gates,
+        proposer_ctx,
+        registration_section,
+        &default_cpu_nonce_solver,
+    )
+}
+
 /// Node-authoritative gate-activation flags for a target height, supplied by the
 /// block template so a standalone miner builds exactly what its node will validate
 /// (instead of reading its own env). `None` at a call site => fall back to the
@@ -964,6 +1076,45 @@ pub struct NodeGateFlags {
 /// verifies it belongs to the worker and binds it into the receipt.
 pub struct ProposerCtx {
     pub assignment: crate::poawx::ProposerAssignmentV1,
+}
+
+/// TEST-ONLY (devnet negative controls): corrupt a coinbase's outputs to prove the
+/// node's shared-reward coinbase validator rejects theft/inflation/mis-shaping. Index 0
+/// is the irx1 OP_RETURN; the p2pkh role outputs follow. Each mode makes exactly one
+/// consensus-relevant defect. Gated behind IRIUM_POAWX_TAMPER_COINBASE at the call site;
+/// mainnet never reaches it (shared-reward hard-off).
+fn apply_coinbase_tamper(outputs: &mut Vec<TxOutput>, mode: &str) {
+    let last = outputs.len().saturating_sub(1);
+    match mode {
+        // Skim 1 unit from the LAST payee into PRIMARY: total conserved, but two amounts
+        // no longer match the derived split -> must reject (the core "theft" case).
+        "steal" => {
+            if outputs.len() > 2 {
+                outputs[1].value += 1;
+                outputs[last].value = outputs[last].value.saturating_sub(1);
+            }
+        }
+        // Pay PRIMARY 1 unit more than the reward allows -> total > reward (inflation).
+        "inflate" => outputs[1].value += 1,
+        // Pay PRIMARY 1 unit less -> total < reward (deflation / burn).
+        "deflate" => outputs[1].value = outputs[1].value.saturating_sub(1),
+        // Drop the last payee entirely -> wrong output count + under-pay.
+        "drop" => {
+            outputs.pop();
+        }
+        // Append an attacker-controlled extra payee -> wrong output count + inflation.
+        "extra" => outputs.push(TxOutput {
+            value: 1,
+            script_pubkey: p2pkh_script(&[0xEEu8; 20]),
+        }),
+        // Swap two role outputs -> pkh/order mismatch at those positions.
+        "reorder" => {
+            if outputs.len() > 3 {
+                outputs.swap(2, 3);
+            }
+        }
+        _ => {}
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1102,7 +1253,28 @@ fn build_all_gates_block_with(
         Some(d) => d.clone(),
         None => dom_at(height),
     };
-    let (in_proofs, in_cands, cs) = build_roles(height, epoch_seed, &dom_in)?;
+    let (in_proofs, in_cands, mut cs) = build_roles(height, epoch_seed, &dom_in)?;
+    // Multi-member finality committee: inject the caller-supplied extra SUPPORT
+    // candidates into the canonical set. The node validates each via scoring +
+    // dominance weight (phase21d) — no VRF proof required for non-winners — and the
+    // whole set is self-committed by `AdmissionCommitmentV1::from_candidate_set` below.
+    // The winner (support_solver) remains `best_for_role(SUPPORT)` because the caller
+    // selects it as the max-effective-score member; the extras only enlarge the
+    // committee that the finality proof votes cover. Empty => no change.
+    if !ids.extra_support_candidates.is_empty()
+        || !ids.extra_compute_candidates.is_empty()
+        || !ids.extra_verify_candidates.is_empty()
+    {
+        for c in ids
+            .extra_support_candidates
+            .iter()
+            .chain(ids.extra_compute_candidates.iter())
+            .chain(ids.extra_verify_candidates.iter())
+        {
+            cs.push(c.clone());
+        }
+        cs.sort_canonical();
+    }
     let dw_in = |pkh: &[u8; 20]| dom_in.weight(DOMINANCE_BASE_WORK_SCORE, pkh, height);
 
     // Candidate admissions (canonical wire bytes the node must ingest), epoch-seeded.
@@ -1197,6 +1369,15 @@ fn build_all_gates_block_with(
         [0x11u8; 32],
         FinalityVoteType::Commit,
     ));
+    }
+    // Multi-member finality committee: add the OTHER committee members' signed Commit
+    // votes so the proof carries a genuine >=2/3 quorum over the full SUPPORT committee.
+    // Each vote's signer must be a candidate in the support committee (checked by
+    // `FinalityProofV1::validate` against the candidate-set support pkhs) and a
+    // registered proposer key (checked by `block_finality_has_genuine_quorum`), which the
+    // caller guarantees by drawing the committee from the registered key set. Empty => no change.
+    for v in &ids.extra_finality_votes {
+        fproof.push(v.clone());
     }
     fproof.sort_canonical();
 
@@ -1371,6 +1552,19 @@ fn build_all_gates_block_with(
     let proposer_registrations: Option<crate::poawx::ProposerRegistrationSection> =
         registration_section.cloned();
 
+    // Step 3: carry the non-winner pool members' VRF proofs + sybil tickets when the
+    // pool-admission gate is active, so the node can verify every PAID fan-out member is
+    // a genuinely VRF-assigned, sybil-ticketed participant. Gate off => None (unchanged).
+    let pool_admission = if crate::chain::pool_admission_enforced(height)
+        && !ids.pool_assignment_proofs.is_empty()
+    {
+        Some(crate::poawx::PoolAdmissionSection {
+            assignment_proofs: ids.pool_assignment_proofs.clone(),
+            tickets: ids.pool_tickets.clone(),
+        })
+    } else {
+        None
+    };
     let ext = Phase20ReceiptExt {
         role_reward: RoleReward {
             compute_contributor_pkh: compute_solver,
@@ -1390,7 +1584,9 @@ fn build_all_gates_block_with(
             dw_in(&verify_solver),
             dw_in(&support_solver),
         ]),
-        candidate_set: Some(cs),
+        // Clone so the full candidate set stays available for the §6 shared-reward
+        // coinbase fan-out below (it re-reads the VERIFY/SUPPORT candidates in order).
+        candidate_set: Some(cs.clone()),
         role_puzzle_proofs: Some([sols[0], sols[1], sols[2]]),
         finality_proof: Some(fproof),
         committed_admission: Some(commitment),
@@ -1399,6 +1595,7 @@ fn build_all_gates_block_with(
         proposer_assignment,
         proposer_registrations,
         delegation_revocations: ids.revocations.clone(),
+        pool_admission,
     };
 
     // Worker receipt: real receipt PoW solution + signed challenge (mode-0).
@@ -1481,28 +1678,93 @@ fn build_all_gates_block_with(
     let mut irx1_script = vec![0x6a, 0x24u8];
     irx1_script.extend_from_slice(b"irx1");
     irx1_script.extend_from_slice(&irx1_root);
-    let outputs = vec![
-        TxOutput {
-            value: 0,
-            script_pubkey: irx1_script,
-        },
-        TxOutput {
-            value: a[0],
-            script_pubkey: p2pkh_script(&worker_pkh),
-        },
-        TxOutput {
-            value: a[1],
-            script_pubkey: p2pkh_script(&compute_solver),
-        },
-        TxOutput {
-            value: a[2],
-            script_pubkey: p2pkh_script(&verify_solver),
-        },
-        TxOutput {
-            value: a[3],
-            script_pubkey: p2pkh_script(&support_solver),
-        },
-    ];
+    // Step 2 (§6 shared distribution): when the shared-reward gate is active, emit the
+    // multi-payee fan-out coinbase the node's `validate_shared_multi_role_coinbase`
+    // re-derives: PRIMARY (55%+rem) -> worker; COMPUTE (22%, best worker) -> the compute
+    // winner; VERIFY (13%, "other valid workers") fanned out across EVERY verify candidate
+    // in the candidate set; SUPPORT (10%, "finality committee") across EVERY support
+    // candidate. Payee order = candidate-set canonical order (`cs` is already sorted), the
+    // SAME order the validator uses. Gate off => the canonical 4-output coinbase, byte-identical.
+    let outputs = if crate::chain::shared_reward_active(height) {
+        let role_pkhs = |role: u8| -> Vec<[u8; 20]> {
+            cs.candidates
+                .iter()
+                .filter(|c| c.role_id == role)
+                .map(|c| c.solver_pkh)
+                .collect()
+        };
+        let verify_payees = role_pkhs(ROLE_VERIFY_CONTRIBUTOR);
+        let support_payees = role_pkhs(ROLE_SUPPORT_CONTRIBUTOR);
+        let mut outs = vec![
+            TxOutput {
+                value: 0,
+                script_pubkey: irx1_script,
+            },
+            TxOutput {
+                value: a[0],
+                script_pubkey: p2pkh_script(&worker_pkh),
+            },
+            TxOutput {
+                value: a[1],
+                script_pubkey: p2pkh_script(&compute_solver),
+            },
+        ];
+        for (pkh, amt) in verify_payees
+            .iter()
+            .zip(crate::poawx::fanout_amounts(a[2], verify_payees.len()))
+        {
+            outs.push(TxOutput {
+                value: amt,
+                script_pubkey: p2pkh_script(pkh),
+            });
+        }
+        for (pkh, amt) in support_payees
+            .iter()
+            .zip(crate::poawx::fanout_amounts(a[3], support_payees.len()))
+        {
+            outs.push(TxOutput {
+                value: amt,
+                script_pubkey: p2pkh_script(pkh),
+            });
+        }
+        outs
+    } else {
+        vec![
+            TxOutput {
+                value: 0,
+                script_pubkey: irx1_script,
+            },
+            TxOutput {
+                value: a[0],
+                script_pubkey: p2pkh_script(&worker_pkh),
+            },
+            TxOutput {
+                value: a[1],
+                script_pubkey: p2pkh_script(&compute_solver),
+            },
+            TxOutput {
+                value: a[2],
+                script_pubkey: p2pkh_script(&verify_solver),
+            },
+            TxOutput {
+                value: a[3],
+                script_pubkey: p2pkh_script(&support_solver),
+            },
+        ]
+    };
+    // TEST-ONLY negative-control hook (devnet): when IRIUM_POAWX_TAMPER_COINBASE is set,
+    // corrupt the coinbase AFTER it is built but BEFORE the merkle root + PoW are computed,
+    // so the block stays structurally valid (merkle/PoW commit to the tampered coinbase) and
+    // the ONLY defect is the payout — isolating the coinbase validator as the rejecting gate.
+    // Never fires unless the env var is set; shared-reward is mainnet-hard-off regardless.
+    let mut outputs = outputs;
+    if crate::activation::network_id_byte() != 0 {
+        // Never on mainnet (network_id 0), even if the env is somehow set — this is a
+        // devnet negative-control affordance only.
+        if let Ok(mode) = std::env::var("IRIUM_POAWX_TAMPER_COINBASE") {
+            apply_coinbase_tamper(&mut outputs, &mode);
+        }
+    }
     let coinbase = Transaction {
         version: 1,
         inputs: vec![TxInput {

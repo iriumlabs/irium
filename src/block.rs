@@ -993,6 +993,7 @@ mod fix2a_boundary_tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let mut r = make_receipt(7);
         r.phase20_ext = Some(ext);

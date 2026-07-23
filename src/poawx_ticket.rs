@@ -329,6 +329,17 @@ pub fn tickets_required() -> bool {
 /// required flag is set. Mainnet hard-off (both inputs are). When off, connect_block
 /// ignores ticket proofs (old Phase 20 behavior unchanged).
 pub fn tickets_enforced(height: u64) -> bool {
+    if network_id_byte() == 0 {
+        // mainnet: ticket ENFORCEMENT is DE-SCOPED for the combined activation and stays
+        // OFF. The ticket-proof VALIDATOR itself is mainnet-hard-off (`TicketProof::validate`
+        // -> "ticket: mainnet hard-off", poawx_ticket.rs:245; and validate_phase20_ticket_proofs
+        // -> "ticket proof: mainnet hard-off", :529), so enforcing here would reject EVERY
+        // block and HALT at activation-1 — observed live 2026-07-23 (retry #2). Kept OFF:
+        // TPK1 sections ride advisory/unvalidated (7a74dfc behaviour). Re-enable only once
+        // the ticket VALIDATOR is un-hard-off AND proven on a network_id=0 (mainnet-context)
+        // connect_block test, per the standing rule added after that halt. #7 de-scoped.
+        return false;
+    }
     tickets_active(height) && tickets_required()
 }
 

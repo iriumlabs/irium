@@ -1,6 +1,0 @@
-# Static bootstrap peers - unsigned fallback for fresh installs.
-# These IPs are tried even if the signed seedlist is unavailable or fails
-# signature verification (e.g. during key rotation).
-# Keep in sync with bootstrap/seedlist.txt.
-207.244.247.86
-157.173.116.134

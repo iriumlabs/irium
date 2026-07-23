@@ -1027,6 +1027,13 @@ impl ChainState {
         self.validate_block_header(&block, expected_height, previous)?;
         validate_poawx_coinbase(&block, expected_height)?;
         validate_poawx_block_receipts(&block, expected_height, previous)?;
+        // A1/A2 fix (gated): bound the VERIFY/SUPPORT fan-out pool + finality committee to
+        // ~K per role via VRF sortition, so pool-stuffing and registration-inflation cannot
+        // exceed the sortition-admitted set. Needs the frozen eligible_count (&self), so it
+        // runs here rather than inside the free-fn receipt validator.
+        if pool_sortition_enforced(expected_height) {
+            self.validate_pool_sortition(&block, expected_height)?;
+        }
         self.validate_block_delegation_revocations(&block, expected_height)?;
         if crate::poawx_dominance::anti_domination_enforced(expected_height) {
             self.validate_block_dominance_weights(&block, expected_height)?;
@@ -1294,7 +1301,17 @@ impl ChainState {
             None => return false,
         };
         let committee_height = height.saturating_sub(1);
-        let committee_size = self.proposer_registry.eligible_count(committee_height);
+        // A2 fix (gated): the committee is the SORTITION-bounded set of SUPPORT candidates
+        // in the block (~K), NOT eligible_count. Since sortition caps that set regardless of
+        // how many keys are registered, the 2/3 quorum `need` stays fixed — an attacker can
+        // no longer balloon eligible_count to push `need` beyond the honest committee's reach.
+        // (validate_pool_sortition, run earlier in connect_block, guarantees every non-winner
+        // support candidate genuinely cleared the sortition, so the count is trustworthy.)
+        let committee_size = if pool_sortition_enforced(height) {
+            Self::block_support_candidate_count(block).max(1)
+        } else {
+            self.proposer_registry.eligible_count(committee_height)
+        };
         if committee_size < crate::poawx_proposer::min_finality_committee() {
             return false;
         }
@@ -1309,6 +1326,76 @@ impl ChainState {
         let den = (proof.threshold_den.max(1)) as u64;
         let need = (committee_size * num + den - 1) / den; // ceil(committee_size * num/den)
         (voters.len() as u64) >= need
+    }
+
+    /// Count of SUPPORT-role candidates in the tip block's candidate set — the
+    /// sortition-bounded finality committee size (A2 fix). Reads the first receipt with a
+    /// candidate set (all receipts share it in the supported single-producer path).
+    fn block_support_candidate_count(block: &Block) -> u64 {
+        block
+            .poawx_receipts
+            .as_ref()
+            .and_then(|rs| rs.iter().find_map(|r| r.phase20_ext.as_ref()))
+            .and_then(|ext| ext.candidate_set.as_ref())
+            .map(|cs| {
+                cs.candidates
+                    .iter()
+                    .filter(|c| c.role_id == crate::poawx::ROLE_SUPPORT_CONTRIBUTOR)
+                    .count() as u64
+            })
+            .unwrap_or(0)
+    }
+
+    /// A1/A2 fix (gated): every NON-WINNER VERIFY/SUPPORT pool member that receives a §6
+    /// fan-out payment must clear the VRF sortition threshold for its role, bounding the
+    /// admitted pool/committee to ~K per role. A candidate's priority is its ECVRF output
+    /// score (fixed per key/seed — NOT grindable), so an attacker cannot exceed the
+    /// sortition-admitted set no matter how many tickets it burns. The role WINNER is
+    /// exempt (the selected best-of-role, validated by true-VRF). Uses the frozen
+    /// eligible_count at the committee height (H-1), matching the finality-quorum height.
+    /// Fail-closed. Mainnet-hard-off at the gate.
+    fn validate_pool_sortition(&self, block: &Block, height: u64) -> Result<(), String> {
+        use crate::poawx::{ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
+        let receipts = match &block.poawx_receipts {
+            Some(r) => r,
+            None => return Ok(()),
+        };
+        let eligible = self.proposer_registry.eligible_count(height.saturating_sub(1));
+        for r in receipts {
+            let ext = match &r.phase20_ext {
+                Some(e) => e,
+                None => continue,
+            };
+            let cs = ext
+                .candidate_set
+                .as_ref()
+                .ok_or_else(|| "pool-sortition: missing candidate set".to_string())?;
+            let vwin = ext.role_reward.verify_contributor_pkh;
+            let swin = ext.role_reward.support_contributor_pkh;
+            for cand in cs.candidates.iter().filter(|c| {
+                c.role_id == ROLE_VERIFY_CONTRIBUTOR || c.role_id == ROLE_SUPPORT_CONTRIBUTOR
+            }) {
+                let is_winner = (cand.role_id == ROLE_VERIFY_CONTRIBUTOR && cand.solver_pkh == vwin)
+                    || (cand.role_id == ROLE_SUPPORT_CONTRIBUTOR && cand.solver_pkh == swin);
+                if is_winner {
+                    continue;
+                }
+                let k = crate::poawx_proposer::pool_sortition_k(cand.role_id);
+                let priority =
+                    crate::poawx_proposer::proposer_priority(&cand.assignment_proof_digest);
+                if !crate::poawx_proposer::pool_sortition_admitted(priority, eligible, k) {
+                    return Err(format!(
+                        "pool-sortition: role {} pkh {} not admitted (priority={} eligible={} k={})",
+                        cand.role_id,
+                        hex::encode(cand.solver_pkh),
+                        priority,
+                        eligible,
+                        k
+                    ));
+                }
+            }
+        }
+        Ok(())
     }
 
     fn validate_block_finality(&self, block: &Block, height: u64) -> Result<(), String> {
@@ -3952,6 +4039,50 @@ pub fn multi_role_reward_active(height: u64) -> bool {
     )
 }
 
+/// Step 2 (devnet build-out): true when the §6 "(shared)" multi-payee coinbase
+/// fan-out is active for `height`. **Mainnet always returns false** (hard-off —
+/// no configuration can enable it on mainnet). Testnet/devnet gate on
+/// `IRIUM_POAWX_SHARED_REWARD_ACTIVATION_HEIGHT`. When off, the canonical 4-output
+/// multi-role coinbase (`validate_poawx_coinbase_payout`) is unchanged.
+pub fn shared_reward_active(height: u64) -> bool {
+    if crate::activation::network_id_byte() == 0 {
+        // mainnet: the combined deploy knob only (env is never honored on mainnet).
+        return matches!(crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT, Some(h) if height >= h);
+    }
+    match crate::activation::poawx_shared_reward_activation_height() {
+        Some(h) => height >= h,
+        None => false,
+    }
+}
+
+/// Step 3 (devnet build-out): true when sybil-resistant fan-out pool admission is
+/// enforced for `height` — every non-winner VERIFY/SUPPORT pool member that receives a
+/// §6 shared-reward payment must carry a valid VRF assignment proof + sybil ticket.
+/// **Mainnet always returns false** (hard-off). Testnet/devnet gate on
+/// `IRIUM_POAWX_POOL_ADMISSION_ACTIVATION_HEIGHT`.
+pub fn pool_admission_enforced(height: u64) -> bool {
+    if crate::activation::network_id_byte() == 0 {
+        return matches!(crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT, Some(h) if height >= h);
+    }
+    match crate::activation::poawx_pool_admission_activation_height() {
+        Some(h) => height >= h,
+        None => false,
+    }
+}
+
+/// A1/A2 fix: true when the VRF sortition cap on VERIFY/SUPPORT pool + finality
+/// committee size is enforced for `height`. **Mainnet always returns false** (hard-off).
+/// Testnet/devnet gate on `IRIUM_POAWX_POOL_SORTITION_ACTIVATION_HEIGHT`.
+pub fn pool_sortition_enforced(height: u64) -> bool {
+    if crate::activation::network_id_byte() == 0 {
+        return matches!(crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT, Some(h) if height >= h);
+    }
+    match crate::activation::poawx_pool_sortition_activation_height() {
+        Some(h) => height >= h,
+        None => false,
+    }
+}
+
 /// Phase 20: true when the CPU/GPU/ASIC fairness matrix primitives are active for
 /// `height`. **Mainnet always returns false** (hard-off until explicit future
 /// governance activation). Testnet/devnet gate on
@@ -4097,6 +4228,207 @@ fn validate_multi_role_coinbase_outputs(
     Ok(())
 }
 
+/// Step 2 (devnet build-out): §6 "(shared)" multi-payee coinbase validator.
+/// When `shared_reward_active(height)`, the coinbase must pay, in canonical order:
+///   [0] PRIMARY  = 55% + rounding remainder -> `primary_pkh` (the receipt worker_pkh)
+///   [1] COMPUTE  = 22% "Best Assigned Worker" -> the compute role winner (single)
+///   [2..] VERIFY = 13% "Other Valid Workers" fanned out across EVERY VERIFY candidate
+///   [..]  SUPPORT= 10% "Finality Committee" fanned out across EVERY SUPPORT candidate
+/// Payees + order are the VERIFY/SUPPORT candidates of `ext.candidate_set` (already
+/// validated by phase21d — scoring, dominance, canonical sort). Fan-out amounts are the
+/// deterministic `fanout_amounts` split, so the node re-derives the exact per-payee value.
+/// Zero-value non-p2pkh outputs (the irx1 OP_RETURN) are ignored; any value-bearing
+/// non-p2pkh output (a hidden fee) rejects; a wrong count/order/amount rejects; and total
+/// paid must equal `total_reward` EXACTLY (no inflation, no deflation). Mainnet-hard-off.
+///
+/// NOTE (honest, not enforced here): fan-out fairness is only as strong as the
+/// sybil-resistance of candidate-set MEMBERSHIP. Non-winner candidates are validated for
+/// scoring + dominance but NOT VRF, so without ticket/admission enforcement a builder could
+/// stuff the VERIFY/SUPPORT pools with its own pkhs. That gating is a separate concern
+/// (tickets/committed-admission); this validator only guarantees the split is exact and
+/// deterministic over whatever candidate set the block's other gates admitted.
+fn validate_shared_multi_role_coinbase(
+    outputs: &[crate::tx::TxOutput],
+    primary_pkh: &[u8; 20],
+    ext: &crate::poawx::Phase20ReceiptExt,
+    total_reward: u64,
+) -> Result<(), String> {
+    use crate::poawx::{
+        ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+    };
+    let cs = ext
+        .candidate_set
+        .as_ref()
+        .ok_or_else(|| "shared-reward: missing candidate set".to_string())?;
+    let amts = crate::poawx::multi_role_amounts(total_reward); // [primary, compute, verify, support]
+    // Candidate pkhs per role, in the candidate set's canonical order.
+    let role_pkhs = |role: u8| -> Vec<[u8; 20]> {
+        cs.candidates
+            .iter()
+            .filter(|c| c.role_id == role)
+            .map(|c| c.solver_pkh)
+            .collect()
+    };
+    let verify_payees = role_pkhs(ROLE_VERIFY_CONTRIBUTOR);
+    let support_payees = role_pkhs(ROLE_SUPPORT_CONTRIBUTOR);
+    if verify_payees.is_empty() {
+        return Err("shared-reward: no VERIFY candidates to receive the 13% pool".to_string());
+    }
+    if support_payees.is_empty() {
+        return Err("shared-reward: no SUPPORT candidates to receive the 10% pool".to_string());
+    }
+    // Build the expected p2pkh outputs in canonical order.
+    let mut expected: Vec<([u8; 20], u64)> = Vec::with_capacity(2 + verify_payees.len() + support_payees.len());
+    expected.push((*primary_pkh, amts[0])); // PRIMARY 55% + remainder
+    expected.push((ext.role_reward.compute_contributor_pkh, amts[1])); // COMPUTE 22% (best worker)
+    for (pkh, a) in verify_payees
+        .iter()
+        .zip(crate::poawx::fanout_amounts(amts[2], verify_payees.len()))
+    {
+        expected.push((*pkh, a));
+    }
+    for (pkh, a) in support_payees
+        .iter()
+        .zip(crate::poawx::fanout_amounts(amts[3], support_payees.len()))
+    {
+        expected.push((*pkh, a));
+    }
+    // Collect actual value-bearing p2pkh outputs; reject any value-bearing non-p2pkh.
+    let mut p2pkh: Vec<([u8; 20], u64)> = Vec::new();
+    for out in outputs {
+        match parse_p2pkh_pkh(&out.script_pubkey) {
+            Some(pkh) => p2pkh.push((pkh, out.value)),
+            None => {
+                if out.value != 0 {
+                    return Err(
+                        "shared-reward: value-bearing non-p2pkh output (hidden fee?)".to_string(),
+                    );
+                }
+            }
+        }
+    }
+    if p2pkh.len() != expected.len() {
+        return Err(format!(
+            "shared-reward: expected {} role outputs, found {}",
+            expected.len(),
+            p2pkh.len()
+        ));
+    }
+    for (i, (epkh, eval)) in expected.iter().enumerate() {
+        if &p2pkh[i].0 != epkh {
+            return Err(format!("shared-reward: output {} pkh/order mismatch", i));
+        }
+        if p2pkh[i].1 != *eval {
+            return Err(format!(
+                "shared-reward: output {} amount {} != expected {}",
+                i, p2pkh[i].1, eval
+            ));
+        }
+    }
+    // Conservation: every unit of the block reward is accounted for, exactly.
+    let sum: u128 = expected.iter().map(|(_, v)| *v as u128).sum();
+    if sum != total_reward as u128 {
+        return Err(format!(
+            "shared-reward: total paid {} != block reward {}",
+            sum, total_reward
+        ));
+    }
+    Ok(())
+}
+
+/// Step 3 (devnet build-out): sybil-resistant fan-out pool admission. When enforced,
+/// every NON-WINNER VERIFY/SUPPORT candidate that receives a §6 shared-reward payment
+/// must be a genuinely VRF-assigned, sybil-ticketed participant — verified here against
+/// the block's PLA1 pool-admission section, FAIL-CLOSED. The role winners are already
+/// VRF-checked (`validate_block_true_vrf`) and ticket-checked
+/// (`validate_phase20_ticket_proofs`), so they are exempt here. Closes the "stuff the
+/// fan-out pools with arbitrary pkhs" gap that made the fan-out only conservation-safe.
+/// Mainnet-hard-off.
+fn validate_pool_member_admission(
+    block: &Block,
+    height: u64,
+    prev_hash: &[u8; 32],
+) -> Result<(), String> {
+    use crate::poawx::{ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
+    let net = crate::activation::network_id_byte();
+    let receipts = match &block.poawx_receipts {
+        Some(r) => r,
+        None => return Ok(()),
+    };
+    let require_sybil = crate::poawx_ticket::effective_sybil_bits();
+    let penalty_enforced = crate::poawx_penalty::penalty_state_enforced(height);
+    for r in receipts {
+        let ext = match &r.phase20_ext {
+            Some(e) => e,
+            None => continue,
+        };
+        let cs = ext
+            .candidate_set
+            .as_ref()
+            .ok_or_else(|| "pool-admission: missing candidate set".to_string())?;
+        let vwin = ext.role_reward.verify_contributor_pkh;
+        let swin = ext.role_reward.support_contributor_pkh;
+        for cand in cs.candidates.iter().filter(|c| {
+            c.role_id == ROLE_VERIFY_CONTRIBUTOR || c.role_id == ROLE_SUPPORT_CONTRIBUTOR
+        }) {
+            // The role winner's proof+ticket ride in the AVR2/TPK1 sections and are
+            // validated separately; only the non-winner PAID pool members need PLA1.
+            let is_winner = (cand.role_id == ROLE_VERIFY_CONTRIBUTOR && cand.solver_pkh == vwin)
+                || (cand.role_id == ROLE_SUPPORT_CONTRIBUTOR && cand.solver_pkh == swin);
+            if is_winner {
+                continue;
+            }
+            let pa = ext.pool_admission.as_ref().ok_or_else(|| {
+                "pool-admission: paid pool member present but no PLA1 section".to_string()
+            })?;
+            // 1. VRF assignment proof: genuine role assignment, bound to this candidate.
+            let proof = pa
+                .assignment_proofs
+                .iter()
+                .find(|p| p.role_id == cand.role_id && p.solver_pkh == cand.solver_pkh)
+                .ok_or_else(|| {
+                    format!(
+                        "pool-admission: no VRF proof for role {} pkh {}",
+                        cand.role_id,
+                        hex::encode(cand.solver_pkh)
+                    )
+                })?;
+            proof.validate(net, height)?;
+            if proof.seed != cs.seed {
+                return Err("pool-admission: VRF proof wrong seed".to_string());
+            }
+            if proof.vrf_output != cand.assignment_proof_digest {
+                return Err("pool-admission: VRF output != candidate digest".to_string());
+            }
+            if hash160(&proof.assignment_public_key) != cand.solver_pkh {
+                return Err("pool-admission: VRF key not bound to solver pkh".to_string());
+            }
+            // 2. Sybil ticket: creating each pool member costs sybil work, bound to pkh.
+            let ticket = pa
+                .tickets
+                .iter()
+                .find(|t| t.role_id == cand.role_id && t.miner_pkh == cand.solver_pkh)
+                .ok_or_else(|| {
+                    format!(
+                        "pool-admission: no sybil ticket for role {} pkh {}",
+                        cand.role_id,
+                        hex::encode(cand.solver_pkh)
+                    )
+                })?;
+            ticket.validate(
+                net,
+                height,
+                prev_hash,
+                cand.role_id,
+                &cand.solver_pkh,
+                require_sybil,
+                penalty_enforced,
+            )?;
+        }
+    }
+    Ok(())
+}
+
 /// Phase 20: comprehensive canonical PoAW-X coinbase payout validator (pure; no env).
 /// Handles all four canonical formats — official/third-party-fee × no-multi-role/multi-role:
 /// - `role = None`  => single PRIMARY/miner payout; `role = Some` => 4-role split.
@@ -4212,22 +4544,22 @@ pub fn phase20_production_active(height: u64) -> bool {
 /// Exposed `pub` so the stratum pool's dev-tests can validate a pool-produced
 /// Phase 20 fixture against the authoritative node validator (Step 3 parity).
 #[allow(clippy::too_many_arguments)]
-pub fn validate_phase20_production_payout(
-    coinbase_outputs: &[crate::tx::TxOutput],
-    primary_pkh: &[u8; 20],
-    total_reward: u64,
+/// Steps 1-2 of the phase-20 production payout check, shared by the canonical
+/// 4-output coinbase path (`validate_phase20_production_payout`) and the §6
+/// shared-reward fan-out path: validate each role claim (compute/verify/support)
+/// against the deterministic fairness assignment, and bind each RoleReward pkh to
+/// its validated claim solver pkh. Keeping this in one place guarantees the two
+/// coinbase modes enforce IDENTICAL role-winner validation.
+fn validate_phase20_role_claims(
+    ext: &crate::poawx::Phase20ReceiptExt,
+    network_id: u8,
     height: u64,
     prev_hash: &[u8; 32],
-    network_id: u8,
-    ext: &crate::poawx::Phase20ReceiptExt,
-    third_party_mode: bool,
 ) -> Result<(), String> {
     use crate::poawx::{
-        validate_fee_terms, validate_role_claim, ROLE_COMPUTE_CONTRIBUTOR,
-        ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+        validate_role_claim, ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR,
+        ROLE_VERIFY_CONTRIBUTOR,
     };
-    // 1. each role claim must carry its expected role and validate against fairness.
-    //    Distinct expected role_ids also reject a duplicate claim for the same role.
     let claims = [
         (ROLE_COMPUTE_CONTRIBUTOR, &ext.compute_claim),
         (ROLE_VERIFY_CONTRIBUTOR, &ext.verify_claim),
@@ -4242,13 +4574,28 @@ pub fn validate_phase20_production_payout(
         }
         validate_role_claim(claim, network_id, height, prev_hash, 0)?;
     }
-    // 2. RoleReward pkhs must equal the validated claim solver pkhs.
     if ext.role_reward.compute_contributor_pkh != ext.compute_claim.solver_pkh
         || ext.role_reward.verify_contributor_pkh != ext.verify_claim.solver_pkh
         || ext.role_reward.support_contributor_pkh != ext.support_claim.solver_pkh
     {
         return Err("phase20: RoleReward pkh does not match validated role claim".to_string());
     }
+    Ok(())
+}
+
+pub fn validate_phase20_production_payout(
+    coinbase_outputs: &[crate::tx::TxOutput],
+    primary_pkh: &[u8; 20],
+    total_reward: u64,
+    height: u64,
+    prev_hash: &[u8; 32],
+    network_id: u8,
+    ext: &crate::poawx::Phase20ReceiptExt,
+    third_party_mode: bool,
+) -> Result<(), String> {
+    use crate::poawx::validate_fee_terms;
+    // 1-2. role claims + RoleReward binding (shared with the §6 shared-reward path).
+    validate_phase20_role_claims(ext, network_id, height, prev_hash)?;
     // 3. fee terms (official => fee_bps 0; third-party => mode + cap + pkh).
     validate_fee_terms(ext.fee_bps, &ext.fee_pkh, third_party_mode)?;
     let fee = if ext.fee_bps > 0 {
@@ -4313,16 +4660,36 @@ fn validate_phase20_production_block(
                 ));
             }
         }
-        validate_phase20_production_payout(
-            &coinbase.outputs,
-            &r.worker_pkh,
-            total_reward,
-            height,
-            prev_hash,
-            network_id,
-            ext,
-            third_party_mode,
-        )?;
+        if shared_reward_active(height) {
+            // Step 2 (§6 shared distribution): same role-claim + RoleReward binding as
+            // the canonical path, then the multi-payee fan-out coinbase. Fees are not
+            // supported in shared mode (devnet build-out): official (fee_bps==0) only.
+            validate_phase20_role_claims(ext, network_id, height, prev_hash)?;
+            crate::poawx::validate_fee_terms(ext.fee_bps, &ext.fee_pkh, third_party_mode)?;
+            if ext.fee_bps != 0 {
+                return Err(
+                    "shared-reward: third-party fee not supported by the shared coinbase"
+                        .to_string(),
+                );
+            }
+            validate_shared_multi_role_coinbase(
+                &coinbase.outputs,
+                &r.worker_pkh,
+                ext,
+                total_reward,
+            )?;
+        } else {
+            validate_phase20_production_payout(
+                &coinbase.outputs,
+                &r.worker_pkh,
+                total_reward,
+                height,
+                prev_hash,
+                network_id,
+                ext,
+                third_party_mode,
+            )?;
+        }
     }
     // Step 6A: hidden role-precommit commitment-root enforcement (gated; mainnet-off).
     if hidden_precommit_active(height) {
@@ -4335,6 +4702,12 @@ fn validate_phase20_production_block(
     // is off, the ext's optional ticket proofs are ignored (old behavior unchanged).
     if crate::poawx_ticket::tickets_enforced(height) {
         validate_phase20_ticket_proofs(receipts, height, prev_hash, network_id)?;
+    }
+    // Step 3 (gated): sybil-resistant fan-out pool admission — every non-winner
+    // VERIFY/SUPPORT pool member that receives a shared-reward payment must carry a valid
+    // VRF proof + sybil ticket. Fail-closed. Makes the §6 fan-out fairness real.
+    if pool_admission_enforced(height) {
+        validate_pool_member_admission(block, height, prev_hash)?;
     }
     Ok(())
 }
@@ -8817,6 +9190,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: if revs.is_empty() { None } else { Some(revs) },
+            pool_admission: None,
         }
     }
 
@@ -9686,6 +10060,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         }
     }
 
@@ -16048,6 +16423,7 @@ mod tests {
                 proposer_assignment: None,
                 proposer_registrations: None,
                 delegation_revocations: None,
+                pool_admission: None,
             }
         };
         let build = |h: u64, prev: &[u8; 32], ext: &crate::poawx::Phase20ReceiptExt| -> Block {

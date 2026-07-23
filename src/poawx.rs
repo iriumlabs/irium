@@ -158,6 +158,24 @@ pub fn multi_role_amounts(total_reward: u64) -> [u64; 4] {
     [primary, compute, verify, support]
 }
 
+/// Deterministic, exactly-conserving fan-out of a shared reward `pool` among `n`
+/// payees — the §6 "(shared)" distribution (Other Valid Workers 13% / Finality
+/// Committee 10%). Each payee gets `pool / n`; the first `pool % n` payees (in the
+/// caller's canonical order) get one extra unit, so the returned amounts sum to
+/// EXACTLY `pool` — no unit is lost (deflation) and none is created (inflation),
+/// which a coinbase conservation check depends on. `n == 0` returns an empty vec
+/// (a shared role with zero candidates is a caller/validator error handled upstream).
+/// Pure; no env. Verified by `fanout_amounts_conserve_exactly`.
+pub fn fanout_amounts(pool: u64, n: usize) -> Vec<u64> {
+    if n == 0 {
+        return Vec::new();
+    }
+    let n64 = n as u64;
+    let base = pool / n64;
+    let rem = (pool % n64) as usize;
+    (0..n).map(|i| if i < rem { base + 1 } else { base }).collect()
+}
+
 // ── Phase 20: third-party pool fee (testnet/devnet-gated) ────────────────────
 //
 // Official Irium pool fee remains 0% (fee_bps=0 default everywhere). A nonzero fee
@@ -863,6 +881,73 @@ impl ProposerRegistrationSection {
     }
 }
 
+/// 4-byte trailing-section magic for the Step 3 pool-admission section (VRF proofs +
+/// sybil tickets for the non-winner fan-out pool members).
+pub const POOL_ADMISSION_SECTION_MAGIC: &[u8; 4] = b"PLA1";
+
+/// Step 3 (devnet build-out): per-pool-member admission evidence so the §6 shared-reward
+/// fan-out is sybil-RESISTANT, not merely conservation-safe. `assignment_proofs` are the
+/// ECVRF role-assignment proofs and `tickets` the sybil tickets for the NON-WINNER
+/// VERIFY/SUPPORT candidates (each role winner's own proof/ticket rides in the existing
+/// AVR2 / TPK1 sections). The node matches each to its candidate by (role_id, solver_pkh)
+/// and fails closed if any paid pool member lacks a valid proof or ticket. Mainnet-hard-off.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PoolAdmissionSection {
+    pub assignment_proofs: Vec<AssignmentProofV2>,
+    pub tickets: Vec<TicketProof>,
+}
+
+impl PoolAdmissionSection {
+    pub fn serialize(&self) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(self.assignment_proofs.len() as u16).to_le_bytes());
+        for p in &self.assignment_proofs {
+            out.extend_from_slice(&p.serialize());
+        }
+        out.extend_from_slice(&(self.tickets.len() as u16).to_le_bytes());
+        for t in &self.tickets {
+            out.extend_from_slice(&t.serialize());
+        }
+        out
+    }
+    pub fn deserialize(raw: &[u8]) -> Result<Self, String> {
+        let mut off = 0usize;
+        let need = |off: usize, n: usize| -> Result<(), String> {
+            if raw.len() < off + n {
+                Err("pool-admission: truncated".to_string())
+            } else {
+                Ok(())
+            }
+        };
+        need(off, 2)?;
+        let np = u16::from_le_bytes(raw[off..off + 2].try_into().expect("2")) as usize;
+        off += 2;
+        let mut assignment_proofs = Vec::with_capacity(np);
+        for _ in 0..np {
+            need(off, ASSIGNMENT_PROOF_V2_WIRE)?;
+            assignment_proofs
+                .push(AssignmentProofV2::deserialize(&raw[off..off + ASSIGNMENT_PROOF_V2_WIRE])?);
+            off += ASSIGNMENT_PROOF_V2_WIRE;
+        }
+        need(off, 2)?;
+        let nt = u16::from_le_bytes(raw[off..off + 2].try_into().expect("2")) as usize;
+        off += 2;
+        let mut tickets = Vec::with_capacity(nt);
+        for _ in 0..nt {
+            need(off, TICKET_PROOF_WIRE)?;
+            tickets.push(TicketProof::deserialize(&raw[off..off + TICKET_PROOF_WIRE])?);
+            off += TICKET_PROOF_WIRE;
+        }
+        if off != raw.len() {
+            return Err("pool-admission: trailing bytes".to_string());
+        }
+        Ok(Self {
+            assignment_proofs,
+            tickets,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Phase20ReceiptExt {
     pub role_reward: RoleReward,
@@ -931,6 +1016,13 @@ pub struct Phase20ReceiptExt {
     /// one of the miner's own delegations. Validated + applied in connect_block under
     /// the delegation gate; reverted on disconnect.
     pub delegation_revocations: Option<Vec<DelegationRevocationV1>>,
+    /// Step 3 (devnet build-out): optional trailing PLA1 pool-admission section — the
+    /// VRF assignment proofs + sybil tickets for the NON-WINNER VERIFY/SUPPORT fan-out
+    /// pool members, so the node can verify every PAID pool member is a genuinely
+    /// VRF-assigned, sybil-ticketed participant (closing the §6 shared-reward
+    /// pool-stuffing gap). None => byte-identical to pre-Step-3 exts. Required +
+    /// validated in connect_block when `pool_admission_enforced(height)`.
+    pub pool_admission: Option<PoolAdmissionSection>,
 }
 
 impl Phase20ReceiptExt {
@@ -1065,6 +1157,15 @@ impl Phase20ReceiptExt {
                 out.extend_from_slice(&rv.serialize());
             }
         }
+        // Step 3 trailing PLA1 pool-admission section (present-only): magic + u32 body
+        // length + body (u16 proof_count + proofs, u16 ticket_count + tickets). Absent =>
+        // byte-identical to pre-Step-3 exts.
+        if let Some(pa) = &self.pool_admission {
+            let body = pa.serialize();
+            out.extend_from_slice(POOL_ADMISSION_SECTION_MAGIC);
+            out.extend_from_slice(&(body.len() as u32).to_le_bytes());
+            out.extend_from_slice(&body);
+        }
         out
     }
 
@@ -1127,6 +1228,7 @@ impl Phase20ReceiptExt {
         // order. An unrecognized or truncated trailing magic is rejected (same
         // strictness as pre-21C). Absent => byte-identical to the pre-section ext.
         let mut role_ticket_proofs: Option<[TicketProof; 3]> = None;
+        let mut pool_admission: Option<PoolAdmissionSection> = None;
         let mut role_dominance_weights: Option<[u64; 4]> = None;
         let mut candidate_set: Option<CandidateSet> = None;
         let mut role_puzzle_proofs: Option<[PuzzleSolutionV1; 3]> = None;
@@ -1319,6 +1421,18 @@ impl Phase20ReceiptExt {
                     off += DELEGATION_REVOCATION_V1_WIRE;
                 }
                 delegation_revocations = Some(revs);
+            } else if magic == POOL_ADMISSION_SECTION_MAGIC {
+                if pool_admission.is_some() {
+                    return Err("phase20 ext: duplicate pool-admission section".to_string());
+                }
+                off += 4;
+                need(off, 4, "pool-admission length")?;
+                let len =
+                    u32::from_le_bytes(raw[off..off + 4].try_into().expect("len 4")) as usize;
+                off += 4;
+                need(off, len, "pool-admission body")?;
+                pool_admission = Some(PoolAdmissionSection::deserialize(&raw[off..off + len])?);
+                off += len;
             } else {
                 return Err("phase20 ext: unknown trailing section magic".to_string());
             }
@@ -1342,6 +1456,7 @@ impl Phase20ReceiptExt {
             proposer_assignment,
             proposer_registrations,
             delegation_revocations,
+            pool_admission,
         })
     }
 
@@ -2230,6 +2345,84 @@ mod tests {
     }
 
     #[test]
+    fn fanout_amounts_conserve_exactly() {
+        // Every fan-out sums to EXACTLY the pool (no inflation/deflation), and each
+        // payee gets base or base+1 (max spread of 1 unit — fair).
+        for &pool in &[0u64, 1, 5, 6, 7, 100, 999, 5_000_000_000, u64::MAX / 4] {
+            for n in 1usize..=64 {
+                let a = fanout_amounts(pool, n);
+                assert_eq!(a.len(), n, "one amount per payee");
+                assert_eq!(
+                    a.iter().map(|&x| x as u128).sum::<u128>(),
+                    pool as u128,
+                    "fanout sum != pool (pool={pool}, n={n})"
+                );
+                let base = pool / n as u64;
+                for v in &a {
+                    assert!(
+                        *v == base || *v == base + 1,
+                        "payee amount {v} not in {{base,base+1}} (pool={pool}, n={n})"
+                    );
+                }
+                // Exactly `pool % n` payees get the extra unit, and they are the FIRST ones.
+                let extras = (pool % n as u64) as usize;
+                assert!(a.iter().take(extras).all(|&v| v == base + 1));
+                assert!(a.iter().skip(extras).all(|&v| v == base));
+            }
+        }
+        // n == 0 → empty (no payees).
+        assert!(fanout_amounts(100, 0).is_empty());
+    }
+
+    #[test]
+    fn pool_admission_section_roundtrips() {
+        use crate::poawx_candidate::AssignmentProofV2;
+        use crate::poawx_penalty::PenaltyStatus;
+        use crate::poawx_ticket::{grind_sybil_nonce, TicketProof};
+        let net = 2u8;
+        let h = 10u64;
+        let seed = [7u8; 32];
+        let prev = [3u8; 32];
+        let mk = |secret: &[u8; 32], role: u8| {
+            let p = AssignmentProofV2::prove_self_solver(secret, net, h, role, [0x13u8; 32], seed)
+                .unwrap();
+            let (nonce, _) =
+                grind_sybil_nonce(net, &prev, &p.solver_pkh, h, &p.assignment_public_key, 0, 10)
+                    .unwrap();
+            let t = TicketProof::new(
+                net,
+                h,
+                prev,
+                role,
+                p.solver_pkh,
+                h,
+                h + 100,
+                p.assignment_public_key,
+                nonce,
+                PenaltyStatus::Clean.id(),
+            );
+            (p, t)
+        };
+        let (p1, t1) = mk(&[1u8; 32], ROLE_VERIFY_CONTRIBUTOR);
+        let (p2, t2) = mk(&[2u8; 32], ROLE_SUPPORT_CONTRIBUTOR);
+        let sec = PoolAdmissionSection {
+            assignment_proofs: vec![p1, p2],
+            tickets: vec![t1, t2],
+        };
+        let rt = PoolAdmissionSection::deserialize(&sec.serialize()).unwrap();
+        assert_eq!(sec, rt, "pool-admission section must round-trip exactly");
+        // Empty section round-trips too.
+        let empty = PoolAdmissionSection {
+            assignment_proofs: vec![],
+            tickets: vec![],
+        };
+        assert_eq!(
+            empty,
+            PoolAdmissionSection::deserialize(&empty.serialize()).unwrap()
+        );
+    }
+
+    #[test]
     fn phase20_role_reward_wire_roundtrip() {
         let r = RoleReward {
             compute_contributor_pkh: [0xC0u8; 20],
@@ -2607,6 +2800,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let bytes = ext.serialize();
         let ext2 = Phase20ReceiptExt::deserialize(&bytes).expect("deserialize");
@@ -2979,6 +3173,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let absent = ext.serialize();
         assert!(!absent.windows(4).any(|w| w == PROPOSER_SECTION_MAGIC));
@@ -3076,6 +3271,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let absent = ext.serialize();
         assert!(!absent.windows(4).any(|w| w == REVOCATION_SECTION_MAGIC));
@@ -3133,6 +3329,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let absent = ext.serialize();
         assert!(!absent.windows(4).any(|w| w == PROPOSER_REG_SECTION_MAGIC));
@@ -3177,6 +3374,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let none = base();
         let mut some = base();
@@ -3224,6 +3422,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let proofs = [
             TicketProof::new(
@@ -3350,6 +3549,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let good = ext.serialize();
         assert_eq!(Phase20ReceiptExt::deserialize(&good).unwrap(), ext);
@@ -3399,6 +3599,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let seed = [0x55u8; 32];
         let mk = |secret: u8, role: u8, solver: [u8; 20]| {
@@ -3491,6 +3692,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let seed = [0x55u8; 32];
         let mut cs = CandidateSet::new(1, 61, seed);
@@ -3575,6 +3777,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let sk = k256::ecdsa::SigningKey::from_slice(&[0x21u8; 32]).unwrap();
         let mut fp = FinalityProofV1::new(1, 60, prev, [0u8; 32], 0, 1, 1);
@@ -3655,6 +3858,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let sol = |m: u8, n: u64, t: u8| PuzzleSolutionV1 {
             mode: m,
@@ -3726,6 +3930,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let mut cs = CandidateSet::new(1, 60, prev);
         cs.push(RoleCandidate::build(
@@ -3803,6 +4008,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         let weights = [1000u64, 800, 900, 950];
         // (1) absent => no DOM1 magic, byte-identical, round-trips.
@@ -3910,6 +4116,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
         // no-ext v3 element == v2 element + a single 0 flag byte (present-only).
         let r = make_test_receipt(9);
@@ -3956,6 +4163,7 @@ mod tests {
             proposer_assignment: None,
             proposer_registrations: None,
             delegation_revocations: None,
+            pool_admission: None,
         };
 
         // Base mode-0 receipt with a production extension attached.

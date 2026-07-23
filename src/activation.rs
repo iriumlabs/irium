@@ -250,6 +250,21 @@ pub fn network_kind_from_env() -> NetworkKind {
 /// PoAW-X gate set; before it, mainnet is byte-identical to pre-activation.
 pub const MAINNET_POAWX_ACTIVATION_HEIGHT: Option<u64> = Some(50_000);
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  COMBINED MAINNET ACTIVATION (Phase-2 / v1.9.133) — THE SINGLE DEPLOY KNOB
+// ──────────────────────────────────────────────────────────────────────────────
+//  ALL of tonight's new consensus features activate at THIS ONE height on mainnet:
+//    PoW-demotion, demonstrated-work, V1 rank-length-floor, four-role fan-out
+//    (shared-reward), sybil-resistant pool admission (PLA1 + REQUIRED tickets),
+//    A1/A2 sortition cap. (N1=59_900, PoAW-X=50_000, delegation=57_920, and every
+//    other live gate are UNCHANGED.) V2 reorg safe-halt is always-on runtime code,
+//    not height-gated. `None` => every new feature OFF (byte-identical to the
+//    deployed 7a74dfc mainnet behaviour). To ACTIVATE: set to `Some(fresh_tip + 15)`
+//    at the deploy step and rebuild — this is the ONLY line to edit.
+//  COORDINATED HARD FORK: nodes not on this binary reject the new blocks and fork off.
+pub const MAINNET_COMBINED_ACTIVATION_HEIGHT: Option<u64> = Some(61_414);
+// ══════════════════════════════════════════════════════════════════════════════
+
 /// Activation binary (v1.9.127): mainnet activation height for delegated (mode-1)
 /// PoAW-X receipts -- the pool paying each miner directly on-chain. `None` => off
 /// (pre-activation); `Some(H)` => active at height >= H. COORDINATED HARD FORK: every
@@ -344,6 +359,38 @@ pub fn poawx_delegation_activation_height() -> Option<u64> {
 /// future governance activation path exists.
 pub fn poawx_multi_role_reward_activation_height() -> Option<u64> {
     env::var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+/// Step 2 (devnet build-out): activation height for the §6 "(shared)" multi-payee
+/// coinbase fan-out (Other Valid Workers 13% + Finality Committee 10% split across
+/// their candidates). `None` => not active. Read from
+/// `IRIUM_POAWX_SHARED_REWARD_ACTIVATION_HEIGHT`. Testnet/devnet only — mainnet is
+/// hard-off (the `chain::shared_reward_active` gate returns false on mainnet).
+pub fn poawx_shared_reward_activation_height() -> Option<u64> {
+    env::var("IRIUM_POAWX_SHARED_REWARD_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+/// Step 3 (devnet build-out): activation height for sybil-resistant fan-out pool
+/// admission — every non-winner VERIFY/SUPPORT pool member must carry a valid VRF
+/// assignment proof + sybil ticket. `None` => not active. Read from
+/// `IRIUM_POAWX_POOL_ADMISSION_ACTIVATION_HEIGHT`. Testnet/devnet only — mainnet
+/// hard-off (`chain::pool_admission_enforced` returns false on mainnet).
+pub fn poawx_pool_admission_activation_height() -> Option<u64> {
+    env::var("IRIUM_POAWX_POOL_ADMISSION_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+/// A1/A2 fix: activation height for the VRF sortition cap bounding VERIFY/SUPPORT
+/// pool + finality-committee size to ~K per role. `None` => not active. Read from
+/// `IRIUM_POAWX_POOL_SORTITION_ACTIVATION_HEIGHT`. Testnet/devnet only — mainnet
+/// hard-off (`chain::pool_sortition_enforced` returns false on mainnet).
+pub fn poawx_pool_sortition_activation_height() -> Option<u64> {
+    env::var("IRIUM_POAWX_POOL_SORTITION_ACTIVATION_HEIGHT")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
 }

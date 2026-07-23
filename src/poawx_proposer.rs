@@ -66,6 +66,55 @@ pub fn is_selected(priority: u64, eligible_count: u64, round: u32) -> bool {
     priority < proposer_threshold(eligible_count, round)
 }
 
+// ── A1/A2 fix: VRF sortition threshold bounding pool/committee size ────────────
+//
+// Closes the A1 (pool-stuffing) + A2 (finality-liveness DoS via registration
+// inflation) root cause — cheap UNBOUNDED admission — by capping the admitted
+// VERIFY/SUPPORT pool members per role to ~K via the SAME VRF-lottery pattern that
+// bounds the proposer set. A candidate's priority is its ECVRF output score (fixed
+// per key/seed, NOT grindable): grinding tickets cannot change it. So the admitted
+// set is bounded to those keys whose VRF genuinely clears the threshold — an
+// attacker's share is its share of the frozen registered set, not the number of
+// tickets it is willing to burn. Mainnet-hard-off at the gate (`pool_sortition_enforced`).
+
+/// Default target committee/pool size K per role.
+pub const DEFAULT_POOL_SORTITION_K_SUPPORT: u64 = 16;
+pub const DEFAULT_POOL_SORTITION_K_VERIFY: u64 = 8;
+
+/// Sortition threshold admitting ~`k` of `eligible_count` keys: a candidate whose VRF
+/// priority `< tau` is admitted. `tau = (u64::MAX / n) * k` (saturating). `k >= n` =>
+/// `u64::MAX` (all admitted; liveness bootstrap when few keys are registered). Mirrors
+/// `proposer_threshold` with `k` in place of the round cascade's `slots`.
+pub fn pool_sortition_threshold(eligible_count: u64, k: u64) -> u64 {
+    let n = eligible_count.max(1);
+    if k >= n {
+        return u64::MAX;
+    }
+    (u64::MAX / n).saturating_mul(k)
+}
+
+/// Whether a candidate with VRF `priority` is sortition-admitted to a ~`k`-size pool
+/// out of `eligible_count` registered keys.
+pub fn pool_sortition_admitted(priority: u64, eligible_count: u64, k: u64) -> bool {
+    priority < pool_sortition_threshold(eligible_count, k)
+}
+
+/// Target pool/committee size K for a contributor role (env-overridable on devnet;
+/// fixed default per role). SUPPORT is the finality committee; VERIFY the "other
+/// workers" pool. `>= 1`.
+pub fn pool_sortition_k(role: u8) -> u64 {
+    let (var, default) = if role == crate::poawx::ROLE_SUPPORT_CONTRIBUTOR {
+        ("IRIUM_POAWX_POOL_SORTITION_K_SUPPORT", DEFAULT_POOL_SORTITION_K_SUPPORT)
+    } else {
+        ("IRIUM_POAWX_POOL_SORTITION_K_VERIFY", DEFAULT_POOL_SORTITION_K_VERIFY)
+    };
+    std::env::var(var)
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(default)
+        .max(1)
+}
+
 /// Earliest header timestamp allowed for a `round`-r block: `parent_time + r*interval`.
 /// The validator rejects a round-r block whose timestamp is earlier (anti round-grind).
 pub fn min_time_for_round(parent_time: u32, round: u32, round_interval_secs: u64) -> u32 {
@@ -143,7 +192,8 @@ pub fn pow_demotion_activation_height() -> Option<u64> {
 /// Do NOT set this back to `Some(H)` until the propagation-layer work (Track 1C)
 /// lands and is proven on a MULTI-NODE devnet. See
 /// `docs/poawx-pow-demotion-mainnet-status.md`.
-pub const MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT: Option<u64> = None;
+pub const MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT: Option<u64> =
+    crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT; // combined deploy knob (None => off)
 
 /// Pure mainnet-const evaluation for PoW demotion (param-driven for race-free
 /// tests): active iff the compiled mainnet height is set and reached.
@@ -187,7 +237,8 @@ pub fn pow_demotion_active(height: u64) -> bool {
 /// `None` => ships INERT: byte-identical to pre-fix on every network until this const
 /// is deliberately set in a later, reviewed release. Modeled EXACTLY on
 /// `pow_demotion_gate`: on mainnet (net 0) the ENV is IGNORED; only this const enables it.
-pub const MAINNET_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT: Option<u64> = None;
+pub const MAINNET_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT: Option<u64> =
+    crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT; // combined deploy knob (None => off)
 
 pub fn rank_length_floor_activation_height() -> Option<u64> {
     std::env::var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT")
@@ -891,6 +942,44 @@ pub fn global_proposer_reg_pool() -> &'static NodeProposerRegistrationPool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pool_sortition_bounds_admitted_to_k() {
+        // Evenly-spaced priorities: EXACTLY k of n clear the threshold, so the admitted
+        // pool/committee is bounded to ~k regardless of how many keys/tickets exist.
+        let n = 24u64;
+        let step = u64::MAX / n;
+        for k in [1u64, 8, 16, 20, 24, 30] {
+            let admitted = (0..n)
+                .filter(|i| pool_sortition_admitted(i * step, n, k))
+                .count() as u64;
+            if k >= n {
+                assert_eq!(admitted, n, "k>=n admits all (liveness bootstrap)");
+                assert_eq!(pool_sortition_threshold(n, k), u64::MAX);
+            } else {
+                assert_eq!(admitted, k, "exactly k of n admitted (k={k})");
+            }
+        }
+        // A key's priority is its FIXED VRF output — grinding tickets can't change it, so a
+        // key above tau is NEVER admitted (can't buy its way into the pool).
+        let (n, k) = (20u64, 16u64);
+        let tau = pool_sortition_threshold(n, k);
+        assert!(!pool_sortition_admitted(tau, n, k), "priority == tau rejected");
+        assert!(
+            pool_sortition_admitted(tau.saturating_sub(1), n, k),
+            "just below tau admitted"
+        );
+        // Inflating n (registration inflation) LOWERS the threshold, so the admitted set
+        // stays ~k — it does NOT grow the committee. This is the A2 property.
+        let tau_inflated = pool_sortition_threshold(n * 5, k);
+        assert!(tau_inflated < tau, "more registered keys => lower per-key admission prob");
+        let admitted_inflated = (0..(n * 5))
+            .filter(|i| pool_sortition_admitted(i * (u64::MAX / (n * 5)), n * 5, k))
+            .count() as u64;
+        assert_eq!(admitted_inflated, k, "committee still ~k after 5x registration inflation");
+        // n==0 treated as 1 (no divide-by-zero).
+        assert_eq!(pool_sortition_threshold(0, 1), u64::MAX);
+    }
 
     #[test]
     fn contributor_role_binding_gate_mainnet_activates_at_height() {

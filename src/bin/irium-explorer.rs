@@ -30,6 +30,7 @@ use irium_node_rs::settlement::{
 };
 use irium_node_rs::tx::decode_full_tx;
 use reqwest::Client;
+use sha2::{Digest, Sha256};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tokio::sync::RwLock;
@@ -243,9 +244,73 @@ struct MinedBlockEntry {
     payees: Vec<(String, u64)>,
 }
 
+const IRIUM_P2PKH_VERSION: u8 = 0x39;
+
+fn p2pkh_hash_from_script(script: &[u8]) -> Option<[u8; 20]> {
+    if script.len() != 25 {
+        return None;
+    }
+    if script[0] != 0x76 || script[1] != 0xa9 || script[2] != 0x14 {
+        return None;
+    }
+    if script[23] != 0x88 || script[24] != 0xac {
+        return None;
+    }
+    let mut out = [0u8; 20];
+    out.copy_from_slice(&script[3..23]);
+    Some(out)
+}
+
+fn base58_p2pkh_from_hash(pkh: &[u8; 20]) -> String {
+    let mut body = Vec::with_capacity(1 + 20);
+    body.push(IRIUM_P2PKH_VERSION);
+    body.extend_from_slice(pkh);
+    let first = Sha256::digest(&body);
+    let second = Sha256::digest(first);
+    let checksum = &second[0..4];
+    let mut full = body;
+    full.extend_from_slice(checksum);
+    bs58::encode(full).into_string()
+}
+
+/// Derive the miner address from a proxied node block's coinbase by scanning for
+/// the FIRST P2PKH output. Post-PoAW-X-activation the coinbase output[0] is an
+/// irx1 OP_RETURN (the payee moved to a later output), so the node's own
+/// `outputs.first()` derivation yields null. Display-only; no consensus effect.
+fn derive_miner_address_from_block_json(block: &Value) -> Option<String> {
+    let cb_hex = block.get("tx_hex")?.as_array()?.first()?.as_str()?;
+    let raw = hex::decode(cb_hex.trim()).ok()?;
+    let tx = decode_full_tx(&raw).ok()?;
+    let pkh = tx
+        .outputs
+        .iter()
+        .find_map(|o| p2pkh_hash_from_script(&o.script_pubkey))?;
+    Some(base58_p2pkh_from_hash(&pkh))
+}
+
+/// If a proxied block lacks a usable miner_address, fill it in from the coinbase
+/// (first P2PKH). Mutates in place; never alters any other field or the response
+/// shape. Display-only; zero consensus effect.
+fn enrich_miner_address(block: &mut Value) {
+    let missing = block
+        .get("miner_address")
+        .and_then(|v| v.as_str())
+        .map(|s| s.trim().is_empty() || s == "N/A")
+        .unwrap_or(true);
+    if !missing {
+        return;
+    }
+    if let Some(addr) = derive_miner_address_from_block_json(block) {
+        if let Some(obj) = block.as_object_mut() {
+            obj.insert("miner_address".to_string(), Value::String(addr));
+        }
+    }
+}
+
 async fn load_block_entry(state: &AppState, height: u64) -> Option<MinedBlockEntry> {
     let path = format!("/rpc/block?height={}", height);
-    let block = proxy_value(state, &path).await.ok()?;
+    let mut block = proxy_value(state, &path).await.ok()?;
+    enrich_miner_address(&mut block);
 
     let miner = block
         .get("miner_address")
@@ -2786,8 +2851,9 @@ async fn refresh_active_miners_once(
     for h in start..=height {
         let path = format!("/rpc/block?height={}", h);
         match proxy_value(state, &path).await {
-            Ok(block) => {
+            Ok(mut block) => {
                 ok_blocks += 1;
+                enrich_miner_address(&mut block);
                 let addr = block
                     .get("miner_address")
                     .and_then(|v| v.as_str())
@@ -2913,7 +2979,8 @@ async fn blocks(
     let mut h = start as i64;
     while h >= 0 && blocks.len() < limit {
         let path = format!("/rpc/block?height={}", h);
-        if let Ok(block) = proxy_value(&state, &path).await {
+        if let Ok(mut block) = proxy_value(&state, &path).await {
+            enrich_miner_address(&mut block);
             blocks.push(block);
         }
         h -= 1;
@@ -2999,6 +3066,10 @@ async fn block(
 ) -> Result<Json<Value>, StatusCode> {
     check_rate(&state, &addr, &headers)?;
     let mut v = proxy_value(&state, &format!("/rpc/block?height={}", height)).await?;
+    // Both enrichments are wanted: miner_address must be derived from the first P2PKH
+    // coinbase output (post-activation the payee moved behind an irx1 OP_RETURN), and the
+    // payees expose the full role split rather than just the proposer.
+    enrich_miner_address(&mut v);
     attach_coinbase_payees(&mut v, height);
     Ok(Json(v))
 }

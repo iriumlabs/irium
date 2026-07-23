@@ -15784,6 +15784,178 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_PUZZLE_BITS");
     }
 
+    // Decentralized inclusive fan-out with 3+ distinct simulated producers.
+    // Proves the feature is GENERAL (not a 2-party special case): gather discovers
+    // every distinct producer's admission from a permissionless gossip set, excludes
+    // self / wrong-seed / dups, selection follows the existing effective_score rule
+    // (order-independent), the block validates under phase22a, and adding more
+    // producers just works.
+    #[test]
+    fn poawx_inclusive_fanout_three_producers_general() {
+        use crate::poawx::{
+            ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+        };
+        use crate::poawx_admission::{gather_gossip_role_candidates, CandidateAdmissionV1};
+        use crate::poawx_candidate::{CandidateSet, RoleCandidate};
+        use crate::poawx_committed_admission::{committed_admission_enforced, AdmissionCommitmentV1};
+        use crate::poawx_penalty::PenaltyStatus;
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT", "2");
+        std::env::set_var("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED", "1");
+
+        let net = crate::activation::network_id_byte();
+        let sk = test_signing_key();
+        let seed = [0x6Au8; 32]; // canonical freeze seed for H=3
+        let wrong_seed = [0x99u8; 32]; // a different (speculative / other-fork) seed
+        let target = 3u64;
+        assert!(committed_admission_enforced(target));
+
+        let mk = |sd: &[u8; 32], role: u8, solver: [u8; 20], tag: u8, dom: u64| {
+            RoleCandidate::build(
+                net,
+                target,
+                sd,
+                role,
+                solver,
+                [0x02u8; 33],
+                [tag; 32],
+                PenaltyStatus::Clean.id(),
+                dom,
+                [tag.wrapping_add(1); 32],
+            )
+        };
+        // A = the producing node (self). B, C, D = three DISTINCT other producers, each
+        // broadcasting a SUPPORT candidate with a different dominance_weight. E = a
+        // producer broadcasting under the WRONG seed. All identity-free to the code.
+        let a = [0xA1u8; 20];
+        let (b, c, d, e) = ([0xB1u8; 20], [0xC1u8; 20], [0xD1u8; 20], [0xE1u8; 20]);
+        let a_compute = mk(&seed, ROLE_COMPUTE_CONTRIBUTOR, a, 0x11, 1000);
+        let a_verify = mk(&seed, ROLE_VERIFY_CONTRIBUTOR, a, 0x12, 1000);
+        let b_sup = mk(&seed, ROLE_SUPPORT_CONTRIBUTOR, b, 0x21, 1000);
+        let c_sup = mk(&seed, ROLE_SUPPORT_CONTRIBUTOR, c, 0x22, 5000);
+        let d_sup = mk(&seed, ROLE_SUPPORT_CONTRIBUTOR, d, 0x23, 3000);
+        let e_sup_wrong = mk(&wrong_seed, ROLE_SUPPORT_CONTRIBUTOR, e, 0x24, 999_999);
+        let a_sup_self = mk(&seed, ROLE_SUPPORT_CONTRIBUTOR, a, 0x25, 4000);
+
+        let adm =
+            |sd: &[u8; 32], cand: &RoleCandidate| CandidateAdmissionV1::new(net, target, *sd, cand.clone());
+        // permissionless gossip set, NOT best-first, with wrong-seed, self, and a dup.
+        let gossip = vec![
+            adm(&seed, &b_sup),
+            adm(&wrong_seed, &e_sup_wrong),
+            adm(&seed, &d_sup),
+            adm(&seed, &a_sup_self),
+            adm(&seed, &c_sup),
+            adm(&seed, &d_sup), // duplicate
+        ];
+
+        // (1) gather discovers ALL 3 distinct other producers; excludes self/wrong-seed/dup.
+        let g = gather_gossip_role_candidates(&gossip, net, target, &seed, &a);
+        let sup: std::collections::HashSet<[u8; 20]> =
+            g.extra_support.iter().map(|x| x.solver_pkh).collect();
+        assert_eq!(g.extra_support.len(), 3, "exactly 3 distinct SUPPORT producers (B,C,D)");
+        assert!(sup.contains(&b) && sup.contains(&c) && sup.contains(&d), "B,C,D all discovered");
+        assert!(!sup.contains(&e), "wrong-seed producer E excluded");
+        assert!(!sup.contains(&a), "self excluded");
+
+        // (2) selection follows the EXISTING effective_score rule, ORDER-INDEPENDENTLY.
+        let build_cs = |gathered: &[RoleCandidate]| {
+            let mut cs = CandidateSet::new(net, target, seed);
+            cs.push(a_compute.clone());
+            cs.push(a_verify.clone());
+            for cand in gathered {
+                cs.push(cand.clone());
+            }
+            cs.sort_canonical();
+            cs
+        };
+        let cs = build_cs(&g.extra_support);
+        let winner = cs
+            .best_for_role(ROLE_SUPPORT_CONTRIBUTOR)
+            .expect("a support winner")
+            .clone();
+        let max_by_score = g
+            .extra_support
+            .iter()
+            .max_by_key(|x| x.effective_score)
+            .unwrap();
+        let min_by_score = g
+            .extra_support
+            .iter()
+            .min_by_key(|x| x.effective_score)
+            .unwrap();
+        assert_ne!(
+            max_by_score.effective_score, min_by_score.effective_score,
+            "producers have distinct scores (selection is meaningful)"
+        );
+        assert_eq!(
+            winner.solver_pkh, max_by_score.solver_pkh,
+            "best_for_role selects the MAX effective_score candidate (existing rule)"
+        );
+        // order-independence: reversed gossip -> same gather set -> same winner.
+        let mut rev = gossip.clone();
+        rev.reverse();
+        let g_rev = gather_gossip_role_candidates(&rev, net, target, &seed, &a);
+        let winner_rev = build_cs(&g_rev.extra_support)
+            .best_for_role(ROLE_SUPPORT_CONTRIBUTOR)
+            .unwrap()
+            .solver_pkh;
+        assert_eq!(winner.solver_pkh, winner_rev, "winner is score-based, NOT gossip order");
+
+        // (3) the resulting fan-out block validates under phase22a, paying the correct set.
+        let parent = {
+            let mut ext = p20_ext(net, 2, &seed, 0, [0u8; 20]);
+            ext.committed_admission = Some(AdmissionCommitmentV1::from_candidate_set(&cs, 2));
+            let mut r = make_test_receipt(2, &sk, seed, 1);
+            r.phase20_ext = Some(ext);
+            Block {
+                header: BlockHeader { version: 1, prev_hash: seed, merkle_root: [0u8; 32], time: 0, bits: 0x207fffff, nonce: 0 },
+                transactions: vec![],
+                auxpow: None,
+                poawx_receipts: Some(vec![r]),
+            }
+        };
+        let parent_hash = parent.header.hash_for_height(2);
+        let mut ext = p20_ext(net, target, &seed, 0, [0u8; 20]);
+        ext.role_reward.compute_contributor_pkh = a;
+        ext.role_reward.verify_contributor_pkh = a;
+        ext.role_reward.support_contributor_pkh = winner.solver_pkh;
+        ext.candidate_set = Some(cs.clone());
+        ext.committed_admission = Some(AdmissionCommitmentV1::from_candidate_set(&cs, target));
+        let mut r = make_test_receipt(target, &sk, parent_hash, 1);
+        r.phase20_ext = Some(ext);
+        let blk = Block {
+            header: BlockHeader { version: 1, prev_hash: parent_hash, merkle_root: [0u8; 32], time: 0, bits: 0x207fffff, nonce: 0 },
+            transactions: vec![],
+            auxpow: None,
+            poawx_receipts: Some(vec![r]),
+        };
+        let st = base_chain(None);
+        let v = st.validate_block_committed_admission(&blk, Some(&parent), target);
+        assert!(v.is_ok(), "phase22a validates the cross-producer fan-out block: {:?}", v);
+
+        // (4) generality: a 4th distinct producer F just works — no 2-party special case.
+        let f = [0xF1u8; 20];
+        let f_sup = mk(&seed, ROLE_SUPPORT_CONTRIBUTOR, f, 0x26, 9000);
+        let mut gossip4 = gossip.clone();
+        gossip4.push(adm(&seed, &f_sup));
+        let g4 = gather_gossip_role_candidates(&gossip4, net, target, &seed, &a);
+        assert_eq!(g4.extra_support.len(), 4, "generalizes to 4 distinct producers (B,C,D,F)");
+        let winner4 = build_cs(&g4.extra_support)
+            .best_for_role(ROLE_SUPPORT_CONTRIBUTOR)
+            .unwrap()
+            .clone();
+        let max4 = g4.extra_support.iter().max_by_key(|x| x.effective_score).unwrap();
+        assert_eq!(winner4.solver_pkh, max4.solver_pkh, "4-producer selection still follows effective_score");
+
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_COMMITTED_ADMISSION_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED");
+    }
+
     #[test]
     fn phase21e_admission_enforcement() {
         use crate::poawx::{

@@ -940,6 +940,57 @@ pub fn build_solo_poawx_block_with_proposer_and_solver(
     )
 }
 
+/// Like `build_solo_poawx_block_with_proposer_and_solver`, but folds in `fanout` —
+/// role candidates GATHERED from OTHER producers' gossiped admissions (see
+/// `poawx_admission::gather_gossip_role_candidates`) — as the block's extra_*/pool
+/// candidates. This is the decentralized inclusive reward fan-out: the extra
+/// candidates are foreign (no secrets needed — validated by scoring + dominance +
+/// their own proofs), and downstream `best_for_role` selects the winner by the
+/// existing `effective_score` rule. When `fanout` is None this is byte-identical to
+/// the solo builder.
+#[allow(clippy::too_many_arguments)]
+pub fn build_solo_poawx_block_with_proposer_and_solver_and_fanout(
+    miner_secret: &[u8; 32],
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+    parent_seed_components: ([u8; 32], [u8; 32]),
+    dominance: &PersistentDominance,
+    node_gates: Option<&NodeGateFlags>,
+    proposer_ctx: Option<&ProposerCtx>,
+    registration_section: Option<&crate::poawx::ProposerRegistrationSection>,
+    solver: &dyn Fn(&mut BlockHeader, u64, Target) -> Result<u32, String>,
+    fanout: Option<&crate::poawx_admission::GatheredFanout>,
+) -> Result<AllGatesProof, String> {
+    let mut ids = AllGatesIdentities::solo(miner_secret)?;
+    if let Some(f) = fanout {
+        ids.extra_compute_candidates = f.extra_compute.clone();
+        ids.extra_verify_candidates = f.extra_verify.clone();
+        ids.extra_support_candidates = f.extra_support.clone();
+        ids.pool_assignment_proofs = f.pool_assignment_proofs.clone();
+    }
+    build_all_gates_block_with(
+        &ids,
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+        parent_seed_components,
+        Some(dominance),
+        node_gates,
+        proposer_ctx,
+        registration_section,
+        solver,
+    )
+}
+
 /// Build a mined all-gates block with THREE genuinely distinct role participants
 /// (compute/verify/support) AND the PRIMARY worker's proposer-VRF assignment. For the
 /// role-attribution + proposer-VRF combination (Option A distinct role-workers + Option 2

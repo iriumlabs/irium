@@ -109,6 +109,65 @@ pub fn candidate_admission_gossip_enabled() -> bool {
         .is_some()
 }
 
+/// Decentralized cross-producer fan-out: gathered role candidates + their proofs.
+#[derive(Debug, Default, Clone)]
+pub struct GatheredFanout {
+    pub extra_compute: Vec<crate::poawx_candidate::RoleCandidate>,
+    pub extra_verify: Vec<crate::poawx_candidate::RoleCandidate>,
+    pub extra_support: Vec<crate::poawx_candidate::RoleCandidate>,
+    pub pool_assignment_proofs: Vec<crate::poawx_candidate::AssignmentProofV2>,
+}
+
+/// Discover EVERY other producer's eligible role candidate for `(net, height,
+/// seed)` from a set of gossiped admissions (the node's permissionless
+/// candidate-admission cache — any broadcaster, not any specific host or key).
+///
+/// Pure and identity-free — no hardcoded key/host/IP; the outcome is identical for
+/// 2 or 200 participants, and for eu or a stranger who spins up a node tomorrow:
+/// - keeps only admissions bound to this `network`/`height` and the CANONICAL
+///   `seed` for `height` (drops stale, speculative wrong-seed, and other-fork ones);
+/// - excludes the caller's own key (`own_pkh`);
+/// - dedups by `(role, solver_pkh)`;
+/// - groups `RoleCandidate`s by role and collects any present `AssignmentProofV2`.
+///
+/// Selection among the gathered candidates is deliberately NOT done here — it
+/// reuses the existing `CandidateSet::best_for_role` / `effective_score` rules
+/// downstream, so there is no favoritism and no new/ad-hoc rule. V1 admissions
+/// carry no `TicketProof` (only `ticket_digest`), so `pool_tickets` is not sourced
+/// here — moot on mainnet where the ticket gate is off.
+pub fn gather_gossip_role_candidates(
+    admissions: &[CandidateAdmissionV1],
+    net: u8,
+    height: u64,
+    seed: &[u8; 32],
+    own_pkh: &[u8; 20],
+) -> GatheredFanout {
+    let mut out = GatheredFanout::default();
+    let mut seen: std::collections::HashSet<(u8, [u8; 20])> = std::collections::HashSet::new();
+    for a in admissions {
+        if a.network_id != net || a.target_height != height || &a.seed != seed {
+            continue; // wrong network/height/seed (stale, speculative, other-fork)
+        }
+        let c = &a.candidate;
+        if &c.solver_pkh == own_pkh {
+            continue; // exclude self (the producer supplies its own as the primary)
+        }
+        if !seen.insert((c.role_id, c.solver_pkh)) {
+            continue; // dedup by (role, solver)
+        }
+        match c.role_id {
+            x if x == crate::poawx::ROLE_COMPUTE_CONTRIBUTOR => out.extra_compute.push(c.clone()),
+            x if x == crate::poawx::ROLE_VERIFY_CONTRIBUTOR => out.extra_verify.push(c.clone()),
+            x if x == crate::poawx::ROLE_SUPPORT_CONTRIBUTOR => out.extra_support.push(c.clone()),
+            _ => continue,
+        }
+        if let Some(p) = &a.assignment_proof_v2 {
+            out.pool_assignment_proofs.push(p.clone());
+        }
+    }
+    out
+}
+
 // ---- Fix 1: per-source candidate-admission flood limiter (anti-DoS) ----
 // The candidate-admission path is mainnet hard-off (candidate_admission_gossip_enabled =>
 // network_id != 0), so this runs ONLY on devnet/testnet. It gates admission INGEST/rebroadcast

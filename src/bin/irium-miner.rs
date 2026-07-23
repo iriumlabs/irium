@@ -3477,14 +3477,90 @@ fn run_poawx_solo() -> Result<(), String> {
             }
         };
 
+        // Opt-in decentralized inclusive fan-out (IRIUM_POAWX_FANOUT_INCLUSIVE=1):
+        // discover EVERY other producer's eligible role candidate from the
+        // permissionless candidate-admission gossip cache for THIS height under the
+        // canonical (agreed-tip) seed, exclude self, and fold them into the block.
+        // best_for_role then selects winners by the existing effective_score rule.
+        // No hardcoded key/host; identical for 2 or 200 producers. Default off => solo.
+        let inclusive_fanout: Option<irium_node_rs::poawx_admission::GatheredFanout> =
+            if env::var("IRIUM_POAWX_FANOUT_INCLUSIVE")
+                .map(|v| v.trim() == "1")
+                .unwrap_or(false)
+            {
+                let g = (|| {
+                    let own_vec = miner_pubkey_hash()?;
+                    if own_vec.len() != 20 {
+                        return None;
+                    }
+                    let mut own_pkh = [0u8; 20];
+                    own_pkh.copy_from_slice(&own_vec);
+                    // canonical epoch seed for `height` — the SAME derivation the block uses.
+                    let base_seed =
+                        irium_node_rs::poawx_committed_admission::admission_epoch_seed(
+                            parent_prev_hash,
+                            prev_hash,
+                        );
+                    let seed =
+                        irium_node_rs::poawx_committed_admission::resolve_epoch_seed_parts(
+                            height,
+                            base_seed,
+                            parent_seed_components.0,
+                            parent_seed_components.1,
+                        );
+                    let url = format!(
+                        "{}/poawx/candidate-admissions?target_height={}",
+                        node_rpc_base().trim_end_matches('/'),
+                        height
+                    );
+                    let mut req = client.get(&url);
+                    if let Some(t) = rpc_token() {
+                        req = req.bearer_auth(t);
+                    }
+                    let json: serde_json::Value = req.send().ok()?.json().ok()?;
+                    let admissions: Vec<_> = json
+                        .get("admissions")?
+                        .as_array()?
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .filter_map(|h| hex::decode(h).ok())
+                        .filter_map(|b| {
+                            irium_node_rs::poawx_admission::CandidateAdmissionV1::deserialize(&b)
+                                .ok()
+                        })
+                        .collect();
+                    Some(
+                        irium_node_rs::poawx_admission::gather_gossip_role_candidates(
+                            &admissions,
+                            net,
+                            height,
+                            &seed,
+                            &own_pkh,
+                        ),
+                    )
+                })();
+                if let Some(ref f) = g {
+                    let n = f.extra_compute.len() + f.extra_verify.len() + f.extra_support.len();
+                    if n > 0 {
+                        println!(
+                            "[poawx] inclusive fan-out: gathered {n} foreign role candidate(s) from gossip"
+                        );
+                    }
+                }
+                g
+            } else {
+                None
+            };
+
         // Stage G0: pass the default CPU nonce solver explicitly (grinds the header
         // nonce with mine_pow, exactly as before). Stage G1's GPU miner calls the
         // same entry point with a GPU-backed solver instead.
-        let proof = match irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver(
+        let proof = match irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver_and_fanout(
             &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,
             parent_seed_components, &dominance, node_gates.as_ref(), proposer_ctx.as_ref(),
             registration_section.as_ref(),
             &irium_node_rs::poawx_mining_harness::default_cpu_nonce_solver,
+            inclusive_fanout.as_ref(),
         ) {
             Ok(p) => p,
             Err(e) => {

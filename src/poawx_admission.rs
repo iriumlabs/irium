@@ -307,6 +307,114 @@ pub fn mandatory_inclusion_enforce_active(height: u64) -> bool {
         .unwrap_or(false)
 }
 
+/// Phase-1 (record-only) activation: RCR1 registration txs are parsed + burn-accounted
+/// and the ledger builds, but the `cs ⊇ req` rule is NOT yet enforced. Must precede
+/// enforce by >= L blocks so the window is populated at enforce. Inert on mainnet.
+pub const MAINNET_MANDATORY_INCLUSION_RECORD_ACTIVATION_HEIGHT: Option<u64> = None;
+pub fn mandatory_inclusion_record_active(height: u64) -> bool {
+    if crate::activation::network_id_byte() == 0 {
+        return matches!(
+            MAINNET_MANDATORY_INCLUSION_RECORD_ACTIVATION_HEIGHT,
+            Some(h) if height >= h
+        );
+    }
+    std::env::var("IRIUM_POAWX_MANDATORY_INCLUSION_RECORD_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|h| height >= h)
+        .unwrap_or(false)
+}
+
+// ---- RCR1 registration transaction codec (productionization) ----
+// A candidate self-registers via a NORMAL transaction carrying one OP_RETURN output:
+//   script = OP_RETURN <push> [ "irmrcr" | ver | target_height | seed(32) | candidate ]
+//   value  = fee_burn   (OP_RETURN is unspendable => the value is BURNED, and because
+//                        the block fee = inputs - ALL outputs, fee_burn can NEVER be
+//                        claimed by the producer as a fee — no inflation, no double-count).
+// fee_tip = the ordinary tx fee (inputs - outputs) -> the recording producer.
+
+pub const RCR1_MAGIC: [u8; 6] = *b"irmrcr"; // irium role-candidacy registration v1
+
+/// Encode a registration into an OP_RETURN `script_pubkey` (the carrying output's
+/// `value` must be set to `fee_burn` by the tx builder).
+pub fn encode_rcr1_script(
+    target_height: u64,
+    seed: &[u8; 32],
+    candidate: &crate::poawx_candidate::RoleCandidate,
+) -> Vec<u8> {
+    let mut payload = Vec::with_capacity(64);
+    payload.extend_from_slice(&RCR1_MAGIC);
+    payload.push(1u8); // version
+    payload.extend_from_slice(&target_height.to_le_bytes());
+    payload.extend_from_slice(seed);
+    let c = candidate.serialize();
+    payload.extend_from_slice(&(c.len() as u16).to_le_bytes());
+    payload.extend_from_slice(&c);
+    let mut script = vec![0x6au8]; // OP_RETURN
+    if payload.len() < 76 {
+        script.push(payload.len() as u8);
+    } else {
+        script.push(0x4cu8); // OP_PUSHDATA1
+        script.push(payload.len() as u8);
+    }
+    script.extend_from_slice(&payload);
+    script
+}
+
+/// Decode an OP_RETURN script back into `(target_height, seed, RoleCandidate)` iff it
+/// is a well-formed RCR1 registration.
+pub fn decode_rcr1_script(
+    script: &[u8],
+) -> Option<(u64, [u8; 32], crate::poawx_candidate::RoleCandidate)> {
+    if script.first() != Some(&0x6au8) {
+        return None;
+    }
+    let mut i = 1usize;
+    let plen = match script.get(i)? {
+        0x4c => {
+            i += 1;
+            *script.get(i)? as usize
+        }
+        n => *n as usize,
+    };
+    i += 1;
+    let payload = script.get(i..i + plen)?;
+    if payload.len() < 6 + 1 + 8 + 32 + 2 || payload[0..6] != RCR1_MAGIC {
+        return None;
+    }
+    let target_height = u64::from_le_bytes(payload[7..15].try_into().ok()?);
+    let mut seed = [0u8; 32];
+    seed.copy_from_slice(&payload[15..47]);
+    let clen = u16::from_le_bytes(payload[47..49].try_into().ok()?) as usize;
+    let cand =
+        crate::poawx_candidate::RoleCandidate::deserialize(payload.get(49..49 + clen)?).ok()?;
+    Some((target_height, seed, cand))
+}
+
+/// Scan a block's transactions for RCR1 registration outputs -> on-chain registrations
+/// recorded at `recorded_height`. `fee_burn` = the OP_RETURN output value (burned).
+pub fn scan_block_registrations(
+    block: &crate::block::Block,
+    recorded_height: u64,
+) -> Vec<RoleCandidacyRegistration> {
+    let mut out = Vec::new();
+    for tx in &block.transactions {
+        for o in &tx.outputs {
+            if let Some((target_height, seed, candidate)) = decode_rcr1_script(&o.script_pubkey) {
+                out.push(RoleCandidacyRegistration {
+                    recorded_height,
+                    target_height,
+                    seed,
+                    candidate,
+                    fee_burn: o.value, // burned (unspendable OP_RETURN); never a claimable fee
+                    fee_tip: 0,        // tip = the tx fee, accounted by the existing fee path
+                });
+            }
+        }
+    }
+    out
+}
+
 // ---- Fix 1: per-source candidate-admission flood limiter (anti-DoS) ----
 // The candidate-admission path is mainnet hard-off (candidate_admission_gossip_enabled =>
 // network_id != 0), so this runs ONLY on devnet/testnet. It gates admission INGEST/rebroadcast

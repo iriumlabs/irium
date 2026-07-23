@@ -1052,6 +1052,9 @@ impl ChainState {
         if crate::poawx_committed_admission::committed_admission_enforced(expected_height) {
             self.validate_block_committed_admission(&block, previous, expected_height)?;
         }
+        if crate::poawx_admission::mandatory_inclusion_enforce_active(expected_height) {
+            self.validate_block_mandatory_inclusion(&block, previous, expected_height)?;
+        }
         if crate::poawx_candidate::true_vrf_enforced(expected_height) {
             self.validate_block_true_vrf(&block, expected_height)?;
         }
@@ -2054,6 +2057,62 @@ impl ChainState {
                 return Err(
                     "phase22a: candidate set does not match committed admission root".to_string(),
                 );
+            }
+        }
+        Ok(())
+    }
+
+    /// MANDATORY-INCLUSION validation (Option A). Derives the canonical eligible set
+    /// for `height` from RCR1 registrations recorded ON-CHAIN in the settle window
+    /// [height-L, height-D] (scanned from `self.chain`), then requires each receipt's
+    /// committed candidate set to be a SUPERSET of it. Fork-safe / restart-safe:
+    /// derived purely from stored blocks, never a live cache. Gated inert on mainnet
+    /// (activation const = None). NOTE (productionization refinement for the live
+    /// enforce path): the seed here is `expected_epoch_seed(H)`; the stable-seed /
+    /// height-range matching from the design (registrations can't know seed(H) in
+    /// advance) is the remaining policy to finalize before a live devnet enforce run.
+    fn validate_block_mandatory_inclusion(
+        &self,
+        block: &Block,
+        previous: Option<&Block>,
+        height: u64,
+    ) -> Result<(), String> {
+        use crate::poawx_admission::{
+            canonical_eligible_set, enforce_mandatory_inclusion, scan_block_registrations,
+            MANDATORY_CAP_PER_ROLE, MANDATORY_FEE_BURN_MIN, MANDATORY_LEAD_WINDOW,
+            MANDATORY_SETTLE_DEPTH,
+        };
+        let receipts = match &block.poawx_receipts {
+            Some(r) => r,
+            None => return Ok(()),
+        };
+        let seed = crate::poawx_committed_admission::expected_epoch_seed(
+            height,
+            block.header.prev_hash,
+            previous,
+        );
+        let lo = height.saturating_sub(MANDATORY_LEAD_WINDOW);
+        let hi = height.saturating_sub(MANDATORY_SETTLE_DEPTH);
+        let mut ledger = Vec::new();
+        for h in lo..=hi {
+            if let Some(b) = self.chain.get(h as usize) {
+                ledger.extend(scan_block_registrations(b, h));
+            }
+        }
+        let req = canonical_eligible_set(
+            &ledger,
+            height,
+            &seed,
+            MANDATORY_LEAD_WINDOW,
+            MANDATORY_SETTLE_DEPTH,
+            MANDATORY_CAP_PER_ROLE,
+            MANDATORY_FEE_BURN_MIN,
+        );
+        for r in receipts {
+            if let Some(ext) = &r.phase20_ext {
+                if let Some(cs) = &ext.candidate_set {
+                    enforce_mandatory_inclusion(cs, &req)?;
+                }
             }
         }
         Ok(())
@@ -16135,6 +16194,75 @@ mod tests {
             "no env can arm mandatory inclusion on mainnet (code-change only)"
         );
         std::env::remove_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT");
+    }
+
+    // Productionization: RCR1 registration-tx codec + block scan + EXPLICIT burn
+    // conservation (fee_burn is an OP_RETURN output => never a claimable fee).
+    #[test]
+    fn poawx_rcr1_tx_codec_scan_and_burn_conservation() {
+        use crate::poawx::ROLE_SUPPORT_CONTRIBUTOR;
+        use crate::poawx_admission::{decode_rcr1_script, encode_rcr1_script, scan_block_registrations};
+        use crate::poawx_candidate::RoleCandidate;
+        use crate::poawx_penalty::PenaltyStatus;
+        use crate::tx::{Transaction, TxOutput};
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        let net = crate::activation::network_id_byte();
+        let seed = [0x6Au8; 32];
+        let target = 100u64;
+        let cand = RoleCandidate::build(
+            net, target, &seed, ROLE_SUPPORT_CONTRIBUTOR, [0xB1u8; 20], [0x02u8; 33],
+            [0x21u8; 32], PenaltyStatus::Clean.id(), 3000, [0x22u8; 32],
+        );
+
+        // (1) codec roundtrip
+        let script = encode_rcr1_script(target, &seed, &cand);
+        assert_eq!(script[0], 0x6au8, "RCR1 output is OP_RETURN (unspendable => burned)");
+        let (t2, s2, c2) = decode_rcr1_script(&script).expect("decodes as RCR1");
+        assert_eq!((t2, s2), (target, seed));
+        assert_eq!(c2.solver_pkh, cand.solver_pkh);
+        assert_eq!(c2.effective_score, cand.effective_score);
+        assert!(decode_rcr1_script(&[0x76, 0xa9, 0x14]).is_none(), "a P2PKH script is not RCR1");
+
+        // (2) EXPLICIT burn conservation: fee_burn is an OP_RETURN OUTPUT, so the claimable
+        // fee (= inputs - ALL outputs, per calculate_fees) can NEVER include it.
+        let (fee_burn, change, inputs_total) = (5_000_000u64, 60_000_000u64, 100_000_000u64);
+        let tx = Transaction {
+            version: 1,
+            inputs: vec![],
+            outputs: vec![
+                TxOutput { value: fee_burn, script_pubkey: script.clone() }, // burn + payload
+                TxOutput { value: change, script_pubkey: vec![0x76, 0xa9, 0x14] }, // change
+            ],
+            locktime: 0,
+        };
+        let sum_outputs: u64 = tx.outputs.iter().map(|o| o.value).sum();
+        assert_eq!(sum_outputs, fee_burn + change, "burn value is part of sum(outputs)");
+        let claimable_fee = inputs_total - sum_outputs; // exactly what calculate_fees returns
+        assert_eq!(claimable_fee, inputs_total - fee_burn - change, "claimable fee = the tip ONLY");
+        assert_eq!(
+            claimable_fee + fee_burn + change,
+            inputs_total,
+            "conservation-exact: inputs = fee_burn(BURNED) + change + tip; producer never claims fee_burn"
+        );
+
+        // (3) scan a block carrying the registration tx.
+        let block = Block {
+            header: BlockHeader { version: 1, prev_hash: [0u8; 32], merkle_root: [0u8; 32], time: 0, bits: 0x207fffff, nonce: 0 },
+            transactions: vec![tx],
+            auxpow: None,
+            poawx_receipts: None,
+        };
+        let regs = scan_block_registrations(&block, 90);
+        assert_eq!(regs.len(), 1, "one RCR1 registration scanned");
+        assert_eq!(regs[0].recorded_height, 90);
+        assert_eq!(regs[0].target_height, target);
+        assert_eq!(regs[0].fee_burn, fee_burn, "fee_burn read from the OP_RETURN output value");
+        assert_eq!(regs[0].candidate.solver_pkh, cand.solver_pkh);
+
+        std::env::remove_var("IRIUM_NETWORK");
     }
 
     #[test]

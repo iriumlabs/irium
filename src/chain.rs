@@ -15956,6 +15956,187 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED");
     }
 
+    // MANDATORY INCLUSION (Option A) — full 5-part proof + 3 sybil-cost properties,
+    // all from the on-chain registration ledger (never a live cache).
+    #[test]
+    fn poawx_mandatory_inclusion_five_part_and_sybil() {
+        use crate::poawx::{
+            ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+        };
+        use crate::poawx_admission::{
+            canonical_eligible_set, enforce_mandatory_inclusion, MandatorySet,
+            RoleCandidacyRegistration, MANDATORY_FEE_BURN_MIN,
+        };
+        use crate::poawx_candidate::{CandidateSet, RoleCandidate};
+        use crate::poawx_penalty::PenaltyStatus;
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        let net = crate::activation::network_id_byte();
+        let seed = [0x6Au8; 32];
+        let wrong_seed = [0x99u8; 32];
+        let target = 100u64;
+        let (l, d, cap, floor) = (64u64, 3u64, 16usize, MANDATORY_FEE_BURN_MIN);
+
+        let mk = |role: u8, solver: [u8; 20], tag: u8, dom: u64| {
+            RoleCandidate::build(
+                net, target, &seed, role, solver, [0x02u8; 33], [tag; 32],
+                PenaltyStatus::Clean.id(), dom, [tag.wrapping_add(1); 32],
+            )
+        };
+        let reg = |rh: u64, sd: [u8; 32], cand: RoleCandidate, burn: u64, tip: u64| {
+            RoleCandidacyRegistration {
+                recorded_height: rh,
+                target_height: target,
+                seed: sd,
+                candidate: cand,
+                fee_burn: burn,
+                fee_tip: tip,
+            }
+        };
+        let a = [0xA1u8; 20];
+        let (b, c, dd) = ([0xB1u8; 20], [0xC1u8; 20], [0xD1u8; 20]);
+        let b_sup = mk(ROLE_SUPPORT_CONTRIBUTOR, b, 0x21, 1000);
+        let c_sup = mk(ROLE_SUPPORT_CONTRIBUTOR, c, 0x22, 5000);
+        let d_sup = mk(ROLE_SUPPORT_CONTRIBUTOR, dd, 0x23, 3000);
+        let a_comp = mk(ROLE_COMPUTE_CONTRIBUTOR, a, 0x11, 1000);
+        let a_ver = mk(ROLE_VERIFY_CONTRIBUTOR, a, 0x12, 1000);
+        // ledger: B,C,D recorded at H-10 (settled, in [H-L,H-D]), fee_burn == floor.
+        let ledger = vec![
+            reg(target - 10, seed, b_sup.clone(), floor, 10),
+            reg(target - 10, seed, c_sup.clone(), floor, 10),
+            reg(target - 10, seed, d_sup.clone(), floor, 10),
+        ];
+        let req = canonical_eligible_set(&ledger, target, &seed, l, d, cap, floor);
+        let build_cs = |support: &[RoleCandidate]| {
+            let mut cs = CandidateSet::new(net, target, seed);
+            cs.push(a_comp.clone());
+            cs.push(a_ver.clone());
+            for s in support {
+                cs.push(s.clone());
+            }
+            cs.sort_canonical();
+            cs
+        };
+        let sset = |m: &MandatorySet| -> std::collections::BTreeSet<[u8; 20]> {
+            m.support.iter().map(|x| x.solver_pkh).collect()
+        };
+
+        // (1) POSITIVE — recorded candidates enforced.
+        assert_eq!(req.support.len(), 3, "canonical set = {{B,C,D}}");
+        assert!(
+            enforce_mandatory_inclusion(&build_cs(&[b_sup.clone(), c_sup.clone(), d_sup.clone()]), &req).is_ok(),
+            "including all recorded candidates -> VALID"
+        );
+        assert!(
+            enforce_mandatory_inclusion(&build_cs(&[b_sup.clone(), c_sup.clone()]), &req).is_err(),
+            "omitting recorded D -> REJECTED"
+        );
+
+        // (2) NEGATIVE — selfish self-fill despite a recorded competitor -> REJECTED.
+        let a_sup = mk(ROLE_SUPPORT_CONTRIBUTOR, a, 0x25, 9000);
+        assert!(
+            enforce_mandatory_inclusion(&build_cs(&[a_sup.clone()]), &req).is_err(),
+            "producer self-fills SUPPORT, ignoring recorded B,C,D -> REJECTED network-wide"
+        );
+
+        // (3) PROPAGATION-EDGE — un-settled admission (recorded at H-1 > H-D) -> not required.
+        let e = [0xE1u8; 20];
+        let e_sup = mk(ROLE_SUPPORT_CONTRIBUTOR, e, 0x24, 8000);
+        let mut ledger_e = ledger.clone();
+        ledger_e.push(reg(target - 1, seed, e_sup.clone(), floor, 10));
+        let req_e = canonical_eligible_set(&ledger_e, target, &seed, l, d, cap, floor);
+        assert!(!sset(&req_e).contains(&e), "un-settled E excluded by settle depth D");
+        assert!(
+            enforce_mandatory_inclusion(&build_cs(&[b_sup.clone(), c_sup.clone(), d_sup.clone()]), &req_e).is_ok(),
+            "honest omission of un-settled E -> STILL VALID (no false reject)"
+        );
+
+        // (4) RESTART-SURVIVAL — re-derive from the same on-chain records (no cache).
+        let req_restart = canonical_eligible_set(&ledger, target, &seed, l, d, cap, floor);
+        assert_eq!(sset(&req), sset(&req_restart), "re-derived from chain is identical (restart-safe)");
+
+        // (5) FORK-AGREEMENT — 3 validators, different input orderings -> identical set + order.
+        let mut v2 = ledger.clone();
+        v2.reverse();
+        let mut v3 = ledger.clone();
+        v3.rotate_left(1);
+        let r2 = canonical_eligible_set(&v2, target, &seed, l, d, cap, floor);
+        let r3 = canonical_eligible_set(&v3, target, &seed, l, d, cap, floor);
+        let ord = |m: &MandatorySet| -> Vec<[u8; 20]> { m.support.iter().map(|x| x.solver_pkh).collect() };
+        assert_eq!(ord(&req), ord(&r2), "validator 2 identical (set+order)");
+        assert_eq!(ord(&req), ord(&r3), "validator 3 identical (set+order)");
+
+        // SYBIL-a — spam (wrong-seed / below-floor / too-old) gets NOTHING into the set.
+        let mut junk = ledger.clone();
+        let (s1, s2, s3) = ([0x51u8; 20], [0x52u8; 20], [0x53u8; 20]);
+        junk.push(reg(target - 10, wrong_seed, mk(ROLE_SUPPORT_CONTRIBUTOR, s1, 0x31, 9999), floor, 999)); // wrong seed
+        junk.push(reg(target - 10, seed, mk(ROLE_SUPPORT_CONTRIBUTOR, s2, 0x32, 9999), floor - 1, 999)); // below floor
+        junk.push(reg(target - l - 5, seed, mk(ROLE_SUPPORT_CONTRIBUTOR, s3, 0x33, 9999), floor, 999)); // too old
+        let rj = canonical_eligible_set(&junk, target, &seed, l, d, cap, floor);
+        assert_eq!(rj.support.len(), 3, "spam excluded — set still exactly {{B,C,D}}");
+        assert!(!sset(&rj).contains(&s1) && !sset(&rj).contains(&s2) && !sset(&rj).contains(&s3));
+
+        // SYBIL-b — crowd-out REQUIRES outbidding (top-N by fee). cap=2.
+        let (leg1, leg2, grief) = ([0x61u8; 20], [0x62u8; 20], [0x63u8; 20]);
+        let l1 = mk(ROLE_SUPPORT_CONTRIBUTOR, leg1, 0x41, 1000);
+        let l2 = mk(ROLE_SUPPORT_CONTRIBUTOR, leg2, 0x42, 1000);
+        let gr = mk(ROLE_SUPPORT_CONTRIBUTOR, grief, 0x43, 1000);
+        let bid = 100_000_000u64;
+        let under = vec![
+            reg(target - 10, seed, l1.clone(), floor, bid),
+            reg(target - 10, seed, l2.clone(), floor, bid),
+            reg(target - 10, seed, gr.clone(), floor, bid / 2), // under-bids
+        ];
+        let ru: std::collections::HashSet<[u8; 20]> =
+            canonical_eligible_set(&under, target, &seed, l, d, 2, floor).support.iter().map(|x| x.solver_pkh).collect();
+        assert!(ru.contains(&leg1) && ru.contains(&leg2) && !ru.contains(&grief),
+            "under-bidding griefer CANNOT displace legit candidates");
+        let over = vec![
+            reg(target - 10, seed, l1.clone(), floor, bid),
+            reg(target - 10, seed, l2.clone(), floor, bid),
+            reg(target - 10, seed, gr.clone(), floor, bid * 2), // OUTbids
+        ];
+        let ro: std::collections::HashSet<[u8; 20]> =
+            canonical_eligible_set(&over, target, &seed, l, d, 2, floor).support.iter().map(|x| x.solver_pkh).collect();
+        assert!(ro.contains(&grief), "displacement REQUIRES paying MORE than a legit's fee (auction works)");
+
+        // SYBIL-c — self-record loophole CLOSED: burn floor applies to ALL, even with a huge tip.
+        let free = vec![reg(target - 10, seed, mk(ROLE_SUPPORT_CONTRIBUTOR, [0x71u8; 20], 0x51, 9999), 0, bid * 100)];
+        assert!(
+            canonical_eligible_set(&free, target, &seed, l, d, cap, floor).support.is_empty(),
+            "fee_burn=0 (free self-record via self-tip) is INVALID -> loophole closed by the burn floor"
+        );
+
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    // network_id=0 (mainnet) CONTEXT test: the rule arrives INERT and no config can
+    // arm it — only a code change to the compiled const can (the §12 discipline).
+    #[test]
+    fn poawx_mandatory_inclusion_mainnet_inert() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("IRIUM_NETWORK"); // unset => network_id 0 (mainnet)
+        std::env::remove_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT");
+        assert_eq!(crate::activation::network_id_byte(), 0, "mainnet context");
+        assert!(
+            crate::poawx_admission::MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT.is_none(),
+            "compiled activation is None (inert)"
+        );
+        assert!(!crate::poawx_admission::mandatory_inclusion_enforce_active(1));
+        assert!(!crate::poawx_admission::mandatory_inclusion_enforce_active(10_000_000));
+        // env override is IGNORED on mainnet — cannot be armed by configuration.
+        std::env::set_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT", "1");
+        assert!(
+            !crate::poawx_admission::mandatory_inclusion_enforce_active(10_000_000),
+            "no env can arm mandatory inclusion on mainnet (code-change only)"
+        );
+        std::env::remove_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT");
+    }
+
     #[test]
     fn phase21e_admission_enforcement() {
         use crate::poawx::{

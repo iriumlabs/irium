@@ -168,6 +168,145 @@ pub fn gather_gossip_role_candidates(
     out
 }
 
+// ===== MANDATORY INCLUSION (Option A): on-chain admission ledger + settle window =====
+//
+// Corrects the opt-in fan-out into a MANDATORY consensus rule: a block is invalid if
+// it omits an eligible role candidate that was already RECORDED ON-CHAIN. Eligibility
+// is derived from the CHAIN ALONE (never the live gossip cache — that is the phase21e
+// fork), so every validator agrees, and it survives restart/IBD. Residual (accepted):
+// cannot force the initial on-chain recording against a full-window monopolist.
+
+/// Starting activation parameters (tunable at activation review; see design doc).
+pub const MANDATORY_LEAD_WINDOW: u64 = 64; // L: scan recorded in [H-L, H-D]
+pub const MANDATORY_SETTLE_DEPTH: u64 = 3; // D: must be on-chain by H-D (propagation + reorg slack)
+pub const MANDATORY_CAP_PER_ROLE: usize = 16; // N: top-N by fee per role (always block-fittable)
+pub const MANDATORY_FEE_BURN_MIN: u64 = 5_000_000; // ~0.05 IRM sybil floor (BURNED)
+
+/// A fee-paying, self-registered role candidacy recorded ON-CHAIN. `fee_burn` is the
+/// mandatory burned sybil floor — paid by EVERYONE including producers, which closes
+/// the self-record loophole (a producer can't free-record its own sybils by tipping
+/// itself). `fee_tip` is the optional recorder incentive.
+#[derive(Debug, Clone)]
+pub struct RoleCandidacyRegistration {
+    pub recorded_height: u64,
+    pub target_height: u64,
+    pub seed: [u8; 32],
+    pub candidate: crate::poawx_candidate::RoleCandidate,
+    pub fee_burn: u64,
+    pub fee_tip: u64,
+}
+
+#[derive(Debug, Default, Clone)]
+pub struct MandatorySet {
+    pub compute: Vec<crate::poawx_candidate::RoleCandidate>,
+    pub verify: Vec<crate::poawx_candidate::RoleCandidate>,
+    pub support: Vec<crate::poawx_candidate::RoleCandidate>,
+}
+
+/// Deterministically derive the canonical eligible (mandatory) set for `height` from
+/// ON-CHAIN registrations — the union recorded in blocks within the settle window
+/// `[height-L, height-D]`. Pure / fork-safe / restart-safe: identical for every
+/// validator given the same chain, independent of live gossip and input order. Per
+/// role: keep valid registrations (settled in-window, `target_height == height`,
+/// matching canonical seed, `fee_burn >= floor`); keep each solver's best (highest
+/// total-fee) bid; sort by total fee desc (tie-break by solver_pkh); take top-N.
+#[allow(clippy::too_many_arguments)]
+pub fn canonical_eligible_set(
+    records: &[RoleCandidacyRegistration],
+    height: u64,
+    seed: &[u8; 32],
+    lead_window: u64,
+    settle_depth: u64,
+    cap_per_role: usize,
+    fee_burn_min: u64,
+) -> MandatorySet {
+    use std::collections::HashMap;
+    let lo = height.saturating_sub(lead_window);
+    let hi = height.saturating_sub(settle_depth);
+    let mut best: HashMap<(u8, [u8; 20]), (u64, crate::poawx_candidate::RoleCandidate)> =
+        HashMap::new();
+    for r in records {
+        if r.recorded_height < lo || r.recorded_height > hi {
+            continue; // outside settle window: un-settled (too recent) or too old
+        }
+        if r.target_height != height || &r.seed != seed || r.fee_burn < fee_burn_min {
+            continue; // wrong target / wrong seed / below sybil burn floor
+        }
+        let key = (r.candidate.role_id, r.candidate.solver_pkh);
+        let total = r.fee_burn.saturating_add(r.fee_tip);
+        match best.get(&key) {
+            Some((f, _)) if *f >= total => {}
+            _ => {
+                best.insert(key, (total, r.candidate.clone()));
+            }
+        }
+    }
+    let mut per_role: HashMap<u8, Vec<(u64, crate::poawx_candidate::RoleCandidate)>> = HashMap::new();
+    for ((role, _), v) in best {
+        per_role.entry(role).or_default().push(v);
+    }
+    let top = |role: u8| -> Vec<crate::poawx_candidate::RoleCandidate> {
+        let mut v = per_role.get(&role).cloned().unwrap_or_default();
+        v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.solver_pkh.cmp(&b.1.solver_pkh)));
+        v.into_iter().take(cap_per_role).map(|(_, c)| c).collect()
+    };
+    MandatorySet {
+        compute: top(crate::poawx::ROLE_COMPUTE_CONTRIBUTOR),
+        verify: top(crate::poawx::ROLE_VERIFY_CONTRIBUTOR),
+        support: top(crate::poawx::ROLE_SUPPORT_CONTRIBUTOR),
+    }
+}
+
+/// MANDATORY-INCLUSION validity rule: the block's committed candidate set must be a
+/// SUPERSET of the canonical eligible set for every role. Combined with the existing
+/// `role_reward == best_for_role(cs)`, a producer keeps a role only by genuinely
+/// out-scoring everyone recorded — never by omitting/self-filling past them.
+pub fn enforce_mandatory_inclusion(
+    cs: &crate::poawx_candidate::CandidateSet,
+    req: &MandatorySet,
+) -> Result<(), String> {
+    let check = |role: u8, needed: &[crate::poawx_candidate::RoleCandidate]| -> Result<(), String> {
+        let present: std::collections::HashSet<[u8; 20]> = cs
+            .candidates
+            .iter()
+            .filter(|c| c.role_id == role)
+            .map(|c| c.solver_pkh)
+            .collect();
+        for r in needed {
+            if !present.contains(&r.solver_pkh) {
+                return Err(format!(
+                    "mandatory-inclusion: block omitted on-chain eligible candidate for role {} (solver {:02x?})",
+                    role,
+                    &r.solver_pkh[..4]
+                ));
+            }
+        }
+        Ok(())
+    };
+    check(crate::poawx::ROLE_COMPUTE_CONTRIBUTOR, &req.compute)?;
+    check(crate::poawx::ROLE_VERIFY_CONTRIBUTOR, &req.verify)?;
+    check(crate::poawx::ROLE_SUPPORT_CONTRIBUTOR, &req.support)?;
+    Ok(())
+}
+
+/// Activation — inert on mainnet (const = None); env-gated on devnet, two-phase
+/// (record-only then enforce >= L blocks later, so the window is populated at enforce).
+pub const MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT: Option<u64> = None;
+
+pub fn mandatory_inclusion_enforce_active(height: u64) -> bool {
+    if crate::activation::network_id_byte() == 0 {
+        return matches!(
+            MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT,
+            Some(h) if height >= h
+        );
+    }
+    std::env::var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|h| height >= h)
+        .unwrap_or(false)
+}
+
 // ---- Fix 1: per-source candidate-admission flood limiter (anti-DoS) ----
 // The candidate-admission path is mainnet hard-off (candidate_admission_gossip_enabled =>
 // network_id != 0), so this runs ONLY on devnet/testnet. It gates admission INGEST/rebroadcast

@@ -16020,6 +16020,201 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_COMMITTED_ADMISSION_REQUIRED");
     }
 
+    // Phase 2 Part 2 (2026-07-25): net-0 proof of the (previously UNTESTED) pool-member sybil
+    // admission validator. With the un-hard-off ticket validator (Phase 1), a multi-payee fan-out
+    // block's non-winner members must carry a valid VRF assignment proof AND a valid 20-bit sybil
+    // ticket; self-stuffing (missing/weak ticket) is rejected; a winners-only block needs no PLA1.
+    // Teeth-verified by mutation (neutered validator -> #2/#3 fail).
+    #[test]
+    fn poawx_pool_admission_net0_sybil_enforced() {
+        use crate::poawx::{PoolAdmissionSection, ROLE_SUPPORT_CONTRIBUTOR};
+        use crate::poawx_candidate::{AssignmentProofV2, CandidateSet, RoleCandidate};
+        use crate::poawx_penalty::PenaltyStatus;
+        use crate::poawx_ticket::{
+            compute_sybil_digest, effective_sybil_bits, grind_sybil_nonce, leading_zero_bits,
+            TicketProof,
+        };
+
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        // MAINNET context: no IRIUM_NETWORK => network_id_byte()==0.
+        std::env::remove_var("IRIUM_NETWORK");
+        let net = crate::activation::network_id_byte();
+        assert_eq!(net, 0, "test must run in net==0 (mainnet) context");
+        assert_eq!(
+            effective_sybil_bits(),
+            20,
+            "net==0 sybil cost is the enforced 20-bit mainnet floor"
+        );
+
+        let height = 100u64;
+        let prev = [0x33u8; 32];
+        let seed = [0x6Au8; 32];
+        let apk = [0x02u8; 33]; // ticket assignment-key placeholder (bound into sybil work)
+        let epoch = height; // bind epoch == target_height (satisfies audit binding if active)
+        let expiry = height + 1_000;
+
+        // ---- Build ONE genuine non-winner SUPPORT pool member (member M). ----
+        // prove_self_solver => solver_pkh == hash160(vrf key), so the validator's
+        // C4 binding (hash160(proof.assignment_public_key) == cand.solver_pkh) and the
+        // contributor-role binding both hold by construction.
+        let m_secret = [0x5Au8; 32];
+        let m_proof = AssignmentProofV2::prove_self_solver(
+            &m_secret,
+            net,
+            height,
+            ROLE_SUPPORT_CONTRIBUTOR,
+            [0u8; 32], // ticket_digest field (not cross-checked by the pool validator)
+            seed,
+        )
+        .expect("member VRF assignment proof");
+        let m_pkh = m_proof.solver_pkh;
+        // Candidate whose assignment_proof_digest IS the VRF output and seed == cs.seed.
+        let m_cand = RoleCandidate::from_assignment_v2(
+            &m_proof,
+            PenaltyStatus::Clean.id(),
+            1_000,
+            [0x77u8; 32],
+        );
+
+        // A valid 20-bit sybil ticket bound to (net=0, prev, m_pkh, epoch, apk).
+        let (good_nonce, _d) = grind_sybil_nonce(net, &prev, &m_pkh, epoch, &apk, 20, 50_000_000)
+            .expect("grind a 20-bit sybil nonce");
+        let good_ticket = TicketProof::new(
+            net,
+            height,
+            prev,
+            ROLE_SUPPORT_CONTRIBUTOR,
+            m_pkh,
+            epoch,
+            expiry,
+            apk,
+            good_nonce,
+            PenaltyStatus::Clean.id(),
+        );
+        assert!(
+            leading_zero_bits(&good_ticket.sybil_work_digest) >= 20,
+            "sanity: good ticket genuinely meets the 20-bit target"
+        );
+
+        // Role winners (self producer A). A SUPPORT candidate for A is present so the
+        // validator's winner-skip path is exercised; winners ride AVR2/TPK1, not PLA1.
+        let a_pkh = [0xA1u8; 20];
+        let a_sup_win = RoleCandidate::build(
+            net,
+            height,
+            &seed,
+            ROLE_SUPPORT_CONTRIBUTOR,
+            a_pkh,
+            [0x02u8; 33],
+            [0x10u8; 32],
+            PenaltyStatus::Clean.id(),
+            1_000,
+            [0x11u8; 32],
+        );
+
+        // Assemble a fan-out ext: winner A (skipped) + non-winner M (needs PLA1).
+        let make_block = |pa: Option<PoolAdmissionSection>, cands: Vec<RoleCandidate>| {
+            let mut cs = CandidateSet::new(net, height, seed);
+            for c in cands {
+                cs.push(c);
+            }
+            cs.sort_canonical();
+            let mut ext = p20_ext(net, height, &prev, 0, [0u8; 20]);
+            ext.role_reward.verify_contributor_pkh = a_pkh;
+            ext.role_reward.support_contributor_pkh = a_pkh; // A is the SUPPORT winner
+            ext.candidate_set = Some(cs);
+            ext.pool_admission = pa;
+            let sk = test_signing_key();
+            let mut r = make_test_receipt(height, &sk, prev, 1);
+            r.phase20_ext = Some(ext);
+            Block {
+                header: BlockHeader {
+                    version: 1,
+                    prev_hash: prev,
+                    merkle_root: [0u8; 32],
+                    time: 0,
+                    bits: 0x207fffff,
+                    nonce: 0,
+                },
+                transactions: vec![],
+                auxpow: None,
+                poawx_receipts: Some(vec![r]),
+            }
+        };
+
+        // (1) POSITIVE: winner A + non-winner M with valid VRF proof + valid 20-bit ticket → Ok.
+        let pos_pa = PoolAdmissionSection {
+            assignment_proofs: vec![m_proof.clone()],
+            tickets: vec![good_ticket.clone()],
+        };
+        let pos = make_block(Some(pos_pa), vec![a_sup_win.clone(), m_cand.clone()]);
+        let r1 = validate_pool_member_admission(&pos, height, &prev);
+        assert!(r1.is_ok(), "POSITIVE: valid PLA1 admits the pool member: {:?}", r1);
+
+        // (2) NEGATIVE (missing ticket): drop M's ticket → Err "no sybil ticket".
+        let miss_pa = PoolAdmissionSection {
+            assignment_proofs: vec![m_proof.clone()],
+            tickets: vec![], // ticket removed
+        };
+        let miss = make_block(Some(miss_pa), vec![a_sup_win.clone(), m_cand.clone()]);
+        let r2 = validate_pool_member_admission(&miss, height, &prev);
+        let e2 = r2.expect_err("missing-ticket member MUST be rejected");
+        assert!(
+            e2.contains("no sybil ticket"),
+            "NEGATIVE#2 rejects for a missing ticket, got: {e2}"
+        );
+
+        // (3) NEGATIVE (insufficient sybil work): a ticket whose nonce yields < 20 bits.
+        let mut low_nonce = [0u8; 32];
+        for i in 0u64..1_000 {
+            low_nonce[0..8].copy_from_slice(&i.to_le_bytes());
+            let d = compute_sybil_digest(net, &prev, &m_pkh, epoch, &apk, &low_nonce);
+            if leading_zero_bits(&d) < 20 {
+                break;
+            }
+        }
+        let low_ticket = TicketProof::new(
+            net,
+            height,
+            prev,
+            ROLE_SUPPORT_CONTRIBUTOR,
+            m_pkh,
+            epoch,
+            expiry,
+            apk,
+            low_nonce,
+            PenaltyStatus::Clean.id(),
+        );
+        assert!(
+            leading_zero_bits(&low_ticket.sybil_work_digest) < 20,
+            "sanity: low ticket genuinely below the 20-bit target (teeth of #3)"
+        );
+        let low_pa = PoolAdmissionSection {
+            assignment_proofs: vec![m_proof.clone()],
+            tickets: vec![low_ticket],
+        };
+        let low = make_block(Some(low_pa), vec![a_sup_win.clone(), m_cand.clone()]);
+        let r3 = validate_pool_member_admission(&low, height, &prev);
+        let e3 = r3.expect_err("sub-20-bit ticket MUST be rejected");
+        assert!(
+            e3.contains("insufficient sybil work"),
+            "NEGATIVE#3 rejects for insufficient sybil work, got: {e3}"
+        );
+
+        // (4) SOLE-PRODUCER NO-HALT: only role winners (no non-winner member), no PLA1 → Ok.
+        let sole = make_block(None, vec![a_sup_win.clone()]);
+        let r4 = validate_pool_member_admission(&sole, height, &prev);
+        assert!(
+            r4.is_ok(),
+            "SOLE-PRODUCER: a winners-only block needs no PLA1 and must not halt: {:?}",
+            r4
+        );
+
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     // MANDATORY INCLUSION (Option A) — full 5-part proof + 3 sybil-cost properties,
     // all from the on-chain registration ledger (never a live cache).
     #[test]

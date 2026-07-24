@@ -819,7 +819,7 @@ fn maybe_advance_contiguous(_dir: &Path, written_height: u64) {
     set_persisted_contiguous_height(contiguous);
 }
 
-fn write_block_json_sync(height: u64, block: &Block) -> std::io::Result<()> {
+pub fn write_block_json_sync(height: u64, block: &Block) -> std::io::Result<()> {
     let path = block_json_path_for_height(height)?;
     let dir = path
         .parent()

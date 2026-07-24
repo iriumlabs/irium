@@ -2645,32 +2645,25 @@ impl ChainState {
         // simultaneously failed over and briefly forked converge on the better-ranked
         // chain instead of deadlocking. Beyond K the absolute V1 floor holds, preserving
         // deep-rewind / long-range-attack protection. K == rank_rewind_window().
-        if crate::poawx_proposer::rank_length_floor_blocks(
+        // CONVERGENCE REWORK 2026-07-24: the fork-choice decision is now a content-only
+        // TOTAL ORDER (`fork_choice_prefers_candidate`). The previous asymmetric
+        // `rank_length_floor_blocks` early-return gated on our OWN `current_len`, so two
+        // nodes could each keep their own branch beyond K (the confirmed permanent-fork
+        // bug). Extract the two branches' rank sequences and delegate to the pure,
+        // antisymmetric decision (same intent: beyond K length wins, within K rank wins).
+        let candidate_ranks: Vec<(u32, u64)> =
+            candidate_branch.iter().map(Self::block_proposer_rank).collect();
+        let current_ranks: Vec<(u32, u64)> =
+            current_branch.iter().copied().map(Self::block_proposer_rank).collect();
+        Ok(crate::poawx_proposer::fork_choice_prefers_candidate(
             crate::poawx_proposer::rank_length_floor_active(tip_height),
-            candidate_branch.len(),
-            current_branch.len(),
             crate::poawx_proposer::rank_rewind_window(),
-        ) {
-            return Ok(false);
-        }
-        let shared = candidate_branch.len().min(current_branch.len());
-        for i in 0..shared {
-            let cr = Self::block_proposer_rank(&candidate_branch[i]);
-            let mr = Self::block_proposer_rank(current_branch[i]);
-            if cr != mr {
-                return Ok(cr < mr);
-            }
-        }
-        // Tie: equal ranks over the shared prefix. Fix 3 (gated): never reward length
-        // (the longest-chain lever a pre-mined / long-range attacker pulls). Pick by the
-        // lowest tip hash instead -- deterministic, so every node converges on the same
-        // fork, and length is removed from the decision entirely. Gate off => legacy
-        // longest-branch tiebreak (byte-identical).
-        if crate::poawx_proposer::fork_choice_hardening_active(self.tip_height()) {
-            Ok(candidate_tip < self.tip_hash())
-        } else {
-            Ok(candidate_branch.len() > current_branch.len())
-        }
+            &candidate_ranks,
+            &current_ranks,
+            &candidate_tip,
+            &self.tip_hash(),
+            crate::poawx_proposer::fork_choice_hardening_active(self.tip_height()),
+        ))
     }
 
     fn find_reorg_path(&self, new_tip: [u8; 32]) -> Result<(u64, Vec<Block>), String> {
@@ -2798,6 +2791,31 @@ impl ChainState {
                     .map(|r| !r.is_empty())
                     .unwrap_or(false)
             }));
+        // #2 restart-safety (convergence rework 2026-07-24): a reorg leaves the on-disk block
+        // files at (ancestor_height, old_tip] holding the DISCONNECTED branch, while the
+        // newly-adopted branch's blocks were only ever side-chain (never persisted -- neither
+        // connect_block nor process_block's tip-only persist writes them), so the append-only
+        // restart replay reconstructs the OLD chain (restart-rewind). Fix: persist the adopted
+        // branch NOW via the SYNCHRONOUS writer, which fsyncs before returning -- the default
+        // `write_block_json` only ENQUEUES to the async persist queue, leaving a crash-window
+        // in which a restart replays the stale old files and rewinds. `connected_new[i]` is the
+        // block at height ancestor+1+i (find_reorg_path returns the branch ascending). The old
+        // files above new_tip are left in place; the prev-hash-linked restart replay defers
+        // them (they cannot link onto the adopted tip) so the rebuilt tip stays at new_tip.
+        // Guarded on the on-disk max height (NOT the async-lagging `contiguous` watermark,
+        // which can trail the tip and skip a needed re-persist): a reorg forking below what has
+        // reached disk needs the rewrite; a no-op otherwise and in unit tests (nothing
+        // persisted => on-disk max height 0). (Trade-off: N synchronous writes under the chain
+        // lock for a reorg of depth N -- bounded by max_reorg_depth; a brief stall on a deep
+        // reorg, acceptable vs a silent restart-rewind.)
+        if ancestor_height < crate::storage::persisted_max_height_on_disk() {
+            for (i, blk) in connected_new.iter().enumerate() {
+                let h = ancestor_height + 1 + i as u64;
+                if let Err(e) = crate::storage::write_block_json_sync(h, blk) {
+                    eprintln!("[reorg][persist] failed to persist adopted block {}: {}", h, e);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -2909,16 +2927,29 @@ impl ChainState {
                     }
                     // A (sync/adoption alignment): if we already hold this candidate's
                     // full body path and our rank fork-choice DECLINES it (keeps our
-                    // chain), do not advertise it as best-header. Re-proposing a chain rank
-                    // has already disposed only spins the no_best_header_block_path loop
-                    // after B converges a shorter better-ranked tip. find_reorg_path (inside
+                    // chain), do not advertise it as best-header. find_reorg_path (inside
                     // proposer_rank_chain_better) returns Err for a candidate we do NOT
-                    // fully hold, so header-only tips are still proposed (rank disposes after
-                    // fetch); only fully-held, rank-declined tips are skipped here. Gated on
-                    // proposer_vrf_enforced to match the process_block reorg gate.
-                    if crate::poawx_proposer::proposer_vrf_enforced(tip_height)
-                        && matches!(self.proposer_rank_chain_better(cand), Ok(false))
-                    {
+                    // fully hold, so only fully-held, rank-declined tips are skipped here.
+                    // TEST-ONLY DIAG (IRIUM_BEST_HEADER_DIAG=1): log why each higher-work
+                    // candidate is kept/skipped -- to confirm whether A's skip ever fires.
+                    let rank_res = if crate::poawx_proposer::proposer_vrf_enforced(tip_height) {
+                        Some(self.proposer_rank_chain_better(cand))
+                    } else {
+                        None
+                    };
+                    if std::env::var("IRIUM_BEST_HEADER_DIAG").is_ok() {
+                        let tag = match &rank_res {
+                            None => "gate_off",
+                            Some(Ok(true)) => "Ok(true)_rank_says_adopt",
+                            Some(Ok(false)) => "Ok(false)_SKIP",
+                            Some(Err(_)) => "Err_incomplete_path",
+                        };
+                        eprintln!(
+                            "[best_header_diag] tip_h={} cand_h={} cand_work>tip rank={}",
+                            tip_height, hw.height, tag
+                        );
+                    }
+                    if matches!(rank_res, Some(Ok(false))) {
                         continue;
                     }
                 }
@@ -17345,6 +17376,284 @@ mod proposer_consensus_tests {
         cs2.validate_block_proposer(&block2, height, None)
             .expect("registered proposer key accepted");
         std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// PERMISSIONLESS ONBOARDING PROOF (the §10c "independent onboarding UNPROVEN"
+    /// milestone). A cold, non-incumbent key goes from CPU-locked-out to demotion-
+    /// eligible using ONLY a self-made registration (sybil PoW + self-signature +
+    /// a recent anchor) carried through the REAL on-ramp — no privilege, allowlist,
+    /// or operator action. Drives the real consensus fns end to end:
+    /// build_signed -> validate_block_proposer_registrations (permissionless inclusion)
+    /// -> apply_block_proposer_registrations (mandatory drain) -> freeze -> eligibility
+    /// -> proposer_demotion_applies (the demotion/CPU-viability unlock flips false->true).
+    #[test]
+    fn permissionless_cold_key_onboards_and_unlocks_demotion() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let envs = [
+            ("IRIUM_NETWORK", "devnet"),
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "0"),
+            ("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "0"),
+            ("IRIUM_POAWX_PROPOSER_VRF_REQUIRED", "1"),
+            ("IRIUM_POAWX_PROPOSER_REGISTRATION_ACTIVATION_HEIGHT", "0"),
+            ("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT", "0"),
+            ("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", "0"),
+            ("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2"),
+            ("IRIUM_POAWX_TICKET_SYBIL_BITS", "4"),
+        ];
+        for (k, v) in envs {
+            std::env::set_var(k, v);
+        }
+        let net = crate::activation::network_id_byte();
+        let required_bits = crate::poawx_ticket::effective_sybil_bits();
+
+        // The cold newcomer's PRODUCED block, at a height inside its future eligible
+        // window (prod_h = R + fd = 2 + 2). Built once; judged before and after onboarding.
+        let prod_h = 4u64;
+        let prod_prev = [0x5Au8; 32];
+        let prod_seed = expected_epoch_seed(prod_h, prod_prev, None);
+        let nc_secret = secret_n(0xC0);
+        let nc_proof = prove(&nc_secret, net, prod_h, prod_seed);
+        let nc_key = nc_proof.assignment_public_key;
+        let nc_pkh = nc_proof.solver_pkh;
+        let tmpl = ext_skeleton(net);
+        let nc_block = block_with_proof(&tmpl, prod_prev, prod_h, nc_proof, 0, 5_000);
+
+        // ===== PHASE 1: LOCKED OUT — a cold key ABSENT from a populated registry gets
+        // NO demotion. (An EMPTY registry is the bootstrap case where any proposer is
+        // accepted; the real §10c lockout is being outside a registry that already has
+        // an incumbent.) =====
+        {
+            let mut cs = base_chain();
+            let mut incumbent = [0u8; 33];
+            incumbent[0] = 0x02;
+            incumbent[1] = 0xEE;
+            cs.proposer_registry.register(incumbent, [0x7Au8; 20], 0);
+            assert_eq!(cs.proposer_registry.eligible_count(prod_h), 1, "populated registry (incumbent)");
+            assert!(!cs.proposer_registry.is_registered(&nc_key), "the newcomer is cold");
+            assert!(
+                !cs.proposer_demotion_applies(&nc_block, prod_h, None),
+                "cold key outside a populated registry gets NO PoW demotion => full target => CPU locked out"
+            );
+        }
+
+        // ===== PHASE 2: PERMISSIONLESS ON-RAMP — self-made reg -> validate -> drain. =====
+        let mut cs = base_chain(); // chain = [genesis]
+        let anchor_h = 0u64;
+        let anchor_hash = cs.chain[0].header.hash_for_height(0);
+        // (a) the newcomer builds its OWN registration: sybil PoW + self-signature only.
+        let reg = crate::poawx::ProposerRegistrationV1::build_signed(
+            &nc_secret,
+            net,
+            anchor_h,
+            &anchor_hash,
+            required_bits,
+        )
+        .expect("cold key self-registers with no privilege");
+        assert_eq!(reg.vrf_pubkey, nc_key, "the registered key IS the block's proposer key");
+        assert_eq!(reg.pkh(), nc_pkh);
+        reg.validate(net, &anchor_hash, required_bits)
+            .expect("the self-made registration is self-valid (no allowlist/auth)");
+        // control: a forged registration is rejected by the SAME validator.
+        let mut forged = reg.clone();
+        forged.signature[0] ^= 0xff;
+        assert!(
+            forged.validate(net, &anchor_hash, required_bits).is_err(),
+            "a forged registration signature must be rejected"
+        );
+
+        // helper: a producer block carrying a proposer-registration section.
+        let mk_reg_block = |prev: [u8; 32], h: u64, sec: crate::poawx::ProposerRegistrationSection| -> Block {
+            let seed = expected_epoch_seed(h, prev, None);
+            let proof = prove(&secret_n(7), net, h, seed);
+            let mut b = block_with_proof(&tmpl, prev, h, proof, 0, 5_000);
+            if let Some(r) = b.poawx_receipts.as_mut().and_then(|rs| rs.get_mut(0)) {
+                if let Some(ext) = r.phase20_ext.as_mut() {
+                    ext.proposer_registrations = Some(sec);
+                }
+            }
+            b
+        };
+
+        // (b) a producer ANNOUNCES the third-party registration at height 1: the real
+        //     inclusion validator ACCEPTS it (permissionless — no allowlist), the real
+        //     drain enqueues it.
+        let ann_block = mk_reg_block(
+            anchor_hash,
+            1,
+            crate::poawx::ProposerRegistrationSection {
+                announces: vec![reg.clone()],
+                activations: vec![],
+            },
+        );
+        cs.validate_block_proposer_registrations(&ann_block, 1)
+            .expect("a producer may include ANY valid third-party registration announce");
+        cs.chain.push(ann_block);
+        cs.apply_block_proposer_registrations(1);
+        assert_eq!(cs.proposer_reg_queue.len(), 1, "announce enqueued into the on-chain queue");
+
+        // (c) the next block MUST force-drain it (mandatory activation) at height 2.
+        let act_block = mk_reg_block(
+            cs.tip_hash(),
+            2,
+            crate::poawx::ProposerRegistrationSection {
+                announces: vec![],
+                activations: vec![reg.clone()],
+            },
+        );
+        cs.validate_block_proposer_registrations(&act_block, 2)
+            .expect("mandatory drain: activation equals the queue head");
+        cs.chain.push(act_block);
+        cs.apply_block_proposer_registrations(2);
+        assert!(
+            cs.proposer_registry.is_registered(&nc_key),
+            "the newcomer is now ON-CHAIN registered (R=2) with no privilege"
+        );
+        assert!(cs.proposer_reg_queue.is_empty(), "queue fully drained");
+
+        // (d) freeze (fd=2): frozen until R+fd, eligible at/after it.
+        assert!(!cs.proposer_registry.is_eligible(&nc_key, 3), "still frozen at target 3 (< R+fd)");
+        assert!(cs.proposer_registry.is_eligible(&nc_key, prod_h), "eligible at target 4 (R+fd)");
+
+        // ===== PHASE 3: ONBOARDED — the SAME cold block now unlocks demotion. =====
+        assert_eq!(cs.proposer_registry.eligible_count(prod_h), 1);
+        assert!(
+            matches!(cs.check_block_proposer(&nc_block, prod_h, None), Ok(true)),
+            "the onboarded newcomer is now a valid, selected, eligible proposer"
+        );
+        assert!(
+            cs.proposer_demotion_applies(&nc_block, prod_h, None),
+            "PoW demotion now applies => floor target => a CPU can produce an accepted block"
+        );
+
+        for (k, _) in envs {
+            std::env::remove_var(k);
+        }
+    }
+
+    /// NET-0 CONTEXT companion to the onboarding proof (the §12-mandated coverage: a
+    /// mainnet-only `network_id == 0` path must be exercised in a net-0 test, not assumed
+    /// from devnet). Hits the ACTUAL mainnet branches the devnet test cannot — hardcoded
+    /// activation heights, `MAINNET_TICKET_SYBIL_BITS == 20`, `proposer_vrf_required()`
+    /// forced true. Pure unit test: no node, no P2P, no I/O (running a net-0 NODE is
+    /// forbidden; a net-0 unit test is the safe way to reach these branches).
+    #[test]
+    fn net0_onboarding_gates_arm_validator_functions_and_demotion_couples() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        // clear any devnet activation overrides — net-0 ignores them for activations,
+        // but freeze-depth/sybil-bits reads should see mainnet defaults.
+        for k in [
+            "IRIUM_POAWX_PROPOSER_FREEZE_DEPTH",
+            "IRIUM_POAWX_TICKET_SYBIL_BITS",
+            "IRIUM_POAWX_PROPOSER_VRF_REQUIRED",
+        ] {
+            std::env::remove_var(k);
+        }
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        let net = crate::activation::network_id_byte();
+        assert_eq!(net, 0, "net-0 (mainnet) context");
+
+        // (1) GATES ARM at the real hardcoded mainnet heights (refutes the stale
+        // 'network_id==0 => hard-off' comments; matches §10b/§10).
+        use crate::poawx_proposer as pp;
+        assert!(!pp::proposer_registration_active(49_999));
+        assert!(pp::proposer_registration_active(50_000), "registration LIVE on mainnet >=50k");
+        assert!(pp::proposer_vrf_enforced(50_000), "vrf enforced on mainnet (required()==true)");
+        assert!(!pp::proposer_nonexclusive_active(59_899));
+        assert!(pp::proposer_nonexclusive_active(59_900), "N1 LIVE on mainnet >=59.9k");
+        assert!(!pp::pow_demotion_active(61_413));
+        assert!(pp::pow_demotion_active(61_414), "demotion LIVE on mainnet >=61,414");
+
+        // (2) the registration VALIDATOR functions on net-0 (NOT enforce-on/validate-off):
+        // a valid self-made reg with MAINNET sybil bits is accepted; a forged one rejected.
+        let required_bits = crate::poawx_ticket::effective_sybil_bits();
+        assert_eq!(required_bits, 20, "MAINNET_TICKET_SYBIL_BITS");
+        let anchor_hash = [0x9Au8; 32]; // the validator self-check needs only the hash value
+        let nc_secret = secret_n(0xC1);
+        let reg = crate::poawx::ProposerRegistrationV1::build_signed(
+            &nc_secret,
+            net,
+            61_414,
+            &anchor_hash,
+            required_bits,
+        )
+        .expect("net-0 self-registration builds (20-bit sybil grind)");
+        reg.validate(net, &anchor_hash, required_bits)
+            .expect("net-0 registration validator ACCEPTS a valid self-made reg (not hard-off)");
+        let mut forged = reg.clone();
+        forged.signature[0] ^= 0xff;
+        assert!(
+            forged.validate(net, &anchor_hash, required_bits).is_err(),
+            "net-0 validator rejects a forged registration"
+        );
+
+        // (3) demotion COUPLES to eligibility on net-0 at mainnet heights.
+        let prod_h = 61_430u64; // >= 61,414 (demotion) and == R + fd(16)
+        let prod_prev = [0x5Bu8; 32];
+        let prod_seed = expected_epoch_seed(prod_h, prod_prev, None);
+        let nc_proof = prove(&nc_secret, net, prod_h, prod_seed);
+        let nc_key = nc_proof.assignment_public_key;
+        let nc_pkh = nc_proof.solver_pkh;
+        assert_eq!(reg.vrf_pubkey, nc_key, "registered key IS the block proposer key");
+        let tmpl = ext_skeleton(net);
+        let nc_block = block_with_proof(&tmpl, prod_prev, prod_h, nc_proof, 0, 5_000);
+
+        // locked out: an incumbent is registered, the newcomer is cold.
+        {
+            let mut cs = base_chain();
+            let mut inc = [0u8; 33];
+            inc[0] = 0x02;
+            inc[1] = 0xEE;
+            cs.proposer_registry.register(inc, [0x7Au8; 20], 61_414);
+            assert!(
+                !cs.proposer_demotion_applies(&nc_block, prod_h, None),
+                "net-0 cold key outside a populated registry gets NO demotion"
+            );
+        }
+
+        // onboarded: newcomer registered (R=61,414) => eligible at R+fd => demotion applies.
+        let mut cs = base_chain();
+        cs.proposer_registry.register(nc_key, nc_pkh, 61_414);
+        assert!(!cs.proposer_registry.is_eligible(&nc_key, 61_429), "frozen just before R+fd");
+        assert!(cs.proposer_registry.is_eligible(&nc_key, prod_h), "eligible at R+fd on net-0");
+        assert!(
+            matches!(cs.check_block_proposer(&nc_block, prod_h, None), Ok(true)),
+            "net-0: onboarded newcomer is a valid, selected, eligible proposer"
+        );
+        assert!(
+            cs.proposer_demotion_applies(&nc_block, prod_h, None),
+            "net-0: onboarding unlocks PoW demotion => a CPU can produce an accepted block"
+        );
+
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// Convergence rework #3: K is a consensus parameter, so mainnet (net-0) MUST ignore
+    /// the env override (else two nodes with different K fork). Off-mainnet keeps env for tests.
+    #[test]
+    fn rank_rewind_window_const_forced_on_mainnet() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_POAWX_RANK_REWIND_WINDOW", "3");
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        assert_eq!(
+            crate::poawx_proposer::rank_rewind_window(),
+            crate::poawx_proposer::DEFAULT_RANK_REWIND_WINDOW,
+            "net-0 must ignore the env K and use the compiled const"
+        );
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        assert_eq!(crate::poawx_proposer::rank_rewind_window(), 3, "off-mainnet honors env K");
+        std::env::remove_var("IRIUM_POAWX_RANK_REWIND_WINDOW");
+        // re-review Finding 2: max_reorg_depth is also a consensus knob -> const-forced on net-0.
+        std::env::set_var("IRIUM_POAWX_MAX_REORG_DEPTH", "42");
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        assert_eq!(
+            crate::poawx_proposer::max_reorg_depth(),
+            crate::poawx_proposer::DEFAULT_MAX_REORG_DEPTH_MAINNET,
+            "net-0 must ignore the env max_reorg_depth"
+        );
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        assert_eq!(crate::poawx_proposer::max_reorg_depth(), 42, "off-mainnet honors env max_reorg_depth");
+        std::env::remove_var("IRIUM_POAWX_MAX_REORG_DEPTH");
         std::env::remove_var("IRIUM_NETWORK");
     }
 

@@ -265,22 +265,75 @@ pub fn rank_length_floor_active(height: u64) -> bool {
 /// would disconnect) at or below which the rank-length floor is RELAXED, so a
 /// better-ranked shorter chain can win — this converges shallow simultaneous-failover
 /// races. BEYOND this depth the absolute V1 floor holds, preserving deep-rewind /
-/// long-range-attack protection. Still env-overridable via IRIUM_POAWX_RANK_REWIND_WINDOW.
-///
-/// K = 20 (2026-07-24, Phase 3 safe-K analysis, `POAWX_AB_PHASE3_SAFE_K_20260724.md`):
-/// liveness needs K >= d_obs = partition_seconds / block_interval (~71 s/block on mainnet ⇒
-/// K=20 tolerates a ~24-min transient partition); security needs K small because there is
-/// NO finality backstop (finalized_height=0) so K is the SOLE bound on a shorter-reorg
-/// rewind (K=20 ⇒ ≤ ~24 min of history, recoverable). Safe window [~17,~30]; 6 was too tight.
-/// ⚠️ CONSENSUS PARAMETER: it changes which reorgs are valid, so it must be RATIFIED and be
-/// IDENTICAL fleet-wide before activation (a K mismatch is itself a non-convergence source);
-/// it is gated on the same activation as the length floor (`rank_length_floor_active`).
+/// long-range-attack protection. Env-driven on the harness; a reviewed mainnet const
+/// would replace the default at productionization (paired with the same activation as
+/// the length floor).
 pub const DEFAULT_RANK_REWIND_WINDOW: u64 = 20;
 pub fn rank_rewind_window() -> u64 {
+    // K is a CONSENSUS parameter: two nodes with different K compute different fork-choice
+    // verdicts and permanently fork. On mainnet (net-0) it MUST be identical fleet-wide, so
+    // ignore the env override and use the compiled const (mirrors rank_length_floor_gate /
+    // pow_demotion_gate, which also ignore env on net-0). Env stays live off-mainnet for tests.
+    if crate::activation::network_id_byte() == 0 {
+        return DEFAULT_RANK_REWIND_WINDOW;
+    }
     std::env::var("IRIUM_POAWX_RANK_REWIND_WINDOW")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .unwrap_or(DEFAULT_RANK_REWIND_WINDOW)
+}
+
+/// CONVERGENCE FIX (symmetric deep-fork rule) — the content-only fork-choice TOTAL ORDER.
+/// Returns true iff `candidate` is preferred over `current`. Each branch is its proposer-rank
+/// sequence ABOVE the common ancestor (index 0 = the first block after the ancestor). Because
+/// the decision is a pure function of chain CONTENT (never of "which branch this node holds"),
+/// it is antisymmetric — `prefers(A,B) == !prefers(B,A)` for A≠B — so every node computes the
+/// same winner ⇒ convergent, and it is a genuine total order (TALL branches `len > K` ordered by
+/// length rank ABOVE SHORT branches `len ≤ K` ordered by rank-lex ⇒ transitive, arrival-order-
+/// independent). This REPLACES the asymmetric `rank_length_floor_blocks` early-return, whose
+/// gating on the evaluating node's own `current_len` made it NOT a total order (the beyond-K
+/// permanent-fork bug: the short-branch node kept its own chain on rank instead of adopting the
+/// longer one). Semantics preserved: beyond K the LONGER chain wins (rank cannot force a deep
+/// rewind — the original floor's intent, now made symmetric); within K, rank-lexicographic at the
+/// first differing height; final tie = lower tip hash (hardening on) / longer branch (legacy).
+/// `floor_active == false` (gate off / pre-activation) ⇒ no deep rule ⇒ byte-identical legacy.
+pub fn fork_choice_prefers_candidate(
+    floor_active: bool,
+    rewind_window: u64,
+    candidate_ranks: &[(u32, u64)],
+    current_ranks: &[(u32, u64)],
+    candidate_tip: &[u8; 32],
+    current_tip: &[u8; 32],
+    hardening_active: bool,
+) -> bool {
+    let (cl, ml) = (candidate_ranks.len(), current_ranks.len());
+    // Beyond K (node-independent: max of the two lengths), LENGTH decides — symmetric.
+    if floor_active && (cl.max(ml) as u64) > rewind_window && cl != ml {
+        return cl > ml;
+    }
+    // Within K (or equal-length deep): rank-lexicographic at the first differing height.
+    let shared = cl.min(ml);
+    for i in 0..shared {
+        if candidate_ranks[i] != current_ranks[i] {
+            return candidate_ranks[i] < current_ranks[i];
+        }
+    }
+    // Tie over the shared prefix: deterministic lowest-tip-hash (hardening) removes length as a
+    // lever; legacy path keeps longest-branch (byte-identical when hardening is off).
+    if hardening_active {
+        candidate_tip < current_tip
+    } else if cl != ml {
+        cl > ml
+    } else {
+        // Equal length + identical rank prefix with hardening OFF: the legacy longest-branch
+        // rule (cl > ml) is false in BOTH directions => not a total order (a latent permanent
+        // fork for equal-length identical-rank siblings). Unreachable on mainnet (wherever the
+        // floor is active hardening is too), but reachable in an off-mainnet floor-on/
+        // hardening-off config, so fall through to the deterministic tip-hash to keep this a
+        // total order there. Byte-identical to legacy for the (overwhelmingly common) unequal-
+        // length case above.
+        candidate_tip < current_tip
+    }
 }
 
 /// B (pure, unit-testable core of the bounded rank-rewind window): does the rank-length
@@ -320,6 +373,77 @@ mod rank_rewind_tests {
         // K == 0 reproduces the PRE-FIX absolute floor: any shorter candidate blocked =
         // the exact deadlock B removes within the window.
         assert!(blk(true, 3, 5, 0), "K=0 == pre-fix: shorter always blocked (deadlock)");
+    }
+
+    use super::fork_choice_prefers_candidate as prefers;
+
+    #[test]
+    fn fork_choice_converges_the_beyond_k_permanent_fork() {
+        // Reproduces the CONFIRMED 61,690-class break, then proves the fix converges it.
+        // Branch A: 25 blocks above the ancestor. Branch B: 22 blocks, BETTER-ranked at the
+        // first differing height. Fork depth (25) > K=20.
+        let k = 20u64;
+        let (a_tip, b_tip) = ([0xAAu8; 32], [0xBBu8; 32]);
+        let mut a = vec![(1u32, 500u64)]; // A[0]: worse (higher) rank
+        let mut b = vec![(0u32, 100u64)]; // B[0]: better (lower) rank
+        for i in 1..25 { a.push((0, 1_000 + i as u64)); }
+        for i in 1..22 { b.push((0, 2_000 + i as u64)); }
+        assert_eq!((a.len(), b.len()), (25, 22));
+
+        // THE BUG (old asymmetric floor): the long node blocks the short reorg, the short
+        // node keeps its own on rank => BOTH keep their own => permanent fork.
+        let long_node_blocks_b = blk(true, b.len(), a.len(), k); // node on A vs cand B
+        let short_node_blocks_a = blk(true, a.len(), b.len(), k); // node on B vs cand A
+        assert!(long_node_blocks_b && !short_node_blocks_a,
+            "old floor is asymmetric (blocks only on the long node) => the permanent fork");
+
+        // THE FIX: content-only total order converges BOTH nodes onto A (longer, beyond K).
+        let a_node_prefers_b = prefers(true, k, &b, &a, &b_tip, &a_tip, true); // node on A, cand B
+        let b_node_prefers_a = prefers(true, k, &a, &b, &a_tip, &b_tip, true); // node on B, cand A
+        assert!(!a_node_prefers_b, "node on A keeps A");
+        assert!(b_node_prefers_a, "node on B ADOPTS A (short node adopts the longer beyond K)");
+        // => both nodes end on A. Converged.
+    }
+
+    #[test]
+    fn fork_choice_prefers_candidate_is_antisymmetric_total_order() {
+        // For any two DISTINCT chains, prefers(X,Y) == !prefers(Y,X) (a total order => no
+        // permanent two-way fork). Covers within-K, at-K, beyond-K, equal-length, and tie.
+        let k = 4u64;
+        let (tx, ty) = ([1u8; 32], [2u8; 32]); // X always carries tx, Y always ty
+        let mk = |len: usize, base: u64| -> Vec<(u32, u64)> {
+            (0..len).map(|i| (0u32, base + i as u64)).collect()
+        };
+        let cases = [
+            (mk(6, 10), mk(3, 20)), // beyond K, different length => length
+            (mk(6, 10), mk(6, 20)), // beyond K, equal length => rank
+            (mk(3, 10), mk(2, 20)), // within K, different length
+            (mk(2, 10), mk(2, 10)), // identical ranks => tie => tip hash
+            (mk(5, 10), mk(4, 10)), // K boundary (5 > K=4)
+            (mk(4, 10), mk(4, 20)), // exactly K, equal length => rank
+            (mk(21, 1), mk(1, 9)),  // deep vs tiny
+        ];
+        for (x, y) in &cases {
+            let xy = prefers(true, k, x, y, &tx, &ty, true);
+            let yx = prefers(true, k, y, x, &ty, &tx, true);
+            assert_ne!(xy, yx,
+                "antisymmetry: exactly one of prefers(X,Y)/prefers(Y,X) for distinct chains (lens {} vs {})",
+                x.len(), y.len());
+        }
+        // gate OFF => legacy: no deep rule, so a beyond-K shorter better-ranked chain wins on
+        // rank (byte-identical to pre-activation behavior).
+        let short_better = mk(1, 1);
+        let long_worse = mk(30, 100);
+        assert!(prefers(false, k, &short_better, &long_worse, &tx, &ty, true),
+            "gate off: rank alone decides (legacy) => shorter better-ranked preferred");
+        // Fix #4: the LEGACY tiebreak (hardening OFF) must ALSO be a total order for the
+        // equal-length identical-rank sibling case (old `cl > ml` was false both ways => fork).
+        let (ida, idb) = (mk(2, 10), mk(2, 10)); // identical ranks, equal length, distinct tips
+        assert_ne!(
+            prefers(true, k, &ida, &idb, &tx, &ty, false),
+            prefers(true, k, &idb, &ida, &ty, &tx, false),
+            "legacy (hardening-off) tiebreak must be a total order for equal-length identical-rank siblings"
+        );
     }
 }
 
@@ -775,15 +899,17 @@ pub fn contributor_role_binding_active(height: u64) -> bool {
 /// the effective reorg floor is `max(finalized_height, tip - max_reorg_depth())`.
 /// Network default + env override, floored at `MAX_REORG_DEPTH_HARD_FLOOR`.
 pub fn max_reorg_depth() -> u64 {
-    let default = if network_id_byte() == 0 {
-        DEFAULT_MAX_REORG_DEPTH_MAINNET
-    } else {
-        DEFAULT_MAX_REORG_DEPTH_DEVNET
-    };
+    // Consensus parameter (bounds every reorg in `reorg_to_tip`): on mainnet (net-0) it MUST
+    // be identical fleet-wide — two nodes with different caps accept/reject different reorgs
+    // => permanent fork — so ignore the env override and use the compiled const (mirrors
+    // rank_rewind_window / pow_demotion_gate, which also ignore env on net-0).
+    if network_id_byte() == 0 {
+        return DEFAULT_MAX_REORG_DEPTH_MAINNET.max(MAX_REORG_DEPTH_HARD_FLOOR);
+    }
     std::env::var("IRIUM_POAWX_MAX_REORG_DEPTH")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
-        .unwrap_or(default)
+        .unwrap_or(DEFAULT_MAX_REORG_DEPTH_DEVNET)
         .max(MAX_REORG_DEPTH_HARD_FLOOR)
 }
 
@@ -791,15 +917,15 @@ pub fn max_reorg_depth() -> u64 {
 /// advance `finalized_height` (Fix 2). Below this, finality does not advance and the
 /// depth cap is the protection.
 pub fn min_finality_committee() -> u64 {
-    let default = if network_id_byte() == 0 {
-        DEFAULT_MIN_FINALITY_COMMITTEE_MAINNET
-    } else {
-        DEFAULT_MIN_FINALITY_COMMITTEE_DEVNET
-    };
+    // Consensus parameter (gates finalized_height advancement): const-forced on mainnet
+    // (net-0), env-honored off-mainnet — same fleet-consistency rationale as max_reorg_depth.
+    if network_id_byte() == 0 {
+        return DEFAULT_MIN_FINALITY_COMMITTEE_MAINNET.max(1);
+    }
     std::env::var("IRIUM_POAWX_MIN_FINALITY_COMMITTEE")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
-        .unwrap_or(default)
+        .unwrap_or(DEFAULT_MIN_FINALITY_COMMITTEE_DEVNET)
         .max(1)
 }
 

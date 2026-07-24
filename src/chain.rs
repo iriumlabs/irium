@@ -4197,7 +4197,12 @@ pub fn pool_admission_enforced(height: u64) -> bool {
         // assignment-proof VRF check (`AssignmentProofV2::validate`) is REAL, not hard-off; it rides
         // advisory here too until pool admission is re-armed TOGETHER with an un-hard-off ticket
         // validator, proven on a network_id==0 connect_block test.
-        return false;
+        // PHASE 2 (2026-07-25): the validator IS now un-hard-off (Phase 1, proven net-0), so the
+        // re-arm precondition holds. This gate and `tickets_enforced` now BOTH route through the
+        // COMBINED `pool_ticket_enforced` (const None ⇒ still OFF/inert), so they arm TOGETHER and
+        // can never be enforce-on/validate-off. Flip the const only after the producing net-0 PLA1
+        // proof AND once real participants exist.
+        return crate::poawx_ticket::pool_ticket_enforced(height);
     }
     match crate::activation::poawx_pool_admission_activation_height() {
         Some(h) => height >= h,
@@ -16375,6 +16380,41 @@ mod tests {
             "no env can arm mandatory inclusion on mainnet (code-change only)"
         );
         std::env::remove_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT");
+    }
+
+    // Phase 2 (2026-07-25): the COMBINED pool-admission + ticket arming. Proves it is INERT on
+    // mainnet (const None) and that `tickets_enforced` and `pool_admission_enforced` are COUPLED
+    // at network_id==0 — they route through the same `pool_ticket_enforced`, so they can never be
+    // enforce-on/validate-off (the 2026-07-23 halt class). A regression guard: if a future edit
+    // arms one gate without the other, this fails.
+    #[test]
+    fn pool_ticket_combined_arming_couples_and_inert_net0() {
+        use crate::poawx_ticket::{
+            pool_ticket_gate, tickets_enforced, MAINNET_POOL_TICKET_ACTIVATION_HEIGHT,
+        };
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("IRIUM_NETWORK"); // net==0 (mainnet context)
+        assert_eq!(crate::activation::network_id_byte(), 0, "mainnet context");
+        // (1) INERT: compiled arm point is None -> OFF at every height.
+        assert!(MAINNET_POOL_TICKET_ACTIVATION_HEIGHT.is_none(), "arm point inert (None) by default");
+        // (2) param-driven arm point activates at/after its height (simulates a future const flip).
+        assert!(!pool_ticket_gate(None, 10_000_000), "None -> off at any height");
+        assert!(!pool_ticket_gate(Some(100), 99), "below activation -> off");
+        assert!(pool_ticket_gate(Some(100), 100), "at activation -> on");
+        assert!(pool_ticket_gate(Some(100), 101), "after activation -> on");
+        // (3) COUPLING: the two gates are IDENTICAL for every height at net==0 (shared source),
+        //     so they arm together and can NEVER diverge into enforce-on/validate-off. Const is
+        //     None here -> both currently OFF (inert), but the equality is what this guards.
+        for h in [1u64, 50_000, 61_414, 61_415, 10_000_000] {
+            assert_eq!(
+                tickets_enforced(h),
+                pool_admission_enforced(h),
+                "tickets_enforced and pool_admission_enforced must be coupled at net==0 (h={h})"
+            );
+            assert!(!pool_admission_enforced(h), "inert on mainnet (const None) at height {h}");
+        }
     }
 
     // Productionization: RCR1 registration-tx codec + block scan + EXPLICIT burn

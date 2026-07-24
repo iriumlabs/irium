@@ -115,6 +115,30 @@ pub fn effective_sybil_bits() -> u32 {
     }
 }
 
+/// Phase 2 (2026-07-25): COMBINED pool-admission + ticket enforcement activation. Arms BOTH
+/// `tickets_enforced` and `chain::pool_admission_enforced` at ONE height so a multi-payee
+/// fan-out block's sybil tickets AND its pool-member admission are enforced together — they can
+/// never diverge into the enforce-on/validate-off HALT class (CLAUDE.md §12). Gated on the
+/// Phase-1 un-hard-off ticket VALIDATOR. Inert on mainnet (const = None); flip to `Some(h)` ONLY
+/// after the producing network_id=0 PLA1 proof AND once real independent participants exist
+/// (else there is no one to ticket). Env-gated on devnet for harness proofs.
+pub const MAINNET_POOL_TICKET_ACTIVATION_HEIGHT: Option<u64> = None;
+
+/// Pure gate logic (param-driven so tests can vary the activation without global env).
+pub fn pool_ticket_gate(activation: Option<u64>, height: u64) -> bool {
+    matches!(activation, Some(h) if height >= h)
+}
+
+pub fn pool_ticket_enforced(height: u64) -> bool {
+    if network_id_byte() == 0 {
+        return pool_ticket_gate(MAINNET_POOL_TICKET_ACTIVATION_HEIGHT, height);
+    }
+    let env = std::env::var("IRIUM_POAWX_POOL_TICKET_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok());
+    pool_ticket_gate(env, height)
+}
+
 impl MinerWorkTicket {
     /// Canonical serialization. `bond_reference` present-flag is a single byte.
     pub fn serialize(&self) -> Vec<u8> {
@@ -342,7 +366,9 @@ pub fn tickets_enforced(height: u64) -> bool {
         // activation, proven on a producing network_id=0 connect_block harness, and only once real
         // independent participants exist (else there is no one to ticket). TPK1 sections ride
         // advisory/unvalidated until then. See POAWX_FAIR_DISTRIBUTION_ACTIVATION_DESIGN_20260725.
-        return false;
+        // PHASE 2 (2026-07-25): route through the COMBINED gate so tickets + pool-admission arm
+        // TOGETHER (const None ⇒ still OFF/inert).
+        return pool_ticket_enforced(height);
     }
     tickets_active(height) && tickets_required()
 }

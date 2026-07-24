@@ -295,10 +295,15 @@ pub const MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT: Option<u64> = None;
 
 pub fn mandatory_inclusion_enforce_active(height: u64) -> bool {
     if crate::activation::network_id_byte() == 0 {
-        return matches!(
-            MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT,
-            Some(h) if height >= h
-        );
+        // Phase 3 (2026-07-25): on mainnet, mandatory-inclusion ENFORCE arms with the SAME combined
+        // fair-distribution activation as tickets + pool-admission (all route through
+        // `pool_ticket_enforced`), so the three arm as ONE unit — inclusion and sybil-cost can never
+        // split (inclusion without sybil-cost is grindable; sybil-cost without inclusion doesn't force
+        // distinctness). The RECORD phase (separate const below) must still precede enforce by >= L
+        // blocks so the window is populated at enforce; set its const to (E - L) when flipping E.
+        // Const None => inert. (MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT is now superseded on
+        // net==0 by the combined const; retained for the devnet env path + record-phase symmetry.)
+        return crate::poawx_ticket::pool_ticket_enforced(height);
     }
     std::env::var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT")
         .ok()

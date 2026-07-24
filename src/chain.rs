@@ -16602,13 +16602,15 @@ mod tests {
         // (3) COUPLING: the two gates are IDENTICAL for every height at net==0 (shared source),
         //     so they arm together and can NEVER diverge into enforce-on/validate-off. Const is
         //     None here -> both currently OFF (inert), but the equality is what this guards.
+        // Phase 3: mandatory-inclusion ENFORCE joins the coupling — all THREE fair-distribution
+        // enforce gates route through pool_ticket_enforced at net==0, so they arm as ONE unit.
         for h in [1u64, 50_000, 61_414, 61_415, 10_000_000] {
-            assert_eq!(
-                tickets_enforced(h),
-                pool_admission_enforced(h),
-                "tickets_enforced and pool_admission_enforced must be coupled at net==0 (h={h})"
-            );
-            assert!(!pool_admission_enforced(h), "inert on mainnet (const None) at height {h}");
+            let t = tickets_enforced(h);
+            let p = pool_admission_enforced(h);
+            let m = crate::poawx_admission::mandatory_inclusion_enforce_active(h);
+            assert_eq!(t, p, "tickets_enforced and pool_admission_enforced coupled at net==0 (h={h})");
+            assert_eq!(p, m, "pool_admission and mandatory-inclusion enforce coupled at net==0 (h={h})");
+            assert!(!p, "inert on mainnet (const None) at height {h}");
         }
     }
 

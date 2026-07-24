@@ -16173,6 +16173,187 @@ mod tests {
 
     // network_id=0 (mainnet) CONTEXT test: the rule arrives INERT and no config can
     // arm it — only a code change to the compiled const can (the §12 discipline).
+    // PRODUCING LIFECYCLE (run under BOTH a devnet net AND network_id=0 mainnet context, §12):
+    // drive REAL blocks carrying REAL RCR1 registration txs through the ON-CHAIN scan path
+    // (validate_block_mandatory_inclusion reads self.chain + the `previous` param), NOT the
+    // hand-built-ledger primitives the five_part test exercises. Closes the "producing devnet" gap.
+    #[test]
+    fn poawx_mandatory_inclusion_producing_lifecycle() {
+        use crate::poawx::ROLE_SUPPORT_CONTRIBUTOR;
+        use crate::poawx_admission::{encode_rcr1_script, MANDATORY_FEE_BURN_MIN};
+        use crate::poawx_candidate::{CandidateSet, RoleCandidate};
+        use crate::poawx_committed_admission::expected_epoch_seed;
+        use crate::poawx_penalty::PenaltyStatus;
+        use crate::tx::{Transaction, TxOutput};
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+
+        for net_env in ["testnet", ""] {
+            if net_env.is_empty() {
+                std::env::remove_var("IRIUM_NETWORK"); // => network_id 0 (mainnet context, §12)
+            } else {
+                std::env::set_var("IRIUM_NETWORK", net_env);
+            }
+            let net = crate::activation::network_id_byte();
+            let ctx = if net == 0 { "net0" } else { "devnet" };
+            let sk = test_signing_key();
+            let target = 80u64; // > MANDATORY_LEAD_WINDOW (64): full window is in range
+            let floor = MANDATORY_FEE_BURN_MIN;
+
+            // a fresh chain of empty blocks [0..target-1] (blocks EXIST, carry no registrations).
+            let fresh = || {
+                let mut s = base_chain(None);
+                while (s.chain.len() as u64) < target {
+                    let h = s.chain.len() as u64;
+                    let prev = s.chain[(h - 1) as usize].header.hash_for_height(h - 1);
+                    s.chain.push(Block {
+                        header: BlockHeader { version: 1, prev_hash: prev, merkle_root: [0u8; 32], time: 0, bits: 0x207fffff, nonce: 0 },
+                        transactions: vec![],
+                        auxpow: None,
+                        poawx_receipts: None,
+                    });
+                }
+                s
+            };
+            let mut st = fresh();
+            let previous = st.chain[(target - 1) as usize].clone();
+            let prev_hash = previous.header.hash_for_height(target - 1);
+            // the exact seed the validator will recompute for `target`.
+            let seed = expected_epoch_seed(target, prev_hash, Some(&previous));
+
+            let mk = |solver: [u8; 20], tag: u8, dom: u64| {
+                RoleCandidate::build(
+                    net, target, &seed, ROLE_SUPPORT_CONTRIBUTOR, solver,
+                    [0x02u8; 33], [tag; 32], PenaltyStatus::Clean.id(), dom, [tag.wrapping_add(1); 32],
+                )
+            };
+            let a = [0xA1u8; 20]; // the producing node itself
+            let (b, c, d) = ([0xB1u8; 20], [0xC1u8; 20], [0xD1u8; 20]);
+            let (b_sup, c_sup, d_sup) = (mk(b, 0x21, 1000), mk(c, 0x22, 5000), mk(d, 0x23, 3000));
+            let a_sup = mk(a, 0x25, 9000);
+
+            // a real RCR1 registration tx: OP_RETURN output whose VALUE is the burned fee.
+            let mk_reg_tx = |cand: &RoleCandidate, burn: u64| Transaction {
+                version: 1,
+                inputs: vec![],
+                outputs: vec![TxOutput { value: burn, script_pubkey: encode_rcr1_script(target, &seed, cand) }],
+                locktime: 0,
+            };
+            // overwrite the on-chain block at `rh` with one carrying these registration txs.
+            let put_regs = |s: &mut ChainState, rh: u64, regs: Vec<Transaction>| {
+                let idx = rh as usize;
+                let prev = s.chain[idx].header.prev_hash;
+                s.chain[idx] = Block {
+                    header: BlockHeader { version: 1, prev_hash: prev, merkle_root: [0u8; 32], time: 0, bits: 0x207fffff, nonce: 0 },
+                    transactions: regs,
+                    auxpow: None,
+                    poawx_receipts: None,
+                };
+            };
+            // a production block at `target` whose SUPPORT candidate-set = `support`.
+            let mk_prod = |support: &[RoleCandidate]| -> Block {
+                let mut cs = CandidateSet::new(net, target, seed);
+                for s in support { cs.push(s.clone()); }
+                cs.sort_canonical();
+                let mut ext = p20_ext(net, target, &seed, 0, [0u8; 20]);
+                ext.candidate_set = Some(cs);
+                let mut r = make_test_receipt(target, &sk, prev_hash, 1);
+                r.phase20_ext = Some(ext);
+                Block {
+                    header: BlockHeader { version: 1, prev_hash, merkle_root: [0u8; 32], time: 0, bits: 0x207fffff, nonce: 0 },
+                    transactions: vec![],
+                    auxpow: None,
+                    poawx_receipts: Some(vec![r]),
+                }
+            };
+            let ok_blk = mk_prod(&[b_sup.clone(), c_sup.clone(), d_sup.clone()]);
+
+            // (3) SOLE-PRODUCER NO-HALT: empty window (no registrations) -> self-fill is VALID.
+            //     Proven on `st` BEFORE any registrations are placed (window all-empty blocks).
+            let solo = mk_prod(&[a_sup.clone()]);
+            assert!(
+                st.validate_block_mandatory_inclusion(&solo, Some(&previous), target).is_ok(),
+                "[{ctx}] lone producer, empty on-chain window -> self-fill VALID (NO HALT)"
+            );
+
+            // place B,C,D as settled on-chain registrations at target-10 (inside [target-64, target-3]).
+            let regs = vec![mk_reg_tx(&b_sup, floor), mk_reg_tx(&c_sup, floor), mk_reg_tx(&d_sup, floor)];
+            put_regs(&mut st, target - 10, regs.clone());
+
+            // (1) POSITIVE via ON-CHAIN scan: block includes on-chain B,C,D -> VALID.
+            assert!(
+                st.validate_block_mandatory_inclusion(&ok_blk, Some(&previous), target).is_ok(),
+                "[{ctx}] on-chain B,C,D included -> VALID (scan path)"
+            );
+            // (2) NEGATIVE selfish self-fill despite recorded B,C,D -> REJECTED.
+            assert!(
+                st.validate_block_mandatory_inclusion(&solo, Some(&previous), target).is_err(),
+                "[{ctx}] self-fills SUPPORT, ignoring on-chain B,C,D -> REJECTED"
+            );
+            // (2b) omitting one recorded competitor (D) -> REJECTED.
+            assert!(
+                st.validate_block_mandatory_inclusion(&mk_prod(&[b_sup.clone(), c_sup.clone()]), Some(&previous), target).is_err(),
+                "[{ctx}] omitting recorded D -> REJECTED"
+            );
+
+            // (4) SETTLE-DEPTH: a registration recorded at target-2 (shallower than D=3) is NOT
+            //     required -> honestly omitting it stays VALID (no false reject on un-settled).
+            let e = [0xE1u8; 20];
+            let e_sup = mk(e, 0x24, 8000);
+            put_regs(&mut st, target - 2, vec![mk_reg_tx(&e_sup, floor)]);
+            assert!(
+                st.validate_block_mandatory_inclusion(&ok_blk, Some(&previous), target).is_ok(),
+                "[{ctx}] un-settled E (recorded at target-2) not required -> omission VALID"
+            );
+
+            // (6) SYBIL floor via the real tx path: a below-floor registrant (G) is excluded from
+            //     the required set -> omitting G is VALID even though it is on-chain.
+            let g = [0x71u8; 20];
+            let g_sup = mk(g, 0x31, 9999);
+            put_regs(&mut st, target - 9, vec![mk_reg_tx(&g_sup, floor - 1)]); // below burn floor
+            assert!(
+                st.validate_block_mandatory_inclusion(&ok_blk, Some(&previous), target).is_ok(),
+                "[{ctx}] below-floor G excluded by burn floor -> omission VALID"
+            );
+
+            // (5) MULTI-VALIDATOR AGREEMENT: same on-chain records, REVERSED tx order -> identical
+            //     verdict (block-level fork-agreement, deterministic across nodes).
+            let mut st_rev = fresh();
+            let mut regs_rev = regs.clone();
+            regs_rev.reverse();
+            put_regs(&mut st_rev, target - 10, regs_rev);
+            assert_eq!(
+                st_rev.validate_block_mandatory_inclusion(&ok_blk, Some(&previous), target).is_ok(),
+                st.validate_block_mandatory_inclusion(&ok_blk, Some(&previous), target).is_ok(),
+                "[{ctx}] validators agree regardless of on-chain tx order"
+            );
+            assert!(
+                st_rev.validate_block_mandatory_inclusion(&solo, Some(&previous), target).is_err(),
+                "[{ctx}] second validator also REJECTS the selfish block"
+            );
+
+            // (7) GATE TEETH / TWO-PHASE (devnet only; net0 arming is code-change-only, see
+            //     poawx_mandatory_inclusion_mainnet_inert): the enforce gate flips with the env,
+            //     so connect_block SKIPS the (rejecting) validator when off and RUNS it when on.
+            if net != 0 {
+                std::env::remove_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT");
+                assert!(
+                    !crate::poawx_admission::mandatory_inclusion_enforce_active(target),
+                    "[{ctx}] gate OFF without env -> connect_block skips the check"
+                );
+                std::env::set_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT", "1");
+                assert!(
+                    crate::poawx_admission::mandatory_inclusion_enforce_active(target),
+                    "[{ctx}] gate ARMED by env on devnet -> connect_block runs the (rejecting) check"
+                );
+                std::env::remove_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT");
+            }
+
+            std::env::remove_var("IRIUM_NETWORK");
+        }
+    }
+
     #[test]
     fn poawx_mandatory_inclusion_mainnet_inert() {
         let _g = chain_poawx_env_lock()

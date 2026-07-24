@@ -233,17 +233,18 @@ impl MinerWorkTicket {
         )
     }
 
-    /// Validate the ticket. `expected_network` 0 = mainnet hard-off. `require_bits`
-    /// (typically `sybil_threshold_bits()`) enforces the Sybil cost when > 0.
+    /// Validate the ticket: version, network match, issue/expiry window, penalty status,
+    /// and the sybil-work binding. `require_bits` (typically `effective_sybil_bits()`, = 20
+    /// at network_id==0) enforces the Sybil cost when > 0.
+    /// Phase 1 (2026-07-25): UN-HARD-OFF at network_id==0 — the validator is correct in
+    /// mainnet context; ENFORCEMENT stays gated (`tickets_enforced`/`pool_admission_enforced`),
+    /// so removing the guard is inert on mainnet until those gates arm (proven at net-0).
     pub fn validate(
         &self,
         expected_network: u8,
         current_height: u64,
         require_bits: u32,
     ) -> Result<(), String> {
-        if expected_network == 0 {
-            return Err("ticket: mainnet hard-off".to_string());
-        }
         if self.version != TICKET_VERSION {
             return Err("ticket: bad version".to_string());
         }
@@ -330,14 +331,17 @@ pub fn tickets_required() -> bool {
 /// ignores ticket proofs (old Phase 20 behavior unchanged).
 pub fn tickets_enforced(height: u64) -> bool {
     if network_id_byte() == 0 {
-        // mainnet: ticket ENFORCEMENT is DE-SCOPED for the combined activation and stays
-        // OFF. The ticket-proof VALIDATOR itself is mainnet-hard-off (`TicketProof::validate`
-        // -> "ticket: mainnet hard-off", poawx_ticket.rs:245; and validate_phase20_ticket_proofs
-        // -> "ticket proof: mainnet hard-off", :529), so enforcing here would reject EVERY
-        // block and HALT at activation-1 — observed live 2026-07-23 (retry #2). Kept OFF:
-        // TPK1 sections ride advisory/unvalidated (7a74dfc behaviour). Re-enable only once
-        // the ticket VALIDATOR is un-hard-off AND proven on a network_id=0 (mainnet-context)
-        // connect_block test, per the standing rule added after that halt. #7 de-scoped.
+        // mainnet: ticket ENFORCEMENT stays OFF here. History: it was de-scoped for the combined
+        // activation because the ticket VALIDATOR was itself mainnet-hard-off, so enforcing would
+        // reject EVERY block and HALT at activation-1 (observed live 2026-07-23, retry #2).
+        // PHASE 1 (2026-07-25): the validator is now UN-HARD-OFF at network_id==0 and PROVEN
+        // (`TicketProof::validate` / `MinerWorkTicket::validate` no longer early-return on
+        // mainnet; `ticket_proof_un_hard_off_net0` covers accept + 8 reject cases at the enforced
+        // 20-bit level). So the halt precondition is removed. Enforcement STILL stays OFF until
+        // PHASE 2 arms it TOGETHER with pool-admission (`pool_admission_enforced`) at one combined
+        // activation, proven on a producing network_id=0 connect_block harness, and only once real
+        // independent participants exist (else there is no one to ticket). TPK1 sections ride
+        // advisory/unvalidated until then. See POAWX_FAIR_DISTRIBUTION_ACTIVATION_DESIGN_20260725.
         return false;
     }
     tickets_active(height) && tickets_required()
@@ -529,9 +533,9 @@ impl TicketProof {
         require_sybil_bits: u32,
         penalty_enforced: bool,
     ) -> Result<(), String> {
-        if expected_network == 0 {
-            return Err("ticket proof: mainnet hard-off".to_string());
-        }
+        // Phase 1 (2026-07-25): UN-HARD-OFF at network_id==0. The full check below runs in
+        // mainnet context; ENFORCEMENT stays gated (`tickets_enforced`/`pool_admission_enforced`),
+        // so removing the guard is inert on mainnet until those gates arm (proven at net-0).
         if self.network_id != expected_network {
             return Err("ticket proof: network mismatch".to_string());
         }
@@ -620,6 +624,101 @@ mod tests {
             issued_height: h_issue,
             expiry_height: h_exp,
         }
+    }
+
+    // Phase 1 (2026-07-25): the ticket VALIDATORS are UN-HARD-OFF at network_id==0. This proves
+    // the mainnet-context (expected_network==0) validator is CORRECT — accepts an honest 20-bit
+    // ticket + rejects every tampering — the §12 net-0 evidence. ENFORCEMENT stays gated
+    // (tickets_enforced / pool_admission_enforced are still OFF on mainnet, armed only in Phase 2),
+    // so this validator is inert on the live chain until those gates flip. Param-driven: passing
+    // expected_network==0 IS the mainnet context, no global-env dependency.
+    #[test]
+    fn ticket_proof_un_hard_off_net0() {
+        use crate::poawx::ROLE_SUPPORT_CONTRIBUTOR;
+        let net = 0u8; // MAINNET context
+        let bits = MAINNET_TICKET_SYBIL_BITS; // 20 — the enforced mainnet sybil cost
+        let prev = [0x07u8; 32];
+        let pkh = [0xA1u8; 20];
+        let apk = [0x02u8; 33];
+        let (height, epoch, expiry) = (100u64, 100u64, 200u64); // epoch==target_height (audit binding)
+        let role = ROLE_SUPPORT_CONTRIBUTOR;
+
+        // one honest 20-bit sybil grind for this (net, prev, pkh, epoch, apk).
+        let (nonce, _d) = grind_sybil_nonce(net, &prev, &pkh, epoch, &apk, bits, 20_000_000)
+            .expect("grind a 20-bit sybil nonce");
+        let proof = TicketProof::new(
+            net, height, prev, role, pkh, epoch, expiry, apk, nonce, PenaltyStatus::Clean.id(),
+        );
+
+        // (1) POSITIVE: honest mainnet-context proof at the enforced 20-bit level -> VALID.
+        assert!(
+            proof.validate(net, height, &prev, role, &pkh, bits, false).is_ok(),
+            "un-hard-off: honest 20-bit ticket proof VALID at network_id==0"
+        );
+        // (2) expected_network mismatch (mainnet proof checked as testnet, or vice versa) -> REJECTED.
+        assert!(
+            proof.validate(3, height, &prev, role, &pkh, bits, false).is_err(),
+            "expected_network mismatch rejected"
+        );
+        // (3) wrong role-solver binding -> REJECTED.
+        assert!(
+            proof.validate(net, height, &prev, role, &[0xB2u8; 20], bits, false).is_err(),
+            "role_solver_pkh != miner_pkh rejected"
+        );
+        // (4) height mismatch -> REJECTED.
+        assert!(
+            proof.validate(net, height + 1, &prev, role, &pkh, bits, false).is_err(),
+            "target_height != height rejected"
+        );
+        // (5) wrong prev_hash breaks the sybil-digest recompute -> REJECTED.
+        assert!(
+            proof.validate(net, height, &[0x09u8; 32], role, &pkh, bits, false).is_err(),
+            "prev_hash mismatch -> sybil digest rejected"
+        );
+        // (6) expired (expiry <= height) -> REJECTED.
+        let exp_proof = TicketProof::new(
+            net, height, prev, role, pkh, epoch, height, apk, nonce, PenaltyStatus::Clean.id(),
+        );
+        assert!(
+            exp_proof.validate(net, height, &prev, role, &pkh, bits, false).is_err(),
+            "expired ticket proof rejected"
+        );
+        // (7) INSUFFICIENT SYBIL WORK: a VALID binding (nonce [0;32]) whose digest misses 20 bits
+        //     is rejected at bits=20 but ACCEPTED at bits=0 (isolates the sybil-cost check).
+        let weak = TicketProof::new(
+            net, height, prev, role, pkh, epoch, expiry, apk, [0u8; 32], PenaltyStatus::Clean.id(),
+        );
+        if !meets_sybil_target(&weak.sybil_work_digest, bits) {
+            assert!(
+                weak.validate(net, height, &prev, role, &pkh, bits, false).is_err(),
+                "below-20-bit sybil work REJECTED (cost enforced at net==0)"
+            );
+            assert!(
+                weak.validate(net, height, &prev, role, &pkh, 0, false).is_ok(),
+                "same weak proof VALID when sybil cost not required (isolates the bits check)"
+            );
+        }
+        // (8) tampered sybil digest -> REJECTED.
+        let mut tampered = TicketProof::new(
+            net, height, prev, role, pkh, epoch, expiry, apk, nonce, PenaltyStatus::Clean.id(),
+        );
+        tampered.sybil_work_digest[0] ^= 0xFF;
+        assert!(
+            tampered.validate(net, height, &prev, role, &pkh, bits, false).is_err(),
+            "tampered sybil digest rejected"
+        );
+
+        // MinerWorkTicket::validate is likewise un-hard-off at net==0 (per-epoch registration token).
+        let (tn, td) = grind_sybil_nonce(net, &[0u8; 32], &pkh, epoch, &apk, 0, 4).expect("nonce");
+        let mwt = MinerWorkTicket {
+            version: TICKET_VERSION, network_id: net, miner_pkh: pkh, epoch,
+            assignment_public_key: apk, sybil_work_nonce: tn, sybil_work_digest: td,
+            recent_reward_score: 0, valid_work_count: 0, invalid_work_count: 0,
+            penalty_status: PenaltyStatus::Clean.id(), bond_reference: None,
+            issued_height: 50, expiry_height: 200,
+        };
+        assert!(mwt.validate(net, 100, 0).is_ok(), "MinerWorkTicket VALID at network_id==0 (un-hard-off)");
+        assert!(mwt.validate(3, 100, 0).is_err(), "MinerWorkTicket network mismatch rejected");
     }
 
     #[test]

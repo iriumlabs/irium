@@ -2639,9 +2639,18 @@ impl ChainState {
         // equal candidates fall through to the rank comparison unchanged, so equal-height
         // sibling forks and legitimate longer chains are unaffected. Gate off (mainnet
         // until a coordinated activation height) => byte-identical legacy behavior.
-        if crate::poawx_proposer::rank_length_floor_active(tip_height)
-            && candidate_branch.len() < current_branch.len()
-        {
+        // B (bounded rank-rewind window): the length floor only blocks a SHORTER
+        // candidate when the reorg would disconnect MORE than K of our own blocks
+        // (current_branch.len()). Within K, rank alone decides — so two producers that
+        // simultaneously failed over and briefly forked converge on the better-ranked
+        // chain instead of deadlocking. Beyond K the absolute V1 floor holds, preserving
+        // deep-rewind / long-range-attack protection. K == rank_rewind_window().
+        if crate::poawx_proposer::rank_length_floor_blocks(
+            crate::poawx_proposer::rank_length_floor_active(tip_height),
+            candidate_branch.len(),
+            current_branch.len(),
+            crate::poawx_proposer::rank_rewind_window(),
+        ) {
             return Ok(false);
         }
         let shared = candidate_branch.len().min(current_branch.len());
@@ -2892,14 +2901,28 @@ impl ChainState {
         };
         for hw in self.headers.values() {
             if hw.work > best.0 {
+                let cand = hw.header.hash_for_height(hw.height);
                 if hardening {
-                    let cand = hw.header.hash_for_height(hw.height);
                     match self.header_fork_ancestor_height(cand, floor) {
                         Some(anc) if anc >= floor => {}
                         _ => continue, // forks below the floor => un-adoptable, skip it
                     }
+                    // A (sync/adoption alignment): if we already hold this candidate's
+                    // full body path and our rank fork-choice DECLINES it (keeps our
+                    // chain), do not advertise it as best-header. Re-proposing a chain rank
+                    // has already disposed only spins the no_best_header_block_path loop
+                    // after B converges a shorter better-ranked tip. find_reorg_path (inside
+                    // proposer_rank_chain_better) returns Err for a candidate we do NOT
+                    // fully hold, so header-only tips are still proposed (rank disposes after
+                    // fetch); only fully-held, rank-declined tips are skipped here. Gated on
+                    // proposer_vrf_enforced to match the process_block reorg gate.
+                    if crate::poawx_proposer::proposer_vrf_enforced(tip_height)
+                        && matches!(self.proposer_rank_chain_better(cand), Ok(false))
+                    {
+                        continue;
+                    }
                 }
-                best = (hw.work.clone(), Some(hw.header.hash_for_height(hw.height)));
+                best = (hw.work.clone(), Some(cand));
             }
         }
         best.1.unwrap_or([0u8; 32])
@@ -2986,6 +3009,14 @@ impl ChainState {
                 match self.header_fork_ancestor_height(cand, floor) {
                     Some(anc) if anc >= floor => {}
                     _ => continue,
+                }
+                // A (sync/adoption alignment): don't fetch toward a fully-held candidate
+                // our rank fork-choice already declined -- see best_header_hash. Header-
+                // only tips (find_reorg_path Err) are still fetched; rank disposes after.
+                if crate::poawx_proposer::proposer_vrf_enforced(tip_height)
+                    && matches!(self.proposer_rank_chain_better(cand), Ok(false))
+                {
+                    continue;
                 }
             }
             let take = match &best {
@@ -4062,7 +4093,21 @@ pub fn shared_reward_active(height: u64) -> bool {
 /// `IRIUM_POAWX_POOL_ADMISSION_ACTIVATION_HEIGHT`.
 pub fn pool_admission_enforced(height: u64) -> bool {
     if crate::activation::network_id_byte() == 0 {
-        return matches!(crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT, Some(h) if height >= h);
+        // HALT-TRAP DISARM (2026-07-24, mirrors `tickets_enforced`). Pool-member admission
+        // validates each non-winner (multi-payee fan-out) VERIFY/SUPPORT pool member's sybil
+        // ticket via the 7-arg `TicketProof::validate`, which is mainnet-hard-off ("ticket proof:
+        // mainnet hard-off", poawx_ticket.rs:522). This gate had been armed to true at
+        // >= MAINNET_COMBINED_ACTIVATION_HEIGHT (61,414) -- LIVE now -- contradicting its own
+        // documented contract (activation.rs:381: "returns false on mainnet"). So the FIRST genuine
+        // multi-payee fan-out block (exactly PoAW-X's fair-distribution purpose) would reach the
+        // hard-off ticket validator -> reject -> chain HALT (the enforce-ON / validate-OFF class
+        // that halted mainnet 2026-07-23, CLAUDE.md §12). Kept OFF, restoring the documented
+        // contract: PLA1 pool-member sections ride advisory/unvalidated. No-op for the running chain
+        // (single-payee QF3 blocks have no non-winner members, so this check never fired). NB the
+        // assignment-proof VRF check (`AssignmentProofV2::validate`) is REAL, not hard-off; it rides
+        // advisory here too until pool admission is re-armed TOGETHER with an un-hard-off ticket
+        // validator, proven on a network_id==0 connect_block test.
+        return false;
     }
     match crate::activation::poawx_pool_admission_activation_height() {
         Some(h) => height >= h,
@@ -8627,6 +8672,62 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
         let block = make_poawx_test_block(vec![0x51]);
         assert!(validate_poawx_coinbase(&block, 100).is_ok());
+    }
+
+    #[test]
+    fn halt_traps_disarmed_on_mainnet_net0() {
+        // §12 (mainnet-hard-off needs a network_id==0 context test): exercise the net-0 branch of
+        // the halt-trap disarm directly. Pre-fix, the connect_block guards `fraud_proof_enforced`
+        // (chain.rs:~1058) and `pool_admission_enforced` (chain.rs:~4753) were ON on mainnet —
+        // fraud >= 50,000, pool-admission >= 61,414 — while their validators are HARD-OFF
+        // (`verify_fraud_proof` -> "fraud proof: mainnet hard-off", poawx_challenge.rs:194; the
+        // 7-arg `TicketProof::validate` -> "ticket proof: mainnet hard-off", poawx_ticket.rs:522 —
+        // both separately tested). So the FIRST block carrying a fraud-proof section or a non-winner
+        // (multi-payee fan-out) pool member would reach a hard-off validator -> reject -> chain HALT
+        // (the enforce-ON / validate-OFF class that halted mainnet 2026-07-23). This pins BOTH
+        // guards OFF on net-0 at and beyond their activation heights, so connect_block never reaches
+        // the hard-off validators. A green devnet/testnet suite (network_id != 0) does NOT cover
+        // this branch — hence the explicit net-0 context here.
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        assert_eq!(
+            crate::activation::network_id_byte(),
+            0,
+            "net-0 (mainnet) context required to exercise the hard-off branch"
+        );
+
+        let poawx = crate::activation::MAINNET_POAWX_ACTIVATION_HEIGHT.expect("poawx activation set");
+        let combined =
+            crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT.expect("combined activation set");
+        let past = combined + 10_000; // well past both activations (mirrors the live tip)
+
+        // Control: both activations ARE reached at these heights — pre-fix, that is exactly what
+        // armed the gates to true, so a false result here is the disarm doing real work.
+        assert!(past >= poawx && past >= combined && combined >= poawx);
+
+        // Fraud halt-trap DISARMED: connect_block guard OFF at and beyond the poawx activation.
+        assert!(
+            !crate::poawx_challenge::fraud_proof_enforced(poawx),
+            "fraud enforcement must be OFF on mainnet at the activation height (halt-trap disarmed)"
+        );
+        assert!(
+            !crate::poawx_challenge::fraud_proof_enforced(past),
+            "fraud enforcement must be OFF on mainnet past the activation height"
+        );
+
+        // Pool/ticket halt-trap DISARMED: connect_block guard OFF at and beyond the combined activation.
+        assert!(
+            !pool_admission_enforced(combined),
+            "pool-admission enforcement must be OFF on mainnet at the combined activation height"
+        );
+        assert!(
+            !pool_admission_enforced(past),
+            "pool-admission enforcement must be OFF on mainnet past the combined activation height"
+        );
+
+        std::env::remove_var("IRIUM_NETWORK");
     }
 
     #[test]
@@ -19180,8 +19281,15 @@ mod proposer_consensus_tests {
     fn v1_floor_blocks_shorter_better_ranked_branch() {
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
+        // RECONCILED 2026-07-24 for the B fix (bounded rank-rewind window): the V1 floor no longer
+        // blocks EVERY shorter branch — within K blocks rank decides (so simultaneous-failover forks
+        // converge), and only a shorter reorg DEEPER than K is blocked (the deep-rewind protection B
+        // preserves). Pin K below this reorg's depth (3) so the invariant under test is the one B
+        // keeps. The within-K ADOPT direction is covered deterministically by
+        // `poawx_proposer::rank_rewind_tests::bounded_rank_rewind_window`.
+        std::env::set_var("IRIUM_POAWX_RANK_REWIND_WINDOW", "2"); // K=2 < reorg depth 3
         let mut cs = base_chain();
-        push_minimal_chain(&mut cs, 3); // current tip height 3
+        push_minimal_chain(&mut cs, 3); // current tip height 3 => a shorter reorg disconnects 3 blocks
         // Candidate: one BETTER-ranked block at height 1 (child of genesis) => shorter fork.
         let cand = proposer_block_h1(&secret_n(1), 2, [7u8; 32], 0);
         let cand_h = cand.header.hash_for_height(1);
@@ -19193,13 +19301,14 @@ mod proposer_consensus_tests {
             cs.proposer_rank_chain_better(cand_h).unwrap(),
             "non-vacuous: without the floor a better-ranked shorter branch wins (the V1 bug)"
         );
-        // WITH the floor active, the shorter branch is BLOCKED regardless of rank.
+        // WITH the floor active AND the reorg deeper than K (3 > 2), the shorter branch is BLOCKED.
         std::env::set_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT", "1");
         assert!(
             !cs.proposer_rank_chain_better(cand_h).unwrap(),
-            "V1: a candidate shorter than the current chain must never win on rank"
+            "V1 (beyond K): a shorter candidate whose reorg exceeds the rewind window must never win on rank"
         );
         std::env::remove_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_RANK_REWIND_WINDOW");
         std::env::remove_var("IRIUM_NETWORK");
     }
 
@@ -19284,10 +19393,26 @@ mod proposer_consensus_tests {
 
     // Gate purity: ships INERT on mainnet (const None, env ignored); env-driven elsewhere.
     #[test]
-    fn v1_floor_gate_pure_inert_on_mainnet() {
+    fn v1_floor_gate_mainnet_const_controlled_env_ignored() {
         use crate::poawx_proposer::rank_length_floor_gate as g;
-        assert!(!g(0, Some(1), 1_000_000), "mainnet: const None => never active, env ignored");
-        assert!(!g(0, Some(50_000), 60_000), "mainnet inert");
+        // RECONCILED 2026-07-24: this gate was `pure_inert_on_mainnet` while the const was None,
+        // but the combined deploy knob aliased `MAINNET_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT` to
+        // `MAINNET_COMBINED_ACTIVATION_HEIGHT = Some(61_414)` — LIVE on mainnet since v1.9.133
+        // (2026-07-23), and load-bearing for the fork-choice work. The DURABLE invariant remains:
+        // on mainnet the ENV is IGNORED; only the compiled const controls activation.
+        assert_eq!(
+            crate::poawx_proposer::MAINNET_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT,
+            crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT
+        );
+        let c = crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT.expect("combined set");
+        assert!(!g(0, Some(1), c - 1), "mainnet: off before the combined activation, env ignored");
+        assert!(g(0, Some(1), c), "mainnet: on AT the combined activation, env ignored");
+        assert!(g(0, None, 1_000_000), "mainnet: on past activation, env irrelevant");
+        // env can NEVER change the mainnet result: Some(1) and None give the same answer.
+        for h in [0u64, c - 1, c, 1_000_000] {
+            assert_eq!(g(0, Some(1), h), g(0, None, h), "mainnet ignores env (h={h})");
+        }
+        // devnet: env-driven (unchanged).
         assert!(g(2, Some(50_000), 60_000), "devnet honors env at/after height");
         assert!(!g(2, None, 60_000), "devnet off without env");
         assert!(!g(2, Some(50_000), 40_000), "devnet off below activation");
@@ -19867,10 +19992,20 @@ mod proposer_consensus_tests {
             !cs.proposer_demotion_applies(&block, height, None),
             "an ineligible proposer must never get demotion, gate or no gate"
         );
-        // mainnet demotion remains hard-off at every height, env irrelevant.
-        assert_eq!(crate::poawx_proposer::MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, None);
-        for h in [0u64, 50_000, 59_426, u64::MAX] {
-            assert!(!crate::poawx_proposer::pow_demotion_gate(0, Some(1), h));
+        // mainnet demotion is const-controlled, env IRRELEVANT (RECONCILED 2026-07-24): the const is
+        // aliased to MAINNET_COMBINED_ACTIVATION_HEIGHT (Some(61,414) since v1.9.133, 2026-07-23), so
+        // demotion is OFF before that height and ON at/after it — but no ENV value can change it.
+        let c = crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT.expect("combined set");
+        assert_eq!(crate::poawx_proposer::MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, Some(c));
+        assert!(!crate::poawx_proposer::pow_demotion_gate(0, Some(1), c - 1)); // off before, env ignored
+        assert!(crate::poawx_proposer::pow_demotion_gate(0, Some(1), c)); // on at/after, env ignored
+        for h in [0u64, 50_000, c - 1, c, u64::MAX] {
+            // env can NEVER enable (or disable) mainnet demotion — Some(1) and None agree.
+            assert_eq!(
+                crate::poawx_proposer::pow_demotion_gate(0, Some(1), h),
+                crate::poawx_proposer::pow_demotion_gate(0, None, h),
+                "mainnet demotion ignores env (h={h})"
+            );
         }
         std::env::remove_var("IRIUM_POAWX_PROPOSER_NONEXCLUSIVE_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH");

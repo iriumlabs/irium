@@ -261,6 +261,68 @@ pub fn rank_length_floor_active(height: u64) -> bool {
     rank_length_floor_gate(network_id_byte(), rank_length_floor_activation_height(), height)
 }
 
+/// B (bounded rank-rewind window): the reorg depth (number of our own blocks a reorg
+/// would disconnect) at or below which the rank-length floor is RELAXED, so a
+/// better-ranked shorter chain can win — this converges shallow simultaneous-failover
+/// races. BEYOND this depth the absolute V1 floor holds, preserving deep-rewind /
+/// long-range-attack protection. Still env-overridable via IRIUM_POAWX_RANK_REWIND_WINDOW.
+///
+/// K = 20 (2026-07-24, Phase 3 safe-K analysis, `POAWX_AB_PHASE3_SAFE_K_20260724.md`):
+/// liveness needs K >= d_obs = partition_seconds / block_interval (~71 s/block on mainnet ⇒
+/// K=20 tolerates a ~24-min transient partition); security needs K small because there is
+/// NO finality backstop (finalized_height=0) so K is the SOLE bound on a shorter-reorg
+/// rewind (K=20 ⇒ ≤ ~24 min of history, recoverable). Safe window [~17,~30]; 6 was too tight.
+/// ⚠️ CONSENSUS PARAMETER: it changes which reorgs are valid, so it must be RATIFIED and be
+/// IDENTICAL fleet-wide before activation (a K mismatch is itself a non-convergence source);
+/// it is gated on the same activation as the length floor (`rank_length_floor_active`).
+pub const DEFAULT_RANK_REWIND_WINDOW: u64 = 20;
+pub fn rank_rewind_window() -> u64 {
+    std::env::var("IRIUM_POAWX_RANK_REWIND_WINDOW")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(DEFAULT_RANK_REWIND_WINDOW)
+}
+
+/// B (pure, unit-testable core of the bounded rank-rewind window): does the rank-length
+/// floor BLOCK adopting a candidate branch? It blocks ONLY a strictly-SHORTER candidate
+/// whose adoption would disconnect MORE than `rewind_window` (K) of our own blocks
+/// (`current_len`). Longer/equal candidates and within-K shorter candidates are never
+/// blocked here — they fall through to the rank comparison, so a better-ranked shorter
+/// chain within K WINS (this is what converges a simultaneous-failover deadlock).
+/// `floor_active == false` => never blocks (legacy byte-identical). `rewind_window == 0`
+/// reproduces the absolute V1 floor (blocks any shorter candidate = pre-fix deadlock).
+pub fn rank_length_floor_blocks(
+    floor_active: bool,
+    candidate_len: usize,
+    current_len: usize,
+    rewind_window: u64,
+) -> bool {
+    floor_active && candidate_len < current_len && current_len as u64 > rewind_window
+}
+
+#[cfg(test)]
+mod rank_rewind_tests {
+    use super::rank_length_floor_blocks as blk;
+    #[test]
+    fn bounded_rank_rewind_window() {
+        // shorter candidate, floor ACTIVE, WITHIN K => NOT blocked: rank alone decides,
+        // so a better-ranked shorter chain can be adopted. THIS converges the deadlock.
+        assert!(!blk(true, 3, 5, 10), "within-K shorter must fall through to rank");
+        assert!(!blk(true, 3, 10, 10), "current_len == K is inside the window");
+        // shorter candidate, floor ACTIVE, BEYOND K => BLOCKED: V1 deep-rewind protection.
+        assert!(blk(true, 3, 11, 10), "beyond-K shorter stays blocked (V1 preserved)");
+        assert!(blk(true, 1, 500, 10), "deep shorter reorg stays blocked (V1)");
+        // longer / equal candidate => never blocked (independent of K / depth).
+        assert!(!blk(true, 8, 5, 2), "longer candidate never blocked");
+        assert!(!blk(true, 5, 5, 2), "equal-length candidate never blocked");
+        // floor INACTIVE => never blocks (legacy byte-identical behavior).
+        assert!(!blk(false, 1, 999, 0), "inactive floor never blocks");
+        // K == 0 reproduces the PRE-FIX absolute floor: any shorter candidate blocked =
+        // the exact deadlock B removes within the window.
+        assert!(blk(true, 3, 5, 0), "K=0 == pre-fix: shorter always blocked (deadlock)");
+    }
+}
+
 // ── non-exclusive proposer eligibility (N1) ──────────────────────────────────
 //
 // Fixes the n==1 exclusionary lockout: with exactly one eligible key,
@@ -1078,17 +1140,25 @@ mod tests {
     }
 
     #[test]
-    fn pow_demotion_gate_is_genuinely_mainnet_hard_off() {
-        // On mainnet the ENV is IGNORED entirely: demotion is controlled solely by
-        // the compiled `MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT` const, reverted to
-        // `None` on 2026-07-18 => hard-off at EVERY height, no env can enable it.
-        assert_eq!(MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, None); // reverted 2026-07-18 (safety)
-        assert!(!pow_demotion_gate(0, Some(1), 1)); // mainnet: off (env ignored)
-        assert!(!pow_demotion_gate(0, Some(1), 58_241)); // off before the old activation height
-        assert!(!pow_demotion_gate(0, Some(1), 58_242)); // off AT the old height (const is None)
-        assert!(!pow_demotion_gate(0, None, 58_242)); // off with no env either
-        assert!(!pow_demotion_gate(0, Some(999), 60_000)); // off far past it, env irrelevant
-        assert!(!pow_demotion_gate(0, Some(1), u64::MAX)); // off at any height whatsoever
+    fn pow_demotion_gate_mainnet_is_const_controlled_env_ignored() {
+        // On mainnet the ENV is IGNORED entirely: demotion is controlled SOLELY by the compiled
+        // `MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT` const. RECONCILED 2026-07-24: after the
+        // 2026-07-18 safety revert to None, the combined deploy knob re-aliased that const to
+        // `MAINNET_COMBINED_ACTIVATION_HEIGHT = Some(61_414)`, LIVE on mainnet since v1.9.133
+        // (2026-07-23). So demotion is OFF below 61,414 and ON at/after — and NO env can change it.
+        let c = crate::activation::MAINNET_COMBINED_ACTIVATION_HEIGHT.expect("combined set");
+        assert_eq!(MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, Some(c));
+        assert!(!pow_demotion_gate(0, Some(1), c - 1)); // off just below activation, env ignored
+        assert!(pow_demotion_gate(0, Some(1), c)); // on AT activation, env ignored
+        assert!(pow_demotion_gate(0, None, u64::MAX)); // on far past it, no env needed
+        // env can NEVER change the mainnet result: Some(1) and None agree at every height.
+        for h in [0u64, 58_242, c - 1, c, u64::MAX] {
+            assert_eq!(
+                pow_demotion_gate(0, Some(1), h),
+                pow_demotion_gate(0, None, h),
+                "mainnet ignores env (h={h})"
+            );
+        }
         // non-mainnet: OFF unless explicitly activated, then on at/after the height.
         assert!(!pow_demotion_gate(2, None, 1)); // devnet unset => off
         assert!(!pow_demotion_gate(1, None, 1)); // testnet unset => off

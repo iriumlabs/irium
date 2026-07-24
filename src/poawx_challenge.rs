@@ -314,6 +314,19 @@ pub fn fraud_proof_enforced_gate(
 /// connect/disconnect are exact inverses and no unvalidated slash is ever applied.
 /// Mainnet hard-off.
 pub fn fraud_proof_enforced(height: u64) -> bool {
+    if network_id_byte() == 0 {
+        // HALT-TRAP DISARM (2026-07-24, mirrors `tickets_enforced`). On mainnet the fraud-proof
+        // VALIDATOR is hard-off: `verify_fraud_proof` returns Err("fraud proof: mainnet hard-off")
+        // for network_id == 0 (poawx_challenge.rs:194). But enforcement here was ON
+        // (`fraud_proof_required()` is hardcoded true on net-0 AND the gate is active >= 50,000),
+        // so the FIRST block carrying a fraud-proof section would be validated -> hard-off Err ->
+        // rejected -> chain HALT. That is the enforce-ON / validate-OFF class that halted mainnet
+        // 2026-07-23 (CLAUDE.md §12). Kept OFF: fraud-proof sections ride advisory/unvalidated,
+        // and slashing apply/revert stay off in lock-step (connect/disconnect remain exact
+        // inverses). No-op for the running chain (no live block carries a fraud proof). Re-enable
+        // ONLY once the validator is un-hard-off AND proven on a network_id==0 connect_block test.
+        return false;
+    }
     fraud_proof_enforced_gate(
         network_id_byte(),
         fraud_proof_activation_height(),

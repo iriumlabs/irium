@@ -1287,18 +1287,29 @@ mod mainnet_gate_truth {
         assert!(crate::poawx_proposer::proposer_vrf_gate(0, None, 50_000));
     }
 
-    /// CONTRAST: PoW demotion is the one gate that is genuinely mainnet-hard-off, because
-    /// it does NOT route through `poawx_effective_activation` — it reads a compiled const
-    /// that is `None`, so no env and no height can enable it. This is the pattern any
-    /// future mainnet-off gate must follow.
+    /// CONTRAST with the `poawx_effective_activation`-routed gates: PoW demotion reads its OWN
+    /// compiled const, so no ENV can enable or disable it on mainnet. RECONCILED 2026-07-24: that
+    /// const is the combined deploy knob (`MAINNET_COMBINED_ACTIVATION_HEIGHT = Some(61_414)`, LIVE
+    /// since v1.9.133 2026-07-23) — so demotion is OFF below 61,414 and ON at/after, always
+    /// env-independent. (`MAINNET_LIVE` = 60,000 here predates that activation, so demotion is still
+    /// off at it; the env-independence invariant is what this pins.)
     #[test]
-    fn pow_demotion_is_the_one_genuinely_hard_off_gate() {
-        assert_eq!(crate::poawx_proposer::MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT, None);
-        for h in [0u64, 49_999, 50_000, MAINNET_LIVE, u64::MAX] {
-            assert!(
-                !crate::poawx_proposer::pow_demotion_gate(0, Some(1), h),
-                "demotion must be off at every mainnet height, env irrelevant (h={h})"
+    fn pow_demotion_reads_its_own_const_env_ignored() {
+        assert_eq!(
+            crate::poawx_proposer::MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT,
+            MAINNET_COMBINED_ACTIVATION_HEIGHT
+        );
+        let c = MAINNET_COMBINED_ACTIVATION_HEIGHT.expect("combined knob set");
+        // env is IRRELEVANT on mainnet at every height: Some(1) and None agree.
+        for h in [0u64, 49_999, 50_000, MAINNET_LIVE, c - 1, c, u64::MAX] {
+            assert_eq!(
+                crate::poawx_proposer::pow_demotion_gate(0, Some(1), h),
+                crate::poawx_proposer::pow_demotion_gate(0, None, h),
+                "demotion ignores env at every mainnet height (h={h})"
             );
         }
+        // Const boundary: off just below the activation, on at/after it (env irrelevant).
+        assert!(!crate::poawx_proposer::pow_demotion_gate(0, None, c - 1));
+        assert!(crate::poawx_proposer::pow_demotion_gate(0, None, c));
     }
 }

@@ -16039,8 +16039,7 @@ mod tests {
         use crate::poawx_candidate::{AssignmentProofV2, CandidateSet, RoleCandidate};
         use crate::poawx_penalty::PenaltyStatus;
         use crate::poawx_ticket::{
-            compute_sybil_digest, effective_sybil_bits, grind_sybil_nonce, leading_zero_bits,
-            TicketProof,
+            effective_sybil_bits, grind_sybil_nonce, leading_zero_bits, TicketProof,
         };
 
         let _g = chain_poawx_env_lock()
@@ -16174,15 +16173,10 @@ mod tests {
             "NEGATIVE#2 rejects for a missing ticket, got: {e2}"
         );
 
-        // (3) NEGATIVE (insufficient sybil work): a ticket whose nonce yields < 20 bits.
-        let mut low_nonce = [0u8; 32];
-        for i in 0u64..1_000 {
-            low_nonce[0..8].copy_from_slice(&i.to_le_bytes());
-            let d = compute_sybil_digest(net, &prev, &m_pkh, epoch, &apk, &low_nonce);
-            if leading_zero_bits(&d) < 20 {
-                break;
-            }
-        }
+        // (3) NEGATIVE (insufficient sybil work): a nonce GROUND at a trivial 1-bit target
+        //     (derived, not a hard-coded crypto literal) — its digest is below the 20-bit floor.
+        let (low_nonce, _ld) = grind_sybil_nonce(net, &prev, &m_pkh, epoch, &apk, 1, 100)
+            .expect("grind a below-20-bit nonce");
         let low_ticket = TicketProof::new(
             net,
             height,

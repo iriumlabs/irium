@@ -88,6 +88,7 @@ fn make_ext(
         role_ticket_proofs: None,
         role_dominance_weights: None,
         candidate_set: None,
+        pool_admission: None,
         role_puzzle_proofs: None,
         finality_proof: None,
         committed_admission: None,

@@ -332,21 +332,19 @@ fn run() -> Result<(), String> {
                 // this member's own pkh + assignment key (the node re-verifies it in PLA1).
                 let ticket = if need_ticket {
                     let apk = proof.assignment_public_key;
-                    let nonce = if sybil_bits > 0 {
-                        match grind_sybil_nonce(
-                            net,
-                            &prev_hash,
-                            &proof.solver_pkh,
-                            height,
-                            &apk,
-                            sybil_bits,
-                            50_000_000,
-                        ) {
-                            Some((n, _)) => n,
-                            None => continue,
-                        }
-                    } else {
-                        [0u8; 32]
+                    // Always grind (bits==0 returns the first nonce immediately), so the sybil
+                    // nonce is DERIVED — never a hard-coded [0u8;32] cryptographic literal.
+                    let nonce = match grind_sybil_nonce(
+                        net,
+                        &prev_hash,
+                        &proof.solver_pkh,
+                        height,
+                        &apk,
+                        sybil_bits,
+                        50_000_000,
+                    ) {
+                        Some((n, _)) => n,
+                        None => continue,
                     };
                     Some(TicketProof::new(
                         net,

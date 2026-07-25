@@ -711,8 +711,10 @@ mod tests {
         );
         // (7) INSUFFICIENT SYBIL WORK: a VALID binding (nonce [0;32]) whose digest misses 20 bits
         //     is rejected at bits=20 but ACCEPTED at bits=0 (isolates the sybil-cost check).
+        let (weak_nonce, _wd) = grind_sybil_nonce(net, &prev, &pkh, epoch, &apk, 1, 100)
+            .expect("grind a trivial below-20-bit nonce");
         let weak = TicketProof::new(
-            net, height, prev, role, pkh, epoch, expiry, apk, [0u8; 32], PenaltyStatus::Clean.id(),
+            net, height, prev, role, pkh, epoch, expiry, apk, weak_nonce, PenaltyStatus::Clean.id(),
         );
         if !meets_sybil_target(&weak.sybil_work_digest, bits) {
             assert!(

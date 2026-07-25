@@ -2022,6 +2022,85 @@ fn rewinded_getblocks_request(chain: &ChainState, peer_height: u64) -> Option<([
     Some((locator_hash_at_height(chain, start_height), count))
 }
 
+/// Getblocks locator (`start_hash`, `count`) to fetch a peer's chain when it is
+/// either strictly taller OR at **equal height with a different tip** — an
+/// equal-height fork (the case that produced the live 62,244 non-convergence).
+///
+/// For an equal-height fork, anchoring the locator at genesis (`[0u8; 32]`) only
+/// re-serves the long shared early history and never reaches the near-tip
+/// divergence, so the competing branch is never delivered and the (correct)
+/// reorg comparator never runs. Instead we walk **back** from our own tip by up
+/// to `MAX_BLOCKS_PER_REQUEST` blocks: the peer then locates that still-shared
+/// block in its own chain and serves the competing branch **above** it, letting
+/// `proposer_rank_chain_better` decide. Forks shallower than a request window
+/// (any realistic race — the live one was 78 deep) resolve in a single round.
+/// Returns `None` when there is nothing to fetch.
+pub(crate) fn fork_sync_locator(
+    chain: &ChainState,
+    peer_height: u64,
+    peer_tip: Option<[u8; 32]>,
+) -> Option<([u8; 32], u32)> {
+    let tip_height = chain.tip_height();
+    // Peer strictly taller: existing forward-rewind covers a near-tip fork too.
+    if peer_height > tip_height {
+        return rewinded_getblocks_request(chain, peer_height);
+    }
+    // Equal height, different tip => an equal-height fork. Walk back from the tip.
+    if peer_height == tip_height && tip_height > 0 {
+        let local_tip = chain.tip_hash();
+        match peer_tip {
+            Some(pt) if pt != local_tip => {
+                let max = MAX_BLOCKS_PER_REQUEST as u64;
+                let rewind = max.min(tip_height);
+                let start_height = tip_height.saturating_sub(rewind);
+                Some((
+                    locator_hash_at_height(chain, start_height),
+                    MAX_BLOCKS_PER_REQUEST,
+                ))
+            }
+            _ => None,
+        }
+    } else {
+        None
+    }
+}
+
+/// Pure model of the getblocks *server*: given a `start_hash` locator, return
+/// the blocks this chain would serve (forward from the block after the located
+/// one, capped at `MAX_BLOCKS_PER_REQUEST`). Mirrors the inline handler and is
+/// shared with the delivery-convergence tests. An unknown non-genesis locator
+/// re-anchors at the genesis child (matching the IBD fallback).
+#[cfg(test)]
+pub(crate) fn serve_getblocks_from(
+    chain: &ChainState,
+    start_hash: [u8; 32],
+    count: u32,
+) -> Vec<Block> {
+    let is_zero = start_hash.iter().all(|b| *b == 0);
+    let mut start_idx = 0usize;
+    let mut matched = false;
+    if let Some((pos, _)) = chain
+        .chain
+        .iter()
+        .enumerate()
+        .find(|(idx, b)| b.header.hash_for_height(*idx as u64) == start_hash)
+    {
+        start_idx = pos + 1;
+        matched = true;
+    }
+    if !matched && !is_zero {
+        start_idx = if chain.chain.len() > 1 { 1 } else { 0 };
+    }
+    let take = (count.min(MAX_BLOCKS_PER_REQUEST) as usize).min(chain.chain.len());
+    chain
+        .chain
+        .iter()
+        .skip(start_idx)
+        .take(take)
+        .cloned()
+        .collect()
+}
+
 struct OutboundDialGuard {
     ip: IpAddr,
     inflight: Arc<StdMutex<HashSet<IpAddr>>>,
@@ -2096,7 +2175,19 @@ async fn maybe_request_sync(
         return;
     }
 
-    let mut start_hash = if local_height == 0 || tip_mismatch {
+    // For an equal-height fork (tip_mismatch), a genesis locator only re-serves
+    // the shared early history and never reaches the divergence -> permanent
+    // non-convergence (the live 62,244 fork). Walk back from our tip instead so
+    // the peer serves the competing branch above the last common block.
+    let mut start_hash = if tip_mismatch {
+        chain
+            .as_ref()
+            .and_then(|c| {
+                let guard = c.lock().unwrap_or_else(|e| e.into_inner());
+                fork_sync_locator(&guard, peer_height, peer_tip).map(|(h, _)| h)
+            })
+            .unwrap_or([0u8; 32])
+    } else if local_height == 0 {
         [0u8; 32]
     } else {
         local_tip

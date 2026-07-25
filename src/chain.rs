@@ -20445,6 +20445,121 @@ mod proposer_consensus_tests {
         clear_sib_env();
     }
 
+    // Regression for the live 62,244 non-convergence: two producers at EQUAL
+    // height with different tips, forked DEEPER than K, on a chain TALLER than
+    // one getblocks window. The comparator was never the bug -- the DELIVERY
+    // layer starved it: the old genesis locator only re-served [1..window] and
+    // never reached the near-tip divergence, so the competing branch was never
+    // downloaded and the reorg never ran. Unlike `depth2_fork_converges` (which
+    // pre-loads both branches into each node), this test exercises the locator +
+    // getblocks server so it actually covers the delivery layer.
+    #[test]
+    fn equal_height_beyond_k_fork_delivers_and_converges() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        set_sib_env();
+        let maxreq = crate::protocol::MAX_BLOCKS_PER_REQUEST; // 512
+        let shared_n: u64 = maxreq as u64 - 20; // 492 shared blocks
+        let depth: u64 = 25; // fork depth > K (rank_rewind_window default 20)
+        let tip: u64 = shared_n + depth; // 517 > window(512): genesis locator can't reach it
+
+        let gh = base_chain().chain[0].header.hash_for_height(0);
+        let mut shared: Vec<(Block, u64)> = Vec::new();
+        let mut prev = gh;
+        for h in 1..=shared_n {
+            let b = minimal_block(prev, 50 + h as u32);
+            prev = b.header.hash_for_height(h);
+            shared.push((b, h));
+        }
+        let fork_parent = prev;
+        let mk = |t0: u32| -> Vec<(Block, u64)> {
+            let mut v = Vec::new();
+            let mut p = fork_parent;
+            for i in 1..=depth {
+                let h = shared_n + i;
+                let b = minimal_block(p, t0 + i as u32);
+                p = b.header.hash_for_height(h);
+                v.push((b, h));
+            }
+            v
+        };
+        let br_a = mk(100_000);
+        let br_b = mk(200_000);
+        let a_tip = br_a.last().unwrap().0.header.hash_for_height(tip);
+        let b_tip = br_b.last().unwrap().0.header.hash_for_height(tip);
+        let a_tip_time = br_a.last().unwrap().0.header.time;
+        let b_tip_time = br_b.last().unwrap().0.header.time;
+        let winner = if a_tip < b_tip { a_tip } else { b_tip };
+
+        // time -> height, to recover heights of served blocks (times are unique).
+        let mut time_h: std::collections::HashMap<u32, u64> = std::collections::HashMap::new();
+        for (b, h) in shared.iter().chain(br_a.iter()).chain(br_b.iter()) {
+            time_h.insert(b.header.time, *h);
+        }
+
+        let build = |active: &[(Block, u64)]| -> ChainState {
+            let mut cs = base_chain();
+            for (b, h) in shared.iter().chain(active.iter()) {
+                let hh = b.header.hash_for_height(*h);
+                cs.block_store.insert(hh, b.clone());
+                cs.heights.insert(hh, *h);
+                cs.chain.push(b.clone());
+            }
+            cs.height = cs.chain.len() as u64;
+            cs
+        };
+        let apply = |node: &mut ChainState, served: &[Block]| {
+            for b in served {
+                let h = time_h[&b.header.time];
+                let hh = b.header.hash_for_height(h);
+                node.block_store.insert(hh, b.clone());
+                node.heights.insert(hh, h);
+            }
+        };
+
+        let mut node_a = build(&br_a);
+        let node_b = build(&br_b);
+        assert_eq!(node_a.tip_height(), tip);
+        assert_eq!(node_b.tip_height(), tip);
+        assert_ne!(node_a.tip_hash(), node_b.tip_hash(), "genuine fork");
+
+        // CONTROL (the bug): a genesis locator serves [1..window] and never
+        // reaches the divergent tip on a chain taller than the window.
+        let via_genesis = crate::p2p::serve_getblocks_from(&node_b, [0u8; 32], maxreq);
+        assert!(
+            !via_genesis.iter().any(|b| b.header.time == b_tip_time),
+            "regression guard: a genesis locator must NOT deliver the divergent tip (this is the non-convergence bug)"
+        );
+
+        // FIX: the equal-height fork locator delivers the competing branch.
+        let loc = crate::p2p::fork_sync_locator(&node_a, node_b.tip_height(), Some(node_b.tip_hash()))
+            .expect("equal-height fork must produce a locator");
+        assert_ne!(loc.0, [0u8; 32], "fork locator must not anchor at genesis");
+        let served_to_a = crate::p2p::serve_getblocks_from(&node_b, loc.0, loc.1);
+        assert!(
+            served_to_a.iter().any(|b| b.header.time == b_tip_time),
+            "fixed locator must deliver the competing branch up to its tip"
+        );
+
+        // Adoption: after delivery, the (correct) comparator converges both nodes.
+        apply(&mut node_a, &served_to_a);
+        let a_final = if node_a.proposer_rank_chain_better(b_tip).unwrap() { b_tip } else { a_tip };
+
+        let mut node_b2 = build(&br_b);
+        let loc_b = crate::p2p::fork_sync_locator(&node_b2, node_a.tip_height(), Some(node_a.tip_hash()))
+            .expect("equal-height fork must produce a locator (symmetric)");
+        let served_to_b = crate::p2p::serve_getblocks_from(&node_a, loc_b.0, loc_b.1);
+        assert!(
+            served_to_b.iter().any(|b| b.header.time == a_tip_time),
+            "fixed locator delivers the competing branch symmetrically"
+        );
+        apply(&mut node_b2, &served_to_b);
+        let b_final = if node_b2.proposer_rank_chain_better(a_tip).unwrap() { a_tip } else { b_tip };
+
+        assert_eq!(a_final, b_final, "both nodes converge to the same tip");
+        assert_eq!(a_final, winner, "converged tip is the deterministic total-order winner");
+        clear_sib_env();
+    }
+
     #[test]
     fn sibling_reorg_within_cap() {
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());

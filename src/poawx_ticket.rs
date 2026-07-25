@@ -122,7 +122,10 @@ pub fn effective_sybil_bits() -> u32 {
 /// Phase-1 un-hard-off ticket VALIDATOR. Inert on mainnet (const = None); flip to `Some(h)` ONLY
 /// after the producing network_id=0 PLA1 proof AND once real independent participants exist
 /// (else there is no one to ticket). Env-gated on devnet for harness proofs.
-pub const MAINNET_POOL_TICKET_ACTIVATION_HEIGHT: Option<u64> = None;
+// Derived from the SINGLE fair-distribution activation knob (activation.rs). Arms tickets +
+// pool-admission + mandatory-inclusion together. None => inert (byte-identical to deployed).
+pub const MAINNET_POOL_TICKET_ACTIVATION_HEIGHT: Option<u64> =
+    crate::activation::MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT;
 
 /// Pure gate logic (param-driven so tests can vary the activation without global env).
 pub fn pool_ticket_gate(activation: Option<u64>, height: u64) -> bool {

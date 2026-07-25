@@ -269,6 +269,32 @@ pub const MAINNET_POAWX_ACTIVATION_HEIGHT: Option<u64> = Some(50_000);
 pub const MAINNET_COMBINED_ACTIVATION_HEIGHT: Option<u64> = Some(61_414);
 // ══════════════════════════════════════════════════════════════════════════════
 
+// ──────────────────────────────────────────────────────────────────────────────
+//  FAIR-DISTRIBUTION ENFORCEMENT ACTIVATION — THE SINGLE PENDING KNOB
+// ──────────────────────────────────────────────────────────────────────────────
+//  Arms the coupled fair-distribution ENFORCEMENT at ONE height on mainnet: sybil
+//  tickets + pool-member admission + mandatory-inclusion. All three route through
+//  `pool_ticket_enforced` (poawx_ticket.rs), so they can NEVER be enforce-on/
+//  validate-off (the 2026-07-23 halt class). The four-role coinbase SPLIT is already
+//  live (MAINNET_COMBINED_ACTIVATION_HEIGHT = 61_414); this makes the payees provably
+//  DISTINCT + sybil-costed. The mandatory-inclusion RECORD phase is derived from this
+//  height minus MANDATORY_LEAD_WINDOW (see poawx_admission.rs) so the eligible window
+//  is populated by the time enforce fires — set ONLY this one value.
+//
+//  `None` => OFF, byte-identical to the deployed seamless mainnet behaviour (payees
+//  ride advisory / self-fill). To ACTIVATE: set to `Some(fresh_tip + safe_margin)`
+//  (a few hundred blocks of headroom) and rebuild — this is the ONLY line to edit.
+//
+//  ⚠️ GATED — do NOT flip until BOTH hold (CLAUDE.md §12):
+//    (1) >= 1 genuine INDEPENDENT miner is enrolling on mainnet — a distinct on-chain
+//        role payee whose pkh is neither c2fc869e (vps) nor 222a0b48 (eu), AND
+//    (2) the producing network_id=0 boundary test passes: a real multi-payee fan-out
+//        block VALIDATES at E, a self-stuffed one REJECTS, a sole-producer block is
+//        unaffected (no halt).
+//  COORDINATED HARD FORK: nodes not on the activation binary reject the new blocks.
+pub const MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT: Option<u64> = None; // <-- set Some(E) to activate
+// ══════════════════════════════════════════════════════════════════════════════
+
 /// Activation binary (v1.9.127): mainnet activation height for delegated (mode-1)
 /// PoAW-X receipts -- the pool paying each miner directly on-chain. `None` => off
 /// (pre-activation); `Some(H)` => active at height >= H. COORDINATED HARD FORK: every

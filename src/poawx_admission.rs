@@ -360,7 +360,14 @@ pub fn mandatory_inclusion_enforce_active(height: u64) -> bool {
 /// Phase-1 (record-only) activation: RCR1 registration txs are parsed + burn-accounted
 /// and the ledger builds, but the `cs ⊇ req` rule is NOT yet enforced. Must precede
 /// enforce by >= L blocks so the window is populated at enforce. Inert on mainnet.
-pub const MAINNET_MANDATORY_INCLUSION_RECORD_ACTIVATION_HEIGHT: Option<u64> = None;
+// Derived: the RECORD phase must precede ENFORCE (the single fair-distribution knob in
+// activation.rs) by MANDATORY_LEAD_WINDOW so the eligible window is populated at enforce.
+// None => inert (byte-identical to deployed).
+pub const MAINNET_MANDATORY_INCLUSION_RECORD_ACTIVATION_HEIGHT: Option<u64> =
+    match crate::activation::MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT {
+        Some(e) => Some(e.saturating_sub(MANDATORY_LEAD_WINDOW)),
+        None => None,
+    };
 pub fn mandatory_inclusion_record_active(height: u64) -> bool {
     if crate::activation::network_id_byte() == 0 {
         return matches!(

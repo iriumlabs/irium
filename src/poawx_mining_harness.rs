@@ -991,6 +991,53 @@ pub fn build_solo_poawx_block_with_proposer_and_solver_and_fanout(
     )
 }
 
+/// Like `..._and_fanout`, but PAYS distinct participants: when `collected` carries role
+/// bundles (candidate + VRF proof + sybil ticket + puzzle solution, fetched from the node's
+/// `/poawx/collected-bundles` pool), the role SOLVERS are set to those foreign participants
+/// via `with_collected` — so the coinbase 22/13/10 slices reach distinct workers, not self.
+/// Empty/None collected => byte-identical to the solo build (sole producer, no halt). Unlike
+/// `build_collected_poawx_block_with_parent`, this passes the real `proposer_ctx` / `node_gates`
+/// / `registration_section`, so the block is a FULL all-gates block (proposer-VRF included).
+#[allow(clippy::too_many_arguments)]
+pub fn build_solo_poawx_block_with_proposer_and_solver_and_collected(
+    miner_secret: &[u8; 32],
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+    parent_seed_components: ([u8; 32], [u8; 32]),
+    dominance: &PersistentDominance,
+    node_gates: Option<&NodeGateFlags>,
+    proposer_ctx: Option<&ProposerCtx>,
+    registration_section: Option<&crate::poawx::ProposerRegistrationSection>,
+    solver: &dyn Fn(&mut BlockHeader, u64, Target) -> Result<u32, String>,
+    collected: Option<CollectedArtifacts>,
+) -> Result<AllGatesProof, String> {
+    let ids = match collected {
+        Some(c) if !c.is_empty() => AllGatesIdentities::with_collected(miner_secret, c)?,
+        _ => AllGatesIdentities::solo(miner_secret)?,
+    };
+    build_all_gates_block_with(
+        &ids,
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+        parent_seed_components,
+        Some(dominance),
+        node_gates,
+        proposer_ctx,
+        registration_section,
+        solver,
+    )
+}
+
 /// Build a mined all-gates block with THREE genuinely distinct role participants
 /// (compute/verify/support) AND the PRIMARY worker's proposer-VRF assignment. For the
 /// role-attribution + proposer-VRF combination (Option A distinct role-workers + Option 2

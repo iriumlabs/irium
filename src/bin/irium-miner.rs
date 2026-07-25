@@ -3552,16 +3552,85 @@ fn run_poawx_solo() -> Result<(), String> {
                 None
             };
 
+        // Fair distribution: fetch the node's COLLECTED role bundles (full artifacts —
+        // candidate + VRF proof + sybil ticket + puzzle solution) so the 3 contributor role
+        // slices (22/13/10) are PAID to distinct participants, not self-filled. Same opt-in as
+        // the fan-out. `/poawx/collected-bundles` is loopback + net!=0 only. Empty => solo build
+        // (sole producer, no halt). The fan-out (candidate-admissions) enlarges the set; this
+        // supplies the payable bundles.
+        let collected: Option<irium_node_rs::poawx_mining_harness::CollectedArtifacts> =
+            if env::var("IRIUM_POAWX_FANOUT_INCLUSIVE")
+                .map(|v| v.trim() == "1")
+                .unwrap_or(false)
+            {
+                (|| {
+                    use irium_node_rs::poawx::{
+                        ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+                    };
+                    use irium_node_rs::poawx_role_bundle::RoleBundleV1;
+                    let url = format!(
+                        "{}/poawx/collected-bundles",
+                        node_rpc_base().trim_end_matches('/')
+                    );
+                    let mut req = client.get(&url);
+                    if let Some(t) = rpc_token() {
+                        req = req.bearer_auth(t);
+                    }
+                    let v: serde_json::Value = req.send().ok()?.json().ok()?;
+                    let mut c = irium_node_rs::poawx_mining_harness::CollectedArtifacts {
+                        compute: None,
+                        verify: None,
+                        support: None,
+                    };
+                    if let Some(arr) = v.get("bundles").and_then(|x| x.as_array()) {
+                        for b in arr {
+                            if let Ok(rb) = RoleBundleV1::from_json(&b.to_string()) {
+                                match rb.role_id {
+                                    ROLE_COMPUTE_CONTRIBUTOR => c.compute = Some(rb),
+                                    ROLE_VERIFY_CONTRIBUTOR => c.verify = Some(rb),
+                                    ROLE_SUPPORT_CONTRIBUTOR => c.support = Some(rb),
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+                    if c.is_empty() {
+                        None
+                    } else {
+                        let n = [c.compute.is_some(), c.verify.is_some(), c.support.is_some()]
+                            .iter()
+                            .filter(|x| **x)
+                            .count();
+                        println!("[poawx] fair-distribution: paying {n} distinct role participant(s) from collected bundles");
+                        Some(c)
+                    }
+                })()
+            } else {
+                None
+            };
+
         // Stage G0: pass the default CPU nonce solver explicitly (grinds the header
         // nonce with mine_pow, exactly as before). Stage G1's GPU miner calls the
         // same entry point with a GPU-backed solver instead.
-        let proof = match irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver_and_fanout(
-            &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,
-            parent_seed_components, &dominance, node_gates.as_ref(), proposer_ctx.as_ref(),
-            registration_section.as_ref(),
-            &irium_node_rs::poawx_mining_harness::default_cpu_nonce_solver,
-            inclusive_fanout.as_ref(),
-        ) {
+        let build_result = if collected.is_some() {
+            // Pay distinct participants for the contributor roles from the collected bundles.
+            irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver_and_collected(
+                &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,
+                parent_seed_components, &dominance, node_gates.as_ref(), proposer_ctx.as_ref(),
+                registration_section.as_ref(),
+                &irium_node_rs::poawx_mining_harness::default_cpu_nonce_solver,
+                collected,
+            )
+        } else {
+            irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver_and_fanout(
+                &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,
+                parent_seed_components, &dominance, node_gates.as_ref(), proposer_ctx.as_ref(),
+                registration_section.as_ref(),
+                &irium_node_rs::poawx_mining_harness::default_cpu_nonce_solver,
+                inclusive_fanout.as_ref(),
+            )
+        };
+        let proof = match build_result {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("[poawx] build failed at height {height}: {e}; retrying");

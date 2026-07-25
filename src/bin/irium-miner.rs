@@ -3555,9 +3555,10 @@ fn run_poawx_solo() -> Result<(), String> {
         // Fair distribution: fetch the node's COLLECTED role bundles (full artifacts —
         // candidate + VRF proof + sybil ticket + puzzle solution) so the 3 contributor role
         // slices (22/13/10) are PAID to distinct participants, not self-filled. Same opt-in as
-        // the fan-out. `/poawx/collected-bundles` is loopback + net!=0 only. Empty => solo build
-        // (sole producer, no halt). The fan-out (candidate-admissions) enlarges the set; this
-        // supplies the payable bundles.
+        // the fan-out. `/poawx/collected-bundles` is loopback by default (a co-located producer
+        // reads its own node's enrolled bundles) and works on ALL networks including mainnet
+        // (Step 3). Empty => solo build (sole producer, no halt). The fan-out
+        // (candidate-admissions) enlarges the set; this supplies the payable bundles.
         let collected: Option<irium_node_rs::poawx_mining_harness::CollectedArtifacts> =
             if env::var("IRIUM_POAWX_FANOUT_INCLUSIVE")
                 .map(|v| v.trim() == "1")

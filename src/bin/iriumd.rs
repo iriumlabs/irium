@@ -14656,9 +14656,14 @@ async fn poawx_get_collected_bundles(
     State(state): State<AppState>,
 ) -> Result<Json<Value>, StatusCode> {
     role_bundle_bridge_guard(&addr)?;
-    if irium_node_rs::activation::network_id_byte() == 0 {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    // Seamless-enrollment (Step 3): the collected-bundle read is available on ALL networks,
+    // including mainnet — a pool/producer must be able to fetch the enrolled miners' bundles
+    // to pay them as distinct on-chain role members. It returns only PUBLIC RoleBundleV1
+    // artifacts (proofs, never a secret key), and access is already restricted by
+    // `role_bundle_bridge_guard` (loopback by default; remote only with the operator opt-in +
+    // rate limit). Ships inert: with no enrolled bundles the list is empty, so the producer
+    // falls back to a solo (self-fill) build, byte-identical to prior mainnet behaviour. The
+    // (net!=0-only) refusal was a dev-scoping artifact of the R1-R4 channel; removed here.
     let height = {
         let g = match state.chain.try_lock() {
             Ok(g) => g,

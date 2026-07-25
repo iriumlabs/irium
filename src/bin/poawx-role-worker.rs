@@ -5,11 +5,18 @@
 //! solver_pkh == hash160(assignment_public_key) (the Phase-1 rule). It fetches the
 //! node template, grinds the real sybil ticket + the real assigned puzzle, builds the
 //! payout-bound ECVRF assignment proof, the role claim (reveal) and the precommit,
-//! then SELF-VERIFIES every artifact against the node validators. Off mainnet /
-//! isolated rig only. Emits the full bundle for the Phase-3 collection channel.
+//! then SELF-VERIFIES every artifact against the node validators, and SUBMITS it to the
+//! node's /poawx/role-bundle endpoint to ENROLL — so this miner's own payout_pkh is paid
+//! its role share. `IRIUM_NODE_RPC` may be a co-located node (loopback) OR a remote pool /
+//! Irium Core node that opted in via IRIUM_POAWX_REMOTE_ENROLLMENT=1 (seamless-enrollment
+//! Step 1). This is the light-miner path: a keypair + a cheap per-height sybil grind + VRF,
+//! no full node required. Fair-distribution PAYOUT of enrolled members is consensus-gated —
+//! advisory until the coupled fair-distribution activation, enforced after.
 //!
 //! Env: IRIUM_POAWX_ROLE_SECRET_HEX (payout key), IRIUM_NODE_RPC, IRIUM_RPC_TOKEN,
-//!      IRIUM_NETWORK. Arg 1: role = compute|verify|support.
+//!      IRIUM_NETWORK, IRIUM_POAWX_ROLE_WORKER_SUBMIT (=0 to print instead of submit).
+//!      Arg 1: role = compute|verify|support. Run once per height (a pool scheduler, the
+//!      app, or a shell loop drives the per-block cadence).
 use irium_node_rs::poawx::{
     role_claim_digest, role_precommit_commitment, PoawxRoleClaim, ROLE_COMPUTE_CONTRIBUTOR,
     ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
@@ -219,6 +226,39 @@ fn main() -> Result<(), String> {
     if let Some(v) = &finality_vote {
         bundle["finality_vote"] = serde_json::Value::String(hex::encode(v.serialize()));
     }
-    println!("{}", serde_json::to_string_pretty(&bundle).unwrap());
+
+    // ---- 8. SUBMIT the enrollment to the node's role-bundle endpoint. This is how a light
+    //         miner ENROLLS as a distinct on-chain role member: the node fully re-validates
+    //         the bundle on ingest (payout binding recomputed, ECVRF + ticket verified) and
+    //         pools it; a producer then folds it into the block so THIS miner's payout_pkh is
+    //         paid its role share. `base` may be a co-located node (loopback) OR a remote pool
+    //         / Irium Core node that opted in via IRIUM_POAWX_REMOTE_ENROLLMENT=1 (Step 1).
+    //         Set IRIUM_POAWX_ROLE_WORKER_SUBMIT=0 to only print the bundle (dev/inspection).
+    let submit = std::env::var("IRIUM_POAWX_ROLE_WORKER_SUBMIT")
+        .map(|v| v.trim() != "0")
+        .unwrap_or(true);
+    if !submit {
+        println!("{}", serde_json::to_string_pretty(&bundle).unwrap());
+        return Ok(());
+    }
+    let resp = client
+        .post(format!("{base}/poawx/role-bundle"))
+        .bearer_auth(&token)
+        .json(&bundle)
+        .send()
+        .map_err(|e| format!("role-bundle submit: {e}"))?;
+    let status = resp.status();
+    let body = resp.text().unwrap_or_default();
+    if !status.is_success() {
+        return Err(format!(
+            "role-bundle submit rejected by node: {status} {}",
+            body.trim()
+        ));
+    }
+    println!(
+        "[role-worker] ENROLLED role={role_name} height={height} pkh={} -> {status} {}",
+        hex::encode(payout_pkh),
+        body.trim()
+    );
     Ok(())
 }

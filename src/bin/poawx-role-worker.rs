@@ -1,9 +1,9 @@
-//! Stage D role-attribution Phase 2: miner-side role-work worker.
+//! PoAW-X light-miner enrollment worker.
 //!
-//! A DISTINCT pool-connected miner independently performs one PoAW-X contributor
-//! role (COMPUTE/VERIFY/SUPPORT) per block, bound to its OWN payout key so that
+//! A DISTINCT miner independently performs one PoAW-X contributor role
+//! (COMPUTE/VERIFY/SUPPORT) per block, bound to its OWN payout key so that
 //! solver_pkh == hash160(assignment_public_key) (the Phase-1 rule). It fetches the
-//! node template, grinds the real sybil ticket + the real assigned puzzle, builds the
+//! role-work params, grinds the real sybil ticket + the real assigned puzzle, builds the
 //! payout-bound ECVRF assignment proof, the role claim (reveal) and the precommit,
 //! then SELF-VERIFIES every artifact against the node validators, and SUBMITS it to the
 //! node's /poawx/role-bundle endpoint to ENROLL — so this miner's own payout_pkh is paid
@@ -13,10 +13,17 @@
 //! no full node required. Fair-distribution PAYOUT of enrolled members is consensus-gated —
 //! advisory until the coupled fair-distribution activation, enforced after.
 //!
+//! Modes:
+//!   - default: one-shot — enroll once for the current height, then exit (a scheduler or
+//!     the pool can invoke per height).
+//!   - IRIUM_POAWX_ROLE_WORKER_LOOP=1: stay-enrolled — poll every
+//!     IRIUM_POAWX_ROLE_WORKER_POLL_SECS (default 10s) and re-enroll on each NEW height,
+//!     retrying transient errors instead of exiting. This is the "set and forget" client.
+//!
 //! Env: IRIUM_POAWX_ROLE_SECRET_HEX (payout key), IRIUM_NODE_RPC, IRIUM_RPC_TOKEN,
-//!      IRIUM_NETWORK, IRIUM_POAWX_ROLE_WORKER_SUBMIT (=0 to print instead of submit).
-//!      Arg 1: role = compute|verify|support. Run once per height (a pool scheduler, the
-//!      app, or a shell loop drives the per-block cadence).
+//!      IRIUM_NETWORK, IRIUM_POAWX_ROLE_WORKER_SUBMIT (=0 to print instead of submit),
+//!      IRIUM_POAWX_ROLE_WORKER_LOOP, IRIUM_POAWX_ROLE_WORKER_POLL_SECS.
+//!      Arg 1: role = compute|verify|support.
 use irium_node_rs::poawx::{
     role_claim_digest, role_precommit_commitment, PoawxRoleClaim, ROLE_COMPUTE_CONTRIBUTOR,
     ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
@@ -50,42 +57,39 @@ fn role_id(name: &str) -> u8 {
     }
 }
 
-fn main() -> Result<(), String> {
-    let role_name = std::env::args().nth(1).unwrap_or_else(|| "compute".into());
-    let role = role_id(&role_name);
-    let net = irium_node_rs::activation::network_id_byte();
-    let secret = {
-        let hx = std::env::var("IRIUM_POAWX_ROLE_SECRET_HEX")
-            .map_err(|_| "set IRIUM_POAWX_ROLE_SECRET_HEX (payout key, 64 hex)".to_string())?;
-        let b = hex::decode(hx.trim()).map_err(|e| format!("bad secret hex: {e}"))?;
-        let mut o = [0u8; 32];
-        o.copy_from_slice(&b);
-        o
-    };
-    let sk = SigningKey::from_bytes((&secret).into()).map_err(|_| "bad secret".to_string())?;
-    let mut payout_pubkey = [0u8; 33];
-    payout_pubkey.copy_from_slice(VerifyingKey::from(&sk).to_encoded_point(true).as_bytes());
-    let payout_pkh = hash160(&payout_pubkey);
-
+/// Build + self-verify + submit one enrollment for the current role-work height. Returns
+/// `Ok(Some(height))` after enrolling that height, or `Ok(None)` if the height is unchanged
+/// from `last_height` (nothing to do this poll).
+#[allow(clippy::too_many_arguments)]
+fn enroll_once(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    token: &str,
+    role: u8,
+    role_name: &str,
+    net: u8,
+    secret: &[u8; 32],
+    sk: &SigningKey,
+    payout_pubkey: [u8; 33],
+    payout_pkh: [u8; 20],
+    last_height: Option<u64>,
+) -> Result<Option<u64>, String> {
     // ---- fetch the R3 role-work params (works regardless of proposer-VRF: the epoch
     //      seed used for role assignments is provided here, not the proposer-VRF seed) ----
-    let base = std::env::var("IRIUM_NODE_RPC").unwrap_or_else(|_| "http://127.0.0.1:38500".into());
-    let token = std::env::var("IRIUM_RPC_TOKEN").unwrap_or_default();
-    let client = reqwest::blocking::Client::new();
     let t: serde_json::Value = client
         .get(format!("{base}/poawx/role-work"))
-        .bearer_auth(&token)
+        .bearer_auth(token)
         .send()
         .map_err(|e| format!("role-work fetch: {e}"))?
         .json()
         .map_err(|e| format!("role-work json: {e}"))?;
     let height = t["height"].as_u64().ok_or("role-work: no height")?;
+    // In loop mode, only enroll once per new height.
+    if last_height == Some(height) {
+        return Ok(None);
+    }
     let prev_hash = h32(t["prev_hash"].as_str().ok_or("role-work: no prev_hash")?);
-    let seed = h32(
-        t["epoch_seed"]
-            .as_str()
-            .ok_or("role-work: no epoch_seed")?,
-    );
+    let seed = h32(t["epoch_seed"].as_str().ok_or("role-work: no epoch_seed")?);
     let puzzle_bits = t["puzzle_anchor_bits"].as_u64().unwrap_or(8) as u8;
     let sybil_bits = t["sybil_bits"].as_u64().unwrap_or(8) as u32;
     let profile = profile_with_bits(puzzle_bits);
@@ -94,12 +98,8 @@ fn main() -> Result<(), String> {
     // Node-authoritative dominance: the candidate's `dominance_weight` is consensus-validated
     // (chain.rs `validate_block_dominance_weights`) against the node's persisted dominance, and
     // it is serialized into the candidate whose SHA-256 digest seeds the puzzle challenge. So it
-    // MUST be derived from the node's snapshot, never hardcoded. Hardcoding 1000 happens to equal
-    // the node weight only when dominance is empty (height 1: fairness_weight = 1000*1000/1000);
-    // at height >= 2 the parent block credits reward share to the solver pkhs, the node weight
-    // falls below 1000, and the worker's puzzle challenge stops matching the builder's rebuilt
-    // one -> "proof digest mismatch" at assembly. The endpoint ships this snapshot precisely so
-    // the worker can build against it (see role-work's dominance note).
+    // MUST be derived from the node's snapshot, never hardcoded. The endpoint ships this snapshot
+    // precisely so the worker can build against it (see role-work's dominance note).
     let dominance = PersistentDominance::from_bytes(
         &hex::decode(
             t["dominance_snapshot"]
@@ -127,9 +127,8 @@ fn main() -> Result<(), String> {
     );
 
     // ---- 2. payout-BOUND assignment proof (prove_self_solver => solver==hash160(apk)) ----
-    //     assignment ticket_digest mirrors the accepted harness pattern (per-role constant).
     let a_ticket = [(0x11u8 + role); 32];
-    let proof = AssignmentProofV2::prove_self_solver(&secret, net, height, role, a_ticket, seed)?;
+    let proof = AssignmentProofV2::prove_self_solver(secret, net, height, role, a_ticket, seed)?;
     let cand =
         RoleCandidate::from_assignment_v2(&proof, PenaltyStatus::Clean.id(), dominance_weight, [role; 32]);
 
@@ -192,7 +191,7 @@ fn main() -> Result<(), String> {
     //         PARENT (block_hash = prev_hash), bound to this worker's real ticket_digest.
     let finality_vote = if role == ROLE_SUPPORT_CONTRIBUTOR {
         let v = irium_node_rs::poawx_finality::FinalityVoteV1::signed(
-            &sk,
+            sk,
             net,
             height,
             prev_hash,
@@ -201,15 +200,13 @@ fn main() -> Result<(), String> {
             ticket.ticket_digest,
             irium_node_rs::poawx_finality::FinalityVoteType::Commit,
         );
-        // self-verify the vote binds correctly before emitting
         v.verify(net, height, &prev_hash)?;
         Some(v)
     } else {
         None
     };
 
-    // ---- 7. emit the payout-bound bundle (for the Phase-3 collection channel) ----
-    println!("[role-worker] ALL ARTIFACTS SELF-VERIFIED. Phase-1 binding holds: solver_pkh == hash160(assignment_public_key) == payout_pkh.");
+    // ---- 7. assemble the payout-bound bundle ----
     let mut bundle = serde_json::json!({
         "network_id": net, "target_height": height, "role_id": role, "role": role_name,
         "solver_pkh": hex::encode(payout_pkh),
@@ -227,23 +224,17 @@ fn main() -> Result<(), String> {
         bundle["finality_vote"] = serde_json::Value::String(hex::encode(v.serialize()));
     }
 
-    // ---- 8. SUBMIT the enrollment to the node's role-bundle endpoint. This is how a light
-    //         miner ENROLLS as a distinct on-chain role member: the node fully re-validates
-    //         the bundle on ingest (payout binding recomputed, ECVRF + ticket verified) and
-    //         pools it; a producer then folds it into the block so THIS miner's payout_pkh is
-    //         paid its role share. `base` may be a co-located node (loopback) OR a remote pool
-    //         / Irium Core node that opted in via IRIUM_POAWX_REMOTE_ENROLLMENT=1 (Step 1).
-    //         Set IRIUM_POAWX_ROLE_WORKER_SUBMIT=0 to only print the bundle (dev/inspection).
+    // ---- 8. SUBMIT the enrollment (or print it in inspection mode) ----
     let submit = std::env::var("IRIUM_POAWX_ROLE_WORKER_SUBMIT")
         .map(|v| v.trim() != "0")
         .unwrap_or(true);
     if !submit {
         println!("{}", serde_json::to_string_pretty(&bundle).unwrap());
-        return Ok(());
+        return Ok(Some(height));
     }
     let resp = client
         .post(format!("{base}/poawx/role-bundle"))
-        .bearer_auth(&token)
+        .bearer_auth(token)
         .json(&bundle)
         .send()
         .map_err(|e| format!("role-bundle submit: {e}"))?;
@@ -260,5 +251,60 @@ fn main() -> Result<(), String> {
         hex::encode(payout_pkh),
         body.trim()
     );
-    Ok(())
+    Ok(Some(height))
+}
+
+fn main() -> Result<(), String> {
+    let role_name = std::env::args().nth(1).unwrap_or_else(|| "compute".into());
+    let role = role_id(&role_name);
+    let net = irium_node_rs::activation::network_id_byte();
+    let secret = {
+        let hx = std::env::var("IRIUM_POAWX_ROLE_SECRET_HEX")
+            .map_err(|_| "set IRIUM_POAWX_ROLE_SECRET_HEX (payout key, 64 hex)".to_string())?;
+        let b = hex::decode(hx.trim()).map_err(|e| format!("bad secret hex: {e}"))?;
+        let mut o = [0u8; 32];
+        o.copy_from_slice(&b);
+        o
+    };
+    let sk = SigningKey::from_bytes((&secret).into()).map_err(|_| "bad secret".to_string())?;
+    let mut payout_pubkey = [0u8; 33];
+    payout_pubkey.copy_from_slice(VerifyingKey::from(&sk).to_encoded_point(true).as_bytes());
+    let payout_pkh = hash160(&payout_pubkey);
+
+    let base = std::env::var("IRIUM_NODE_RPC").unwrap_or_else(|_| "http://127.0.0.1:38500".into());
+    let token = std::env::var("IRIUM_RPC_TOKEN").unwrap_or_default();
+    let client = reqwest::blocking::Client::new();
+
+    let loop_mode = std::env::var("IRIUM_POAWX_ROLE_WORKER_LOOP")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false);
+
+    // One-shot: run once and propagate errors (nonzero exit) exactly as before.
+    if !loop_mode {
+        return enroll_once(
+            &client, &base, &token, role, &role_name, net, &secret, &sk, payout_pubkey, payout_pkh,
+            None,
+        )
+        .map(|_| ());
+    }
+
+    // Stay-enrolled: poll for new heights and re-enroll, retrying transient errors.
+    let poll_secs = std::env::var("IRIUM_POAWX_ROLE_WORKER_POLL_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .unwrap_or(10);
+    println!("[role-worker] loop mode: role={role_name} poll={poll_secs}s node={base}");
+    let mut last_height: Option<u64> = None;
+    loop {
+        match enroll_once(
+            &client, &base, &token, role, &role_name, net, &secret, &sk, payout_pubkey, payout_pkh,
+            last_height,
+        ) {
+            Ok(Some(h)) => last_height = Some(h),
+            Ok(None) => {}
+            Err(e) => eprintln!("[role-worker] enrollment error (will retry): {e}"),
+        }
+        std::thread::sleep(std::time::Duration::from_secs(poll_secs));
+    }
 }

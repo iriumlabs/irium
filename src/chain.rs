@@ -20560,6 +20560,103 @@ mod proposer_consensus_tests {
         clear_sib_env();
     }
 
+    // Regression for the live 62,506 TALLER-fork deadlock: a peer that is LONGER but on a
+    // forked branch we can't link. The old sync used OUR OWN tip as the getblocks locator
+    // -- the peer doesn't have it, so the server re-anchors at the genesis child and serves
+    // only shared early history (on a chain taller than one window), never the divergence.
+    // Combined with `state.height` only being refreshed by a Headers message that never
+    // arrives, the node permanently believed the peer was "not taller" and never fetched.
+    // The fix routes a taller UNLINKED fork through fork_sync_locator (backward walk), so
+    // the peer serves the competing branch and the comparator can decide.
+    #[test]
+    fn taller_fork_locator_delivers_branch() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        set_sib_env();
+        let maxreq = crate::protocol::MAX_BLOCKS_PER_REQUEST;
+        let shared_n: u64 = maxreq as u64 - 5; // 507: chain taller than one window(512)
+        let my_depth: u64 = 5; // our (shorter) branch -> tip 512
+        let peer_depth: u64 = 12; // peer's (longer) branch -> tip 519 (taller fork, within K)
+
+        let gh = base_chain().chain[0].header.hash_for_height(0);
+        let mut shared: Vec<(Block, u64)> = Vec::new();
+        let mut prev = gh;
+        for h in 1..=shared_n {
+            let b = minimal_block(prev, 50 + h as u32);
+            prev = b.header.hash_for_height(h);
+            shared.push((b, h));
+        }
+        let fork_parent = prev;
+        let mk = |t0: u32, depth: u64| -> Vec<(Block, u64)> {
+            let mut v = Vec::new();
+            let mut p = fork_parent;
+            for i in 1..=depth {
+                let h = shared_n + i;
+                let b = minimal_block(p, t0 + i as u32);
+                p = b.header.hash_for_height(h);
+                v.push((b, h));
+            }
+            v
+        };
+        let my_br = mk(100_000, my_depth);
+        let peer_br = mk(200_000, peer_depth);
+        let my_tip = my_br.last().unwrap().0.header.hash_for_height(shared_n + my_depth);
+        let peer_tip = peer_br.last().unwrap().0.header.hash_for_height(shared_n + peer_depth);
+        let peer_tip_time = peer_br.last().unwrap().0.header.time;
+        let peer_height = shared_n + peer_depth;
+
+        let mut time_h: std::collections::HashMap<u32, u64> = std::collections::HashMap::new();
+        for (b, h) in shared.iter().chain(my_br.iter()).chain(peer_br.iter()) {
+            time_h.insert(b.header.time, *h);
+        }
+        let build = |active: &[(Block, u64)]| -> ChainState {
+            let mut cs = base_chain();
+            for (b, h) in shared.iter().chain(active.iter()) {
+                let hh = b.header.hash_for_height(*h);
+                cs.block_store.insert(hh, b.clone());
+                cs.heights.insert(hh, *h);
+                cs.chain.push(b.clone());
+            }
+            cs.height = cs.chain.len() as u64;
+            cs
+        };
+        let mut my_node = build(&my_br);
+        let peer_node = build(&peer_br);
+        // peer_tip_forked precondition: peer_tip is not in my chain and differs from my tip.
+        assert_ne!(peer_tip, my_tip);
+        assert!(!my_node.heights.contains_key(&peer_tip) && !my_node.headers.contains_key(&peer_tip));
+
+        // CONTROL: the OLD locator (our own tip) does NOT deliver the taller fork's tip
+        // (peer re-anchors at genesis child on a chain taller than the window).
+        let via_own_tip = crate::p2p::serve_getblocks_from(&peer_node, my_tip, maxreq);
+        assert!(
+            !via_own_tip.iter().any(|b| b.header.time == peer_tip_time),
+            "regression guard: own-tip locator must NOT reach a taller fork's divergence (the deadlock)"
+        );
+
+        // FIX: fork_sync_locator for the taller peer walks back and delivers the branch.
+        let loc = crate::p2p::fork_sync_locator(&my_node, peer_height, Some(peer_tip))
+            .expect("taller fork must produce a locator");
+        assert_ne!(loc.0, my_tip, "must not use our own (unshared) tip");
+        assert_ne!(loc.0, [0u8; 32], "must not anchor at genesis");
+        let served = crate::p2p::serve_getblocks_from(&peer_node, loc.0, loc.1);
+        assert!(
+            served.iter().any(|b| b.header.time == peer_tip_time),
+            "backward locator delivers the taller fork's competing branch up to its tip"
+        );
+
+        // After delivery the branch links and the comparator can evaluate it (no orphan).
+        for b in &served {
+            let h = time_h[&b.header.time];
+            let hh = b.header.hash_for_height(h);
+            my_node.block_store.insert(hh, b.clone());
+            my_node.heights.insert(hh, h);
+        }
+        my_node
+            .proposer_rank_chain_better(peer_tip)
+            .expect("delivered taller fork must be linkable so the comparator evaluates it");
+        clear_sib_env();
+    }
+
     #[test]
     fn sibling_reorg_within_cap() {
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());

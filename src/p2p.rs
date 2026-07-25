@@ -2139,7 +2139,8 @@ async fn maybe_request_sync(
         Some(h) => h,
         None => return,
     };
-    let (local_height, local_tip, best_header_height, best_header_hash) = match chain {
+    let (local_height, local_tip, best_header_height, best_header_hash, peer_tip_forked) = match chain
+    {
         Some(c) => {
             let guard = c.lock().unwrap_or_else(|e| e.into_inner());
             let local_height = guard.tip_height();
@@ -2151,35 +2152,60 @@ async fn maybe_request_sync(
                 .map(|hw| hw.height)
                 .or_else(|| guard.heights.get(&best_header_hash).copied())
                 .unwrap_or(local_height);
+            // A peer that is NOT shorter and whose advertised tip we hold NEITHER as a
+            // linked block NOR as a header (and which differs from our tip) is on a
+            // genuine competing fork we have not fetched. We must sync toward it even when
+            // our own best_header cannot advance past our tip (we can't link its blocks
+            // yet) -- otherwise a shallow TALLER fork deadlocks: the guards below treat the
+            // peer as "not taller / inflated" and never fetch the branch, so best_header
+            // never moves, so the peer stays "not taller". Requiring `peer_height >=
+            // local_height` excludes SHORTER forks (e.g. the demoted-boundary external
+            // peers) so we don't waste fetches chasing chains we'd never adopt. Both
+            // `state.tip` and `state.height` are refreshed on every handshake (which
+            // re-fires on the peer's tip change), so the advertised height is current.
+            let peer_tip_forked = peer_height >= local_height
+                && peer_tip
+                    .map(|t| {
+                        t != local_tip
+                            && !guard.heights.contains_key(&t)
+                            && !guard.headers.contains_key(&t)
+                    })
+                    .unwrap_or(false);
             (
                 local_height,
                 local_tip,
                 best_header_height,
                 best_header_hash,
+                peer_tip_forked,
             )
         }
-        None => (0, [0u8; 32], 0, [0u8; 32]),
+        None => (0, [0u8; 32], 0, [0u8; 32], false),
     };
     let tip_mismatch = peer_tip
         .map(|t| peer_height == local_height && t != local_tip)
         .unwrap_or(false);
 
-    if peer_height < local_height || (peer_height == local_height && !tip_mismatch) {
+    if (peer_height < local_height || (peer_height == local_height && !tip_mismatch))
+        && !peer_tip_forked
+    {
         return;
     }
 
-    // At validated tip with no mismatch, ignore inflated peer-advertised heights.
-    if best_header_height <= local_height && !tip_mismatch {
+    // At validated tip with no mismatch, ignore inflated peer-advertised heights --
+    // EXCEPT a genuine unlinked fork (peer_tip_forked), which we must fetch even though
+    // our best_header can't advance past our tip until we link the branch.
+    if best_header_height <= local_height && !tip_mismatch && !peer_tip_forked {
         let mut state = peer_state.lock().await;
         state.headers_inflight = false;
         return;
     }
 
-    // For an equal-height fork (tip_mismatch), a genesis locator only re-serves
-    // the shared early history and never reaches the divergence -> permanent
-    // non-convergence (the live 62,244 fork). Walk back from our tip instead so
-    // the peer serves the competing branch above the last common block.
-    let mut start_hash = if tip_mismatch {
+    // For an equal-height fork (tip_mismatch) OR a taller unlinked fork
+    // (peer_tip_forked), a genesis/own-tip locator only re-serves the shared early
+    // history and never reaches the divergence -> permanent non-convergence (the live
+    // 62,244 equal-height fork AND the 62,506 taller-fork deadlock). Walk back from our
+    // tip instead so the peer serves the competing branch above the last common block.
+    let mut start_hash = if tip_mismatch || peer_tip_forked {
         chain
             .as_ref()
             .and_then(|c| {
@@ -2279,7 +2305,7 @@ async fn maybe_request_sync(
             state.headers_inflight = true;
         }
     }
-    if (peer_height > local_height || tip_mismatch)
+    if (peer_height > local_height || tip_mismatch || peer_tip_forked)
         && sync_block_request_allowed_for(
             block_requests,
             addr.ip(),
@@ -5180,6 +5206,14 @@ impl P2PNode {
                             {
                                 let mut state = peer_state.lock().await;
                                 state.tip = parsed_tip;
+                                // Record the advertised height so a taller FORKED peer (whose
+                                // blocks we cannot link yet, so no Headers message ever
+                                // refreshes state.height) is still seen as taller by
+                                // maybe_request_sync -- else a shallow taller fork deadlocks.
+                                // The sync it triggers self-validates the claim (bounded by
+                                // per-peer sync rate limits); an inflated claim without a
+                                // real fork is still dropped by the inflation guard.
+                                state.height = Some(payload.height);
                                 state.node_id = node_id_bytes.clone();
                                 state.supports_uptime = supports_uptime;
                             }
@@ -7793,6 +7827,9 @@ async fn handle_incoming_with_sybil(
                     {
                         let mut state = peer_state.lock().await;
                         state.tip = parsed_tip;
+                        // Record advertised height so a taller FORKED peer is seen as taller
+                        // by maybe_request_sync (see the outbound handshake handler for why).
+                        state.height = Some(payload.height);
                         state.node_id = node_id_bytes.clone();
                         state.supports_uptime = supports_uptime;
                     }

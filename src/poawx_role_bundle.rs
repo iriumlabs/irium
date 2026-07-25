@@ -457,6 +457,30 @@ impl NodeRoleBundlePool {
 const IDENTITY_RATE_WINDOW_SECS: u64 = 60;
 const IDENTITY_RATE_MAX: u32 = 8;
 
+/// Per-identity role-bundle submission limit. MAINNET (network_id==0) is FIXED at the consts —
+/// env-ignored, so the anti-DoS bound cannot be relaxed in production. Devnet/testnet may raise it
+/// via `IRIUM_POAWX_IDENTITY_RATE_{MAX,WINDOW_SECS}` for many-contributor / fast-block harnesses where
+/// a contributor legitimately submits on every block (8/60s is designed for ~2-min production blocks).
+pub fn identity_rate_window_secs() -> u64 {
+    if crate::activation::network_id_byte() == 0 {
+        return IDENTITY_RATE_WINDOW_SECS;
+    }
+    std::env::var("IRIUM_POAWX_IDENTITY_RATE_WINDOW_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|w| w.clamp(1, 3600))
+        .unwrap_or(IDENTITY_RATE_WINDOW_SECS)
+}
+pub fn identity_rate_max() -> u32 {
+    if crate::activation::network_id_byte() == 0 {
+        return IDENTITY_RATE_MAX;
+    }
+    std::env::var("IRIUM_POAWX_IDENTITY_RATE_MAX")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(IDENTITY_RATE_MAX)
+}
+
 struct IdentityRate {
     window_start: std::time::Instant,
     count: u32,
@@ -472,7 +496,7 @@ fn identity_rate_map() -> &'static Mutex<BTreeMap<[u8; 20], IdentityRate>> {
 /// jump would reset every bucket.
 pub fn identity_rate_allowed(solver_pkh: &[u8; 20]) -> bool {
     let now = std::time::Instant::now();
-    let window = std::time::Duration::from_secs(IDENTITY_RATE_WINDOW_SECS);
+    let window = std::time::Duration::from_secs(identity_rate_window_secs());
     let mut m = identity_rate_map().lock().unwrap_or_else(|e| e.into_inner());
     if m.len() > 8192 {
         m.retain(|_, r| now.duration_since(r.window_start) < window);
@@ -486,7 +510,7 @@ pub fn identity_rate_allowed(solver_pkh: &[u8; 20]) -> bool {
         e.count = 0;
     }
     e.count = e.count.saturating_add(1);
-    e.count <= IDENTITY_RATE_MAX
+    e.count <= identity_rate_max()
 }
 
 /// Test observability: how many times a bundle actually reached VALIDATION. Lets a test

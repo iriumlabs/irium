@@ -198,6 +198,28 @@ that submits valid work earns real block rewards directly to the IRM
 address used as the Stratum worker name — the pool runs in SOLO payout
 mode (no fee, no aggregation).
 
+### Run your own PoAW-X producer (CPU, permissionless)
+
+From block 50,000, producing a block means running your **own full iriumd node** as a PoAW-X
+producer — and PoAW-X blocks are produced at a CPU-reachable floor difficulty, so a commodity CPU
+can produce them with **no ASIC or GPU required**. Onboarding is permissionless: you register a
+proposer key, your node gossips it, and by consensus every producer must include it — the
+registration queue is force-drained in first-in-first-out order, so no producer can gatekeep who
+joins. After a 16-block freeze your key is eligible and wins ~1/n of blocks by fair VRF sortition,
+earning its share of the 55/22/13/10 role split.
+
+```bash
+cargo build --release --bin iriumd --bin irium-miner
+./target/release/iriumd                                    # run a full node, let it sync
+openssl rand -hex 32 > ~/.irium/producer.secret && chmod 600 ~/.irium/producer.secret
+IRIUM_POAWX_MINER_SECRET_HEX="$(cat ~/.irium/producer.secret)" \
+IRIUM_NODE_RPC=http://127.0.0.1:38300 \
+  ./target/release/irium-miner --poawx --threads 1         # registration is automatic
+```
+
+Full step-by-step guide, including how the permissionless, no-gatekeeper design works:
+[docs/run-your-own-producer.md](docs/run-your-own-producer.md).
+
 ---
 
 ## Running a Public Node
@@ -313,6 +335,7 @@ Full walkthrough: [QUICKSTART.md](QUICKSTART.md) | API reference: [docs/API.md](
 | [docs/DOCKER.md](docs/DOCKER.md) | Docker deployment guide |
 | [docs/SEED-NODE.md](docs/SEED-NODE.md) | Running a public seed node |
 | [docs/DEVELOPER-QUICKSTART.md](docs/DEVELOPER-QUICKSTART.md) | Dev environment setup |
+| [docs/run-your-own-producer.md](docs/run-your-own-producer.md) | Run your own independent PoAW-X producer (CPU, permissionless) |
 | [docs/LISTING-APPLICATION.md](docs/LISTING-APPLICATION.md) | Exchange listing application template |
 
 ---

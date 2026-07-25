@@ -262,6 +262,28 @@ irium-miner-gpu \
 
 Your `<YOUR_ADDRESS>` is also your worker name — the pool credits payouts directly to it. Live pool stats (active miners, blocks found, rolling-window hashrate per profile) are available at `http://pool.irium.org:3337/stats` and are surfaced in the desktop app's Explorer tab.
 
+### Option D — Run your own PoAW-X producer (full node, CPU, permissionless)
+
+From the PoAW-X activation onward, producing a block means running your **own full iriumd node** as an independent producer, and blocks are produced at a CPU-reachable floor difficulty — **no ASIC or GPU required**. Onboarding is permissionless and needs no approval: you register a proposer key, your node gossips it, and by consensus every producer must include it (the registration queue is force-drained in order, so no one can gatekeep who joins). After a 16-block freeze your key is eligible and wins roughly `1/n` of blocks by fair VRF sortition.
+
+```bash
+# build the node + producer
+cargo build --release --bin iriumd --bin irium-miner
+
+# run a full node and let it sync to the network tip
+./target/release/iriumd
+
+# create your producer key — keep it private
+openssl rand -hex 32 > ~/.irium/producer.secret && chmod 600 ~/.irium/producer.secret
+
+# produce — registration is automatic; you're eligible after 16 blocks
+IRIUM_POAWX_MINER_SECRET_HEX="$(cat ~/.irium/producer.secret)" \
+IRIUM_NODE_RPC=http://127.0.0.1:38300 \
+  ./target/release/irium-miner --poawx --threads 1
+```
+
+Full step-by-step guide, including how the permissionless, no-gatekeeper design works: [docs/run-your-own-producer.md](docs/run-your-own-producer.md).
+
 ---
 
 ## Step 6 — Browse the marketplace

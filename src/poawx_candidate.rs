@@ -431,6 +431,10 @@ impl CandidateSet {
     pub fn sort_canonical(&mut self) {
         self.candidates
             .sort_by(|a, b| a.sort_key().cmp(&b.sort_key()));
+        // Dedup identical candidates so the result satisfies `is_canonical` (strictly
+        // increasing sort_key). Duplicates can arise when a fan-out extra restates a
+        // candidate already present (e.g. a collected worker also gossiped as an admission).
+        self.candidates.dedup_by(|a, b| a.sort_key() == b.sort_key());
     }
 
     /// Whether the candidate list is in canonical order with no duplicate keys.

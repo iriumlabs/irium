@@ -1359,18 +1359,35 @@ fn build_all_gates_block_with(
     // The winner (support_solver) remains `best_for_role(SUPPORT)` because the caller
     // selects it as the max-effective-score member; the extras only enlarge the
     // committee that the finality proof votes cover. Empty => no change.
-    if !ids.extra_support_candidates.is_empty()
-        || !ids.extra_compute_candidates.is_empty()
-        || !ids.extra_verify_candidates.is_empty()
+    // FIX (2026-07-25 activation bug): only fold a fan-out extra as a candidate if the
+    // producer can FULLY PAY it — i.e. it has a collected bundle (claim + ticket) for its
+    // (role, solver_pkh). Admission-only candidates (e.g. another producer's gossiped
+    // admission with no bundle) are UNPAYABLE; folding them lets the enforced validator's
+    // `best_for_role` (chain.rs:2307) pick a payee this block cannot provide artifacts for
+    // ("selected role solver is not the best candidate"), which degraded the 2026-07-25
+    // activation under 2-producer racing. With no payable extras (e.g. sole/self-fill or
+    // 2 producers with no external bundles) the set stays the base candidates, so
+    // best_for_role == the selected solver by construction. `sort_canonical` dedups.
+    let can_pay = |c: &crate::poawx_candidate::RoleCandidate| -> bool {
+        ids.collected
+            .as_ref()
+            .and_then(|col| col.for_role(c.role_id))
+            .map(|b| b.solver_pkh == c.solver_pkh)
+            .unwrap_or(false)
+    };
+    let mut folded_any = false;
+    for c in ids
+        .extra_support_candidates
+        .iter()
+        .chain(ids.extra_compute_candidates.iter())
+        .chain(ids.extra_verify_candidates.iter())
     {
-        for c in ids
-            .extra_support_candidates
-            .iter()
-            .chain(ids.extra_compute_candidates.iter())
-            .chain(ids.extra_verify_candidates.iter())
-        {
+        if can_pay(c) {
             cs.push(c.clone());
+            folded_any = true;
         }
+    }
+    if folded_any {
         cs.sort_canonical();
     }
     let dw_in = |pkh: &[u8; 20]| dom_in.weight(DOMINANCE_BASE_WORK_SCORE, pkh, height);
@@ -2008,6 +2025,57 @@ mod tests {
         assert!(
             build_devnet_all_gates_block(0, 1, [0x44u8; 32], None, 0x207fffff, 1, 1).is_ok(),
             "builder accepts known mainnet network id"
+        );
+    }
+
+    #[test]
+    fn unpayable_fanout_extra_is_not_folded_as_winner() {
+        // Regression for the 2026-07-25 activation halt: a fan-out extra the producer
+        // CANNOT pay (no collected bundle for it) must NOT be folded into the candidate
+        // set, so the enforced validator's `best_for_role` (chain.rs:2307) always equals
+        // the selected payee. Before the fix, folding an unpayable higher-scoring extra
+        // (e.g. another producer's gossiped admission under 2-producer racing) made
+        // best_for_role != payee => "selected role solver is not the best candidate".
+        let net = 1u8; // devnet (dev builder is mainnet-hard-off)
+        let height = 1u64;
+        let prev = [0x44u8; 32];
+        let seed = prev; // height-1 epoch seed (parent_prev_hash None) falls back to prev_hash
+        let role = ROLE_COMPUTE_CONTRIBUTOR;
+
+        // Unpayable extra: a DIFFERENT key with a very high dominance weight (would win
+        // best_for_role if folded) and NO collected bundle => can_pay == false.
+        let secret2 = [0x99u8; 32];
+        let proof2 =
+            AssignmentProofV2::prove_self_solver(&secret2, net, height, role, [0x11u8 + role; 32], seed)
+                .expect("extra proof");
+        let extra =
+            RoleCandidate::from_assignment_v2(&proof2, PenaltyStatus::Clean.id(), 100_000, [role; 32]);
+        assert_ne!(extra.solver_pkh, [0u8; 20]);
+
+        let mut ids = AllGatesIdentities::dev().expect("dev ids");
+        ids.extra_compute_candidates = vec![extra.clone()];
+
+        let proof = build_all_gates_block_with(
+            &ids, net, height, prev, None, 0x207fffff, 1, 1,
+            ([0u8; 32], [0u8; 32]), None, None, None, None,
+            &default_cpu_nonce_solver,
+        )
+        .expect("block builds with an unpayable extra");
+        let receipts = proof.block.poawx_receipts.as_ref().expect("receipts");
+        let ext = receipts[0].phase20_ext.as_ref().expect("ext");
+        let cs = ext.candidate_set.as_ref().expect("candidate set");
+
+        // 1) the unpayable extra is NOT folded into the candidate set.
+        assert!(
+            !cs.candidates.iter().any(|c| c.solver_pkh == extra.solver_pkh),
+            "unpayable fan-out extra must not be folded as winner-eligible"
+        );
+        // 2) the payee equals best_for_role — the exact invariant the enforced validator
+        //    checks (would FAIL before the fix: payee=self, best_for_role=the extra).
+        let best = cs.best_for_role(role).expect("best");
+        assert_eq!(
+            ext.role_reward.compute_contributor_pkh, best.solver_pkh,
+            "compute payee must equal best_for_role"
         );
     }
 

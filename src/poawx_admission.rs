@@ -109,6 +109,51 @@ pub fn candidate_admission_gossip_enabled() -> bool {
         .is_some()
 }
 
+/// Seamless-enrollment (Step 1): whether this node accepts ENROLLMENT submissions
+/// (proposer registration, candidate admission, role bundle) from NON-loopback sources —
+/// i.e. a pool or Irium Core node relaying its own miners' enrollment. Default OFF; an
+/// operator must deliberately opt in (`IRIUM_POAWX_REMOTE_ENROLLMENT=1`). This is a
+/// TRANSPORT switch, not a consensus gate — it changes only what the node accepts over
+/// HTTP, never block validity — so it reads env on all networks (including mainnet) and
+/// ships inert. Every submission is still fully self-validated on arrival (self-signature
+/// + sybil PoW for registrations; ECVRF + payout binding for role bundles/admissions), so
+/// opening the transport cannot forge an identity; the only new exposure is flooding,
+/// bounded by the per-source rate limiter below.
+pub fn remote_enrollment_enabled() -> bool {
+    std::env::var("IRIUM_POAWX_REMOTE_ENROLLMENT")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false)
+}
+
+/// Transport-admission outcome for a remote enrollment submission.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EnrollmentTransport {
+    Admit,
+    Forbidden,
+    RateLimited,
+}
+
+/// Pure transport-admission decision (param-driven for race-free tests). Loopback is
+/// always admitted (the endpoint's own gossip/activation gate still applies afterwards).
+/// A non-loopback caller is admitted only if the operator opted in AND it is under the
+/// per-source rate limit. Mirrors `enrollment_transport_guard` in iriumd exactly.
+pub fn enrollment_transport_decision(
+    is_loopback: bool,
+    opted_in: bool,
+    under_rate: bool,
+) -> EnrollmentTransport {
+    if is_loopback {
+        return EnrollmentTransport::Admit;
+    }
+    if !opted_in {
+        return EnrollmentTransport::Forbidden;
+    }
+    if !under_rate {
+        return EnrollmentTransport::RateLimited;
+    }
+    EnrollmentTransport::Admit
+}
+
 /// Decentralized cross-producer fan-out: gathered role candidates + their proofs.
 #[derive(Debug, Default, Clone)]
 pub struct GatheredFanout {
@@ -1027,6 +1072,24 @@ pub fn global_admission_cache() -> &'static NodeCandidateAdmissionCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enrollment_transport_decision_matrix() {
+        use EnrollmentTransport::*;
+        // Loopback is always admitted, regardless of opt-in / rate — backward compatible
+        // with today's loopback-only behaviour.
+        assert_eq!(enrollment_transport_decision(true, false, false), Admit);
+        assert_eq!(enrollment_transport_decision(true, true, true), Admit);
+        // Non-loopback + NOT opted in => Forbidden. This is the default (ships inert):
+        // remote miners are refused until an operator sets IRIUM_POAWX_REMOTE_ENROLLMENT=1.
+        assert_eq!(enrollment_transport_decision(false, false, true), Forbidden);
+        assert_eq!(enrollment_transport_decision(false, false, false), Forbidden);
+        // Non-loopback + opted in + under rate => Admit (a pool/app relaying its miners).
+        assert_eq!(enrollment_transport_decision(false, true, true), Admit);
+        // Non-loopback + opted in + OVER rate => RateLimited (flood protection), NOT a
+        // forbidden/ban — drop-only, so a burst is shed without disconnecting the peer.
+        assert_eq!(enrollment_transport_decision(false, true, false), RateLimited);
+    }
 
     #[test]
     fn admission_rate_limiter_passes_honest_drops_flood() {

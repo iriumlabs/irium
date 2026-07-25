@@ -14554,12 +14554,34 @@ fn role_gossip_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
     Ok(())
 }
 
-/// Phase 21E: loopback-only guard for the candidate-admission bridge
-/// (testnet/devnet, mainnet hard-off, disabled unless the admission gate is set).
-fn candidate_admission_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
-    if !addr.ip().is_loopback() {
+/// Seamless-enrollment (Step 1): shared transport gate for the three enrollment endpoints
+/// (proposer registration, candidate admission, role bundle). Loopback is always admitted
+/// (co-located CLI/app/pool miners, exactly as before). A non-loopback caller — a pool or
+/// Irium Core node relaying a remote miner's enrollment — is admitted only when the operator
+/// opted in (`IRIUM_POAWX_REMOTE_ENROLLMENT=1`) AND is under the per-source rate limit.
+/// Default off => ships inert (loopback-only, byte-identical to prior behaviour). This opens
+/// TRANSPORT only; every submission is still fully self-validated downstream (self-signature
+/// + sybil PoW for registrations, ECVRF + payout binding for admissions/bundles), so it can
+/// never forge an identity — the only added exposure is flooding, bounded by the rate limiter.
+fn enrollment_transport_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
+    use irium_node_rs::poawx_admission as adm;
+    if addr.ip().is_loopback() {
+        return Ok(());
+    }
+    if !adm::remote_enrollment_enabled() {
         return Err(StatusCode::FORBIDDEN);
     }
+    if !adm::admission_rate_allowed(addr.ip()) {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
+    }
+    Ok(())
+}
+
+/// Phase 21E: transport gate for the candidate-admission bridge. Loopback always; a remote
+/// caller only with operator opt-in (see `enrollment_transport_guard`). Still requires the
+/// admission gossip gate to be active.
+fn candidate_admission_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
+    enrollment_transport_guard(addr)?;
     if !irium_node_rs::poawx_admission::candidate_admission_gossip_enabled() {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -14579,9 +14601,7 @@ fn finality_vote_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
 }
 
 fn proposer_registration_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
-    if !addr.ip().is_loopback() {
-        return Err(StatusCode::FORBIDDEN);
-    }
+    enrollment_transport_guard(addr)?;
     if !irium_node_rs::poawx_proposer::proposer_registration_gossip_enabled() {
         return Err(StatusCode::FORBIDDEN);
     }
@@ -14600,13 +14620,21 @@ fn proposer_registration_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCod
 /// remote exposure is a separate, separately-approved unit. Do not read the existence of
 /// this endpoint as "all mining paths are collected".
 fn role_bundle_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
-    // R2: non-loopback sources are refused unless an operator has explicitly opted in.
-    // Default remains loopback-only, so this ships inert. R1's tiered limiting is the
-    // precondition for ever enabling it.
-    if !addr.ip().is_loopback()
-        && !irium_node_rs::poawx_role_bundle::role_bundle_public_submission_enabled()
+    use irium_node_rs::poawx_admission as adm;
+    // Loopback always. A non-loopback source is admitted if the operator opted in via EITHER
+    // the legacy role-bundle flag (IRIUM_POAWX_ROLE_BUNDLE_PUBLIC) or the unified seamless-
+    // enrollment flag (IRIUM_POAWX_REMOTE_ENROLLMENT), and is under the per-source rate limit.
+    // Default off => ships inert (loopback-only).
+    if addr.ip().is_loopback() {
+        return Ok(());
+    }
+    if !(irium_node_rs::poawx_role_bundle::role_bundle_public_submission_enabled()
+        || adm::remote_enrollment_enabled())
     {
         return Err(StatusCode::FORBIDDEN);
+    }
+    if !adm::admission_rate_allowed(addr.ip()) {
+        return Err(StatusCode::TOO_MANY_REQUESTS);
     }
     Ok(())
 }

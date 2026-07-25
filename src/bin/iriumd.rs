@@ -14590,7 +14590,9 @@ fn proposer_registration_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCod
 
 /// POST /poawx/registration : a local miner submits a ProposerRegistrationV1 (wire
 /// bytes). The node light-validates, pools it, and gossips it so a producer can announce
-/// it on-chain. Loopback-only; mainnet hard-off.
+/// it on-chain. Loopback-only. LIVE on mainnet — registration gossip is enabled at network_id==0
+/// (`proposer_registration_gossip_enabled()` is true because PoAW-X is active), so an independent
+/// producer self-registers here.
 /// C1: loopback-only guard for the role-bundle collection endpoint.
 ///
 /// LOOPBACK-ONLY IN THIS UNIT. Co-located miners (standalone CLI, GPU, Irium Core with a

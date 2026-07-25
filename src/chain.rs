@@ -1,4 +1,12 @@
 #![allow(dead_code)]
+//! ⚠ MAINNET STATUS (reconciled 2026-07-25; authoritative check: `activation::mainnet_gate_truth`): the many
+//! per-fn "mainnet hard-off" / "returns false on mainnet" comments below are STALE for any gate whose
+//! `MAINNET_*_ACTIVATION_HEIGHT` is `Some` — those route through `activation::poawx_effective_activation`,
+//! which on `network_id==0` ignores the env and uses the COMPILED height, so the gate is ACTIVE in production
+//! (PoAW-X ≥50,000; N1 ≥59,900; the combined stack — demotion / shared-reward 4-role coinbase / anti-domination
+//! / committed-admission / candidate-admission / puzzle / finality / penalty / audit / adaptive — ≥61,414).
+//! Genuinely hard-off ONLY for `None` gates (mandatory-inclusion; the combined pool-ticket gate ⇒ tickets +
+//! pool-admission). Do not read a per-fn "mainnet hard-off" comment as literal.
 use std::collections::{HashMap, HashSet};
 use std::env;
 

@@ -1,3 +1,7 @@
+//! ⚠ MAINNET STATUS (reconciled 2026-07-25; authoritative check: `mainnet_gate_truth`): the "mainnet hard-off"
+//! wording on the gate helpers below is STALE for any gate whose `MAINNET_*_ACTIVATION_HEIGHT` is `Some` — those
+//! are ACTIVE on mainnet at/after that compiled height via `poawx_effective_activation` (which ignores the env
+//! on `network_id==0`). Genuinely hard-off ONLY for `None` gates (e.g. mandatory-inclusion, the pool-ticket gate).
 use std::env;
 
 /// Mainnet HTLCv1 activation height source-of-truth.

@@ -1,5 +1,12 @@
-//! PoAW-X VRF-assigned proposer sortition (Phase 31). Devnet/testnet only;
-//! mainnet hard-off (`network_id == 0`). See `docs/poawx-proposer-vrf-design.md`.
+//! PoAW-X VRF-assigned proposer sortition (Phase 31). See `docs/poawx-proposer-vrf-design.md`.
+//!
+//! ⚠ MAINNET STATUS (reconciled 2026-07-25; authoritative check: `activation::mainnet_gate_truth`):
+//! the per-fn "mainnet hard-off (`network_id == 0`)" wording below is STALE for any gate whose
+//! `MAINNET_*_ACTIVATION_HEIGHT` is `Some` — those route through `activation::poawx_effective_activation`,
+//! which on `network_id == 0` IGNORES the env and substitutes the COMPILED activation height, so the gate is
+//! ACTIVE in production at/after it. Proposer-VRF + proposer REGISTRATION are LIVE on mainnet ≥50,000, and N1
+//! non-exclusive eligibility ≥59,900. A gate is genuinely hard-off ONLY when its const is `None`. Do not read
+//! per-fn "mainnet hard-off" comments as literal.
 //!
 //! The chain decides who may propose each height via a VRF lottery on the
 //! committee-controlled epoch seed: hashrate gives zero advantage. A backup
@@ -931,7 +938,9 @@ pub fn min_finality_committee() -> u64 {
 
 pub const PROPOSER_REG_POOL_MAX: usize = 1024;
 
-/// Whether proposer-registration gossip is enabled (non-mainnet only).
+/// Whether proposer-registration gossip is enabled. LIVE on mainnet too: the
+/// `MAINNET_POAWX_ACTIVATION_HEIGHT.is_some()` clause makes this return true on
+/// `network_id == 0`, so independent producers CAN self-register via `/poawx/registration`.
 pub fn proposer_registration_gossip_enabled() -> bool {
     crate::activation::network_id_byte() != 0
         || crate::activation::MAINNET_POAWX_ACTIVATION_HEIGHT.is_some()
@@ -939,7 +948,8 @@ pub fn proposer_registration_gossip_enabled() -> bool {
 
 /// Node-local pool of gossiped proposer registrations awaiting on-chain announcement.
 /// Gossip ingest is LIGHT (claimed sybil bits + self-signature + dedup); the full
-/// anchor-bound validation runs at block inclusion (connect_block). Mainnet hard-off.
+/// anchor-bound validation runs at block inclusion (connect_block). LIVE on mainnet
+/// (registration gossip + on-chain announcement are active ≥50,000).
 /// A0: minimum anchor-height advance before a refresh of an already-pooled key is
 /// treated as new and rebroadcast. Below this the record is still updated (the pool
 /// keeps the freshest anchor) but the outcome is `Duplicate`, so it does not

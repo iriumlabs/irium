@@ -289,11 +289,15 @@ fn main() -> Result<(), String> {
     }
 
     // Stay-enrolled: poll for new heights and re-enroll, retrying transient errors.
+    // Default 2s: the block producer only waits a bounded window (IRIUM_POAWX_FANOUT_WAIT_MS,
+    // ~3s) for enrollments before it fixes the coinbase and grinds PoW, so a slow poll would
+    // miss fast (burst) blocks and self-fill them. Keep enroll latency (poll + grind) well
+    // under the producer's wait.
     let poll_secs = std::env::var("IRIUM_POAWX_ROLE_WORKER_POLL_SECS")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|s| *s > 0)
-        .unwrap_or(10);
+        .unwrap_or(2);
     println!("[role-worker] loop mode: role={role_name} poll={poll_secs}s node={base}");
     let mut last_height: Option<u64> = None;
     loop {

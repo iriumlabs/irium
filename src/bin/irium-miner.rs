@@ -3564,48 +3564,95 @@ fn run_poawx_solo() -> Result<(), String> {
                 .map(|v| v.trim() == "1")
                 .unwrap_or(false)
             {
-                (|| {
-                    use irium_node_rs::poawx::{
-                        ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
-                    };
-                    use irium_node_rs::poawx_role_bundle::RoleBundleV1;
-                    let url = format!(
-                        "{}/poawx/collected-bundles",
-                        node_rpc_base().trim_end_matches('/')
-                    );
-                    let mut req = client.get(&url);
-                    if let Some(t) = rpc_token() {
-                        req = req.bearer_auth(t);
-                    }
-                    let v: serde_json::Value = req.send().ok()?.json().ok()?;
-                    let mut c = irium_node_rs::poawx_mining_harness::CollectedArtifacts {
-                        compute: None,
-                        verify: None,
-                        support: None,
-                    };
-                    if let Some(arr) = v.get("bundles").and_then(|x| x.as_array()) {
-                        for b in arr {
-                            if let Ok(rb) = RoleBundleV1::from_json(&b.to_string()) {
-                                match rb.role_id {
-                                    ROLE_COMPUTE_CONTRIBUTOR => c.compute = Some(rb),
-                                    ROLE_VERIFY_CONTRIBUTOR => c.verify = Some(rb),
-                                    ROLE_SUPPORT_CONTRIBUTOR => c.support = Some(rb),
-                                    _ => {}
+                use irium_node_rs::poawx::{
+                    ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+                };
+                use irium_node_rs::poawx_role_bundle::RoleBundleV1;
+                // One snapshot read of the node's currently-enrolled PAYABLE bundles.
+                let read_bundles =
+                    || -> Option<irium_node_rs::poawx_mining_harness::CollectedArtifacts> {
+                        let url = format!(
+                            "{}/poawx/collected-bundles",
+                            node_rpc_base().trim_end_matches('/')
+                        );
+                        let mut req = client.get(&url);
+                        if let Some(t) = rpc_token() {
+                            req = req.bearer_auth(t);
+                        }
+                        let v: serde_json::Value = req.send().ok()?.json().ok()?;
+                        let mut c = irium_node_rs::poawx_mining_harness::CollectedArtifacts {
+                            compute: None,
+                            verify: None,
+                            support: None,
+                        };
+                        if let Some(arr) = v.get("bundles").and_then(|x| x.as_array()) {
+                            for b in arr {
+                                if let Ok(rb) = RoleBundleV1::from_json(&b.to_string()) {
+                                    match rb.role_id {
+                                        ROLE_COMPUTE_CONTRIBUTOR => c.compute = Some(rb),
+                                        ROLE_VERIFY_CONTRIBUTOR => c.verify = Some(rb),
+                                        ROLE_SUPPORT_CONTRIBUTOR => c.support = Some(rb),
+                                        _ => {}
+                                    }
                                 }
                             }
                         }
+                        if c.is_empty() {
+                            None
+                        } else {
+                            Some(c)
+                        }
+                    };
+                let role_n =
+                    |c: &Option<irium_node_rs::poawx_mining_harness::CollectedArtifacts>| -> usize {
+                        c.as_ref()
+                            .map(|x| {
+                                [x.compute.is_some(), x.verify.is_some(), x.support.is_some()]
+                                    .iter()
+                                    .filter(|b| **b)
+                                    .count()
+                            })
+                            .unwrap_or(0)
+                    };
+                // Bounded wait so role-workers that enroll just AFTER this height opens are still
+                // paid. The coinbase is fixed BEFORE PoW grinding, and PoW can find a block in a
+                // burst (a few seconds) faster than a worker's per-height enroll cycle -- that
+                // block would otherwise self-fill (the proposer keeps the 22/13/10 role shares).
+                // Poll the payable bundles until all 3 roles are present (best case) or the set is
+                // stable, capped at IRIUM_POAWX_FANOUT_WAIT_MS (default 3000; set 0 to disable for
+                // a sole producer with no role-workers). Both operator producers run this, so the
+                // race winner has always waited and distributes. Bounded latency, only when
+                // fan-out is enabled. NOTE: the wait must exceed the worker's max enroll latency
+                // (poll interval + grind); role-workers should poll ~1s.
+                let wait_ms = env::var("IRIUM_POAWX_FANOUT_WAIT_MS")
+                    .ok()
+                    .and_then(|v| v.trim().parse::<u64>().ok())
+                    .unwrap_or(3000);
+                let start = std::time::Instant::now();
+                let mut best = read_bundles();
+                let mut best_n = role_n(&best);
+                let mut last_gain = std::time::Instant::now();
+                while best_n < 3 && (start.elapsed().as_millis() as u64) < wait_ms {
+                    std::thread::sleep(std::time::Duration::from_millis(200));
+                    let c = read_bundles();
+                    if role_n(&c) > best_n {
+                        best_n = role_n(&c);
+                        best = c;
+                        last_gain = std::time::Instant::now();
                     }
-                    if c.is_empty() {
-                        None
-                    } else {
-                        let n = [c.compute.is_some(), c.verify.is_some(), c.support.is_some()]
-                            .iter()
-                            .filter(|x| **x)
-                            .count();
-                        println!("[poawx] fair-distribution: paying {n} distinct role participant(s) from collected bundles");
-                        Some(c)
+                    // Early-exit once we have SOME roles and none new for a while (stable set),
+                    // so a partial-worker set doesn't always burn the full window.
+                    if best_n > 0 && (last_gain.elapsed().as_millis() as u64) >= 900 {
+                        break;
                     }
-                })()
+                }
+                if best_n > 0 {
+                    println!(
+                        "[poawx] fair-distribution: paying {best_n} distinct role participant(s) from collected bundles (waited {}ms)",
+                        start.elapsed().as_millis()
+                    );
+                }
+                best
             } else {
                 None
             };

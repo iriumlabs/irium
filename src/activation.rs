@@ -292,7 +292,7 @@ pub const MAINNET_COMBINED_ACTIVATION_HEIGHT: Option<u64> = Some(61_414);
 //        block VALIDATES at E, a self-stuffed one REJECTS, a sole-producer block is
 //        unaffected (no halt).
 //  COORDINATED HARD FORK: nodes not on the activation binary reject the new blocks.
-pub const MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT: Option<u64> = None; // <-- set Some(E) to activate
+pub const MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT: Option<u64> = Some(62236u64);
 // ══════════════════════════════════════════════════════════════════════════════
 
 /// Activation binary (v1.9.127): mainnet activation height for delegated (mode-1)

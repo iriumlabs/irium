@@ -8820,14 +8820,24 @@ mod tests {
             "fraud enforcement must be OFF on mainnet past the activation height"
         );
 
-        // Pool/ticket halt-trap DISARMED: connect_block guard OFF at and beyond the combined activation.
+        // Pool/ticket halt-trap RESOLVED BY COUPLING (not by staying off): OFF below the
+        // fair-distribution activation (no enforce-on/validate-off trap can fire in the
+        // pre-activation window), and ARMED at/after it — but armed TOGETHER with the
+        // now-un-hard-off ticket validator (poawx_ticket.rs), so it can never be
+        // enforce-on/validate-off. (`past` well beyond fd is therefore enforced, not off.)
+        let fd = crate::activation::MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT
+            .expect("fair-distribution activated");
         assert!(
             !pool_admission_enforced(combined),
-            "pool-admission enforcement must be OFF on mainnet at the combined activation height"
+            "pool-admission OFF at the combined activation (below the fair-distribution activation)"
         );
         assert!(
-            !pool_admission_enforced(past),
-            "pool-admission enforcement must be OFF on mainnet past the combined activation height"
+            !pool_admission_enforced(fd - 1),
+            "pool-admission OFF just below the fair-distribution activation"
+        );
+        assert!(
+            pool_admission_enforced(fd) && pool_admission_enforced(past),
+            "pool-admission ARMED at/after the fair-distribution activation (coupled with its validator)"
         );
 
         std::env::remove_var("IRIUM_NETWORK");
@@ -16564,17 +16574,19 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK"); // unset => network_id 0 (mainnet)
         std::env::remove_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT");
         assert_eq!(crate::activation::network_id_byte(), 0, "mainnet context");
-        assert!(
-            crate::poawx_admission::MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT.is_none(),
-            "compiled activation is None (inert)"
-        );
-        assert!(!crate::poawx_admission::mandatory_inclusion_enforce_active(1));
-        assert!(!crate::poawx_admission::mandatory_inclusion_enforce_active(10_000_000));
-        // env override is IGNORED on mainnet — cannot be armed by configuration.
+        // Mandatory-inclusion ENFORCE is ACTIVATED via the single fair-distribution knob at
+        // MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT (62,236): inert BELOW it, active AT/AFTER.
+        // (The legacy per-feature const stays None; enforce routes through pool_ticket_enforced.)
+        let e = crate::activation::MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT
+            .expect("fair-distribution activated on mainnet");
+        assert!(!crate::poawx_admission::mandatory_inclusion_enforce_active(e - 1), "inert below activation");
+        assert!(crate::poawx_admission::mandatory_inclusion_enforce_active(e), "active at activation");
+        assert!(crate::poawx_admission::mandatory_inclusion_enforce_active(e + 1_000_000), "active past activation");
+        // env override is IGNORED on mainnet — cannot change the code-defined boundary.
         std::env::set_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT", "1");
         assert!(
-            !crate::poawx_admission::mandatory_inclusion_enforce_active(10_000_000),
-            "no env can arm mandatory inclusion on mainnet (code-change only)"
+            !crate::poawx_admission::mandatory_inclusion_enforce_active(e - 1),
+            "no env can arm mandatory inclusion below the code activation on mainnet"
         );
         std::env::remove_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT");
     }
@@ -16595,24 +16607,26 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK"); // net==0 (mainnet context)
         assert_eq!(crate::activation::network_id_byte(), 0, "mainnet context");
         // (1) INERT: compiled arm point is None -> OFF at every height.
-        assert!(MAINNET_POOL_TICKET_ACTIVATION_HEIGHT.is_none(), "arm point inert (None) by default");
+        assert!(MAINNET_POOL_TICKET_ACTIVATION_HEIGHT.is_some(), "arm point ACTIVATED (derives from the fair-distribution knob)");
         // (2) param-driven arm point activates at/after its height (simulates a future const flip).
         assert!(!pool_ticket_gate(None, 10_000_000), "None -> off at any height");
         assert!(!pool_ticket_gate(Some(100), 99), "below activation -> off");
         assert!(pool_ticket_gate(Some(100), 100), "at activation -> on");
         assert!(pool_ticket_gate(Some(100), 101), "after activation -> on");
-        // (3) COUPLING: the two gates are IDENTICAL for every height at net==0 (shared source),
-        //     so they arm together and can NEVER diverge into enforce-on/validate-off. Const is
-        //     None here -> both currently OFF (inert), but the equality is what this guards.
-        // Phase 3: mandatory-inclusion ENFORCE joins the coupling — all THREE fair-distribution
-        // enforce gates route through pool_ticket_enforced at net==0, so they arm as ONE unit.
-        for h in [1u64, 50_000, 61_414, 61_415, 10_000_000] {
+        // (3) COUPLING: the THREE fair-distribution enforce gates (tickets + pool-admission +
+        //     mandatory-inclusion) are IDENTICAL for every height at net==0 (shared source =
+        //     pool_ticket_enforced), so they arm together as ONE unit and can NEVER diverge into
+        //     enforce-on/validate-off (the 2026-07-23 halt class). Activated at the
+        //     fair-distribution knob: inert below it, active at/after.
+        let fd = crate::activation::MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT
+            .expect("fair-distribution activated");
+        for h in [1u64, 50_000, 61_414, fd - 1, fd, fd + 1, 10_000_000] {
             let t = tickets_enforced(h);
             let p = pool_admission_enforced(h);
             let m = crate::poawx_admission::mandatory_inclusion_enforce_active(h);
             assert_eq!(t, p, "tickets_enforced and pool_admission_enforced coupled at net==0 (h={h})");
             assert_eq!(p, m, "pool_admission and mandatory-inclusion enforce coupled at net==0 (h={h})");
-            assert!(!p, "inert on mainnet (const None) at height {h}");
+            assert_eq!(p, h >= fd, "enforce arms exactly at the fair-distribution activation (h={h})");
         }
     }
 

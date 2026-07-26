@@ -330,7 +330,7 @@ pub fn drain_persist_queue(timeout: Duration) -> bool {
     true
 }
 
-fn p2pkh_hash_from_script(script: &[u8]) -> Option<[u8; 20]> {
+pub fn p2pkh_hash_from_script(script: &[u8]) -> Option<[u8; 20]> {
     if script.len() != 25 {
         return None;
     }
@@ -345,7 +345,7 @@ fn p2pkh_hash_from_script(script: &[u8]) -> Option<[u8; 20]> {
     Some(out)
 }
 
-fn base58_p2pkh_from_hash(pkh: &[u8; 20]) -> String {
+pub fn base58_p2pkh_from_hash(pkh: &[u8; 20]) -> String {
     let mut body = Vec::with_capacity(1 + 20);
     body.push(IRIUM_P2PKH_VERSION);
     body.extend_from_slice(pkh);

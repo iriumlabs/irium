@@ -237,6 +237,10 @@ struct MinedBlockEntry {
     time: u64,
     hash: String,
     source: Option<String>,
+    // The ACTUAL coinbase P2PKH payees + amounts (sats), decoded from the block's
+    // coinbase tx. Shows the PoAW-X reward split (proposer 55% + worker roles
+    // 22/13/10 to distinct workers) instead of just the proposer + the full subsidy.
+    payees: Vec<(String, u64)>,
 }
 
 async fn load_block_entry(state: &AppState, height: u64) -> Option<MinedBlockEntry> {
@@ -266,11 +270,16 @@ async fn load_block_entry(state: &AppState, height: u64) -> Option<MinedBlockEnt
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
+    // Decode the coinbase's real P2PKH payees + amounts so the reward SPLIT is shown,
+    // not just the proposer + the height-based full subsidy.
+    let payees = block_coinbase_payees(&block);
+
     Some(MinedBlockEntry {
         miner,
         time,
         hash,
         source,
+        payees,
     })
 }
 
@@ -2918,6 +2927,70 @@ async fn blocks(
     Ok(Json(payload))
 }
 
+/// Scan a coinbase tx's raw bytes for its P2PKH outputs -> (base58 address, sats).
+/// Uses the fixed P2PKH output pattern (`<8B value LE> 19 76a914 <20B pkh> 88ac`) rather
+/// than a full tx parse -- coinbase outputs are all P2PKH or OP_RETURN, so this is exact
+/// and avoids depending on a tx deserializer the lib doesn't expose.
+fn decode_coinbase_payees(raw: &[u8]) -> Vec<(String, u64)> {
+    let mut out = Vec::new();
+    let mut i = 8usize; // need 8 value bytes before the script-length byte
+    while i + 26 <= raw.len() {
+        if raw[i] == 0x19
+            && raw[i + 1] == 0x76
+            && raw[i + 2] == 0xa9
+            && raw[i + 3] == 0x14
+            && raw[i + 24] == 0x88
+            && raw[i + 25] == 0xac
+        {
+            let val = u64::from_le_bytes(raw[i - 8..i].try_into().unwrap());
+            let mut pkh = [0u8; 20];
+            pkh.copy_from_slice(&raw[i + 4..i + 24]);
+            out.push((irium_node_rs::storage::base58_p2pkh_from_hash(&pkh), val));
+            i += 26;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Coinbase payees of a block JSON as (address, sats), decoded from tx_hex[0].
+fn block_coinbase_payees(block: &Value) -> Vec<(String, u64)> {
+    let cb_hex = block
+        .get("tx_hex")
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_str())
+        .or_else(|| block.get("tx_hex").and_then(|v| v.as_str()));
+    match cb_hex.and_then(|h| hex::decode(h.trim()).ok()) {
+        Some(raw) => decode_coinbase_payees(&raw),
+        None => Vec::new(),
+    }
+}
+
+/// Attach `coinbase_payees` (address / amount_irm / share_pct) to a block JSON so
+/// consumers see the PoAW-X reward SPLIT (proposer 55% + worker roles 22/13/10 to
+/// distinct workers) rather than just the proposer + the full height-based subsidy.
+fn attach_coinbase_payees(block: &mut Value, height: u64) {
+    let total_sats = reward_irm_for_height(height) * 1e8;
+    let payees: Vec<Value> = block_coinbase_payees(block)
+        .into_iter()
+        .map(|(addr, sats)| {
+            json!({
+                "address": addr,
+                "amount_irm": (sats as f64) / 1e8,
+                "share_pct": if total_sats > 0.0 {
+                    ((sats as f64) / total_sats * 100.0 * 10.0).round() / 10.0
+                } else { 0.0 },
+            })
+        })
+        .collect();
+    if let Some(obj) = block.as_object_mut() {
+        obj.insert("coinbase_payee_count".into(), json!(payees.len()));
+        obj.insert("coinbase_payees".into(), json!(payees));
+    }
+}
+
 async fn block(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
@@ -2925,7 +2998,9 @@ async fn block(
     Path(height): Path<u64>,
 ) -> Result<Json<Value>, StatusCode> {
     check_rate(&state, &addr, &headers)?;
-    proxy_json(&state, &format!("/rpc/block?height={}", height)).await
+    let mut v = proxy_value(&state, &format!("/rpc/block?height={}", height)).await?;
+    attach_coinbase_payees(&mut v, height);
+    Ok(Json(v))
 }
 
 async fn blockhash(
@@ -3251,10 +3326,27 @@ async fn pool_payouts(
             let mature = confirmations >= COINBASE_MATURITY;
             let maturity_remaining = COINBASE_MATURITY.saturating_sub(confirmations);
 
+            // The actual coinbase split: distinct payees + their IRM shares + %.
+            let total_sats = reward_irm_for_height(height) * 1e8;
+            let payees_json: Vec<Value> = entry
+                .payees
+                .iter()
+                .map(|(addr, sats)| {
+                    json!({
+                        "address": addr,
+                        "amount_irm": (*sats as f64) / 1e8,
+                        "share_pct": if total_sats > 0.0 {
+                            ((*sats as f64) / total_sats * 100.0 * 10.0).round() / 10.0
+                        } else { 0.0 },
+                    })
+                })
+                .collect();
             payouts.push(json!({
                 "height": height,
                 "address": entry.miner,
                 "reward_irm": reward_irm_for_height(height),
+                "payees": payees_json,
+                "payee_count": entry.payees.len(),
                 "time": entry.time,
                 "hash": entry.hash,
                 "status": "on_chain",

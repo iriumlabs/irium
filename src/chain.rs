@@ -8844,6 +8844,73 @@ mod tests {
     }
 
     #[test]
+    fn mandatory_inclusion_disarmed_on_mainnet_net0() {
+        // §12 again: mandatory-inclusion ENFORCE used to ride `pool_ticket_enforced`, so it armed on
+        // mainnet at the combined fair-distribution activation (62,236) with NO producer-side
+        // support — `canonical_eligible_set`/`scan_block_registrations` have no caller outside the
+        // validator. Worse, the rule is jointly UNSATISFIABLE with `best_for_role`: an RCR1
+        // registration carries a RoleCandidate but none of the claim/ticket/puzzle artifacts needed
+        // to PAY that role, so a high-weight registration must be included and then becomes
+        // best_for_role, which the producer cannot pay. Include -> rejected by best_for_role; omit
+        // -> rejected by mandatory-inclusion. Either way the chain halts.
+        //
+        // It never fired only because PoAW-X blocks are coinbase-only, so no RCR1 can reach the
+        // chain. This pins the disarm, and pins that the SIBLING gates stay armed (the disarm must
+        // decouple inclusion only, not weaken sybil-cost).
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        assert_eq!(
+            crate::activation::network_id_byte(),
+            0,
+            "net-0 (mainnet) context required to exercise the mainnet branch"
+        );
+
+        let fair = crate::activation::MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT
+            .expect("fair-distribution activation set");
+        let past = fair + 10_000; // mirrors the live tip being well past the activation
+
+        // Control: the coupling source IS live at these heights — pre-fix that is precisely what
+        // armed inclusion, so a false result below is the disarm doing real work.
+        assert!(
+            crate::poawx_ticket::pool_ticket_enforced(fair)
+                && crate::poawx_ticket::pool_ticket_enforced(past),
+            "control: the gate inclusion used to ride must be ARMED here, else this test proves nothing"
+        );
+
+        // DISARMED at and beyond the activation that used to arm it.
+        assert!(
+            !crate::poawx_admission::mandatory_inclusion_enforce_active(fair),
+            "mandatory-inclusion must be OFF on mainnet at the fair-distribution activation"
+        );
+        assert!(
+            !crate::poawx_admission::mandatory_inclusion_enforce_active(past),
+            "mandatory-inclusion must be OFF on mainnet well past the activation"
+        );
+
+        // Guard against re-arming by flipping the dedicated const without building the producer
+        // side: this is the knob that must stay None until that work lands.
+        assert!(
+            crate::poawx_admission::MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT.is_none(),
+            "re-arming inclusion needs a producer-side implementation AND a fix for the \
+             unpayable-candidate/best_for_role conflict, proven on a net-0 connect_block harness"
+        );
+
+        // The sibling gates must NOT have been weakened by the decoupling.
+        assert!(
+            crate::poawx_ticket::tickets_enforced(past),
+            "tickets must stay ARMED — the disarm decouples inclusion only"
+        );
+        assert!(
+            pool_admission_enforced(past),
+            "pool-admission must stay ARMED — the disarm decouples inclusion only"
+        );
+
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
     fn test_validate_poawx_coinbase_mode_inactive_always_ok() {
         let _g = chain_poawx_env_lock()
             .lock()
@@ -16573,14 +16640,17 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK"); // unset => network_id 0 (mainnet)
         std::env::remove_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT");
         assert_eq!(crate::activation::network_id_byte(), 0, "mainnet context");
-        // Mandatory-inclusion ENFORCE is ACTIVATED via the single fair-distribution knob at
-        // MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT (62,236): inert BELOW it, active AT/AFTER.
-        // (The legacy per-feature const stays None; enforce routes through pool_ticket_enforced.)
+        // DISARMED 2026-07-26: enforce no longer rides `pool_ticket_enforced`; it reads its own
+        // const, which is None => INERT at EVERY height on mainnet. It was armed at the
+        // fair-distribution knob (62,236) with no producer-side support, and is jointly
+        // unsatisfiable with `best_for_role` for an unpayable RCR1 candidate — include and the
+        // block is rejected by best_for_role, omit and it is rejected here. See
+        // `mandatory_inclusion_disarmed_on_mainnet_net0`.
         let e = crate::activation::MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT
             .expect("fair-distribution activated on mainnet");
-        assert!(!crate::poawx_admission::mandatory_inclusion_enforce_active(e - 1), "inert below activation");
-        assert!(crate::poawx_admission::mandatory_inclusion_enforce_active(e), "active at activation");
-        assert!(crate::poawx_admission::mandatory_inclusion_enforce_active(e + 1_000_000), "active past activation");
+        assert!(!crate::poawx_admission::mandatory_inclusion_enforce_active(e - 1), "inert below the old arm point");
+        assert!(!crate::poawx_admission::mandatory_inclusion_enforce_active(e), "DISARMED at the old arm point");
+        assert!(!crate::poawx_admission::mandatory_inclusion_enforce_active(e + 1_000_000), "DISARMED past the old arm point");
         // env override is IGNORED on mainnet — cannot change the code-defined boundary.
         std::env::set_var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT", "1");
         assert!(
@@ -16612,11 +16682,13 @@ mod tests {
         assert!(!pool_ticket_gate(Some(100), 99), "below activation -> off");
         assert!(pool_ticket_gate(Some(100), 100), "at activation -> on");
         assert!(pool_ticket_gate(Some(100), 101), "after activation -> on");
-        // (3) COUPLING: the THREE fair-distribution enforce gates (tickets + pool-admission +
-        //     mandatory-inclusion) are IDENTICAL for every height at net==0 (shared source =
-        //     pool_ticket_enforced), so they arm together as ONE unit and can NEVER diverge into
+        // (3) COUPLING: tickets + pool-admission stay IDENTICAL for every height at net==0 (shared
+        //     source = pool_ticket_enforced), so they arm as ONE unit and can never diverge into
         //     enforce-on/validate-off (the 2026-07-23 halt class). Activated at the
         //     fair-distribution knob: inert below it, active at/after.
+        //     mandatory-inclusion was DELIBERATELY DECOUPLED 2026-07-26 — it has no producer-side
+        //     implementation and is jointly unsatisfiable with best_for_role, so it must stay OFF
+        //     at every height regardless of this knob.
         let fd = crate::activation::MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT
             .expect("fair-distribution activated");
         for h in [1u64, 50_000, 61_414, fd - 1, fd, fd + 1, 10_000_000] {
@@ -16624,7 +16696,7 @@ mod tests {
             let p = pool_admission_enforced(h);
             let m = crate::poawx_admission::mandatory_inclusion_enforce_active(h);
             assert_eq!(t, p, "tickets_enforced and pool_admission_enforced coupled at net==0 (h={h})");
-            assert_eq!(p, m, "pool_admission and mandatory-inclusion enforce coupled at net==0 (h={h})");
+            assert!(!m, "mandatory-inclusion stays DISARMED at net==0 regardless of the knob (h={h})");
             assert_eq!(p, h >= fd, "enforce arms exactly at the fair-distribution activation (h={h})");
         }
     }

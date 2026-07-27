@@ -340,15 +340,34 @@ pub const MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT: Option<u64> = None;
 
 pub fn mandatory_inclusion_enforce_active(height: u64) -> bool {
     if crate::activation::network_id_byte() == 0 {
-        // Phase 3 (2026-07-25): on mainnet, mandatory-inclusion ENFORCE arms with the SAME combined
-        // fair-distribution activation as tickets + pool-admission (all route through
-        // `pool_ticket_enforced`), so the three arm as ONE unit — inclusion and sybil-cost can never
-        // split (inclusion without sybil-cost is grindable; sybil-cost without inclusion doesn't force
-        // distinctness). The RECORD phase (separate const below) must still precede enforce by >= L
-        // blocks so the window is populated at enforce; set its const to (E - L) when flipping E.
-        // Const None => inert. (MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT is now superseded on
-        // net==0 by the combined const; retained for the devnet env path + record-phase symmetry.)
-        return crate::poawx_ticket::pool_ticket_enforced(height);
+        // DISARMED on mainnet 2026-07-26. It previously returned `pool_ticket_enforced(height)`,
+        // coupling ENFORCE to the combined fair-distribution activation (Some(62_236)) alongside
+        // tickets + pool-admission. That coupling armed a rule NO PRODUCER CAN SATISFY:
+        //
+        //   * There is no producer-side support at all — `canonical_eligible_set` /
+        //     `scan_block_registrations` have zero call sites outside this validator and its tests,
+        //     so no block builder ever learns what it is required to include.
+        //   * Worse, the rule is jointly UNSATISFIABLE with `best_for_role` (chain.rs:~2304). An
+        //     RCR1 registration carries a `RoleCandidate` but NOT the claim / ticket / puzzle
+        //     artifacts needed to pay that role. So a registration with a high dominance weight
+        //     must be included (this rule) and then becomes `best_for_role`, which the producer
+        //     cannot pay -> "selected role solver is not the best candidate". Include and the block
+        //     is rejected; omit and it is rejected here. Either way: chain halt.
+        //
+        // It has never fired only because PoAW-X blocks are coinbase-only
+        // (`poawx_mining_harness.rs`: `transactions: vec![coinbase]`), so no RCR1 output can reach
+        // the chain and the required set is always empty. That makes this disarm BEHAVIOURALLY
+        // IDENTICAL on the live chain (empty `req` => the check was already a no-op) while removing
+        // a halt that would arm itself the moment block building starts including ordinary
+        // transactions.
+        //
+        // Tickets and pool-admission stay armed on their own gate — this decouples ONLY inclusion.
+        // Re-arming requires BOTH a producer-side implementation and a resolution of the
+        // unpayable-candidate conflict above, proven on a producing network_id=0 connect_block
+        // harness first. Pinned by `mandatory_inclusion_disarmed_on_mainnet_net0` (chain.rs).
+        return MAINNET_MANDATORY_INCLUSION_ACTIVATION_HEIGHT
+            .map(|h| height >= h)
+            .unwrap_or(false);
     }
     std::env::var("IRIUM_POAWX_MANDATORY_INCLUSION_ENFORCE_HEIGHT")
         .ok()

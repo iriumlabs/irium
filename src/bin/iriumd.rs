@@ -2123,6 +2123,20 @@ fn load_builtin_fallback_seeds() -> Vec<String> {
     seeds
 }
 
+/// NAT-PMP port mapping is on by default: a node nobody can dial cannot help anyone
+/// bootstrap, and the request only ever goes to the user's own gateway on the local link.
+/// Opt out with IRIUM_P2P_NAT_PMP=0 (e.g. a host that already has a forwarded port, or an
+/// operator who does not want the node touching the router).
+fn nat_pmp_enabled() -> bool {
+    match std::env::var("IRIUM_P2P_NAT_PMP") {
+        Ok(v) => {
+            let v = v.trim();
+            !(v == "0" || v.eq_ignore_ascii_case("false") || v.eq_ignore_ascii_case("off"))
+        }
+        Err(_) => true,
+    }
+}
+
 fn load_dns_seed_hosts(node_cfg: Option<&NodeConfig>) -> Vec<String> {
     let mut hosts = node_cfg
         .map(|cfg| cfg.p2p_dns_seeds.clone())
@@ -17528,6 +17542,58 @@ async fn main() {
     let p2p_bind_str: Option<String> = std::env::var("IRIUM_P2P_BIND")
         .ok()
         .or_else(|| node_cfg.as_ref().and_then(|cfg| cfg.p2p_bind.clone()));
+
+    // NAT-PMP: ask our OWN router to forward the P2P port, then advertise the resulting
+    // public address. A node behind NAT can dial out but nobody can dial in, so it can never
+    // become a bootstrap peer however long it runs -- which is why the seed list still has to
+    // name specific hosts. Mapping the port turns an ordinary follower into a dialable peer,
+    // so the seed pool grows from the network itself rather than from a curated list.
+    //
+    // Best-effort and bounded: one request each, short timeouts, no retries. A router that
+    // does not speak NAT-PMP simply never answers and the node continues exactly as before.
+    // Never overrides an operator-set endpoint, and opt out with IRIUM_P2P_NAT_PMP=0.
+    let external_endpoint: Option<String> = match (&external_endpoint, &p2p_bind_str) {
+        (Some(_), _) => external_endpoint, // operator knows better than the router
+        (None, Some(bind)) if nat_pmp_enabled() => {
+            let port = bind.parse::<SocketAddr>().ok().map(|a| a.port());
+            match port {
+                Some(port) => {
+                    let discovered = tokio::task::spawn_blocking(move || {
+                        let timeout = std::time::Duration::from_millis(1_500);
+                        let gw = irium_node_rs::nat_pmp::default_gateway_v4()
+                            .ok_or_else(|| "no IPv4 default gateway".to_string())?;
+                        let ip = irium_node_rs::nat_pmp::request_external_address(gw, timeout)?;
+                        let m = irium_node_rs::nat_pmp::request_mapping(
+                            gw,
+                            port,
+                            irium_node_rs::nat_pmp::DEFAULT_MAPPING_LIFETIME_SECS,
+                            timeout,
+                        )?;
+                        Ok::<String, String>(format!("{}:{}", ip, m.external_port))
+                    })
+                    .await;
+                    match discovered {
+                        Ok(Ok(ep)) => {
+                            eprintln!("[p2p] nat-pmp: mapped port, advertising {ep}");
+                            Some(ep)
+                        }
+                        Ok(Err(e)) => {
+                            // Expected on most networks (no NAT-PMP, or already public).
+                            eprintln!("[p2p] nat-pmp: no mapping ({e}); continuing without it");
+                            None
+                        }
+                        Err(e) => {
+                            eprintln!("[p2p] nat-pmp: probe task failed: {e}");
+                            None
+                        }
+                    }
+                }
+                None => None,
+            }
+        }
+        _ => external_endpoint,
+    };
+
     let p2p: Option<P2PNode> = if let Some(bind) = p2p_bind_str {
         match bind.parse::<SocketAddr>() {
             Ok(addr) => {
@@ -19931,6 +19997,33 @@ async fn main() {
             .expect("bind failed");
 
         axum::serve(listener, app).await.expect("server error");
+    }
+}
+
+#[cfg(test)]
+mod nat_pmp_optout_tests {
+    use super::*;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The kill switch is the operator's control over their own router being touched, so it
+    /// must honour the obvious spellings and default to ON (a node nobody can dial helps
+    /// nobody bootstrap).
+    #[test]
+    fn nat_pmp_defaults_on_and_honours_the_kill_switch() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("IRIUM_P2P_NAT_PMP");
+        assert!(nat_pmp_enabled(), "must default to enabled");
+
+        for off in ["0", "false", "FALSE", "off", "Off", " 0 "] {
+            std::env::set_var("IRIUM_P2P_NAT_PMP", off);
+            assert!(!nat_pmp_enabled(), "{off:?} must disable nat-pmp");
+        }
+        for on in ["1", "true", "yes", "anything-else"] {
+            std::env::set_var("IRIUM_P2P_NAT_PMP", on);
+            assert!(nat_pmp_enabled(), "{on:?} must leave nat-pmp enabled");
+        }
+        std::env::remove_var("IRIUM_P2P_NAT_PMP");
     }
 }
 

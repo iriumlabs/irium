@@ -77,6 +77,7 @@ pub mod header_sync;
 pub mod ltc_p2p;
 pub mod ltc_spv;
 pub mod mempool;
+pub mod nat_pmp;
 pub mod network;
 pub mod network_era;
 pub mod p2p;

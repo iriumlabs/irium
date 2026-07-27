@@ -18,29 +18,43 @@ is **not** an operator setting and cannot be enabled or disabled by configuratio
 > **Operators and miners must upgrade to iriumd v1.9.119 (or later) before block 50,000.** A node
 > still running an older binary will reject post-activation blocks and fall off the canonical chain.
 
-## Current status (updated 2026-07-19)
+## Current status (updated 2026-07-26)
 
 The consensus **gates** listed below are active on mainnet from block 50,000 and are enforced by
 every node: proposer selection validation, proposer registration, anti-domination, assigned puzzle
 work, the finality committee, and candidate admission. Blocks that do not satisfy them are rejected.
 
-Two things described in this document are **not yet live**, and this section previously implied
-otherwise:
+What changed since the previous revision of this section:
 
-- **The 55/22/13/10 split is produced on-chain, but all four outputs currently pay the same
-  recipient.** Every block's coinbase does carry four outputs in exactly 55/22/13/10 proportion — but
-  they resolve to a single participant, not four distinct contributors, because role assignment
-  currently resolves to one identity. The split is real; the distribution across separate parties is
-  not yet.
-- **Block proposal is currently concentrated in one producer.** Proposal is limited to proposers
-  already carrying eligibility, and onboarding for new independent proposers is **not yet available**.
-  If you are mining, you are contributing hashrate through a pool, not proposing blocks yourself.
+- **The 55/22/13/10 split now pays four distinct on-chain recipients.** Earlier revisions said all
+  four outputs resolved to a single participant. That is no longer true: when other role workers are
+  participating, each role share is paid to a separate address, verified on mainnet by decoding
+  coinbase outputs. A block produced with no other participants still self-fills (one identity takes
+  all four shares) — that fallback is deliberate, so a solo miner is never blocked and the chain
+  never stalls.
+- **PoW demotion is active on mainnet** from block 61,414 (`MAINNET_COMBINED_ACTIVATION_HEIGHT`).
+  Earlier revisions of this section said it was not active. A proposer that is eligible for the
+  current height is validated against a reduced (floor) target; every other block must still meet the
+  full network target.
+- **Ticket-proof and pool-admission enforcement are active** from block 62,236
+  (`MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT`).
 
-**PoW demotion is not active on mainnet.** A selected proposer does not get a reduced proof-of-work
-target; every block must meet the full network target.
+Limitations that remain, stated plainly:
 
-We are treating the proposal-concentration limitation as a defect to fix, not as intended behaviour.
-This section will be updated when that changes.
+- **Block proposal is not yet meaningfully open to third parties.** Non-exclusive proposer
+  eligibility is active from block 59,900, so a non-incumbent key *can* become eligible and propose.
+  But an **ineligible** miner's block is judged against the full network target rather than the
+  demoted floor, which in practice is an enormous disadvantage — so proposal today remains
+  concentrated among keys that already hold eligibility. Becoming eligible still depends on an
+  existing producer including your registration.
+- **The participants demonstrating the multi-role split are operator-run.** The distribution
+  machinery is proven end to end, but it has not yet been exercised by independent third-party
+  miners. Treat the split as a working mechanism, not as evidence of decentralisation.
+- **Fraud-proof enforcement is deliberately off on mainnet.** Fraud-proof sections are carried but
+  not enforced; the validator is disabled rather than half-armed, which is intentional.
+
+We continue to treat the proposal-concentration limitation as a defect to fix, not as intended
+behaviour. This section will be updated when that changes.
 
 ## What PoAW-X adds
 

@@ -49,6 +49,51 @@ use ripemd::Ripemd160;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
+/// Marker for an on-chain peer announcement, matched by `scan_blocks_for_peers`
+/// (bin/iriumd.rs). Kept byte-identical to that reader's prefix.
+pub const PEER_ANNOUNCE_PREFIX: &[u8] = b"IRIUM_PEER ";
+
+/// Build the zero-value `OP_RETURN "IRIUM_PEER <ip:port>"` script a producer embeds in
+/// its coinbase, or `None` when nothing should be announced.
+///
+/// This is Irium's DNS-FREE bootstrap: peers are discovered by reading recent blocks, so
+/// a new node needs no DNS lookup and no trusted seed operator -- only the chain it is
+/// already downloading. Opt in with `IRIUM_POAWX_ANNOUNCE_PEER=<ip:port>`.
+///
+/// Refuses anything a peer could not dial, because a bad address is permanent once it is
+/// in a block: unparseable, port 0, loopback, unspecified, or private/link-local ranges.
+pub fn peer_announcement_script() -> Option<Vec<u8>> {
+    let raw = std::env::var("IRIUM_POAWX_ANNOUNCE_PEER").ok()?;
+    let addr: std::net::SocketAddr = raw.trim().parse().ok()?;
+    if addr.port() == 0 {
+        return None;
+    }
+    let routable = match addr.ip() {
+        std::net::IpAddr::V4(v4) => {
+            !(v4.is_loopback()
+                || v4.is_unspecified()
+                || v4.is_private()
+                || v4.is_link_local()
+                || v4.is_broadcast()
+                || v4.is_documentation()
+                || v4.is_multicast())
+        }
+        std::net::IpAddr::V6(v6) => !(v6.is_loopback() || v6.is_unspecified() || v6.is_multicast()),
+    };
+    if !routable {
+        return None;
+    }
+    let mut payload = Vec::from(PEER_ANNOUNCE_PREFIX);
+    payload.extend_from_slice(addr.to_string().as_bytes());
+    // Single-byte direct push only; the reader assumes script[1] is the length.
+    if payload.is_empty() || payload.len() > 75 {
+        return None;
+    }
+    let mut script = vec![0x6au8, payload.len() as u8];
+    script.extend_from_slice(&payload);
+    Some(script)
+}
+
 /// Accept only known Irium network ids. Mainnet is `network_id == 0`
 /// ([`crate::activation::NetworkKind::id_byte`]), testnet is 1, and devnet is 2.
 /// The caller MUST pass the resolved network id.
@@ -1867,6 +1912,22 @@ fn build_all_gates_block_with(
             },
         ]
     };
+    // DNS-FREE PEER DISCOVERY. Append a zero-value OP_RETURN advertising this producer's
+    // own P2P address, so a cold node can find CURRENT peers by scanning recent blocks
+    // (`scan_blocks_for_peers` in bin/iriumd.rs) instead of trusting DNS or whatever IPs
+    // happen to be baked into its binary. Every block then refreshes the peer set, which
+    // makes bootstrap self-healing and removes the dependency on a fixed seed operator.
+    //
+    // Consensus-neutral: `validate_poawx_coinbase_payout` ignores EVERY non-P2PKH output
+    // whose value is 0, regardless of content (chain.rs), and only P2PKH outputs are
+    // counted/ordered. So nodes running older binaries accept this unchanged -- no fork.
+    let mut outputs = outputs;
+    if let Some(script) = peer_announcement_script() {
+        outputs.push(TxOutput {
+            value: 0,
+            script_pubkey: script,
+        });
+    }
     // TEST-ONLY negative-control hook (devnet): when IRIUM_POAWX_TAMPER_COINBASE is set,
     // corrupt the coinbase AFTER it is built but BEFORE the merkle root + PoW are computed,
     // so the block stays structurally valid (merkle/PoW commit to the tampered coinbase) and
@@ -1942,6 +2003,100 @@ fn build_all_gates_block_with(
         block_hash,
         irx1_root,
     })
+}
+
+#[cfg(test)]
+mod peer_announce_tests {
+    use super::*;
+
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The announcement must be readable by `scan_blocks_for_peers` (bin/iriumd.rs), which
+    /// assumes `script[0] == OP_RETURN`, `script[1] == payload length`, then the
+    /// `IRIUM_PEER ` prefix followed by a parseable socket address.
+    #[test]
+    fn peer_announcement_round_trips_through_the_reader_format() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_POAWX_ANNOUNCE_PEER", "203.0.113.7:38291");
+        // 203.0.113.0/24 is TEST-NET-3 (documentation) and is correctly refused.
+        assert!(peer_announcement_script().is_none(), "documentation range refused");
+
+        std::env::set_var("IRIUM_POAWX_ANNOUNCE_PEER", "198.51.100.9:38291");
+        assert!(peer_announcement_script().is_none(), "documentation range refused");
+
+        std::env::set_var("IRIUM_POAWX_ANNOUNCE_PEER", "8.8.4.4:38291");
+        let script = peer_announcement_script().expect("routable address must announce");
+        assert_eq!(script[0], 0x6a, "must be OP_RETURN");
+        assert_eq!(script[1] as usize, script.len() - 2, "length byte must match payload");
+        let payload = &script[2..];
+        assert!(payload.starts_with(PEER_ANNOUNCE_PREFIX), "must carry the reader's prefix");
+        let addr = std::str::from_utf8(&payload[PEER_ANNOUNCE_PREFIX.len()..]).unwrap();
+        let parsed: std::net::SocketAddr = addr.parse().expect("reader must be able to parse it");
+        assert_eq!(parsed.port(), 38291);
+
+        std::env::remove_var("IRIUM_POAWX_ANNOUNCE_PEER");
+        assert!(peer_announcement_script().is_none(), "absent env => no announcement");
+    }
+
+    /// Addresses no peer could ever dial must never reach a block -- once mined they are
+    /// permanent, and every cold node would waste a dial slot on them.
+    #[test]
+    fn peer_announcement_refuses_undialable_addresses() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        for bad in [
+            "127.0.0.1:38291",     // loopback
+            "0.0.0.0:38291",       // unspecified
+            "192.168.1.10:38291",  // private
+            "10.0.0.5:38291",      // private
+            "169.254.1.1:38291",   // link-local
+            "1.2.3.4:0",           // port 0
+            "not-an-address",      // unparseable
+        ] {
+            std::env::set_var("IRIUM_POAWX_ANNOUNCE_PEER", bad);
+            assert!(
+                peer_announcement_script().is_none(),
+                "must refuse undialable announce address {bad}"
+            );
+        }
+        std::env::remove_var("IRIUM_POAWX_ANNOUNCE_PEER");
+    }
+
+    /// CONSENSUS SAFETY: the announcement rides as a zero-value OP_RETURN, which
+    /// `validate_poawx_coinbase_payout` ignores like any other non-P2PKH zero-value output.
+    /// If this ever stops holding, every announcing producer's block is rejected -- so pin it.
+    #[test]
+    fn extra_zero_value_op_return_does_not_break_coinbase_validation() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let primary = [0x11u8; 20];
+        let reward = 5_000_000_000u64;
+        let p2pkh = |pkh: &[u8; 20]| crate::tx::p2pkh_script(pkh);
+
+        // Baseline: irx1 marker + the single PRIMARY payout.
+        let mut outs = vec![
+            crate::tx::TxOutput { value: 0, script_pubkey: vec![0x6a, 0x04, b'i', b'r', b'x', b'1'] },
+            crate::tx::TxOutput { value: reward, script_pubkey: p2pkh(&primary) },
+        ];
+        crate::chain::validate_poawx_coinbase_payout(&outs, &primary, reward, None, None)
+            .expect("baseline coinbase must validate");
+
+        // Now append the peer announcement exactly as the builder does.
+        std::env::set_var("IRIUM_POAWX_ANNOUNCE_PEER", "8.8.4.4:38291");
+        let script = peer_announcement_script().expect("routable address announces");
+        outs.push(crate::tx::TxOutput { value: 0, script_pubkey: script });
+        crate::chain::validate_poawx_coinbase_payout(&outs, &primary, reward, None, None)
+            .expect("peer announcement must NOT affect coinbase validity");
+
+        // Control: the same output carrying value IS rejected, proving the rule that makes
+        // this safe is "zero-value", not "OP_RETURN is always ignored".
+        let last = outs.last_mut().unwrap();
+        last.value = 1;
+        assert!(
+            crate::chain::validate_poawx_coinbase_payout(&outs, &primary, reward, None, None)
+                .is_err(),
+            "a value-bearing non-p2pkh output must still be rejected"
+        );
+        std::env::remove_var("IRIUM_POAWX_ANNOUNCE_PEER");
+    }
 }
 
 #[cfg(test)]

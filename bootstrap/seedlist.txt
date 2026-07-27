@@ -1,4 +1,12 @@
-# Official signed bootstrap seeds only
+# Official signed bootstrap seeds.
+#
+# This file is a LAST-RESORT fallback. Preferred bootstrap order is:
+#   1. peers learned from previous runs (seedlist.runtime)
+#   2. DNS seeds (seed.irium.org, seed2.irium.org) - changeable without a release
+#   3. this signed list
+#
+# Entries must be reachable on the P2P port. A dead entry is worse than no entry:
+# it wastes a dial slot on every cold start. 47.143.179.245 was removed on
+# 2026-07-27 after being verified unreachable on 38291/38300/8333.
 207.244.247.86
 157.173.116.134
-47.143.179.245

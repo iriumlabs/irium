@@ -1096,17 +1096,34 @@ impl NodeProposerRegistrationPool {
 
     /// Up to `max` pending registrations whose key is NOT in `exclude` (already queued or
     /// on-chain), as announce candidates for the next block.
+    /// Announce candidates for the block at `height`.
+    ///
+    /// Anchor freshness is enforced HERE, not just by the validator. A registration whose
+    /// sybil anchor has aged past `PROPOSER_REG_ANCHOR_WINDOW` is rejected by
+    /// `validate_block_proposer_registrations` (via `registration_anchor_valid`), so offering
+    /// one would make the producer build a block that every node rejects — a production stall
+    /// caused purely by a stale pool entry. Two behaviours:
+    ///
+    ///   * PRUNE entries that are permanently aged out (anchor + window < height). They can
+    ///     never become valid again, so a pooled registration cannot linger indefinitely
+    ///     across a restart, an outage, or a long gap in block production.
+    ///   * FILTER (without pruning) entries that merely fail `anchor_height < height`. That
+    ///     can happen transiently while our tip lags a peer, and the entry is still good.
     pub fn announce_candidates(
         &self,
         max: usize,
         exclude: &BTreeSet<[u8; 33]>,
+        height: u64,
     ) -> Vec<crate::poawx::ProposerRegistrationV1> {
-        let pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        let window = PROPOSER_REG_ANCHOR_WINDOW;
+        let mut pending = self.pending.lock().unwrap_or_else(|e| e.into_inner());
+        pending.retain(|_, p| !(height > window && p.reg.anchor_height < height - window));
         // A0: FIRST-COME-FIRST-SERVED by arrival sequence. Iterating the BTreeMap
         // directly would return lexicographic public-key order, which is grindable.
         let mut c: Vec<&PooledRegistration> = pending
             .values()
             .filter(|p| !exclude.contains(&p.reg.vrf_pubkey))
+            .filter(|p| registration_anchor_valid(p.reg.anchor_height, height, window))
             .collect();
         c.sort_by_key(|p| p.seq);
         c.into_iter().take(max).map(|p| p.reg.clone()).collect()
@@ -1377,6 +1394,39 @@ mod tests {
         assert!(!reg.is_registered(&k));
     }
 
+    /// A pooled registration must not survive forever. Its sybil anchor ages out after
+    /// PROPOSER_REG_ANCHOR_WINDOW, at which point the validator would reject an announce
+    /// carrying it -- so the pool must both stop OFFERING it and stop STORING it. Without
+    /// the prune, a registration submitted before an outage/restart sits in memory
+    /// indefinitely and is announced the moment production resumes.
+    #[test]
+    fn stale_pooled_registration_is_not_offered_and_is_pruned() {
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let net = crate::activation::network_id_byte();
+        let pool = NodeProposerRegistrationPool::default();
+        let anchor = 1_000u64;
+        let reg =
+            crate::poawx::ProposerRegistrationV1::build_signed(&[0x3u8; 32], net, anchor, &[0x9u8; 32], 0)
+                .unwrap();
+        assert!(matches!(
+            pool.ingest_bytes(&reg.serialize(), |_h| Some([0x9u8; 32])),
+            crate::poawx_gossip::GossipOutcome::AcceptedNew
+        ));
+
+        // Control: while the anchor is still inside the window it IS offered, so a later
+        // empty result is the freshness rule doing real work rather than an empty pool.
+        let fresh = pool.announce_candidates(4, &BTreeSet::new(), anchor + 1);
+        assert_eq!(fresh.len(), 1, "fresh registration must be offered");
+        assert_eq!(pool.len(), 1);
+
+        // Aged out: beyond the window it must be neither offered nor retained.
+        let stale_h = anchor + PROPOSER_REG_ANCHOR_WINDOW + 1;
+        let stale = pool.announce_candidates(4, &BTreeSet::new(), stale_h);
+        assert!(stale.is_empty(), "aged-out registration must NOT be offered");
+        assert_eq!(pool.len(), 0, "aged-out registration must be PRUNED, not just filtered");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     #[test]
     fn pool_refreshes_to_fresher_anchor() {
         std::env::set_var("IRIUM_NETWORK", "devnet");
@@ -1401,7 +1451,7 @@ mod tests {
             crate::poawx_gossip::GossipOutcome::Duplicate
         ));
         // ...but convergence is preserved: the stored record IS the fresher one.
-        let held = pool.announce_candidates(1, &BTreeSet::new());
+        let held = pool.announce_candidates(1, &BTreeSet::new(), 6);
         assert_eq!(
             held[0].anchor_height, 5,
             "sub-threshold refresh must still update the stored record"
@@ -1536,7 +1586,7 @@ mod a0_a2_registration_fairness {
         );
 
         let got: Vec<[u8; 33]> = pool
-            .announce_candidates(5, &BTreeSet::new())
+            .announce_candidates(5, &BTreeSet::new(), 1)
             .into_iter()
             .map(|r| r.vrf_pubkey)
             .collect();
@@ -1547,7 +1597,7 @@ mod a0_a2_registration_fairness {
         let smallest = key_sorted[0];
         let first_arrival = arrival[0];
         if smallest != first_arrival {
-            let head = pool.announce_candidates(1, &BTreeSet::new());
+            let head = pool.announce_candidates(1, &BTreeSet::new(), 1);
             assert_eq!(head[0].vrf_pubkey, first_arrival);
             assert_ne!(head[0].vrf_pubkey, smallest, "smallest key must not capture the slot");
         }
@@ -1609,12 +1659,14 @@ mod a0_a2_registration_fairness {
         pool.ingest_bytes(&first.serialize(), |_h| Some([0x9u8; 32]));
         pool.ingest_bytes(&second.serialize(), |_h| Some([0x9u8; 32]));
         // `second` refreshes aggressively; it must still stay behind `first`.
-        for d in 1..=5u64 {
+        // Anchors must stay within PROPOSER_REG_ANCHOR_WINDOW of each other: a block can
+        // only announce registrations that are ALL still fresh at its height.
+        for d in 1..=3u64 {
             let bump = reg_for(0x42, 100 + d * PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA * 2, net);
             pool.ingest_bytes(&bump.serialize(), |_h| Some([0x9u8; 32]));
         }
         let got: Vec<[u8; 33]> = pool
-            .announce_candidates(3, &BTreeSet::new())
+            .announce_candidates(3, &BTreeSet::new(), 150)
             .into_iter()
             .map(|r| r.vrf_pubkey)
             .collect();

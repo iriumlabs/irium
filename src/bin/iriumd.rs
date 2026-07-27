@@ -16965,6 +16965,9 @@ fn maybe_spawn_ltc_header_sync(state: AppState, network: NetworkKind) {
     });
 }
 
+// The post-v1.9.67 dead block below still names `client`/`relay_tip`, so they cannot be
+// renamed away; suppress the unused warning at the fn level instead.
+#[allow(unused_variables)]
 async fn run_btc_header_sync_cycle(
     state: &AppState,
     client: &reqwest::Client,
@@ -17095,6 +17098,9 @@ async fn run_btc_header_sync_cycle(
     } // closes #[allow] block
 }
 
+// The post-v1.9.67 dead block below still names `client`/`relay_tip`, so they cannot be
+// renamed away; suppress the unused warning at the fn level instead.
+#[allow(unused_variables)]
 async fn run_ltc_header_sync_cycle(
     state: &AppState,
     client: &reqwest::Client,

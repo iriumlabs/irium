@@ -368,11 +368,11 @@ fn run() -> Result<(), String> {
         // Pick a role's winner exactly as the node does (`best_for_role`), then split into
         // (winner_secret, extra_candidates, extra_votes, extra_proofs, extra_tickets). The
         // extra proofs+tickets are the NON-WINNER members' pool-admission evidence (PLA1).
-        #[allow(clippy::type_complexity)]
         // NEGATIVE-CONTROL tamper: bypass the miner's sortition filter so it stuffs the pool
         // with NON-CLEARING members — the node's validate_pool_sortition must then reject.
         let sortition_on = irium_node_rs::chain::pool_sortition_enforced(height)
             && env::var("IRIUM_POAWX_TAMPER_SORTITION").is_err();
+        #[allow(clippy::type_complexity)]
         let select_winner = |role: u8, eligible: u64, pool: &[PoolEntry]|
          -> Result<
             (

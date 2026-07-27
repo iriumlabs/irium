@@ -11028,8 +11028,7 @@ mod tests {
         //   - validate_poawx_coinbase_payout (canonical 0% fee split)
         // Plus the E13-E18 negatives. No validator is weakened; no PoW bypass.
         use crate::poawx::{
-            multi_role_amounts, ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR,
-            ROLE_VERIFY_CONTRIBUTOR,
+            ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
         };
         use crate::poawx_admission::{global_admission_cache, CandidateAdmissionV1};
         use crate::poawx_candidate::{AssignmentProofV2, CandidateSet, RoleCandidate};
@@ -11521,7 +11520,7 @@ mod tests {
         }
         let puzzle_proofs = [sols[0], sols[1], sols[2]];
 
-        let committee: Vec<[u8; 20]> = cs
+        let _committee: Vec<[u8; 20]> = cs
             .candidates
             .iter()
             .filter(|c| c.role_id == ROLE_SUPPORT_CONTRIBUTOR)

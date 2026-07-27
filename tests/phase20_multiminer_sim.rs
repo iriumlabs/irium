@@ -199,7 +199,7 @@ fn rejects_claim_for_a_lane_not_assigned() {
     let assigned = assign_lane(NET, HEIGHT, &p, ROLE_COMPUTE_CONTRIBUTOR, 0).id();
     let wrong = [LANE_CPU_FRIENDLY, LANE_GPU_PARALLEL, LANE_ASIC_STREAMING]
         .into_iter()
-        .find(|&l| l != assigned && PoawxLane::from_id(l).map_or(false, |x| x.is_fairness_lane()))
+        .find(|&l| l != assigned && PoawxLane::from_id(l).is_some_and(|x| x.is_fairness_lane()))
         .expect("a second fairness lane exists");
     let solver = ext.compute_claim.solver_pkh;
     let (nonce, secret) = (ext.compute_claim.nonce, ext.compute_claim.secret);

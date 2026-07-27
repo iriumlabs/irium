@@ -3732,7 +3732,7 @@ mod tests {
         let mut c2 = base();
         let mut ca2 = ca.clone();
         ca2.candidate_admission_root[0] ^= 1;
-        ca2.digest = ca2.digest; // (digest stays; mutating root still changes serialized bytes)
+        // digest deliberately NOT recomputed: mutating the root alone still changes the serialized bytes
         c2.committed_admission = Some(ca2);
         assert_ne!(
             c.digest(),

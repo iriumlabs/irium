@@ -418,7 +418,7 @@ fn parse_milestone_form_lines(
         let amount = parts[2]
             .parse::<f64>()
             .ok()
-            .and_then(|f| if f.is_finite() { Some(f) } else { None })
+            .filter(|&f| f.is_finite())
             .ok_or_else(|| "invalid milestone amount".to_string())?;
         let atoms = (amount * 100_000_000.0).round() as u64;
         let timeout_height = parts[3]
@@ -3401,7 +3401,7 @@ async fn pool_workers(
 
     let total_found: u64 = by_addr.values().copied().sum();
     let mut rows: Vec<(String, u64)> = by_addr.into_iter().collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    rows.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     let workers: Vec<Value> = rows
         .into_iter()
@@ -3466,7 +3466,7 @@ async fn pool_distribution(
 
     let total_found: u64 = by_addr.values().copied().sum();
     let mut rows: Vec<(String, u64)> = by_addr.into_iter().collect();
-    rows.sort_by(|a, b| b.1.cmp(&a.1));
+    rows.sort_by_key(|b| std::cmp::Reverse(b.1));
 
     let unique_addresses = rows.len() as u64;
 

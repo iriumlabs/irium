@@ -20728,6 +20728,127 @@ mod proposer_consensus_tests {
         clear_sib_env();
     }
 
+    /// LIVE 2026-07-28 non-convergence: eu sat at 63,314 with `best_header_tip=63,316`
+    /// (vps's branch) and never fetched a single block -- through racing, through
+    /// quiescence, and through a restart. Recovery needed manual block-file deletion.
+    ///
+    /// Root cause: `peer_tip_forked` requires the peer's tip to be UNKNOWN to us. Once the
+    /// peer's headers have arrived its tip IS in `headers`, so that flag goes false while
+    /// our APPLIED chain is still on a competing branch. The locator then fell through to
+    /// our own tip -- which the peer does not have, so it can serve nothing after it, and
+    /// the sync stalls permanently.
+    ///
+    /// This pins the missing predicate: with the peer's headers held, we must still detect
+    /// that our applied tip is off their branch.
+    #[test]
+    fn taller_fork_with_headers_held_is_still_detected_as_off_branch() {
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        set_sib_env();
+        let maxreq = crate::protocol::MAX_BLOCKS_PER_REQUEST;
+        // Taller than one request window, so a genesis-anchored serve cannot cover the
+        // divergence -- otherwise the control below passes for the wrong reason.
+        let shared_n: u64 = maxreq as u64 - 5;
+        let my_depth: u64 = 4; // mirrors eu: 63,311..63,314
+        let peer_depth: u64 = 6; // mirrors vps: 63,311..63,316
+
+        let gh = base_chain().chain[0].header.hash_for_height(0);
+        let mut shared: Vec<(Block, u64)> = Vec::new();
+        let mut prev = gh;
+        for h in 1..=shared_n {
+            let b = minimal_block(prev, 50 + h as u32);
+            prev = b.header.hash_for_height(h);
+            shared.push((b, h));
+        }
+        let fork_parent = prev;
+        let mk = |t0: u32, depth: u64| -> Vec<(Block, u64)> {
+            let mut v = Vec::new();
+            let mut p = fork_parent;
+            for i in 1..=depth {
+                let h = shared_n + i;
+                let b = minimal_block(p, t0 + i as u32);
+                p = b.header.hash_for_height(h);
+                v.push((b, h));
+            }
+            v
+        };
+        let my_br = mk(100_000, my_depth);
+        let peer_br = mk(200_000, peer_depth);
+        let my_height = shared_n + my_depth;
+        let peer_height = shared_n + peer_depth;
+        let my_tip = my_br.last().unwrap().0.header.hash_for_height(my_height);
+        let peer_tip = peer_br.last().unwrap().0.header.hash_for_height(peer_height);
+
+        let build = |active: &Vec<(Block, u64)>| -> ChainState {
+            let mut cs = base_chain();
+            for (b, h) in shared.iter().chain(active.iter()) {
+                let hh = b.header.hash_for_height(*h);
+                cs.block_store.insert(hh, b.clone());
+                cs.heights.insert(hh, *h);
+                cs.chain.push(b.clone());
+            }
+            cs.height = cs.chain.len() as u64;
+            cs
+        };
+        let mut my_node = build(&my_br);
+
+        // THE CONDITION THAT BROKE IT: we have already received the peer's headers, so its
+        // tip is known to us. Everything below is evaluated in that state.
+        for (b, h) in shared.iter().chain(peer_br.iter()) {
+            let hh = b.header.hash_for_height(*h);
+            my_node.headers.insert(
+                hh,
+                HeaderWork { header: b.header.clone(), height: *h, work: BigUint::from(9000u32 + *h as u32) },
+            );
+        }
+        assert!(
+            my_node.headers.contains_key(&peer_tip),
+            "precondition: we hold the peer's headers"
+        );
+
+        // CONTROL: the OLD detector is blind here -- this is precisely why it stalled.
+        let peer_tip_forked_old = peer_height >= my_height
+            && peer_tip != my_tip
+            && !my_node.heights.contains_key(&peer_tip)
+            && !my_node.headers.contains_key(&peer_tip);
+        assert!(
+            !peer_tip_forked_old,
+            "control: peer_tip_forked MUST be false once headers are held -- otherwise this \
+             test is not reproducing the live stall"
+        );
+
+        // FIX: the applied tip is provably not on the peer's header chain.
+        assert!(
+            !crate::p2p::local_tip_on_header_chain(&my_node, peer_tip, my_tip, my_height),
+            "our applied tip is on a competing branch and must be detected as off-branch"
+        );
+
+        // ...and on the SAME branch it must stay quiet (no spurious fork locators).
+        let same_branch_node = build(&peer_br);
+        let same_tip = peer_tip;
+        assert!(
+            crate::p2p::local_tip_on_header_chain(&same_branch_node, peer_tip, same_tip, peer_height),
+            "a node already on the peer's branch must NOT be flagged off-branch"
+        );
+
+        // And the locator that this unlocks actually delivers the competing branch.
+        let peer_node = build(&peer_br);
+        let peer_tip_time = 200_000 + peer_depth as u32;
+        let via_own_tip = crate::p2p::serve_getblocks_from(&peer_node, my_tip, maxreq);
+        assert!(
+            !via_own_tip.iter().any(|b| b.header.time == peer_tip_time),
+            "regression guard: our own tip is unknown to the peer, so it cannot reach the divergence"
+        );
+        let loc = crate::p2p::fork_sync_locator(&my_node, peer_height, Some(peer_tip))
+            .expect("taller fork must produce a locator");
+        assert_ne!(loc.0, my_tip, "must not use our own (unshared) tip");
+        let served = crate::p2p::serve_getblocks_from(&peer_node, loc.0, loc.1);
+        assert!(
+            served.iter().any(|b| b.header.time == peer_tip_time),
+            "the fork locator must deliver the peer's branch up to its tip"
+        );
+        clear_sib_env();
+    }
+
     #[test]
     fn sibling_reorg_within_cap() {
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());

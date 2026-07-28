@@ -2035,6 +2035,49 @@ fn rewinded_getblocks_request(chain: &ChainState, peer_height: u64) -> Option<([
 /// `proposer_rank_chain_better` decide. Forks shallower than a request window
 /// (any realistic race — the live one was 78 deep) resolve in a single round.
 /// Returns `None` when there is nothing to fetch.
+/// How far back to walk the header chain when testing whether our applied tip is on it.
+/// Generous relative to any realistic producer race (the live ones were 4-78 deep) while
+/// staying O(1)-ish per sync tick.
+pub(crate) const MAX_ANCESTRY_WALK: u64 = 4096;
+
+/// Is our applied tip an ancestor of `best_header_hash` (i.e. are we on the same branch)?
+///
+/// This is the case `peer_tip_forked` MISSES. That flag requires the peer's tip to be
+/// unknown to us; but once we have ALREADY received the peer's headers, its tip IS in
+/// `headers`, so the flag goes false while our *applied* chain is still on a competing
+/// branch. The locator then falls through to our own tip -- which the peer does not have,
+/// so it can serve nothing after it, and the sync stalls forever. That is exactly the live
+/// 2026-07-28 fork: eu sat at 63,314 with `best_header_tip=63,316` (vps's branch, headers
+/// held) and never fetched a single block, through racing, through quiescence, and through
+/// a restart.
+///
+/// Walks back from `best_header_hash` to `local_height` and compares. Returns `true`
+/// (assume same branch, changing nothing) whenever the walk is inconclusive -- an unknown
+/// parent or an over-long chain -- so this can only ever ADD a fork locator where we are
+/// provably on a different branch, never remove one.
+pub(crate) fn local_tip_on_header_chain(
+    chain: &ChainState,
+    best_header_hash: [u8; 32],
+    local_tip: [u8; 32],
+    local_height: u64,
+) -> bool {
+    if best_header_hash == local_tip {
+        return true;
+    }
+    let mut cur = best_header_hash;
+    for _ in 0..MAX_ANCESTRY_WALK {
+        let hw = match chain.headers.get(&cur) {
+            Some(h) => h,
+            None => return true, // inconclusive -> preserve existing behaviour
+        };
+        if hw.height <= local_height {
+            return cur == local_tip;
+        }
+        cur = hw.header.prev_hash;
+    }
+    true
+}
+
 pub(crate) fn fork_sync_locator(
     chain: &ChainState,
     peer_height: u64,
@@ -2139,7 +2182,14 @@ async fn maybe_request_sync(
         Some(h) => h,
         None => return,
     };
-    let (local_height, local_tip, best_header_height, best_header_hash, peer_tip_forked) = match chain
+    let (
+        local_height,
+        local_tip,
+        best_header_height,
+        best_header_hash,
+        peer_tip_forked,
+        applied_tip_off_branch,
+    ) = match chain
     {
         Some(c) => {
             let guard = c.lock().unwrap_or_else(|e| e.into_inner());
@@ -2171,15 +2221,27 @@ async fn maybe_request_sync(
                             && !guard.headers.contains_key(&t)
                     })
                     .unwrap_or(false);
+            // We hold a TALLER header chain, but our applied tip is not on it: we are on a
+            // competing branch and a locator built from our own tip can never reach common
+            // ground (the peer has no such block). `peer_tip_forked` cannot see this once we
+            // already hold the peer's headers -- see `local_tip_on_header_chain`.
+            let applied_tip_off_branch = best_header_height > local_height
+                && !local_tip_on_header_chain(
+                    &guard,
+                    best_header_hash,
+                    local_tip,
+                    local_height,
+                );
             (
                 local_height,
                 local_tip,
                 best_header_height,
                 best_header_hash,
                 peer_tip_forked,
+                applied_tip_off_branch,
             )
         }
-        None => (0, [0u8; 32], 0, [0u8; 32], false),
+        None => (0, [0u8; 32], 0, [0u8; 32], false, false),
     };
     let tip_mismatch = peer_tip
         .map(|t| peer_height == local_height && t != local_tip)
@@ -2205,7 +2267,7 @@ async fn maybe_request_sync(
     // history and never reaches the divergence -> permanent non-convergence (the live
     // 62,244 equal-height fork AND the 62,506 taller-fork deadlock). Walk back from our
     // tip instead so the peer serves the competing branch above the last common block.
-    let mut start_hash = if tip_mismatch || peer_tip_forked {
+    let mut start_hash = if tip_mismatch || peer_tip_forked || applied_tip_off_branch {
         chain
             .as_ref()
             .and_then(|c| {

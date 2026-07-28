@@ -2127,6 +2127,23 @@ fn load_builtin_fallback_seeds() -> Vec<String> {
 /// bootstrap, and the request only ever goes to the user's own gateway on the local link.
 /// Opt out with IRIUM_P2P_NAT_PMP=0 (e.g. a host that already has a forwarded port, or an
 /// operator who does not want the node touching the router).
+/// TEST-ONLY: when running a multi-node harness on one machine, every node shares
+/// 127.0.0.1, so the "don't dial yourself" filter (which compares IP only, ignoring port)
+/// discards every peer -- the bootstrap line reads `manual=2 ... filtered_local=2` and the
+/// nodes never connect. Skipping it lets a local harness peer. Mirrors
+/// PeerDirectory::allow_local_peers and is likewise HARD-REFUSED on mainnet.
+fn allow_local_peer_dial() -> bool {
+    if irium_node_rs::activation::network_id_byte() == 0 {
+        return false;
+    }
+    std::env::var("IRIUM_P2P_ALLOW_LOCAL")
+        .map(|v| {
+            let v = v.trim();
+            v == "1" || v.eq_ignore_ascii_case("true")
+        })
+        .unwrap_or(false)
+}
+
 fn nat_pmp_enabled() -> bool {
     match std::env::var("IRIUM_P2P_NAT_PMP") {
         Ok(v) => {
@@ -2175,7 +2192,7 @@ async fn resolve_dns_seed_addrs(
         match resolved {
             Ok(Ok(iter)) => {
                 for addr in iter {
-                    if local_ips.contains(&addr.ip()) {
+                    if local_ips.contains(&addr.ip()) && !allow_local_peer_dial() {
                         filtered_local += 1;
                         continue;
                     }
@@ -2317,7 +2334,7 @@ fn build_seed_addrs(
     {
         match parse_seed_to_socketaddr(seed, default_seed_port) {
             Ok(addr) => {
-                if local_ips.contains(&addr.ip()) {
+                if local_ips.contains(&addr.ip()) && !allow_local_peer_dial() {
                     filtered_local += 1;
                     continue;
                 }
@@ -2329,7 +2346,7 @@ fn build_seed_addrs(
         }
     }
     for addr in dns_seed_addrs {
-        if local_ips.contains(&addr.ip()) {
+        if local_ips.contains(&addr.ip()) && !allow_local_peer_dial() {
             filtered_local += 1;
             continue;
         }
@@ -2340,7 +2357,7 @@ fn build_seed_addrs(
     for seed in manual_seeds {
         match parse_seed_to_socketaddr(seed, default_seed_port) {
             Ok(addr) => {
-                if local_ips.contains(&addr.ip()) {
+                if local_ips.contains(&addr.ip()) && !allow_local_peer_dial() {
                     filtered_local += 1;
                     continue;
                 }

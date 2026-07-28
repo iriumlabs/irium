@@ -502,7 +502,32 @@ impl PeerDirectory {
         }
     }
 
+    /// TEST-ONLY: allow loopback/private peers so a multi-node harness can run on one box.
+    ///
+    /// Without this, two local nodes can never peer (`peers=0` while each knows the other is
+    /// in its seedlist), so fork/convergence behaviour can only ever be "harness-proven" in
+    /// unit tests against a reconstruction -- which is exactly how a fork fix reached
+    /// production unvalidated on 2026-07-28.
+    ///
+    /// HARD-REFUSED ON MAINNET (network_id == 0) regardless of the env var: a mainnet-byte
+    /// node that accepted private peers is precisely the isolation gap that lets a "test"
+    /// node touch the live network.
+    fn allow_local_peers() -> bool {
+        if crate::activation::network_id_byte() == 0 {
+            return false;
+        }
+        std::env::var("IRIUM_P2P_ALLOW_LOCAL")
+            .map(|v| {
+                let v = v.trim();
+                v == "1" || v.eq_ignore_ascii_case("true")
+            })
+            .unwrap_or(false)
+    }
+
     fn is_private_or_unroutable(ip: &IpAddr) -> bool {
+        if Self::allow_local_peers() {
+            return false;
+        }
         match ip {
             IpAddr::V4(v4) => {
                 v4.is_private()
@@ -911,5 +936,48 @@ impl PeerDirectory {
             rec.touch();
             self.flush();
         }
+    }
+}
+
+#[cfg(test)]
+mod local_peer_gate_tests {
+    use super::*;
+
+    static ALLOW_LOCAL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The local-peer affordance exists so a multi-node harness can run on one box (without
+    /// it two local nodes never peer, so fork/convergence can only be "proven" against a
+    /// reconstruction -- which is how an unvalidated fork fix reached production 2026-07-28).
+    /// It must be impossible to enable for MAINNET: a mainnet-byte node accepting private
+    /// peers is exactly the isolation gap that lets a test node reach the live network.
+    #[test]
+    fn allow_local_peers_is_refused_on_mainnet_and_opt_in_elsewhere() {
+        let _g = ALLOW_LOCAL_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+        let private: IpAddr = "192.168.1.5".parse().unwrap();
+
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        std::env::set_var("IRIUM_P2P_ALLOW_LOCAL", "1");
+        assert_eq!(crate::activation::network_id_byte(), 0, "mainnet context");
+        assert!(
+            PeerDirectory::is_private_or_unroutable(&loopback),
+            "mainnet must NEVER accept loopback peers, flag or not"
+        );
+        assert!(
+            PeerDirectory::is_private_or_unroutable(&private),
+            "mainnet must NEVER accept private peers, flag or not"
+        );
+
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        assert!(
+            !PeerDirectory::is_private_or_unroutable(&loopback),
+            "devnet with the flag set must accept loopback so a local harness can peer"
+        );
+        std::env::remove_var("IRIUM_P2P_ALLOW_LOCAL");
+        assert!(
+            PeerDirectory::is_private_or_unroutable(&loopback),
+            "default (flag unset) must still reject loopback"
+        );
+        std::env::remove_var("IRIUM_NETWORK");
     }
 }

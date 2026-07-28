@@ -3359,12 +3359,29 @@ impl P2PNode {
         Duration::from_secs(secs.clamp(2, 30))
     }
 
+    /// Does this rejection reflect OUR choice rather than the peer's misbehaviour?
+    ///
+    /// Only intrinsically-invalid blocks should cost reputation. A well-formed block on a
+    /// COMPETING branch that we simply decline to adopt is not misbehaviour -- but it used
+    /// to be recorded via `record_block(.., false)`, which is `invalid_blocks += 1` and
+    /// `score -= 50`. Observed on mainnet 2026-07-28 during the fork: eu scored vps (the
+    /// peer holding the chain eu needed) at **-50**, while a peer stuck ~13k blocks behind
+    /// held **+2**. That did not cross the request-suppression gate that time
+    /// (`best >= 10 && score <= -6`), but it is a loaded gun: with any peer at score >= 10,
+    /// the node blacklists block requests to the only peer that can resolve the fork.
+    ///
+    /// The three fork-choice refusals below are all decisions we made about our own chain
+    /// (sibling ranked lower, reorg deeper than the cap, fork below the finalized height),
+    /// so they must be scored like `side chain` -- ignored, not punished.
     fn is_soft_block_reject(reason: &str) -> bool {
         let msg = reason.to_lowercase();
         msg.contains("duplicate block")
             || msg.contains("orphan")
             || msg.contains("unknown parent")
             || msg.contains("side chain")
+            || msg.contains("sibling not better")
+            || msg.contains("reorg rejected")
+            || msg.contains("keeping current tip")
     }
 
     fn is_duplicate_block(reason: &str) -> bool {
@@ -9660,6 +9677,42 @@ async fn handle_incoming_with_sybil(
 
 #[cfg(test)]
 mod tests {
+
+    /// A peer that serves a valid block on a COMPETING branch must not be scored as if it
+    /// sent an invalid block. `record_block(.., false)` is `invalid_blocks += 1` =>
+    /// `score -= 50`, and the request gate suppresses block requests to any peer at
+    /// `score <= -6` once some peer reaches `>= 10`. Penalising fork-choice refusals
+    /// therefore lets a fork blacklist the ONE peer holding the chain we need.
+    /// Mainnet 2026-07-28: vps sat at -50 on eu while a peer ~13k blocks behind held +2.
+    #[test]
+    fn fork_choice_refusals_do_not_penalise_the_peer() {
+        for reason in [
+            "keeping current tip (sibling not better)",
+            "reorg rejected: depth 42 exceeds max-reorg-depth cap 20 (hardening backstop)",
+            "reorg rejected: fork ancestor height 10 is at/below finalized height 12",
+            "duplicate block",
+            "orphan block",
+            "unknown parent",
+            "side chain",
+        ] {
+            assert!(
+                P2PNode::is_soft_block_reject(reason),
+                "our-choice refusal must NOT cost reputation: {reason}"
+            );
+        }
+        // Genuine invalidity must still be punished, else this disarms anti-abuse scoring.
+        for reason in [
+            "invalid proof of work",
+            "bad signature",
+            "merkle root mismatch",
+            "coinbase payout mismatch",
+        ] {
+            assert!(
+                !P2PNode::is_soft_block_reject(reason),
+                "genuine invalidity must STILL cost reputation: {reason}"
+            );
+        }
+    }
     use super::{
         attach_orphan_header_chain, block_request_cache_key, classify_outbound_dial_failure,
         dialable_multiaddr_from_advertised, orphan_headers_map, recent_orphan_header_hashes,

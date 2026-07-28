@@ -674,25 +674,35 @@ GitHub</a>
   function fmtIRM2(n) {
     return Number(n).toLocaleString('en-US', {minimumFractionDigits: 2, maximumFractionDigits: 2}) + ' IRM';
   }
+  // The ladder used to stop at TH/s, so anything above ~1e15 divided down to a number
+  // that toFixed() still rendered exponentially and then had a unit glued on -- producing
+  // "1.1566729908296395e+36 TH/s". Cover the full SI range, and fall back to clean
+  // scientific notation beyond it rather than a broken hybrid.
   function fmtHps(h) {
-    if (!h || h <= 0) return '0 H/s';
-    if (h >= 1e12) return (h/1e12).toFixed(2) + ' TH/s';
-    if (h >= 1e9)  return (h/1e9).toFixed(2)  + ' GH/s';
-    if (h >= 1e6)  return (h/1e6).toFixed(2)  + ' MH/s';
-    if (h >= 1e3)  return (h/1e3).toFixed(1)  + ' KH/s';
-    return h.toFixed(0) + ' H/s';
+    h = Number(h);
+    if (!h || !isFinite(h) || h <= 0) return '0 H/s';
+    var units = ['H/s','KH/s','MH/s','GH/s','TH/s','PH/s','EH/s','ZH/s','YH/s'];
+    var i = 0;
+    while (h >= 1000 && i < units.length - 1) { h /= 1000; i++; }
+    if (h >= 1000) return h.toExponential(2) + ' ' + units[units.length - 1];
+    return h.toFixed(i === 0 ? 0 : 2) + ' ' + units[i];
   }
 
   function fmtSupplyM(irm) {
     if (irm >= 1e6) return (irm / 1e6).toFixed(2) + 'M IRM';
     return irm.toLocaleString('en-US', {maximumFractionDigits: 0}) + ' IRM';
   }
+  // Same class of bug as fmtHps: the ladder stopped at 'B', so a 1e40 difficulty rendered
+  // as "1.8593536474554886e+31B".
   function fmtDiffAbbr(n) {
-    if (n == null) return '—';
-    if (n >= 1e9) return (n / 1e9).toFixed(3) + 'B';
-    if (n >= 1e6) return (n / 1e6).toFixed(3) + 'M';
-    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
-    return fmtN(n);
+    n = Number(n);
+    if (n == null || !isFinite(n)) return '—';
+    var units = ['','K','M','B','T','Qa','Qi','Sx','Sp','Oc','No','Dc'];
+    var i = 0;
+    while (n >= 1000 && i < units.length - 1) { n /= 1000; i++; }
+    if (n >= 1000) return Number(n).toExponential(2) + units[units.length - 1];
+    if (i === 0) return fmtN(n);
+    return n.toFixed(2) + units[i];
   }
 
   function normalizeBlock(b) {

@@ -1878,6 +1878,33 @@ fn load_runtime_seeds() -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// How many peers a node already knows before it is considered bootstrapped enough to
+/// skip the signed seed baseline and the cold-start block scan.
+pub const MIN_KNOWN_PEERS_FOR_BOOTSTRAPPED: usize = 5;
+
+/// The number of DISTINCT peers in the runtime seed cache.
+///
+/// The gates below used `load_runtime_seeds().len()`, which counts LINES in
+/// `seedlist.runtime` — an append-style cache that repeats the same peer every time it
+/// is rewritten. Observed on eu 2026-07-28: 7 entries that were two hosts, `A:38291`
+/// three times, `B:38291` three times, plus a bare `A`. So a node that knew two peers
+/// scored 7 and skipped the very baseline it needed to find more.
+///
+/// Counted by IP, with bare entries normalised through `default_port`, so `A` and
+/// `A:38291` are one host rather than two. Unparseable lines are not peers and do not
+/// count. This errs toward loading the baseline rather than skipping it, which is the
+/// safe direction: a redundant seed list costs one dial, a missing one costs the node
+/// its ability to join.
+fn runtime_seed_peer_count(default_port: u16) -> usize {
+    let mut hosts: HashSet<IpAddr> = HashSet::new();
+    for seed in load_runtime_seeds() {
+        if let Ok(addr) = parse_seed_to_socketaddr(&seed, default_port) {
+            hosts.insert(addr.ip());
+        }
+    }
+    hosts.len()
+}
+
 // ---- Item 3 (Phase 1 DNS-free bootstrap): peers.custom.json --------------
 //
 // Operator-curated seed list, kept separate from seedlist.runtime (which is
@@ -17723,7 +17750,7 @@ async fn main() {
         }
     }
     // Phase 3: cold-start blockchain peer scan
-    if load_runtime_seeds().len() < 5 {
+    if runtime_seed_peer_count(default_seed_port) < MIN_KNOWN_PEERS_FOR_BOOTSTRAPPED {
         let (scanned, block_peers) = {
             let guard = shared_state.lock().unwrap_or_else(|e| e.into_inner());
             scan_blocks_for_peers(&guard, 2016)
@@ -17763,12 +17790,13 @@ async fn main() {
     };
     let dns_seed_hosts = load_dns_seed_hosts(node_cfg.as_ref());
     // Devnet/testnet: skip signed (mainnet-only) seed list entirely.
-    let signed_seeds =
-        if network_kind_from_env() != NetworkKind::Mainnet || load_runtime_seeds().len() >= 5 {
-            Vec::new()
-        } else {
-            load_signed_seeds()
-        };
+    let signed_seeds = if network_kind_from_env() != NetworkKind::Mainnet
+        || runtime_seed_peer_count(default_seed_port) >= MIN_KNOWN_PEERS_FOR_BOOTSTRAPPED
+    {
+        Vec::new()
+    } else {
+        load_signed_seeds()
+    };
     let p2p_bind_for_local = std::env::var("IRIUM_P2P_BIND")
         .ok()
         .or_else(|| node_cfg.as_ref().and_then(|cfg| cfg.p2p_bind.clone()));
@@ -30618,7 +30646,10 @@ mod tests {
         std::env::set_var("IRIUM_NETWORK", "devnet");
         // The condition in the patched code: non-mainnet OR runtime_seeds >= 5 → Vec::new()
         let signed: Vec<String> =
-            if network_kind_from_env() != NetworkKind::Mainnet || load_runtime_seeds().len() >= 5 {
+            if network_kind_from_env() != NetworkKind::Mainnet
+                || crate::runtime_seed_peer_count(irium_node_rs::constants::DEFAULT_P2P_PORT)
+                    >= crate::MIN_KNOWN_PEERS_FOR_BOOTSTRAPPED
+            {
                 Vec::new()
             } else {
                 load_signed_seeds()
@@ -33188,6 +33219,42 @@ mod agent_version_tests {
     #[test]
     fn default_p2p_port_is_the_live_network_port() {
         assert_eq!(irium_node_rs::constants::DEFAULT_P2P_PORT, 38291);
+    }
+
+
+    /// eu's real runtime cache on 2026-07-28: 7 lines, two hosts. The old `.len()` gate
+    /// scored it 7 and skipped the signed seed baseline; a node that knows two peers is
+    /// not bootstrapped.
+    #[test]
+    fn runtime_seed_count_is_distinct_hosts_not_file_lines() {
+        let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+            .join(format!(".irium_runtimeseed_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Verbatim shape of the observed file, including the bare-IP last line.
+        std::fs::write(
+            dir.join("seedlist.runtime"),
+            "207.244.247.86:38291\n157.173.116.134:38291\n207.244.247.86:38291\n\
+             157.173.116.134:38291\n207.244.247.86:38291\n157.173.116.134:38291\n\
+             207.244.247.86\n",
+        )
+        .unwrap();
+        std::env::set_var("IRIUM_BOOTSTRAP_DIR", &dir);
+
+        let lines = crate::load_runtime_seeds().len();
+        let hosts = crate::runtime_seed_peer_count(
+            irium_node_rs::constants::DEFAULT_P2P_PORT,
+        );
+
+        std::env::remove_var("IRIUM_BOOTSTRAP_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(lines, 7, "the file really does hold 7 entries");
+        assert_eq!(hosts, 2, "but they are only two distinct peers");
+        assert!(
+            hosts < crate::MIN_KNOWN_PEERS_FOR_BOOTSTRAPPED,
+            "two peers must NOT count as bootstrapped, so the signed baseline still loads"
+        );
     }
 
 }

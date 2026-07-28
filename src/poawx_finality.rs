@@ -772,6 +772,7 @@ mod tests {
 
     #[test]
     fn finality_threshold_defaults_to_two_thirds() {
+        let _env = crate::test_env::guard();
         // Gap 7: with no env override the threshold is 2/3 (supermajority),
         // not the old 1/1 unanimous. Pure + race-free (no env mutation).
         assert_eq!(finality_threshold_values(None, None), (2, 3));
@@ -790,6 +791,7 @@ mod tests {
 
     #[test]
     fn phase24a_finality_wire_malformed_rejected() {
+        let _env = crate::test_env::guard();
         let bh = [0x11u8; 32];
         let ph = [0x22u8; 32];
         // vote: exact wire.
@@ -844,6 +846,7 @@ mod tests {
 
     #[test]
     fn vote_sign_verify_and_rejects() {
+        let _env = crate::test_env::guard();
         let sk = key(0x21);
         let bh = [0x44u8; 32];
         let ph = [0x33u8; 32];
@@ -888,6 +891,7 @@ mod tests {
 
     #[test]
     fn proof_threshold_pass_and_fail() {
+        let _env = crate::test_env::guard();
         // committee of 3.
         let sks = [key(0xA1), key(0xB2), key(0xC3)];
         let committee: Vec<[u8; 20]> = sks.iter().map(pkh_of).collect();
@@ -1001,6 +1005,7 @@ mod tests {
 
     #[test]
     fn required_votes_math() {
+        let _env = crate::test_env::guard();
         let p = FinalityProofV1::new(1, 10, [0u8; 32], [0u8; 32], 0, 2, 3);
         assert_eq!(p.required_votes(3), 2); // ceil(3*2/3)=2
         assert_eq!(p.required_votes(1), 1); // clamp >=1
@@ -1010,6 +1015,7 @@ mod tests {
 
     #[test]
     fn audit_finality_cache_rejects_equivocation() {
+        let _env = crate::test_env::guard();
         // Fix #6: a member casting a Commit vote for a DIFFERENT block at the same height is
         // rejected by the gossip cache when the audit gate is active, so two conflicting
         // finality proofs cannot be assembled. Mainnet hard-off.
@@ -1081,6 +1087,7 @@ mod tests {
 
     #[test]
     fn finality_gossip_cache_ingest_dedupe_window_prune() {
+        let _env = crate::test_env::guard();
         let _g = crate::poawx::poawx_test_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -1168,6 +1175,7 @@ mod tests {
 
     #[test]
     fn gate_logic_pure_and_mainnet_off() {
+        let _env = crate::test_env::guard();
         assert!(
             !finality_committee_gate(0, Some(1), 100),
             "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"

@@ -378,6 +378,7 @@ mod tests {
 
     #[test]
     fn kind_id_roundtrip_and_reserved_fail_closed() {
+        let _env = crate::test_env::guard();
         assert_eq!(FraudKind::from_id(0), Some(FraudKind::FinalityEquivocation));
         assert_eq!(FraudKind::FinalityEquivocation.id(), 0);
         // reserved-but-unimplemented kinds decode to None (fail-closed).
@@ -388,6 +389,7 @@ mod tests {
 
     #[test]
     fn valid_equivocation_accepts() {
+        let _env = crate::test_env::guard();
         let (fp, offender) = good_proof();
         let off = verify_fraud_proof(&fp, NET, 200).expect("valid proof");
         assert_eq!(off.offender_pkh, offender);
@@ -397,6 +399,7 @@ mod tests {
 
     #[test]
     fn canonical_ordering_is_enforced_by_constructor() {
+        let _env = crate::test_env::guard();
         // Regardless of arg order, the constructor canonicalizes a < b.
         let signer = sk(0x11);
         let a = vote_for(&signer, 100, 5, [0xBBu8; 32], FinalityVoteType::Commit);
@@ -408,6 +411,7 @@ mod tests {
 
     #[test]
     fn non_canonical_ordering_rejects() {
+        let _env = crate::test_env::guard();
         let (mut fp, _) = good_proof();
         std::mem::swap(&mut fp.vote_a, &mut fp.vote_b); // now a > b
         let err = verify_fraud_proof(&fp, NET, 200).unwrap_err();
@@ -416,6 +420,7 @@ mod tests {
 
     #[test]
     fn same_block_hash_is_not_equivocation() {
+        let _env = crate::test_env::guard();
         let signer = sk(0x11);
         let a = vote_for(&signer, 100, 5, [0xAAu8; 32], FinalityVoteType::Commit);
         let b = vote_for(&signer, 100, 5, [0xAAu8; 32], FinalityVoteType::Commit);
@@ -436,6 +441,7 @@ mod tests {
 
     #[test]
     fn different_signers_reject() {
+        let _env = crate::test_env::guard();
         let s1 = sk(0x11);
         let s2 = sk(0x22);
         let a = vote_for(&s1, 100, 5, [0xAAu8; 32], FinalityVoteType::Commit);
@@ -447,6 +453,7 @@ mod tests {
 
     #[test]
     fn height_mismatch_rejects() {
+        let _env = crate::test_env::guard();
         let signer = sk(0x11);
         let a = vote_for(&signer, 100, 5, [0xAAu8; 32], FinalityVoteType::Commit);
         let b = vote_for(&signer, 101, 5, [0xBBu8; 32], FinalityVoteType::Commit);
@@ -457,6 +464,7 @@ mod tests {
 
     #[test]
     fn committee_epoch_mismatch_rejects() {
+        let _env = crate::test_env::guard();
         let signer = sk(0x11);
         let a = vote_for(&signer, 100, 5, [0xAAu8; 32], FinalityVoteType::Commit);
         let b = vote_for(&signer, 100, 6, [0xBBu8; 32], FinalityVoteType::Commit);
@@ -467,6 +475,7 @@ mod tests {
 
     #[test]
     fn vote_type_mismatch_rejects() {
+        let _env = crate::test_env::guard();
         let signer = sk(0x11);
         let a = vote_for(&signer, 100, 5, [0xAAu8; 32], FinalityVoteType::Commit);
         let b = vote_for(&signer, 100, 5, [0xBBu8; 32], FinalityVoteType::Precommit);
@@ -477,6 +486,7 @@ mod tests {
 
     #[test]
     fn tampered_signature_rejects() {
+        let _env = crate::test_env::guard();
         let (mut fp, _) = good_proof();
         fp.vote_a.signature[0] ^= 0xFF; // corrupt the signature
         let err = verify_fraud_proof(&fp, NET, 200).unwrap_err();
@@ -485,6 +495,7 @@ mod tests {
 
     #[test]
     fn offender_pkh_mismatch_rejects() {
+        let _env = crate::test_env::guard();
         let (mut fp, _) = good_proof();
         fp.offender_pkh = [0xEEu8; 20];
         let err = verify_fraud_proof(&fp, NET, 200).unwrap_err();
@@ -493,6 +504,7 @@ mod tests {
 
     #[test]
     fn future_target_height_rejects() {
+        let _env = crate::test_env::guard();
         let (fp, _) = good_proof(); // target_height = 100
         let err = verify_fraud_proof(&fp, NET, 50).unwrap_err();
         assert!(err.contains("future"), "got: {}", err);
@@ -500,6 +512,7 @@ mod tests {
 
     #[test]
     fn mainnet_hard_off_rejects() {
+        let _env = crate::test_env::guard();
         let (fp, _) = good_proof();
         let err = verify_fraud_proof(&fp, 0, 200).unwrap_err();
         assert!(err.contains("mainnet hard-off"), "got: {}", err);
@@ -507,6 +520,7 @@ mod tests {
 
     #[test]
     fn wrong_network_rejects() {
+        let _env = crate::test_env::guard();
         let (fp, _) = good_proof(); // network_id = NET (2)
         let err = verify_fraud_proof(&fp, 3, 200).unwrap_err();
         assert!(err.contains("wrong network"), "got: {}", err);
@@ -514,6 +528,7 @@ mod tests {
 
     #[test]
     fn wire_roundtrip_exact() {
+        let _env = crate::test_env::guard();
         let (fp, _) = good_proof();
         let bytes = fp.serialize();
         assert_eq!(bytes.len(), FRAUD_PROOF_V1_WIRE);
@@ -523,6 +538,7 @@ mod tests {
 
     #[test]
     fn truncated_wire_rejects() {
+        let _env = crate::test_env::guard();
         let (fp, _) = good_proof();
         let bytes = fp.serialize();
         assert!(FraudProofV1::deserialize(&bytes[..bytes.len() - 1]).is_err());
@@ -531,6 +547,7 @@ mod tests {
 
     #[test]
     fn gate_logic_pure() {
+        let _env = crate::test_env::guard();
         assert!(!fraud_proof_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(fraud_proof_gate(1, Some(1), 100));
         assert!(!fraud_proof_gate(1, None, 100));
@@ -539,6 +556,7 @@ mod tests {
 
     #[test]
     fn enforced_gate_logic_pure() {
+        let _env = crate::test_env::guard();
         assert!(fraud_proof_enforced_gate(1, Some(1), true, 100));
         assert!(!fraud_proof_enforced_gate(1, Some(1), false, 100));
         assert!(

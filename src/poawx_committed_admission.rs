@@ -478,6 +478,7 @@ mod tests {
 
     #[test]
     fn phase24a_committed_admission_wire_malformed_rejected() {
+        let _env = crate::test_env::guard();
         assert!(AdmissionCommitmentV1::deserialize(&[0u8; ADMISSION_COMMITMENT_WIRE - 1]).is_err());
         assert!(AdmissionCommitmentV1::deserialize(&[0u8; ADMISSION_COMMITMENT_WIRE + 1]).is_err());
         assert!(AdmissionCommitmentV1::deserialize(&[]).is_err());
@@ -487,6 +488,7 @@ mod tests {
 
     #[test]
     fn commitment_wire_roundtrip_and_validate() {
+        let _env = crate::test_env::guard();
         let seed = [0x44u8; 32];
         let cs = sample_set(1, 11, seed);
         let c = AdmissionCommitmentV1::from_candidate_set(&cs, 10);
@@ -501,6 +503,7 @@ mod tests {
 
     #[test]
     fn mutation_changes_digest_and_breaks_match() {
+        let _env = crate::test_env::guard();
         let seed = [0x44u8; 32];
         let cs = sample_set(1, 11, seed);
         let c = AdmissionCommitmentV1::from_candidate_set(&cs, 10);
@@ -516,6 +519,7 @@ mod tests {
 
     #[test]
     fn commit_height_must_be_target_minus_one() {
+        let _env = crate::test_env::guard();
         let seed = [0x44u8; 32];
         let cs = sample_set(1, 11, seed);
         // commit_height 9 (not 10) for target 11 -> invalid.
@@ -530,6 +534,7 @@ mod tests {
 
     #[test]
     fn count_cap_enforced_on_deserialize() {
+        let _env = crate::test_env::guard();
         let seed = [0x44u8; 32];
         let mut c = AdmissionCommitmentV1::new(1, 11, 10, seed, [0u8; 32], 2, 0);
         c.candidate_count = MAX_COMMITTED_CANDIDATES + 1;
@@ -540,6 +545,7 @@ mod tests {
 
     #[test]
     fn gate_logic_pure_and_mainnet_off() {
+        let _env = crate::test_env::guard();
         assert!(
             !committed_admission_gate(0, Some(1), 100),
             "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
@@ -556,6 +562,7 @@ mod tests {
 
     #[test]
     fn multisource_seed_gate_pure() {
+        let _env = crate::test_env::guard();
         assert!(!multisource_seed_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(multisource_seed_gate(1, Some(1), 100));
         assert!(!multisource_seed_gate(1, None, 100));
@@ -564,6 +571,7 @@ mod tests {
 
     #[test]
     fn assignment_seed_v2_anti_grind() {
+        let _env = crate::test_env::guard();
         let base = [0x11u8; 32];
         let fin = [0x22u8; 32];
         let pre = [0x33u8; 32];
@@ -581,6 +589,7 @@ mod tests {
 
     #[test]
     fn resolve_epoch_seed_parts_off_is_legacy_passthrough() {
+        let _env = crate::test_env::guard();
         // Gate off (no activation height) => returns the legacy base unchanged,
         // byte-identical, regardless of the other components. Env-mutating =>
         // serialized via the crate-wide PoAW-X test env lock.

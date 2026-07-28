@@ -732,6 +732,7 @@ mod tests {
 
     #[test]
     fn standard_header_resolver_mainnet_ignores_override() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             resolve_standard_header_activation(NetworkKind::Mainnet, Some(5)),
             crate::constants::STANDARD_HEADER_ACTIVATION_HEIGHT
@@ -744,6 +745,7 @@ mod tests {
 
     #[test]
     fn standard_header_resolver_non_mainnet_default_one_or_override() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             resolve_standard_header_activation(NetworkKind::Devnet, None),
             1
@@ -764,6 +766,7 @@ mod tests {
 
     #[test]
     fn standard_header_mainnet_ignores_env_var() {
+        let _env = crate::test_env::guard();
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_STANDARD_HEADER_ACTIVATION_HEIGHT", "9");
         assert_eq!(
@@ -779,6 +782,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_htlc_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_HTLCV1_ACTIVATION_HEIGHT", "42");
         let resolved = resolved_htlcv1_activation_height(NetworkKind::Mainnet);
@@ -788,6 +792,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_htlc_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_HTLCV1_ACTIVATION_HEIGHT", "42");
         assert_eq!(
@@ -803,6 +808,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_lwma_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_LWMA_ACTIVATION_HEIGHT", "42");
         let resolved = resolved_lwma_activation_height(NetworkKind::Mainnet);
@@ -812,6 +818,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_lwma_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_LWMA_ACTIVATION_HEIGHT", "42");
         assert_eq!(
@@ -827,6 +834,7 @@ mod tests {
 
     #[test]
     fn mainnet_lwma_v2_activation_height_is_set() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             MAINNET_LWMA_V2_ACTIVATION_HEIGHT,
             Some(19_740),
@@ -841,6 +849,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_lwma_v2_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_LWMA_V2_ACTIVATION_HEIGHT", "99999");
         let resolved = resolved_lwma_v2_activation_height(NetworkKind::Mainnet);
@@ -855,6 +864,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_lwma_v2_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_LWMA_V2_ACTIVATION_HEIGHT", "500");
         assert_eq!(
@@ -870,6 +880,7 @@ mod tests {
 
     #[test]
     fn mainnet_auxpow_activation_height_is_24800() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             MAINNET_AUXPOW_ACTIVATION_HEIGHT,
             Some(24_800),
@@ -883,6 +894,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_auxpow_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_AUXPOW_ACTIVATION_HEIGHT", "99999");
         let resolved = resolved_auxpow_activation_height(NetworkKind::Mainnet);
@@ -892,6 +904,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_auxpow_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_AUXPOW_ACTIVATION_HEIGHT", "1000");
         assert_eq!(
@@ -907,6 +920,7 @@ mod tests {
 
     #[test]
     fn mainnet_block_time_v2_activation_height_is_24250() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             MAINNET_BLOCK_TIME_V2_ACTIVATION_HEIGHT,
             Some(24_250),
@@ -920,6 +934,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_block_time_v2_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_BLOCK_TIME_V2_ACTIVATION_HEIGHT", "12345");
         let resolved = resolved_block_time_v2_activation_height(NetworkKind::Mainnet);
@@ -934,6 +949,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_block_time_v2_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_BLOCK_TIME_V2_ACTIVATION_HEIGHT", "75");
         assert_eq!(
@@ -949,6 +965,7 @@ mod tests {
 
     #[test]
     fn mainnet_btc_spv_relay_height_is_23850() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             MAINNET_BTC_SPV_RELAY_ACTIVATION_HEIGHT,
             Some(23_850),
@@ -962,6 +979,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_btc_spv_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_BTC_SPV_RELAY_ACTIVATION_HEIGHT", "12345");
         let resolved = resolved_btc_spv_relay_activation_height(NetworkKind::Mainnet);
@@ -972,6 +990,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_btc_spv_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_BTC_SPV_RELAY_ACTIVATION_HEIGHT", "50");
         assert_eq!(
@@ -987,6 +1006,7 @@ mod tests {
 
     #[test]
     fn mainnet_htlc_btc_swap_v1_height_is_23850() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             MAINNET_HTLC_BTC_SWAP_V1_ACTIVATION_HEIGHT,
             Some(23_850),
@@ -1000,6 +1020,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_htlc_btc_swap_v1_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_HTLC_BTC_SWAP_V1_ACTIVATION_HEIGHT", "777");
         let resolved = resolved_htlc_btc_swap_v1_activation_height(NetworkKind::Mainnet);
@@ -1010,6 +1031,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_htlc_btc_swap_v1_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_HTLC_BTC_SWAP_V1_ACTIVATION_HEIGHT", "777");
         assert_eq!(
@@ -1025,6 +1047,7 @@ mod tests {
 
     #[test]
     fn mainnet_swap_order_v1_height_is_23850() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             MAINNET_SWAP_ORDER_V1_ACTIVATION_HEIGHT,
             Some(23_850),
@@ -1038,6 +1061,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_swap_order_v1_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_SWAP_ORDER_V1_ACTIVATION_HEIGHT", "4242");
         let resolved = resolved_swap_order_v1_activation_height(NetworkKind::Mainnet);
@@ -1048,6 +1072,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_swap_order_v1_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_SWAP_ORDER_V1_ACTIVATION_HEIGHT", "111");
         assert_eq!(
@@ -1063,6 +1088,7 @@ mod tests {
 
     #[test]
     fn mainnet_ltc_spv_height_activated_at_24800() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             MAINNET_LTC_SPV_RELAY_ACTIVATION_HEIGHT,
             Some(24_800),
@@ -1076,6 +1102,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_ltc_spv_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_LTC_SPV_RELAY_ACTIVATION_HEIGHT", "5555");
         let resolved = resolved_ltc_spv_relay_activation_height(NetworkKind::Mainnet);
@@ -1086,6 +1113,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_ltc_spv_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_LTC_SPV_RELAY_ACTIVATION_HEIGHT", "77");
         assert_eq!(
@@ -1101,6 +1129,7 @@ mod tests {
 
     #[test]
     fn mainnet_ltc_anchor_constants_have_expected_values() {
+        let _env = crate::test_env::guard();
         // Display-order hash (from litecoinspace.org / Litecoin Core RPC).
         // Reversed to natural order in `LtcAnchor::mainnet()`.
         assert_eq!(MAINNET_LTC_ANCHOR_HEIGHT, 3_106_656);
@@ -1112,6 +1141,7 @@ mod tests {
 
     #[test]
     fn mainnet_htlc_ltc_swap_v1_height_activated_at_24800() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             MAINNET_HTLC_LTC_SWAP_V1_ACTIVATION_HEIGHT,
             Some(24_800),
@@ -1125,6 +1155,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_htlc_ltc_swap_v1_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_HTLC_LTC_SWAP_V1_ACTIVATION_HEIGHT", "8888");
         let resolved = resolved_htlc_ltc_swap_v1_activation_height(NetworkKind::Mainnet);
@@ -1135,6 +1166,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_htlc_ltc_swap_v1_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_HTLC_LTC_SWAP_V1_ACTIVATION_HEIGHT", "99");
         assert_eq!(
@@ -1150,6 +1182,7 @@ mod tests {
 
     #[test]
     fn mainnet_ltc_swap_order_v1_height_activated_at_24800() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             MAINNET_LTC_SWAP_ORDER_V1_ACTIVATION_HEIGHT,
             Some(24_800),
@@ -1163,6 +1196,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_ltc_swap_order_v1_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_LTC_SWAP_ORDER_V1_ACTIVATION_HEIGHT", "3333");
         let resolved = resolved_ltc_swap_order_v1_activation_height(NetworkKind::Mainnet);
@@ -1173,6 +1207,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_ltc_swap_order_v1_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_LTC_SWAP_ORDER_V1_ACTIVATION_HEIGHT", "222");
         assert_eq!(
@@ -1188,6 +1223,7 @@ mod tests {
 
     #[test]
     fn mainnet_btc_swap_bech32_payment_is_none_pending_governance() {
+        let _env = crate::test_env::guard();
         assert!(
             MAINNET_BTC_SWAP_BECH32_PAYMENT_ACTIVATION_HEIGHT.is_none(),
             "bech32 P2WPKH BTC payment acceptance must stay disabled on mainnet until governance flips this constant"
@@ -1197,6 +1233,7 @@ mod tests {
 
     #[test]
     fn mainnet_ignores_btc_swap_bech32_payment_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_BTC_SWAP_BECH32_PAYMENT_ACTIVATION_HEIGHT", "12345");
         let resolved = resolved_btc_swap_bech32_payment_activation_height(NetworkKind::Mainnet);
@@ -1207,6 +1244,7 @@ mod tests {
 
     #[test]
     fn non_mainnet_uses_btc_swap_bech32_payment_env_override() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         std::env::set_var("IRIUM_BTC_SWAP_BECH32_PAYMENT_ACTIVATION_HEIGHT", "55");
         assert_eq!(
@@ -1226,6 +1264,7 @@ mod tests {
     /// this module's `env_lock`.
     #[test]
     fn poawx_required_flags_are_hardcoded_true_on_mainnet() {
+        let _env = crate::test_env::guard();
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "mainnet");
         assert!(crate::poawx_dominance::anti_domination_required());
@@ -1265,6 +1304,7 @@ mod mainnet_gate_truth {
 
     #[test]
     fn effective_activation_ignores_env_on_mainnet() {
+        let _env = crate::test_env::guard();
         assert_eq!(MAINNET_POAWX_ACTIVATION_HEIGHT, Some(50_000));
         // Whatever the env says, mainnet gets the compiled height.
         for env in [None, Some(1u64), Some(u64::MAX)] {
@@ -1284,6 +1324,7 @@ mod mainnet_gate_truth {
     /// that mainnet is currently enforcing has been silently disabled.
     #[test]
     fn every_routed_gate_is_on_at_a_live_mainnet_height() {
+        let _env = crate::test_env::guard();
         let h = MAINNET_LIVE;
         let gates: [(&str, bool); 10] = [
             ("anti_domination", crate::poawx_dominance::anti_domination_gate(0, None, h)),
@@ -1307,6 +1348,7 @@ mod mainnet_gate_truth {
     /// The activation boundary is exactly 50,000 — off below, on at and above.
     #[test]
     fn mainnet_activation_boundary_is_exact() {
+        let _env = crate::test_env::guard();
         assert!(!crate::poawx_dominance::anti_domination_gate(0, None, 49_999));
         assert!(crate::poawx_dominance::anti_domination_gate(0, None, 50_000));
         assert!(!crate::poawx_puzzle::puzzle_work_gate(0, None, 49_999));
@@ -1325,6 +1367,7 @@ mod mainnet_gate_truth {
     /// off at it; the env-independence invariant is what this pins.)
     #[test]
     fn pow_demotion_reads_its_own_const_env_ignored() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             crate::poawx_proposer::MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT,
             MAINNET_COMBINED_ACTIVATION_HEIGHT

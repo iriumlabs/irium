@@ -411,6 +411,7 @@ mod rank_rewind_tests {
     use super::rank_length_floor_blocks as blk;
     #[test]
     fn bounded_rank_rewind_window() {
+        let _env = crate::test_env::guard();
         // shorter candidate, floor ACTIVE, WITHIN K => NOT blocked: rank alone decides,
         // so a better-ranked shorter chain can be adopted. THIS converges the deadlock.
         assert!(!blk(true, 3, 5, 10), "within-K shorter must fall through to rank");
@@ -432,6 +433,7 @@ mod rank_rewind_tests {
 
     #[test]
     fn fork_choice_converges_the_beyond_k_permanent_fork() {
+        let _env = crate::test_env::guard();
         // Reproduces the CONFIRMED 61,690-class break, then proves the fix converges it.
         // Branch A: 25 blocks above the ancestor. Branch B: 22 blocks, BETTER-ranked at the
         // first differing height. Fork depth (25) > K=20.
@@ -460,6 +462,7 @@ mod rank_rewind_tests {
 
     #[test]
     fn fork_choice_prefers_candidate_is_antisymmetric_total_order() {
+        let _env = crate::test_env::guard();
         // For any two DISTINCT chains, prefers(X,Y) == !prefers(Y,X) (a total order => no
         // permanent two-way fork). Covers within-K, at-K, beyond-K, equal-length, and tie.
         let k = 4u64;
@@ -1206,6 +1209,7 @@ mod tests {
 
     #[test]
     fn pool_sortition_bounds_admitted_to_k() {
+        let _env = crate::test_env::guard();
         // Evenly-spaced priorities: EXACTLY k of n clear the threshold, so the admitted
         // pool/committee is bounded to ~k regardless of how many keys/tickets exist.
         let n = 24u64;
@@ -1244,6 +1248,7 @@ mod tests {
 
     #[test]
     fn contributor_role_binding_gate_mainnet_activates_at_height() {
+        let _env = crate::test_env::guard();
         // Activation binary (v1.9.127): mainnet (network 0) activates the contributor-role
         // binding at the fixed code height MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT, ignoring
         // env. Below it, off; at/above it, on (coordinated hard fork).
@@ -1261,6 +1266,7 @@ mod tests {
 
     #[test]
     fn cumulative_slots_cascade() {
+        let _env = crate::test_env::guard();
         // counts: round0=1, round1=4, round2=14, round3+=all, capped at n.
         assert_eq!(cumulative_slots(0, 100), 1);
         assert_eq!(cumulative_slots(1, 100), 4);
@@ -1276,6 +1282,7 @@ mod tests {
 
     #[test]
     fn threshold_widens_and_saturates() {
+        let _env = crate::test_env::guard();
         // n=100: round0 admits ~1/100 of the space, round2 ~14/100, round3 all.
         assert_eq!(proposer_threshold(100, 0), u64::MAX / 100);
         assert_eq!(proposer_threshold(100, 1), (u64::MAX / 100) * 4);
@@ -1298,6 +1305,7 @@ mod tests {
 
     #[test]
     fn selection_by_priority() {
+        let _env = crate::test_env::guard();
         // lowest priority (0) always selected at round 0; priority at/above tau not.
         let n = 100;
         let tau0 = proposer_threshold(n, 0);
@@ -1313,6 +1321,7 @@ mod tests {
 
     #[test]
     fn round_timing() {
+        let _env = crate::test_env::guard();
         // round r opens at parent + r*interval; validator floor is the same.
         assert_eq!(min_time_for_round(1000, 0, 30), 1000);
         assert_eq!(min_time_for_round(1000, 1, 30), 1030);
@@ -1326,6 +1335,7 @@ mod tests {
 
     #[test]
     fn gate_mainnet_activates_at_50000() {
+        let _env = crate::test_env::guard();
         // network 0 (mainnet) PoAW-X activates at the fixed code height (50_000),
         // ignoring any env activation: off below it, on at/after it.
         assert!(!proposer_vrf_gate(0, Some(1), 49_999)); // mainnet: off before activation
@@ -1340,6 +1350,7 @@ mod tests {
 
     #[test]
     fn pow_demotion_gate_mainnet_is_const_controlled_env_ignored() {
+        let _env = crate::test_env::guard();
         // On mainnet the ENV is IGNORED entirely: demotion is controlled SOLELY by the compiled
         // `MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT` const. RECONCILED 2026-07-24: after the
         // 2026-07-18 safety revert to None, the combined deploy knob re-aliased that const to
@@ -1368,6 +1379,7 @@ mod tests {
 
     #[test]
     fn mainnet_pow_demotion_const_controls_net0_activation() {
+        let _env = crate::test_env::guard();
         // The mainnet activation path is the compiled const, evaluated by the pure
         // param-driven helper (testable without mutating the shipped const or env):
         assert!(!mainnet_pow_demotion_active(None, 10_000_000)); // unset => off at any height
@@ -1383,6 +1395,7 @@ mod tests {
 
     #[test]
     fn priority_from_output_le() {
+        let _env = crate::test_env::guard();
         let mut out = [0u8; 32];
         out[0..8].copy_from_slice(&7u64.to_le_bytes());
         assert_eq!(proposer_priority(&out), 7);
@@ -1390,6 +1403,7 @@ mod tests {
 
     #[test]
     fn fork_choice_hardening_gate_and_depth_floor() {
+        let _env = crate::test_env::guard();
         assert!(!fork_choice_hardening_gate(0, Some(1), 100)); // mainnet hard-off
         assert!(fork_choice_hardening_gate(2, Some(50), 50));
         assert!(fork_choice_hardening_gate(2, Some(50), 999));
@@ -1408,6 +1422,7 @@ mod tests {
 
     #[test]
     fn registration_gate_pure() {
+        let _env = crate::test_env::guard();
         assert!(!proposer_registration_gate(false, Some(1), 100)); // vrf off => off
         assert!(!proposer_registration_gate(true, None, 100)); // no activation => off
         assert!(proposer_registration_gate(true, Some(50), 50)); // active at height
@@ -1417,6 +1432,7 @@ mod tests {
 
     #[test]
     fn registration_anchor_window_math() {
+        let _env = crate::test_env::guard();
         // in the past + within window.
         assert!(registration_anchor_valid(60, 66, 64));
         assert!(registration_anchor_valid(65, 66, 64));
@@ -1431,6 +1447,7 @@ mod tests {
 
     #[test]
     fn registry_is_registered_tracks_keys() {
+        let _env = crate::test_env::guard();
         let mut reg = ProposerEligibilityRegistry::default();
         let k = [0x9u8; 33];
         assert!(!reg.is_registered(&k));
@@ -1447,6 +1464,7 @@ mod tests {
     /// indefinitely and is announced the moment production resumes.
     #[test]
     fn stale_pooled_registration_is_not_offered_and_is_pruned() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
         let pool = NodeProposerRegistrationPool::default();
@@ -1475,6 +1493,7 @@ mod tests {
 
     #[test]
     fn pool_refreshes_to_fresher_anchor() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
         let pool = NodeProposerRegistrationPool::default();
@@ -1522,6 +1541,7 @@ mod tests {
 
     #[test]
     fn pool_ingest_dedup_and_filter() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
         let pool = NodeProposerRegistrationPool::default();
@@ -1549,6 +1569,7 @@ mod tests {
 
     #[test]
     fn anti_spam_cap_math() {
+        let _env = crate::test_env::guard();
         // gate off => configured value passes through verbatim.
         assert_eq!(cap_difficulty_if_enforced(20, false, 8), 20);
         // enforced => capped downward at the floor.
@@ -1559,6 +1580,7 @@ mod tests {
 
     #[test]
     fn registry_freeze_and_expiry() {
+        let _env = crate::test_env::guard();
         let mut reg = ProposerEligibilityRegistry::default();
         let k1 = [0x11u8; 33];
         let k2 = [0x22u8; 33];
@@ -1580,6 +1602,7 @@ mod tests {
 
     #[test]
     fn registry_register_unregister_symmetry() {
+        let _env = crate::test_env::guard();
         let mut reg = ProposerEligibilityRegistry::default();
         let k = [0x33u8; 33];
         let (fd, ew) = (4u64, 100u64);
@@ -1609,6 +1632,7 @@ mod a0_a2_registration_fairness {
     /// cheap vanity key (independent of the sybil PoW) captured every node's list.
     #[test]
     fn announce_order_is_arrival_not_key_order() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
         let pool = NodeProposerRegistrationPool::default();
@@ -1655,6 +1679,7 @@ mod a0_a2_registration_fairness {
     /// out to every peer for free.
     #[test]
     fn small_refresh_does_not_rebroadcast_large_one_does() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
         let pool = NodeProposerRegistrationPool::default();
@@ -1692,6 +1717,7 @@ mod a0_a2_registration_fairness {
     /// the head of the queue forever by re-anchoring -- the same capture A0 removes.
     #[test]
     fn refresh_does_not_jump_the_queue() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
         let pool = NodeProposerRegistrationPool::default();
@@ -1773,6 +1799,7 @@ mod a4_sybil_recompute {
     /// field-check makes this test pass a forged registration again.
     #[test]
     fn forged_zero_digest_rejected_but_passes_the_old_field_check() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
         let pool = NodeProposerRegistrationPool::default();
@@ -1801,6 +1828,7 @@ mod a4_sybil_recompute {
     /// An honestly-ground registration is accepted when the anchor recomputes to match.
     #[test]
     fn honest_registration_with_matching_anchor_is_accepted() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
         let pool = NodeProposerRegistrationPool::default();
@@ -1818,6 +1846,7 @@ mod a4_sybil_recompute {
     /// not be able to skip verification by choosing an anchor we do not hold.
     #[test]
     fn unresolvable_anchor_fails_closed() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
         let pool = NodeProposerRegistrationPool::default();
@@ -1835,6 +1864,7 @@ mod a4_sybil_recompute {
     /// against the wrong anchor recomputes to a different digest and is rejected.
     #[test]
     fn honest_registration_against_wrong_anchor_is_rejected() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
         let pool = NodeProposerRegistrationPool::default();

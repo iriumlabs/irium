@@ -663,6 +663,7 @@ mod tests {
     // expected_network==0 IS the mainnet context, no global-env dependency.
     #[test]
     fn ticket_proof_un_hard_off_net0() {
+        let _env = crate::test_env::guard();
         use crate::poawx::ROLE_SUPPORT_CONTRIBUTOR;
         let net = 0u8; // MAINNET context
         let bits = MAINNET_TICKET_SYBIL_BITS; // 20 — the enforced mainnet sybil cost
@@ -754,6 +755,7 @@ mod tests {
 
     #[test]
     fn phase24a_ticket_wire_malformed_rejected() {
+        let _env = crate::test_env::guard();
         // MinerWorkTicket requires a minimum length; short input rejects, no panic.
         assert!(
             MinerWorkTicket::deserialize(&[0u8; 50]).is_err(),
@@ -775,6 +777,7 @@ mod tests {
 
     #[test]
     fn ticket_serialize_roundtrip_and_digest_mutation() {
+        let _env = crate::test_env::guard();
         let t = mk(1, 10, 100);
         let b = t.serialize();
         let t2 = MinerWorkTicket::deserialize(&b).unwrap();
@@ -791,6 +794,7 @@ mod tests {
 
     #[test]
     fn ticket_validate_accept_and_rejects() {
+        let _env = crate::test_env::guard();
         let net = 1u8;
         let t = mk(net, 10, 100);
         assert!(t.validate(net, 50, 0).is_ok(), "valid in-window ticket");
@@ -813,6 +817,7 @@ mod tests {
 
     #[test]
     fn sybil_threshold_disabled_permits_enabled_rejects_insufficient() {
+        let _env = crate::test_env::guard();
         let net = 1u8;
         let pkh = [0xB2u8; 20];
         let apk = [0x03u8; 33];
@@ -848,6 +853,7 @@ mod tests {
 
     #[test]
     fn ticket_penalized_not_high_trust_eligible() {
+        let _env = crate::test_env::guard();
         let net = 1u8;
         let mut t = mk(net, 10, 100);
         t.penalty_status = PenaltyStatus::SuspendedForEpoch.id();
@@ -858,6 +864,7 @@ mod tests {
 
     #[test]
     fn ticket_gate_logic_pure() {
+        let _env = crate::test_env::guard();
         // pure gate (no global env mutation -> race-free under parallel tests).
         assert!(!tickets_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(tickets_gate(1, Some(1), 100), "testnet active");
@@ -870,6 +877,7 @@ mod tests {
 
     #[test]
     fn audit_ticket_rejects_epoch_not_bound_to_height() {
+        let _env = crate::test_env::guard();
         use crate::poawx::ROLE_VERIFY_CONTRIBUTOR;
         // Fix #7: when the audit gate is active a ticket's epoch must equal its target_height
         // (closes the "any epoch passes" sybil-window gap). Mainnet hard-off.
@@ -918,6 +926,7 @@ mod tests {
 
     #[test]
     fn ticket_proof_roundtrip_and_validate() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
         let net = 1u8;
         let solver = [0xC7u8; 20];

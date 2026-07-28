@@ -535,6 +535,7 @@ mod tests {
 
     #[test]
     fn node_role_gossip_envelope_roundtrip_hides_secret() {
+        let _env = crate::test_env::guard();
         let (s, n) = ([0x11u8; 32], [0x22u8; 32]);
         let pc = pc_dto(1, 2, ROLE_COMPUTE_CONTRIBUTOR, [0xA1u8; 20], s, n);
         let bytes = RolePrecommitGossip::new(pc.clone()).encode();
@@ -553,6 +554,7 @@ mod tests {
 
     #[test]
     fn node_cache_ingest_validate_window_dedupe() {
+        let _env = crate::test_env::guard();
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         enable();
         let net = 1u8;
@@ -636,6 +638,7 @@ mod tests {
 
     #[test]
     fn node_gossip_outcome_rebroadcast_policy() {
+        let _env = crate::test_env::guard();
         // P2P dispatch policy: only AcceptedNew rebroadcasts; duplicate/invalid do not.
         assert!(GossipOutcome::AcceptedNew.should_rebroadcast());
         assert!(!GossipOutcome::Duplicate.should_rebroadcast());
@@ -647,6 +650,7 @@ mod tests {
 
     #[test]
     fn node_cache_mainnet_and_disabled_hard_off() {
+        let _env = crate::test_env::guard();
         let _g = env_lock().lock().unwrap_or_else(|e| e.into_inner());
         // disabled (no env) -> reject.
         disable();

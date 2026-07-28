@@ -113,3 +113,6 @@ pub mod sybil;
 pub mod tx;
 pub mod wallet;
 pub mod wallet_store;
+
+#[cfg(test)]
+mod test_env;

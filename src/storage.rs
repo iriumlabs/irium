@@ -1000,6 +1000,7 @@ mod storage_security_tests {
     #[test]
     #[cfg(unix)]
     fn block_json_path_rejects_symlink_leaf() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         let base = temp_blocks_dir();
         let _ = fs::remove_dir_all(&base);
@@ -1017,6 +1018,7 @@ mod storage_security_tests {
 
     #[test]
     fn read_write_block_json_string_round_trip() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         let base = temp_blocks_dir();
         let _ = fs::remove_dir_all(&base);
@@ -1034,6 +1036,7 @@ mod storage_security_tests {
     // ── Phase 24C: storage isolation fail-closed (no fs touched; path logic only) ──
     #[test]
     fn phase24c_resolve_configured_dir_unset_invalid_valid() {
+        let _env = crate::test_env::guard();
         let _g = env_lock().lock().unwrap();
         let home = os_home_dir();
         for var in ["IRIUM_DATA_DIR", "IRIUM_BLOCKS_DIR", "IRIUM_STATE_DIR"] {
@@ -1059,6 +1062,7 @@ mod storage_security_tests {
 
     #[test]
     fn phase24c_validate_storage_env_fail_closed() {
+        let _env = crate::test_env::guard();
         let _g = env_lock().lock().unwrap();
         for var in [
             "IRIUM_DATA_DIR",
@@ -1085,6 +1089,7 @@ mod storage_security_tests {
 
     #[test]
     fn phase24c_default_preserved_when_unset() {
+        let _env = crate::test_env::guard();
         // (9) regression: with env unset, dirs resolve to the ~/.irium default
         // (path computation only; does not create or touch ~/.irium).
         let _g = env_lock().lock().unwrap();

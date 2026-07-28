@@ -361,6 +361,7 @@ mod tests {
 
     #[test]
     fn prunes_old_low_activity_entries() {
+        let _env = crate::test_env::guard();
         let now = now_secs();
         let mut rep = PeerReputation::new("1.2.3.4:38291".to_string());
         rep.last_seen = now - (REPUTATION_PRUNE_AFTER_SECS + 60.0);
@@ -371,6 +372,7 @@ mod tests {
 
     #[test]
     fn keeps_old_successful_entries() {
+        let _env = crate::test_env::guard();
         let now = now_secs();
         let mut rep = PeerReputation::new("1.2.3.4:38291".to_string());
         rep.last_seen = now - (REPUTATION_PRUNE_AFTER_SECS + 60.0);
@@ -385,6 +387,7 @@ mod tests {
 
     #[test]
     fn fix128_dial_failures_do_not_subtract_score() {
+        let _env = crate::test_env::guard();
         let mut rep = PeerReputation::new("1.2.3.4:38291".to_string());
         rep.dial_failures = 100;
         rep.update_score();
@@ -395,6 +398,7 @@ mod tests {
 
     #[test]
     fn fix128_handshake_failures_still_subtract_score_as_before() {
+        let _env = crate::test_env::guard();
         let mut rep = PeerReputation::new("1.2.3.4:38291".to_string());
         rep.failed_connections = 17;
         rep.update_score();
@@ -405,6 +409,7 @@ mod tests {
 
     #[test]
     fn fix128_is_banned_respects_env_threshold() {
+        let _env = crate::test_env::guard();
         let mut rep = PeerReputation::new("1.2.3.4:38291".to_string());
         rep.failed_connections = 17;
         rep.update_score();
@@ -438,6 +443,7 @@ mod tests {
 
     #[test]
     fn fix128_record_dial_failure_increments_counter_and_updates_last_seen() {
+        let _env = crate::test_env::guard();
         let tmp = std::env::temp_dir().join(format!(
             "irium_rep_test_{}_{}.json",
             std::process::id(),
@@ -459,6 +465,7 @@ mod tests {
 
     #[test]
     fn fix128_reputation_json_legacy_file_without_dial_failures_loads() {
+        let _env = crate::test_env::guard();
         // Build a legacy-format JSON object (no dial_failures field)
         // and confirm load() defaults the missing field to 0 without
         // crashing.
@@ -495,6 +502,7 @@ mod tests {
 
     #[test]
     fn fix128_reputation_ban_threshold_default_is_20() {
+        let _env = crate::test_env::guard();
         std::env::remove_var("IRIUM_REPUTATION_BAN_SCORE_THRESHOLD");
         assert_eq!(reputation_ban_score_threshold(), 20);
     }

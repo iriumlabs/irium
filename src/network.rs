@@ -943,7 +943,6 @@ impl PeerDirectory {
 mod local_peer_gate_tests {
     use super::*;
 
-    static ALLOW_LOCAL_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// The local-peer affordance exists so a multi-node harness can run on one box (without
     /// it two local nodes never peer, so fork/convergence can only be "proven" against a
@@ -952,8 +951,8 @@ mod local_peer_gate_tests {
     /// peers is exactly the isolation gap that lets a test node reach the live network.
     #[test]
     fn allow_local_peers_is_refused_on_mainnet_and_opt_in_elsewhere() {
-        let _g = ALLOW_LOCAL_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let loopback: IpAddr = "127.0.0.1".parse().unwrap();
+        let _env = crate::test_env::guard();
+                let loopback: IpAddr = "127.0.0.1".parse().unwrap();
         let private: IpAddr = "192.168.1.5".parse().unwrap();
 
         std::env::set_var("IRIUM_NETWORK", "mainnet");

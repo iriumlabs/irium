@@ -197,6 +197,7 @@ mod tests {
     /// transition is sharp at the activation height.
     #[test]
     fn block_target_interval_uses_mainnet_v2_fork_at_24250() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -215,6 +216,7 @@ mod tests {
     /// landing on the fork height itself.
     #[test]
     fn block_target_interval_is_v1_pre_fork_v2_post_fork() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -240,6 +242,7 @@ mod tests {
     /// curve stays continuous through the fork.
     #[test]
     fn halving_count_is_continuous_across_fork() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -270,6 +273,7 @@ mod tests {
     /// discontinuity.
     #[test]
     fn block_reward_is_continuous_across_fork() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -297,6 +301,7 @@ mod tests {
     /// `HALVING_INTERVAL_V2` blocks past the fork (not at the V1 cadence).
     #[test]
     fn block_reward_post_fork_halves_after_v2_interval_blocks() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -336,6 +341,7 @@ mod tests {
     /// `24_250 + k * 1_050_000 + 1`.
     #[test]
     fn block_reward_mainnet_post_fork_curve() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock()
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);

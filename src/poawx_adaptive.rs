@@ -189,6 +189,7 @@ mod tests {
 
     #[test]
     fn healthy_is_normal() {
+        let _env = crate::test_env::guard();
         let p = assess(&healthy(), AdaptiveMode::Normal);
         assert_eq!(p.mode, AdaptiveMode::Normal);
         assert_eq!(p.confirmation_multiplier, 1);
@@ -197,6 +198,7 @@ mod tests {
 
     #[test]
     fn low_miner_count_is_caution_not_halt() {
+        let _env = crate::test_env::guard();
         let mut s = healthy();
         s.active_miner_count = 1;
         s.valid_role_count = 1;
@@ -210,6 +212,7 @@ mod tests {
 
     #[test]
     fn reorg_or_invalid_or_concentration_is_defense() {
+        let _env = crate::test_env::guard();
         let mut s = healthy();
         s.recent_reorg_signal = DEFENSE_REORG_SIGNAL;
         assert_eq!(assess(&s, AdaptiveMode::Normal).mode, AdaptiveMode::Defense);
@@ -229,6 +232,7 @@ mod tests {
 
     #[test]
     fn defense_to_recovery_then_normal() {
+        let _env = crate::test_env::guard();
         // clean signals after Defense -> Recovery.
         let p = assess(&healthy(), AdaptiveMode::Defense);
         assert_eq!(p.mode, AdaptiveMode::Recovery);
@@ -244,6 +248,7 @@ mod tests {
 
     #[test]
     fn zero_miners_cannot_produce() {
+        let _env = crate::test_env::guard();
         let mut s = healthy();
         s.active_miner_count = 0;
         assert!(
@@ -256,6 +261,7 @@ mod tests {
 
     #[test]
     fn gate_logic_pure() {
+        let _env = crate::test_env::guard();
         assert!(!adaptive_mode_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(adaptive_mode_gate(1, Some(1), 100));
         assert!(!adaptive_mode_gate(1, None, 100));

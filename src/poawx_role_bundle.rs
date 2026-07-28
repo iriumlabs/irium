@@ -631,6 +631,7 @@ mod tests {
 
     #[test]
     fn valid_bundle_parses_and_validates() {
+        let _env = crate::test_env::guard();
         let b = RoleBundleV1::from_json(&bundle_json(0x01, ROLE_COMPUTE_CONTRIBUTOR)).expect("parse");
         b.validate(NET, H, Some(SEED), None).expect("must validate");
         // and the payout binding genuinely holds
@@ -641,6 +642,7 @@ mod tests {
     /// a test that accepts any error passes for the wrong reason.
     #[test]
     fn each_malformation_is_rejected_with_its_own_reason() {
+        let _env = crate::test_env::guard();
         let ok = RoleBundleV1::from_json(&bundle_json(0x02, ROLE_COMPUTE_CONTRIBUTOR)).unwrap();
 
         let mut b = ok.clone();
@@ -688,6 +690,7 @@ mod tests {
 
     #[test]
     fn pool_keeps_best_per_role_and_prunes_on_height_advance() {
+        let _env = crate::test_env::guard();
         let pool = NodeRoleBundlePool::default();
         let a = RoleBundleV1::from_json(&bundle_json(0x03, ROLE_COMPUTE_CONTRIBUTOR)).unwrap();
         let b = RoleBundleV1::from_json(&bundle_json(0x04, ROLE_COMPUTE_CONTRIBUTOR)).unwrap();
@@ -721,6 +724,7 @@ mod tests {
 
     #[test]
     fn collect_roles_reports_distinct_payees() {
+        let _env = crate::test_env::guard();
         let pool = NodeRoleBundlePool::default();
         for (sk, role) in [
             (0x05u8, ROLE_COMPUTE_CONTRIBUTOR),
@@ -741,6 +745,7 @@ mod tests {
 
     #[test]
     fn empty_pool_yields_no_collected_roles_so_builders_are_unchanged() {
+        let _env = crate::test_env::guard();
         let c = collect_roles_for_height(u64::MAX); // nothing ever ingested at this height
         assert!(c.is_empty());
         assert_eq!(c.distinct_payees(), 0);
@@ -775,6 +780,7 @@ mod r1_r2_r3_tests {
     /// directly against a validation counter rather than inferred from timing.
     #[test]
     fn tier1_rejection_never_reaches_validation() {
+        let _env = crate::test_env::guard();
         let pool = NodeRoleBundlePool::default();
         let src = ip(11);
         let b = valid_bundle(0x21);
@@ -810,6 +816,7 @@ mod r1_r2_r3_tests {
     /// many workers, or one worker spread across many addresses.
     #[test]
     fn identity_limit_engages_independently_of_source_limit() {
+        let _env = crate::test_env::guard();
         let pool = NodeRoleBundlePool::default();
         let b = valid_bundle(0x22);
         let mut identity_limited = false;
@@ -834,6 +841,7 @@ mod r1_r2_r3_tests {
     /// unaffected by another's exhaustion.
     #[test]
     fn identity_limit_is_per_identity_not_global() {
+        let _env = crate::test_env::guard();
         let pool = NodeRoleBundlePool::default();
         let noisy = valid_bundle(0x23);
         for i in 0..(IDENTITY_RATE_MAX + 4) {
@@ -850,6 +858,7 @@ mod r1_r2_r3_tests {
     /// R2 -- public submission is OFF unless an operator opts in. Default loopback.
     #[test]
     fn public_submission_defaults_off_and_is_opt_in() {
+        let _env = crate::test_env::guard();
         std::env::remove_var("IRIUM_POAWX_ROLE_BUNDLE_PUBLIC");
         assert!(
             !role_bundle_public_submission_enabled(),
@@ -881,6 +890,7 @@ mod r4_finality_vote_tests {
 
     #[test]
     fn valid_support_bundle_with_its_own_vote_validates() {
+        let _env = crate::test_env::guard();
         let b = support_bundle(0x31);
         b.validate(NET, H, Some(SEED), Some(PARENT))
             .expect("SUPPORT bundle with its own vote must validate");
@@ -892,6 +902,7 @@ mod r4_finality_vote_tests {
     /// passes for the wrong reason.
     #[test]
     fn each_vote_malformation_is_rejected_with_its_own_reason() {
+        let _env = crate::test_env::guard();
         let ok = support_bundle(0x32);
 
         // SUPPORT without a vote at all

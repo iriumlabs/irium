@@ -6704,6 +6704,7 @@ mod tests {
 
     #[test]
     fn htlc_activation_boundary_n_minus_1_n_n_plus_1() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(Some(10));
         let sender = signing_key(1);
         let recipient = signing_key(2);
@@ -6753,6 +6754,7 @@ mod tests {
 
     #[test]
     fn htlc_output_rejected_before_activation() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(Some(100));
         let sender = signing_key(1);
         let recipient = signing_key(2);
@@ -6789,6 +6791,7 @@ mod tests {
 
     #[test]
     fn htlc_output_accepted_after_activation() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(Some(1));
         let sender = signing_key(4);
         let recipient = signing_key(5);
@@ -6854,6 +6857,7 @@ mod tests {
 
     #[test]
     fn htlc_claim_valid_and_wrong_preimage() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(Some(1));
         chain.height = 50;
         let recipient = signing_key(7);
@@ -6905,6 +6909,7 @@ mod tests {
 
     #[test]
     fn htlc_refund_respects_timeout() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(Some(1));
         let recipient = signing_key(9);
         let refund = signing_key(10);
@@ -6949,6 +6954,7 @@ mod tests {
 
     #[test]
     fn htlc_malformed_witness_fails() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(Some(1));
         chain.height = 50;
         let recipient = signing_key(11);
@@ -6978,6 +6984,7 @@ mod tests {
 
     #[test]
     fn htlc_claim_wrong_recipient_pubkey_fails() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(Some(1));
         chain.height = 50;
         let recipient = signing_key(15);
@@ -7022,6 +7029,7 @@ mod tests {
 
     #[test]
     fn htlc_refund_wrong_pubkey_fails() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(Some(1));
         chain.height = 500;
         let recipient = signing_key(18);
@@ -7063,6 +7071,7 @@ mod tests {
 
     #[test]
     fn pre_activation_uses_legacy_retarget_exactly() {
+        let _env = crate::test_env::guard();
         let mut chain = difficulty_chain(Some(30_000), 0x207fffff);
         let mut time = chain.chain[0].header.time;
         for _ in 1..DIFFICULTY_RETARGET_INTERVAL {
@@ -7079,6 +7088,7 @@ mod tests {
 
     #[test]
     fn activation_boundary_switches_to_lwma() {
+        let _env = crate::test_env::guard();
         let activation = 70;
         let mut chain = difficulty_chain(Some(activation), 0x207fffff);
         let mut time = chain.chain[0].header.time;
@@ -7103,6 +7113,7 @@ mod tests {
 
     #[test]
     fn lwma_is_deterministic_for_same_headers() {
+        let _env = crate::test_env::guard();
         let activation = 70;
         let mut chain_a = difficulty_chain(Some(activation), 0x207fffff);
         let mut chain_b = difficulty_chain(Some(activation), 0x207fffff);
@@ -7122,6 +7133,7 @@ mod tests {
 
     #[test]
     fn lwma_recovers_from_hashrate_increase_with_step_clamp() {
+        let _env = crate::test_env::guard();
         let activation = 70;
         let mut chain = difficulty_chain(Some(activation), 0x207fffff);
         let test_bits = synthetic_working_bits(&chain);
@@ -7160,6 +7172,7 @@ mod tests {
     /// asserting the fix, so this cannot pass by accident.
     #[test]
     fn demotion_difficulty_freeze_stops_the_lwma_runaway() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -7234,6 +7247,7 @@ mod tests {
 
     #[test]
     fn lwma_recovers_from_hashrate_drop_with_step_clamp() {
+        let _env = crate::test_env::guard();
         let activation = 70;
         let mut chain = difficulty_chain(Some(activation), 0x207fffff);
         let test_bits = synthetic_working_bits(&chain);
@@ -7260,6 +7274,7 @@ mod tests {
 
     #[test]
     fn lwma_clamps_forward_timestamp_spikes() {
+        let _env = crate::test_env::guard();
         let activation = 70;
         let mut clamped = difficulty_chain(Some(activation), 0x207fffff);
         let mut time_a = clamped.chain[0].header.time;
@@ -7291,6 +7306,7 @@ mod tests {
 
     #[test]
     fn lwma_clamps_non_monotonic_timestamps_to_one_second() {
+        let _env = crate::test_env::guard();
         let activation = 70;
         let mut monotonic = difficulty_chain(Some(activation), 0x207fffff);
         let mut time_a = monotonic.chain[0].header.time;
@@ -7322,6 +7338,7 @@ mod tests {
 
     #[test]
     fn lwma_respects_post_activation_max_target_floor() {
+        let _env = crate::test_env::guard();
         let activation = 70;
         let mut chain = difficulty_chain(Some(activation), 0x207fffff);
         let mut time = chain.chain[0].header.time;
@@ -7337,6 +7354,7 @@ mod tests {
 
     #[test]
     fn activation_future_does_not_rewrite_historical_targets() {
+        let _env = crate::test_env::guard();
         let mut future = difficulty_chain(Some(30_000), 0x207fffff);
         let mut disabled = difficulty_chain(None, 0x207fffff);
         let mut time = future.chain[0].header.time;
@@ -7354,6 +7372,7 @@ mod tests {
 
     #[test]
     fn reorg_across_activation_boundary_recomputes_safely() {
+        let _env = crate::test_env::guard();
         let activation = 70;
         let mut chain = difficulty_chain(Some(activation), 0x207fffff);
         let mut time = chain.chain[0].header.time;
@@ -7379,6 +7398,7 @@ mod tests {
 
     #[test]
     fn legacy_p2pkh_unchanged() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(None);
         let sender = signing_key(13);
         let recipient = signing_key(14);
@@ -7442,6 +7462,7 @@ mod tests {
 
     #[test]
     fn lwma_v2_inactive_when_field_is_none() {
+        let _env = crate::test_env::guard();
         // With lwma_v2: None the chain must behave identically to v1.
         let activation = 70u64;
         let mut v1_chain = difficulty_chain(Some(activation), 0x207fffff);
@@ -7463,6 +7484,7 @@ mod tests {
 
     #[test]
     fn lwma_v2_activates_at_boundary() {
+        let _env = crate::test_env::guard();
         let v1_act = 10u64;
         let v2_act = 50u64;
         let mut chain = difficulty_chain_v2(Some(v1_act), Some(v2_act), 0x207fffff);
@@ -7485,6 +7507,7 @@ mod tests {
 
     #[test]
     fn lwma_v2_step_clamp_unchanged() {
+        let _env = crate::test_env::guard();
         let v1_act = 10u64;
         let v2_act = 20u64;
         let mut chain = difficulty_chain_v2(Some(v1_act), Some(v2_act), 0x207fffff);
@@ -7514,6 +7537,7 @@ mod tests {
 
     #[test]
     fn lwma_v2_recovers_faster_than_v1_after_hashrate_drop() {
+        let _env = crate::test_env::guard();
         // Use a hard initial bits (well below max_target) so there is ample room to
         // ease without saturating.  After exactly 35 moderate-slow blocks (900s =
         // 1.5x T, step-clamp NOT binding), v2's 30-block window is fully refreshed
@@ -7564,6 +7588,7 @@ mod tests {
 
     #[test]
     fn lwma_v2_steady_state_stable() {
+        let _env = crate::test_env::guard();
         let v1_act = 10u64;
         let v2_act = 20u64;
         let mut chain = difficulty_chain_v2(Some(v1_act), Some(v2_act), 0x207fffff);
@@ -7596,6 +7621,7 @@ mod tests {
 
     #[test]
     fn lwma_v2_boundary_no_off_by_one() {
+        let _env = crate::test_env::guard();
         // Build a chain with v1 active from height 16462 and v2 from 19740.
         // Populate synthetic blocks up to height 19741 and verify:
         //   heights < 19740  => v1 params (N=60, clamp=6T)
@@ -7705,6 +7731,7 @@ mod tests {
 
     #[test]
     fn block_time_v2_clamp_uses_v1_below_fork_v2_above() {
+        let _env = crate::test_env::guard();
         // Construct LwmaParams once (no env active during construction; the
         // solvetime ceiling is computed at use time, not at construction
         // time). Then set the env and confirm `max_solvetime_at` picks V1
@@ -7736,6 +7763,7 @@ mod tests {
 
     #[test]
     fn block_time_v2_lwma_target_changes_at_fork_boundary() {
+        let _env = crate::test_env::guard();
         // Build a chain with LWMA active early and produce a synthetic
         // window of equal-interval blocks. With the V2 fork enabled at
         // height H, computing target_for_height(H-1) and target_for_height(H)
@@ -7777,6 +7805,7 @@ mod tests {
 
     #[test]
     fn block_time_v2_disabled_preserves_pre_change_behavior() {
+        let _env = crate::test_env::guard();
         // Regression: with the V2 fork height left at None (mainnet ships
         // this way), every LWMA target computation must be byte-identical
         // to the pre-change implementation. We assert this indirectly by
@@ -7988,6 +8017,7 @@ mod tests {
 
     #[test]
     fn mpso_disabled_by_default_mainnet() {
+        let _env = crate::test_env::guard();
         let chain = mpso_chain(None);
         assert!(!chain.mpsov1_active_at(0));
         assert!(!chain.mpsov1_active_at(u64::MAX));
@@ -7995,6 +8025,7 @@ mod tests {
 
     #[test]
     fn mpso_activation_boundary() {
+        let _env = crate::test_env::guard();
         let chain = mpso_chain(Some(100));
         assert!(!chain.mpsov1_active_at(99));
         assert!(chain.mpsov1_active_at(100));
@@ -8003,6 +8034,7 @@ mod tests {
 
     #[test]
     fn mpso_output_rejected_before_activation() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(100));
         chain.height = 50;
         let sender = mpso_signing_key(1);
@@ -8039,6 +8071,7 @@ mod tests {
 
     #[test]
     fn mpso_output_accepted_after_activation() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let sender = mpso_signing_key(1);
@@ -8068,6 +8101,7 @@ mod tests {
 
     #[test]
     fn mpso_output_reject_timeout_not_in_future() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let sender = mpso_signing_key(1);
@@ -8101,6 +8135,7 @@ mod tests {
 
     #[test]
     fn mpso_valid_1of1_claim_before_timeout() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(10);
@@ -8118,6 +8153,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_claim_at_timeout() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 100; // exactly timeout height
         let ck1 = mpso_signing_key(10);
@@ -8135,6 +8171,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_claim_after_timeout() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 150;
         let ck1 = mpso_signing_key(10);
@@ -8152,6 +8189,7 @@ mod tests {
 
     #[test]
     fn mpso_valid_refund_at_timeout() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 100;
         let ck1 = mpso_signing_key(10);
@@ -8169,6 +8207,7 @@ mod tests {
 
     #[test]
     fn mpso_valid_refund_after_timeout() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 200;
         let ck1 = mpso_signing_key(10);
@@ -8186,6 +8225,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_refund_before_timeout() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(10);
@@ -8203,6 +8243,7 @@ mod tests {
 
     #[test]
     fn mpso_valid_2of3_claim() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(20);
@@ -8232,6 +8273,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_1of2_when_threshold_is_2() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(20);
@@ -8252,6 +8294,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_high_bitmap_bits() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(30);
@@ -8288,6 +8331,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_extra_signatures_trailing_bytes() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(40);
@@ -8308,6 +8352,7 @@ mod tests {
 
     #[test]
     fn mpso_valid_secret_gated_claim() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(50);
@@ -8336,6 +8381,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_missing_preimage_when_secret_gate_set() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(50);
@@ -8364,6 +8410,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_wrong_preimage() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(50);
@@ -8392,6 +8439,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_preimage_too_long() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(50);
@@ -8436,6 +8484,7 @@ mod tests {
     }
     #[test]
     fn mpso_reject_claim_with_refund_key() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(60);
@@ -8454,6 +8503,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_refund_with_claim_key() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 200;
         let ck1 = mpso_signing_key(60);
@@ -8472,6 +8522,7 @@ mod tests {
 
     #[test]
     fn mpso_htlcv1_still_works_with_mpso_active() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         // Also activate HTLCv1
         chain.params.htlcv1_activation_height = Some(1);
@@ -8510,6 +8561,7 @@ mod tests {
 
     #[test]
     fn mpso_reject_invalid_compressed_pubkey_in_output() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let sender = mpso_signing_key(1);
@@ -8563,6 +8615,7 @@ mod tests {
 
     #[test]
     fn mpso_witness_over_768_bytes_rejected() {
+        let _env = crate::test_env::guard();
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
         let ck1 = mpso_signing_key(70);
@@ -8585,6 +8638,7 @@ mod tests {
 
     #[test]
     fn mpso_full_quorum_claim_valid() {
+        let _env = crate::test_env::guard();
         // claim_m == claim_n (full quorum)
         let mut chain = mpso_chain(Some(1));
         chain.height = 50;
@@ -8605,6 +8659,7 @@ mod tests {
 
     #[test]
     fn mpso_different_claim_refund_thresholds() {
+        let _env = crate::test_env::guard();
         // refund_m != claim_m
         let mut chain = mpso_chain(Some(1));
         let ck1 = mpso_signing_key(90);
@@ -8697,6 +8752,7 @@ mod tests {
 
     #[test]
     fn evict_invalid_mempool_entries_drops_double_spend() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(None);
         let sender = signing_key(11);
         let prev = add_spendable_p2pkh_utxo(&mut chain, &sender, 10_000);
@@ -8729,6 +8785,7 @@ mod tests {
 
     #[test]
     fn evict_invalid_mempool_entries_keeps_valid_tx_unchanged() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(None);
         let sender = signing_key(12);
         let prev = add_spendable_p2pkh_utxo(&mut chain, &sender, 10_000);
@@ -8754,6 +8811,7 @@ mod tests {
 
     #[test]
     fn evict_invalid_mempool_entries_drops_all_conflicts_in_one_pass() {
+        let _env = crate::test_env::guard();
         let mut chain = base_chain(None);
         let sender = signing_key(13);
         let pkh = key_hash(&sender);
@@ -8877,6 +8935,7 @@ mod tests {
 
     #[test]
     fn test_validate_poawx_coinbase_no_activation_env_always_ok() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -8889,6 +8948,7 @@ mod tests {
 
     #[test]
     fn halt_traps_disarmed_on_mainnet_net0() {
+        let _env = crate::test_env::guard();
         // §12 (mainnet-hard-off needs a network_id==0 context test): exercise the net-0 branch of
         // the halt-trap disarm directly. Pre-fix, the connect_block guards `fraud_proof_enforced`
         // (chain.rs:~1058) and `pool_admission_enforced` (chain.rs:~4753) were ON on mainnet —
@@ -8955,6 +9015,7 @@ mod tests {
 
     #[test]
     fn mandatory_inclusion_disarmed_on_mainnet_net0() {
+        let _env = crate::test_env::guard();
         // §12 again: mandatory-inclusion ENFORCE used to ride `pool_ticket_enforced`, so it armed on
         // mainnet at the combined fair-distribution activation (62,236) with NO producer-side
         // support — `canonical_eligible_set`/`scan_block_registrations` have no caller outside the
@@ -9022,6 +9083,7 @@ mod tests {
 
     #[test]
     fn test_validate_poawx_coinbase_mode_inactive_always_ok() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9036,6 +9098,7 @@ mod tests {
 
     #[test]
     fn test_validate_poawx_coinbase_pre_activation_height_ok() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9051,6 +9114,7 @@ mod tests {
 
     #[test]
     fn test_validate_poawx_coinbase_rejects_missing_commitment() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9069,6 +9133,7 @@ mod tests {
 
     #[test]
     fn test_validate_poawx_coinbase_rejects_zero_root() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9086,6 +9151,7 @@ mod tests {
 
     #[test]
     fn test_validate_poawx_coinbase_accepts_valid_irx1() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9105,6 +9171,7 @@ mod tests {
 
     #[test]
     fn test_validate_poawx_coinbase_mainnet_gate_skips_check() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9278,6 +9345,7 @@ mod tests {
 
     #[test]
     fn phase13b_inactive_mode_always_ok() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9293,6 +9361,7 @@ mod tests {
 
     #[test]
     fn phase13b_pre_activation_height_ok() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9309,6 +9378,7 @@ mod tests {
 
     #[test]
     fn phase13b_mainnet_unchanged() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9328,6 +9398,7 @@ mod tests {
 
     #[test]
     fn phase13b_missing_receipts_rejected() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9351,6 +9422,7 @@ mod tests {
 
     #[test]
     fn phase13b_empty_receipts_rejected() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9373,6 +9445,7 @@ mod tests {
 
     #[test]
     fn phase13b_zero_irx1_root_rejected() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9393,6 +9466,7 @@ mod tests {
 
     #[test]
     fn phase13b_valid_block_accepted() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9650,6 +9724,7 @@ mod tests {
 
     #[test]
     fn stage_d_revocation_accepts_unrevoked_and_ignores_mode0() {
+        let _env = crate::test_env::guard();
         // (a)/(d): an unrevoked delegation is accepted, and a mode-0 receipt is unaffected
         // even when the revoked set is populated.
         let _g = chain_poawx_env_lock()
@@ -9676,6 +9751,7 @@ mod tests {
 
     #[test]
     fn stage_d_revocation_rejects_revoked_forward_looking() {
+        let _env = crate::test_env::guard();
         // (b)/(c): a delegation revoked in block 5 is rejected only at heights > 5; the
         // block at (or before) the revocation's own height is never retroactively invalid.
         let _g = chain_poawx_env_lock()
@@ -9703,6 +9779,7 @@ mod tests {
 
     #[test]
     fn stage_d_revocation_record_validation_and_apply_revert() {
+        let _env = crate::test_env::guard();
         // Record validity is enforced, and apply/revert from a block are exact inverses.
         let _g = chain_poawx_env_lock()
             .lock()
@@ -9751,6 +9828,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_accepts_valid_delegated_receipt() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9772,6 +9850,7 @@ mod tests {
 
     #[test]
     fn activation_binary_mainnet_accepts_delegated_at_height() {
+        let _env = crate::test_env::guard();
         // ACTIVATION BINARY positive proof: under mainnet config, a valid delegated
         // (mode-1) block is ACCEPTED at/after MAINNET_POAWX_DELEGATION_HEIGHT and REJECTED
         // one block below it (the fail-safe guard still fires pre-activation).
@@ -9808,6 +9887,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_rejected_before_activation() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9829,6 +9909,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_rejected_on_mainnet() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9850,6 +9931,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_rejects_wrong_miner_pkh() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9871,6 +9953,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_rejects_bad_delegation_sig() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9896,6 +9979,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_rejects_expired_delegation() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9916,6 +10000,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_rejects_network_mismatch() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9936,6 +10021,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_rejects_signer_not_pool_pubkey() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9960,6 +10046,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_rejects_nonzero_fee() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -9980,6 +10067,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_reward_split_requires_miner_payout() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -10046,6 +10134,7 @@ mod tests {
 
     #[test]
     fn phase20_multi_role_coinbase_valid_accepted() {
+        let _env = crate::test_env::guard();
         let primary = [0xA1u8; 20];
         let role = p20_role();
         let total = 5_000_000_000u64;
@@ -10068,6 +10157,7 @@ mod tests {
 
     #[test]
     fn phase20_multi_role_coinbase_rejections() {
+        let _env = crate::test_env::guard();
         use crate::tx::{p2pkh_script, TxOutput};
         let primary = [0xA1u8; 20];
         let role = p20_role();
@@ -10132,6 +10222,7 @@ mod tests {
 
     #[test]
     fn phase20_multi_role_duplicate_pkh_kept_separate() {
+        let _env = crate::test_env::guard();
         use crate::tx::{p2pkh_script, TxOutput};
         // primary == support pkh: duplicates are allowed but remain 4 separate outputs
         // in canonical order (no aggregation).
@@ -10182,6 +10273,7 @@ mod tests {
 
     #[test]
     fn phase20_multi_role_gate_mainnet_off_and_testnet_height() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -10205,6 +10297,7 @@ mod tests {
 
     #[test]
     fn phase20_fairness_matrix_gate_mainnet_off_and_testnet_height() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -10225,6 +10318,7 @@ mod tests {
 
     #[test]
     fn phase20_third_party_fee_gate_mainnet_off_and_testnet() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -10248,6 +10342,7 @@ mod tests {
 
     #[test]
     fn phase20_fee_aware_coinbase_payout() {
+        let _env = crate::test_env::guard();
         use crate::tx::{p2pkh_script, TxOutput};
         let primary = [0xA1u8; 20];
         let role = crate::poawx::RoleReward {
@@ -10501,6 +10596,7 @@ mod tests {
 
     #[test]
     fn phase20_integrated_production_validator() {
+        let _env = crate::test_env::guard();
         let net = 1u8;
         let height = 500u64;
         let prev = [0x44u8; 32];
@@ -10594,6 +10690,7 @@ mod tests {
 
     #[test]
     fn phase20_production_gate_requires_multirole_and_fairness_mainnet_off() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -10615,6 +10712,7 @@ mod tests {
 
     #[test]
     fn phase20_connect_block_production_enforcement() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -10861,6 +10959,7 @@ mod tests {
 
     #[test]
     fn phase21c_dominance_weight_enforcement() {
+        let _env = crate::test_env::guard();
         use crate::poawx_dominance::{RoleRewardKind, DOMINANCE_BASE_WORK_SCORE};
         let _g = chain_poawx_env_lock()
             .lock()
@@ -10964,6 +11063,7 @@ mod tests {
 
     #[test]
     fn phase22e_wrong_candidate_score_rejects() {
+        let _env = crate::test_env::guard();
         // (26) a block whose candidate digest does NOT equal the VRF output is rejected
         // by validate_block_true_vrf, even with a self-valid AVR2 proof attached.
         use crate::poawx::{
@@ -11038,6 +11138,7 @@ mod tests {
 
     #[test]
     fn phase22e_true_vrf_e2e_block() {
+        let _env = crate::test_env::guard();
         // End-to-end: with candidate-set + admission + true-VRF ALL enforced, a block
         // carrying V2 candidates (digest = VRF output) + the AVR2 section must satisfy
         // BOTH validate_block_candidate_sets (V1 recompute skipped under the gate) AND
@@ -11191,6 +11292,7 @@ mod tests {
 
     #[test]
     fn phase24k_native_pow_all_gates_validators() {
+        let _env = crate::test_env::guard();
         // Phase 24K Stage 1: build ONE PoAW-X block at height 1 over the real
         // locked genesis, carrying EVERY gate section, MINE it with Irium's
         // actual PoW hash (the same `hash_for_height` path the node validator
@@ -11553,6 +11655,7 @@ mod tests {
 
     #[test]
     fn phase24k_native_pow_all_gates_connect_block() {
+        let _env = crate::test_env::guard();
         // Phase 24K Stage 2: the FULL node entry point. Build a mined all-gates
         // block at height 1 over the real locked genesis and drive the entire
         // `connect_block` pipeline (header PoW -> irx1 coinbase -> receipts +
@@ -11826,6 +11929,7 @@ mod tests {
 
     #[test]
     fn phase24l_lib_builder_connect_block() {
+        let _env = crate::test_env::guard();
         // Phase 24L: the live-proof binary builds its all-gates block via the lib
         // helper `build_devnet_all_gates_block`. This test exercises that EXACT
         // builder and proves its output is accepted by the full `connect_block`
@@ -11942,6 +12046,7 @@ mod tests {
 
     #[test]
     fn gap3_multisource_seed_all_gates_connect_block() {
+        let _env = crate::test_env::guard();
         // Gap 3: with the multi-source seed gate ON, the assignment (candidate-set/
         // VRF) seed is the v2 value (grandparent + parent finality digest + precommit
         // + epoch keying), NOT the bare grandparent hash. The harness builder and the
@@ -12069,6 +12174,7 @@ mod tests {
 
     #[test]
     fn gap10_adaptive_posture_tracks_signals() {
+        let _env = crate::test_env::guard();
         use crate::poawx_adaptive::{AdaptiveMode, DEFENSE_REORG_SIGNAL};
         let _g = chain_poawx_env_lock()
             .lock()
@@ -12103,6 +12209,7 @@ mod tests {
 
     #[test]
     fn gap10_adaptive_gate_off_is_noop() {
+        let _env = crate::test_env::guard();
         use crate::poawx_adaptive::{AdaptiveMode, DEFENSE_REORG_SIGNAL};
         let _g = chain_poawx_env_lock()
             .lock()
@@ -12122,6 +12229,7 @@ mod tests {
 
     #[test]
     fn gap12_solo_poawx_builder_connect_block() {
+        let _env = crate::test_env::guard();
         // Gap 12: a single miner secret plays ALL roles (worker + finality member +
         // compute/verify/support). The solo builder must produce a node-acceptable
         // all-gates block (the lib-level half of solo PoAW-X mining; the live miner
@@ -12240,6 +12348,7 @@ mod tests {
 
     #[test]
     fn all_gates_solo_poawx_builder_connect_block() {
+        let _env = crate::test_env::guard();
         // Gap-extension: the solo builder, with ALL gates active (the Tier-A set PLUS
         // the four formerly-deferred gates: multi-source seed, hidden precommit,
         // tickets, penalty), produces node-acceptable blocks across a multi-height
@@ -12491,6 +12600,7 @@ mod tests {
 
     #[test]
     fn stage_d_delegated_all_gates_connect_block_pays_miner() {
+        let _env = crate::test_env::guard();
         // Stage D Step 5 Milestone A: the DELEGATED (mode-1) builder produces a block the
         // full connect_block accepts under all gates INCLUDING proposer-VRF (Step 3
         // delegated branch) and delegation-revocation-clean (Step 4), and the coinbase
@@ -12677,6 +12787,7 @@ mod tests {
 
     #[test]
     fn phase4_multi_participant_distinct_role_payouts_connect_block() {
+        let _env = crate::test_env::guard();
         // Role-attribution Phase 4 final proof: with the contributor-role binding rule
         // ACTIVE, a full all-gates block whose COMPUTE/VERIFY/SUPPORT roles are performed by
         // three GENUINELY DISTINCT participants (each solver == hash160 of its own VRF key) is
@@ -12849,6 +12960,7 @@ mod tests {
     /// negative control proves that.
     #[test]
     fn c3_block_assembled_from_collected_artifacts_only() {
+        let _env = crate::test_env::guard();
         use crate::poawx_admission::global_admission_cache;
         use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
         use crate::poawx_mining_harness::{
@@ -12979,6 +13091,7 @@ mod tests {
     /// limiting before ever being poolable.
     #[test]
     fn r1_r4_three_remote_workers_collected_and_assembled() {
+        let _env = crate::test_env::guard();
         use crate::poawx_admission::global_admission_cache;
         use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
         use crate::poawx_mining_harness::{
@@ -13111,6 +13224,7 @@ mod tests {
     /// LOUDLY rather than emit a block that would be rejected on-chain.
     #[test]
     fn c3_dominance_disagreement_breaks_assembly_explicitly() {
+        let _env = crate::test_env::guard();
         use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
         use crate::poawx_mining_harness::{
             build_collected_poawx_block_with_parent, simulate_role_worker_bundle, CollectedArtifacts,
@@ -13171,6 +13285,7 @@ mod tests {
     #[test]
     #[ignore] // rig: reads REAL role-worker bundles from IRIUM_M3_DIR and lands their attributed identities on-chain
     fn phase4_real_worker_bundles_land_block_distinct_recipients() {
+        let _env = crate::test_env::guard();
         // Chains the genuine distinct role-workers to an on-chain accepted block. Reads the
         // real bundles produced by connected workers (compute_A/compute_B/verify_1/support_1),
         // determines which COMPUTE competitor the higher self-VRF score selects (best_for_role),
@@ -13358,6 +13473,7 @@ mod tests {
     #[test]
     #[ignore] // rig: real role-worker bundles land on-chain UNDER proposer-VRF ENFORCED (mainnet-faithful)
     fn phase4_real_worker_bundles_land_block_with_proposer_vrf_enforced() {
+        let _env = crate::test_env::guard();
         // Mainnet-faithful combination: proposer-VRF is ACTIVE + REQUIRED (as on live
         // mainnet, where proposer_vrf_active is true past height 50000 and
         // proposer_vrf_required() is true on net 0) AND the contributor-role-binding rule
@@ -13566,6 +13682,7 @@ mod tests {
     #[test]
     #[ignore] // rig: real VRF sortition picks PRIMARY among many proposers + 3 distinct contributor roles
     fn phase4_multiproposer_vrf_sortition_with_distinct_contributor_roles() {
+        let _env = crate::test_env::guard();
         // Mainnet-faithful, no shortcuts to fairness. proposer-VRF is ACTIVE + REQUIRED and
         // contributor-role-binding is ACTIVE. SIX genuinely distinct proposer candidates are
         // frozen-registered; the UNMODIFIED VRF sortition (priority < threshold(n, round))
@@ -13852,6 +13969,7 @@ mod tests {
 
     #[test]
     fn state_a_registered_proposer_no_delegation_pays_single_custodial() {
+        let _env = crate::test_env::guard();
         // Option A fallback matrix, STATE (a): a REGISTERED proposer with NO delegation
         // produces a normal SOLO single-payout block -- exactly today's production behavior
         // (the operator's own miner is paid; no direct-to-delegate payment, no distinct
@@ -14013,6 +14131,7 @@ mod tests {
 
     #[test]
     fn all_gates_plus_contributor_binding_solo_connect_block() {
+        let _env = crate::test_env::guard();
         // REGRESSION for the 2026-07-17 mainnet halt (block 57,794): the all-gates solo
         // builder, with CONTRIBUTOR_ROLE_BINDING additionally ACTIVE, must produce
         // connect_block-accepted blocks. Pre-fix the contributor solvers had
@@ -14125,6 +14244,7 @@ mod tests {
 
     #[test]
     fn phase4_contributor_binding_rejects_mismatched_solver() {
+        let _env = crate::test_env::guard();
         // Isolated proof of the rule at AssignmentProofV2::validate (dominance/ordering cannot
         // preempt it here): solver_pkh must == hash160(assignment_public_key) for a contributor
         // role when the binding is active; mismatch is rejected, a matched solver is accepted,
@@ -14176,6 +14296,7 @@ mod tests {
 
     #[test]
     fn miner_uses_node_gate_flags_over_local_env() {
+        let _env = crate::test_env::guard();
         // Option A regression for rodb2008\'s "missing precommit_root": the harness must
         // build per the NODE-supplied gate flags, not its own env. Here the LOCAL env has
         // hidden-precommit / tickets / multisource / penalty OFF, but node flags say ON ->
@@ -14350,6 +14471,7 @@ mod tests {
 
     #[test]
     fn cross_miner_none_path_requires_real_dominance() {
+        let _env = crate::test_env::guard();
         // Regression for the v0.1.2 stuck-at-height-1 devnet: when miner B extends a
         // block A mined, the standalone `None`/solo-replay path credits B for A's
         // prior block, so B stamps a penalized dominance weight the node rejects
@@ -14458,6 +14580,7 @@ mod tests {
 
     #[test]
     fn solo_consecutive_blocks_live_path() {
+        let _env = crate::test_env::guard();
         // REGRESSION: the live solo miner builds consecutive blocks via the
         // `None` dominance path (dom_at replay). The two-miner test alternated
         // identities so the height-2 producer was always fresh (weight 1000) and
@@ -14544,6 +14667,7 @@ mod tests {
 
     #[test]
     fn two_miner_alternating_reward_system() {
+        let _env = crate::test_env::guard();
         // ACCEPTANCE GATE for the multi-miner fix: two DIFFERENT miner identities
         // alternate blocks (A,B,A,B,...) and every gate accepts, then the whole
         // reward system is verified end-to-end across both miners.
@@ -14708,6 +14832,7 @@ mod tests {
 
     #[test]
     fn finality_checkpoint_reorg_protection() {
+        let _env = crate::test_env::guard();
         // Fixes the Phase 2 simulation scenario-6 gap: a heavier fork forking BELOW
         // a finalized block must be rejected, while a fork at/above it (and the
         // legacy work-monotonic behavior) still works.
@@ -14880,6 +15005,7 @@ mod tests {
 
     #[test]
     fn phase26b_multiblock_epoch_seed_soak() {
+        let _env = crate::test_env::guard();
         // Phase 26B: with epoch-seed alignment the multi-block all-gates chain is
         // satisfiable. Build + connect 6 sequential blocks (genesis -> 6) via the
         // EXACT live-proof builder, every gate enforced each step (connect_block
@@ -14971,6 +15097,7 @@ mod tests {
 
     #[test]
     fn phase26b_stale_immediate_parent_seed_rejected() {
+        let _env = crate::test_env::guard();
         // Negative: a height-2 block whose candidate set is seeded by the IMMEDIATE
         // parent hash (the pre-26B / stale seeding — reproduced by building with
         // parent_prev = None so the epoch seed falls back to prev_hash = hash(H1))
@@ -15042,6 +15169,7 @@ mod tests {
 
     #[test]
     fn phase26b_committed_admission_root_and_replay_rejected() {
+        let _env = crate::test_env::guard();
         // Negative (phase22a binding): the committed-admission commitment binds the
         // candidate set by (network, target_height, seed, root, count). A tampered
         // root, a wrong seed (replay/stale from a different epoch), or a wrong
@@ -15106,6 +15234,7 @@ mod tests {
 
     #[test]
     fn phase26d_cold_replay_with_persisted_admissions() {
+        let _env = crate::test_env::guard();
         // Phase 26D: prove a restarted node can re-validate persisted blocks
         // through the UNCHANGED phase21e gate by reloading the durable
         // candidate-admission snapshot. Build a 6-block all-gates chain (ingesting
@@ -15214,6 +15343,7 @@ mod tests {
 
     #[test]
     fn phase26e_fresh_sync_via_served_admissions() {
+        let _env = crate::test_env::guard();
         // Phase 26E: a brand-new / fresh-wipe node (empty admission cache, no
         // persisted snapshot) can sync a 6-block chain when a peer SERVES the
         // historical candidate admissions for the synced heights. The receiver
@@ -15350,6 +15480,7 @@ mod tests {
 
     #[test]
     fn phase22d_true_vrf_enforcement() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{
             ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
         };
@@ -15478,6 +15609,7 @@ mod tests {
 
     #[test]
     fn phase22a_committed_admission_enforcement() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{
             ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
         };
@@ -15650,6 +15782,7 @@ mod tests {
 
     #[test]
     fn audit_finality_rejects_parent_hash_mismatch() {
+        let _env = crate::test_env::guard();
         use crate::poawx::ROLE_SUPPORT_CONTRIBUTOR;
         use crate::poawx_candidate::{CandidateSet, RoleCandidate};
         use crate::poawx_finality::{FinalityProofV1, FinalityVoteType, FinalityVoteV1};
@@ -15761,6 +15894,7 @@ mod tests {
 
     #[test]
     fn phase21h_finality_enforcement() {
+        let _env = crate::test_env::guard();
         use crate::poawx::ROLE_SUPPORT_CONTRIBUTOR;
         use crate::poawx_candidate::{CandidateSet, RoleCandidate};
         use crate::poawx_finality::{
@@ -15893,6 +16027,7 @@ mod tests {
 
     #[test]
     fn phase21f_puzzle_enforcement() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{
             ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
         };
@@ -16050,6 +16185,7 @@ mod tests {
     // producers just works.
     #[test]
     fn poawx_inclusive_fanout_three_producers_general() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{
             ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
         };
@@ -16221,6 +16357,7 @@ mod tests {
     // Teeth-verified by mutation (neutered validator -> #2/#3 fail).
     #[test]
     fn poawx_pool_admission_net0_sybil_enforced() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{PoolAdmissionSection, ROLE_SUPPORT_CONTRIBUTOR};
         use crate::poawx_candidate::{AssignmentProofV2, CandidateSet, RoleCandidate};
         use crate::poawx_penalty::PenaltyStatus;
@@ -16407,6 +16544,7 @@ mod tests {
     // all from the on-chain registration ledger (never a live cache).
     #[test]
     fn poawx_mandatory_inclusion_five_part_and_sybil() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{
             ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
         };
@@ -16567,6 +16705,7 @@ mod tests {
     // hand-built-ledger primitives the five_part test exercises. Closes the "producing devnet" gap.
     #[test]
     fn poawx_mandatory_inclusion_producing_lifecycle() {
+        let _env = crate::test_env::guard();
         use crate::poawx::ROLE_SUPPORT_CONTRIBUTOR;
         use crate::poawx_admission::{encode_rcr1_script, MANDATORY_FEE_BURN_MIN};
         use crate::poawx_candidate::{CandidateSet, RoleCandidate};
@@ -16744,6 +16883,7 @@ mod tests {
 
     #[test]
     fn poawx_mandatory_inclusion_mainnet_inert() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -16777,6 +16917,7 @@ mod tests {
     // arms one gate without the other, this fails.
     #[test]
     fn pool_ticket_combined_arming_couples_and_inert_net0() {
+        let _env = crate::test_env::guard();
         use crate::poawx_ticket::{
             pool_ticket_gate, tickets_enforced, MAINNET_POOL_TICKET_ACTIVATION_HEIGHT,
         };
@@ -16815,6 +16956,7 @@ mod tests {
     // conservation (fee_burn is an OP_RETURN output => never a claimable fee).
     #[test]
     fn poawx_rcr1_tx_codec_scan_and_burn_conservation() {
+        let _env = crate::test_env::guard();
         use crate::poawx::ROLE_SUPPORT_CONTRIBUTOR;
         use crate::poawx_admission::{decode_rcr1_script, encode_rcr1_script, scan_block_registrations};
         use crate::poawx_candidate::RoleCandidate;
@@ -16882,6 +17024,7 @@ mod tests {
 
     #[test]
     fn phase21e_admission_enforcement() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{
             ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
         };
@@ -17024,6 +17167,7 @@ mod tests {
 
     #[test]
     fn phase21d_candidate_set_enforcement() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{
             ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
         };
@@ -17150,6 +17294,7 @@ mod tests {
 
     #[test]
     fn phase21c_dominance_connect_disconnect_reorg() {
+        let _env = crate::test_env::guard();
         use crate::poawx_dominance::RoleRewardKind;
         let _g = chain_poawx_env_lock()
             .lock()
@@ -17289,6 +17434,7 @@ mod tests {
 
     #[test]
     fn phase21b_ticket_penalty_enforcement() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{
             ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
         };
@@ -17443,6 +17589,7 @@ mod tests {
 
     #[test]
     fn phase20_connect_block_mode1_third_party_fee_and_binding() {
+        let _env = crate::test_env::guard();
         use k256::ecdsa::signature::hazmat::PrehashSigner;
         let _g = chain_poawx_env_lock()
             .lock()
@@ -17554,6 +17701,7 @@ mod tests {
 
     #[test]
     fn phase20_hidden_precommit_enforcement() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -17750,6 +17898,7 @@ mod tests {
 
     #[test]
     fn phase13b_irx1_root_mismatch_rejected() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -17786,6 +17935,7 @@ mod tests {
 
     #[test]
     fn phase13b_wrong_commitment_nonce_rejected() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -17857,6 +18007,7 @@ mod tests {
 
     #[test]
     fn phase13b_bad_worker_sig_rejected() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -17884,6 +18035,7 @@ mod tests {
 
     #[test]
     fn phase13b_spoofed_pkh_rejected() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -17914,6 +18066,7 @@ mod tests {
 
     #[test]
     fn phase13b_insufficient_puzzle_difficulty_rejected() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -17943,6 +18096,7 @@ mod tests {
 
     #[test]
     fn phase13b_missing_worker_payout_rejected() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -17971,6 +18125,7 @@ mod tests {
 
     #[test]
     fn phase13b_legacy_block_wire_still_parses() {
+        let _env = crate::test_env::guard();
         // Verify that a block with no receipt section (pre-Phase-13-A wire)
         // still deserializes correctly after Phase 13-B changes.
         let block = make_poawx_test_block(vec![0x51]);
@@ -18050,6 +18205,7 @@ mod tests {
 
     #[test]
     fn fraudproof_valid_equivocation_accepts() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -18064,6 +18220,7 @@ mod tests {
 
     #[test]
     fn fraudproof_invalid_fails_closed() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -18079,6 +18236,7 @@ mod tests {
 
     #[test]
     fn fraudproof_duplicate_within_block_rejected() {
+        let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -18094,6 +18252,7 @@ mod tests {
 
     #[test]
     fn fraudproof_apply_then_revert_exact_inverse() {
+        let _env = crate::test_env::guard();
         use crate::poawx_penalty::PenaltyStatus;
         let _g = chain_poawx_env_lock()
             .lock()
@@ -18128,6 +18287,7 @@ mod tests {
 
     #[test]
     fn fraudproof_gate_not_required_no_slashing() {
+        let _env = crate::test_env::guard();
         use crate::poawx_penalty::PenaltyStatus;
         let _g = chain_poawx_env_lock()
             .lock()
@@ -18313,6 +18473,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn vrf_unforgeable_and_threshold() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         let net = crate::activation::network_id_byte();
@@ -18335,6 +18496,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn eligibility_freeze_anti_grind() {
+        let _env = crate::test_env::guard();
         // A key learned on-chain at height H is frozen out until H+FREEZE_DEPTH, so the
         // seed revealed at H-1 cannot be used to register a winning key for height H.
         let mut reg = ProposerEligibilityRegistry::default();
@@ -18353,6 +18515,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn liveness_round_escalation() {
+        let _env = crate::test_env::guard();
         // A proposer not admitted at round 0 IS admitted at a wider later round, so the
         // cascade never stalls; round r opens only after r*interval seconds.
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
@@ -18380,6 +18543,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn single_deterministic_winner() {
+        let _env = crate::test_env::guard();
         // Among many eligible proposers (same seed/height) the lowest VRF priority is
         // unique and is the canonical winner; block_proposer_rank reflects it.
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
@@ -18406,6 +18570,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn selected_cpu_beats_unselected_asic() {
+        let _env = crate::test_env::guard();
         // Fork choice: a CPU selected at round 0 beats an ASIC that only wins at round 1,
         // regardless of PoW. Exercises proposer_rank_chain_better on a real fork.
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
@@ -18433,6 +18598,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn proposer_rejected_when_registered_key_mismatches() {
+        let _env = crate::test_env::guard();
         // Fix #9: with a non-empty eligible registry, a block whose proposer key is not the
         // registered one is rejected and the diagnostic lists the eligible proposer pkhs (the
         // silent "miner signs with the wrong key" 0-yield cause). Not gate-dependent.
@@ -18485,6 +18651,7 @@ mod proposer_consensus_tests {
     /// -> proposer_demotion_applies (the demotion/CPU-viability unlock flips false->true).
     #[test]
     fn permissionless_cold_key_onboards_and_unlocks_demotion() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         let envs = [
             ("IRIUM_NETWORK", "devnet"),
@@ -18635,6 +18802,7 @@ mod proposer_consensus_tests {
     /// forbidden; a net-0 unit test is the safe way to reach these branches).
     #[test]
     fn net0_onboarding_gates_arm_validator_functions_and_demotion_couples() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         // clear any devnet activation overrides — net-0 ignores them for activations,
         // but freeze-depth/sybil-bits reads should see mainnet defaults.
@@ -18728,6 +18896,7 @@ mod proposer_consensus_tests {
     /// the env override (else two nodes with different K fork). Off-mainnet keeps env for tests.
     #[test]
     fn rank_rewind_window_const_forced_on_mainnet() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_POAWX_RANK_REWIND_WINDOW", "3");
         std::env::set_var("IRIUM_NETWORK", "mainnet");
@@ -18755,6 +18924,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn liveness_recovery_admits_registered_expired_key_under_stall() {
+        let _env = crate::test_env::guard();
         // Genuine stall + recovery gate active => a REGISTERED but out-of-window
         // (expired) proposer key is re-admitted, so a chain whose only in-window
         // proposer went offline can recover. VRF sortition priority still enforced.
@@ -18792,6 +18962,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn liveness_recovery_gate_off_leaves_expired_key_rejected() {
+        let _env = crate::test_env::guard();
         // Gate OFF => the same stalled block with a registered-but-expired proposer key
         // is still rejected => default behavior byte-identical.
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
@@ -18825,6 +18996,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn proposer_stall_recovery_secs_has_unforgeable_floor() {
+        let _env = crate::test_env::guard();
         // default 6h; floor is 2x MAX_FUTURE_BLOCK_TIME (14_400) so the stall gap cannot
         // be forged via a future timestamp.
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
@@ -18839,6 +19011,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn non_selected_proposer_rejected_even_with_max_pow() {
+        let _env = crate::test_env::guard();
         // The proposer gate rejects a non-selected proposer no matter the PoW: the SAME
         // block is rejected when the eligible set is large (priority misses the round-0
         // cut) and accepted when it is the sole eligible winner. Hashrate never changes
@@ -18985,6 +19158,7 @@ mod proposer_consensus_tests {
     /// (1) Demotion ACTIVE => a floor-only header is ADMITTED.
     #[test]
     fn c1_add_header_admits_demoted_header_when_gate_on() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c1_env_on();
         let mut chain = c1_hard_chain();
@@ -19013,6 +19187,7 @@ mod proposer_consensus_tests {
     /// const is None).
     #[test]
     fn c1_add_header_rejects_demoted_header_when_gate_off() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c1_env_on();
         let chain_probe = c1_hard_chain();
@@ -19032,6 +19207,7 @@ mod proposer_consensus_tests {
     /// modes. Admission is a lowered bar, not a removed one.
     #[test]
     fn c1_add_header_rejects_sub_floor_header_in_both_modes() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c1_env_on();
         let probe = c1_hard_chain();
@@ -19064,6 +19240,7 @@ mod proposer_consensus_tests {
     /// every caller is byte-identical to legacy; gate on returns the constant floor.
     #[test]
     fn c1_header_admission_target_resolves_by_gate() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         let declared = Target {
             bits: C1_HARD_BITS,
@@ -19221,6 +19398,7 @@ mod proposer_consensus_tests {
     /// reject a floor-only block.
     #[test]
     fn c3_process_block_accepts_demoted_when_gate_on() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c3_env_on(true);
         let (mut chain, parent, parent_hash) = c3_chain_with_detached_parent();
@@ -19249,6 +19427,7 @@ mod proposer_consensus_tests {
     /// behaviour, which is the mainnet path (activation const is None).
     #[test]
     fn c3_process_block_rejects_demoted_when_gate_off() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c3_env_on(true);
         let (mut chain, parent, parent_hash) = c3_chain_with_detached_parent();
@@ -19270,6 +19449,7 @@ mod proposer_consensus_tests {
     /// lives in the receipts, so this isolates the PoW gate.
     #[test]
     fn c3_process_block_rejects_sub_floor_block_in_both_modes() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         let floor = crate::pow::floor_target(8);
 
@@ -19315,6 +19495,7 @@ mod proposer_consensus_tests {
     /// catch.
     #[test]
     fn c3_process_block_uses_real_parent_not_tip_for_previous() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c3_env_on(true);
 
@@ -19412,6 +19593,7 @@ mod proposer_consensus_tests {
     /// is below our total_work) IS selected for fetch.
     #[test]
     fn c4_selects_demoted_candidate_under_gate() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c4_env_on(true);
         let (chain, hash) = c4_chain(true, true);
@@ -19429,6 +19611,7 @@ mod proposer_consensus_tests {
     /// candidate is correctly NOT selected, because its work is below our tip's.
     #[test]
     fn c4_gate_off_is_work_based_and_unchanged() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c4_env_on(false);
         let (chain, _hash) = c4_chain(true, true);
@@ -19447,6 +19630,7 @@ mod proposer_consensus_tests {
     /// selector but NOT by the adoptable one.
     #[test]
     fn c4_adoptability_floor_preserved_under_gate() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c4_env_on(true);
         let (chain, _hash) = c4_chain(true, false); // unlinked parent
@@ -19472,6 +19656,7 @@ mod proposer_consensus_tests {
     /// work.
     #[test]
     fn c4_selector_gate_never_outruns_adopter_gate() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         for (demotion, vrf) in [(true, true), (true, false), (false, true), (false, false)] {
             std::env::set_var("IRIUM_NETWORK", "testnet");
@@ -19522,6 +19707,7 @@ mod proposer_consensus_tests {
     /// (1) A demoted block (meets only the floor) is credited FLOOR work.
     #[test]
     fn c6_demoted_block_credited_floor_work() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c3_env_on(true);
         let (mut chain, parent, ph) = c3_chain_with_detached_parent();
@@ -19541,6 +19727,7 @@ mod proposer_consensus_tests {
     /// the floor and under-count real work by ~2^35 -- worse than the bug C6 fixes.
     #[test]
     fn c6_honest_full_pow_block_still_credited_declared_work() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c3_env_on(true);
         let (chain, _parent, ph) = c3_chain_with_detached_parent();
@@ -19579,6 +19766,7 @@ mod proposer_consensus_tests {
     /// block. "What we credit" must match "why we accepted".
     #[test]
     fn c6_auxpow_block_credited_declared_work() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c3_env_on(true);
         let (mut chain, _parent, ph) = c3_chain_with_detached_parent();
@@ -19610,6 +19798,7 @@ mod proposer_consensus_tests {
     /// mainnet configuration (activation const is None).
     #[test]
     fn c6_gate_off_credits_declared_work() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c3_env_on(true);
         let (mut chain, parent, ph) = c3_chain_with_detached_parent();
@@ -19632,6 +19821,7 @@ mod proposer_consensus_tests {
     /// demoted block where the two formulas would differ by ~2^35.
     #[test]
     fn c6_connect_and_disconnect_credit_identical_work() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         c3_env_on(true);
         let (mut chain, parent, ph) = c3_chain_with_detached_parent();
@@ -19659,6 +19849,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn pow_demotion_accepts_floor_block_only_with_valid_assignment() {
+        let _env = crate::test_env::guard();
         // Part-1/Part-2 PoW demotion, proven at the consensus PoW gate
         // `validate_block_header` (the exact check `connect_block` runs). A validly
         // SELECTED proposer's block is ACCEPTED while its header hash meets only the
@@ -19831,6 +20022,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn multi_miner_cpu_vs_asic_integration() {
+        let _env = crate::test_env::guard();
         // Several CPUs at round 0 plus an ASIC that only reaches round 1: the canonical
         // winner is always a round-0 CPU; the ASIC never wins, whatever its hashrate.
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
@@ -19911,6 +20103,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn registration_queue_apply_revert_symmetry() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         set_reg_env();
         let net = crate::activation::network_id_byte();
@@ -19951,6 +20144,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn part_b_eligible_count_proposer_only() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         set_reg_env();
         let net = crate::activation::network_id_byte();
@@ -19985,6 +20179,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn registration_validation_forced_drain_and_announces() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         set_reg_env(); // no sybil env => effective_sybil_bits() == 0
         let net = crate::activation::network_id_byte();
@@ -20066,6 +20261,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn registration_inert_when_gate_off() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         // (a) mainnet (network_id == 0) is hard-off even with everything set.
         std::env::set_var("IRIUM_NETWORK", "mainnet");
@@ -20110,6 +20306,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn reorg_deeper_than_cap_rejected() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_FORKCHOICE_HARDENING_ACTIVATION_HEIGHT", "1");
@@ -20145,6 +20342,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn equal_rank_longer_chain_no_length_reorg() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_FORKCHOICE_HARDENING_ACTIVATION_HEIGHT", "1");
@@ -20187,6 +20385,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn solo_fork_cannot_self_finalize() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_FORKCHOICE_HARDENING_ACTIVATION_HEIGHT", "1");
@@ -20293,6 +20492,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn header_sync_skips_unadoptable_deep_chain() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_FORKCHOICE_HARDENING_ACTIVATION_HEIGHT", "1");
@@ -20432,6 +20632,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn gap_a_best_adoptable_excludes_foreign_deep_chain() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_MAX_REORG_DEPTH", "10"); // floor = 30 - 10 = 20
@@ -20454,6 +20655,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn gap_a_best_adoptable_none_when_only_foreign() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_MAX_REORG_DEPTH", "10");
@@ -20481,6 +20683,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn gap_b2_prune_keeps_honest_orphans() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_MAX_REORG_DEPTH", "10");
@@ -20503,6 +20706,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn gap_b1_orphan_branch_class_routing() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_MAX_REORG_DEPTH", "10");
@@ -20550,6 +20754,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn sibling_tiebreak_deterministic() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         set_sib_env();
         let gh = base_chain().chain[0].header.hash_for_height(0);
@@ -20572,6 +20777,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn sibling_better_rank_wins_both_orders() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         set_sib_env();
         let gh = base_chain().chain[0].header.hash_for_height(0);
@@ -20592,6 +20798,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn depth2_fork_converges() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         set_sib_env();
         let gh = base_chain().chain[0].header.hash_for_height(0);
@@ -20636,6 +20843,7 @@ mod proposer_consensus_tests {
     // getblocks server so it actually covers the delivery layer.
     #[test]
     fn equal_height_beyond_k_fork_delivers_and_converges() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         set_sib_env();
         let maxreq = crate::protocol::MAX_BLOCKS_PER_REQUEST; // 512
@@ -20751,6 +20959,7 @@ mod proposer_consensus_tests {
     // the peer serves the competing branch and the comparator can decide.
     #[test]
     fn taller_fork_locator_delivers_branch() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         set_sib_env();
         let maxreq = crate::protocol::MAX_BLOCKS_PER_REQUEST;
@@ -20852,6 +21061,7 @@ mod proposer_consensus_tests {
     /// that our applied tip is off their branch.
     #[test]
     fn taller_fork_with_headers_held_is_still_detected_as_off_branch() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         set_sib_env();
         let maxreq = crate::protocol::MAX_BLOCKS_PER_REQUEST;
@@ -20961,6 +21171,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn sibling_reorg_within_cap() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         set_sib_env();
         std::env::set_var("IRIUM_POAWX_MAX_REORG_DEPTH", "10");
@@ -21017,6 +21228,7 @@ mod proposer_consensus_tests {
     // Control 1: a SHORTER better-ranked branch must NOT trigger a deep rewind.
     #[test]
     fn v1_floor_blocks_shorter_better_ranked_branch() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         // RECONCILED 2026-07-24 for the B fix (bounded rank-rewind window): the V1 floor no longer
@@ -21053,6 +21265,7 @@ mod proposer_consensus_tests {
     // Control 2: an equal-height sibling fork is still decided by rank (floor unaffected).
     #[test]
     fn v1_floor_allows_equal_height_sibling_by_rank() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT", "1");
@@ -21081,6 +21294,7 @@ mod proposer_consensus_tests {
     // Control 3: a legitimately LONGER better-ranked chain is still adopted (floor unaffected).
     #[test]
     fn v1_floor_allows_longer_better_ranked_chain() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT", "1");
@@ -21113,6 +21327,7 @@ mod proposer_consensus_tests {
     // Control 4 (V2): the poison flag safe-halts tip advancement (no silent truncation).
     #[test]
     fn v2_poison_flag_safe_halts_tip_advancement() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         let mut cs = base_chain();
         cs.reorg_rollback_poisoned = true;
@@ -21132,6 +21347,7 @@ mod proposer_consensus_tests {
     // Gate purity: ships INERT on mainnet (const None, env ignored); env-driven elsewhere.
     #[test]
     fn v1_floor_gate_mainnet_const_controlled_env_ignored() {
+        let _env = crate::test_env::guard();
         use crate::poawx_proposer::rank_length_floor_gate as g;
         // RECONCILED 2026-07-24: this gate was `pure_inert_on_mainnet` while the const was None,
         // but the combined deploy knob aliased `MAINNET_RANK_LENGTH_FLOOR_ACTIVATION_HEIGHT` to
@@ -21239,6 +21455,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn stage_d_delegated_proposer_accepts_registered_pays_miner() {
+        let _env = crate::test_env::guard();
         // Step 3 (a): a valid v2 delegation whose registered, frozen-eligible custodial
         // proposer key made the proposer VRF proof is ACCEPTED, and the block pays the
         // MINER's payout pkh directly -- never the proposer key or the pool delegate.
@@ -21283,6 +21500,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn stage_d_delegated_proposer_rejects_unregistered_mismatch_and_v1() {
+        let _env = crate::test_env::guard();
         // Step 3 (b): the delegated branch rejects (b1) an unregistered / ineligible
         // proposer key, (b2) a proof key that differs from the miner-signed
         // proposer_pubkey, and (b3) a v1 delegation (which cannot authorise a proposer).
@@ -21345,6 +21563,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn stage_d_mode0_proposer_unchanged() {
+        let _env = crate::test_env::guard();
         // Step 3 (c): the mode-0 (delegation == None) path is byte-identical -- a matching
         // worker is accepted, a mismatched worker is rejected with the ORIGINAL error.
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
@@ -21385,6 +21604,7 @@ mod proposer_consensus_tests {
 
     #[test]
     fn stage_d_delegated_tampered_proposer_pubkey_breaks_signature() {
+        let _env = crate::test_env::guard();
         // Forgery leg (Attack 1 / 2c): the miner's v2 signature covers proposer_pubkey,
         // so swapping the proposer key after signing invalidates the delegation. A pool
         // cannot bind a proposer key the miner never authorised. This is enforced by
@@ -21436,6 +21656,7 @@ mod proposer_consensus_tests {
     /// control cannot drift away from the positive case.
     #[test]
     fn n1_ineligible_proposer_is_non_fatal_under_gate() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
@@ -21484,6 +21705,7 @@ mod proposer_consensus_tests {
     /// guard for "does deploying this disrupt current block production".
     #[test]
     fn incumbent_eligible_proposer_is_unchanged_by_the_gate() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
@@ -21521,6 +21743,7 @@ mod proposer_consensus_tests {
     /// own failure mode once a second key registers (tau drops to u64::MAX / n).
     #[test]
     fn unselected_sortition_is_non_fatal_under_gate() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
@@ -21582,6 +21805,7 @@ mod proposer_consensus_tests {
     /// n==1 so sortition saturates and the round-timing check is genuinely reached.
     #[test]
     fn early_round_is_non_fatal_under_gate() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
@@ -21624,6 +21848,7 @@ mod proposer_consensus_tests {
     /// failure still rejects WITH THE GATE ON, and never via a policy message.
     #[test]
     fn structural_failures_still_reject_with_the_gate_on() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
@@ -21710,6 +21935,7 @@ mod proposer_consensus_tests {
     /// `pow_demotion_active`, whose mainnet const remains None at every height.
     #[test]
     fn gate_never_enables_pow_demotion() {
+        let _env = crate::test_env::guard();
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_PROPOSER_FREEZE_DEPTH", "2");
@@ -21754,6 +21980,7 @@ mod proposer_consensus_tests {
     /// env entirely, and an unset env is off on every network.
     #[test]
     fn gate_active_on_mainnet_at_activation_height() {
+        let _env = crate::test_env::guard();
         // N1-CORRECTED to match the deployed line (7a74dfc): the const is set, so mainnet
         // enables the gate at/after H with the env ignored. Preserves live N1 behavior.
         const H: u64 = 59_900;
@@ -21793,6 +22020,7 @@ mod poawx_mainnet_activation_tests {
     /// routed through `poawx_effective_activation`.
     #[test]
     fn poawx_mainnet_activates_at_50000_paramdriven() {
+        let _env = crate::test_env::guard();
         use crate::activation::{poawx_effective_activation, MAINNET_POAWX_ACTIVATION_HEIGHT};
 
         let before = 49_999u64;

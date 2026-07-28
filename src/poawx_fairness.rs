@@ -476,6 +476,7 @@ mod verification {
 
     #[test]
     fn layer0_null_fixture_is_uniform_and_non_degenerate() {
+        let _env = crate::test_env::guard();
         let n = 20;
         let t = 4000;
         let m = priority_matrix(n, t, Bias::None, 0xA11CE);
@@ -511,6 +512,7 @@ mod verification {
 
     #[test]
     fn layer1_null_calibration_smoke() {
+        let _env = crate::test_env::guard();
         let fpr = null_false_positive_rate(SMOKE_R, 10, 2000);
         // Family-wise over 7 measures, so the per-run fire rate should be modest.
         assert!(
@@ -522,6 +524,7 @@ mod verification {
     #[test]
     #[ignore] // nightly
     fn layer1_null_calibration_full() {
+        let _env = crate::test_env::guard();
         let fpr = null_false_positive_rate(FULL_R, 10, 2000);
         println!("LAYER 1 null false-positive rate (R={FULL_R}): {fpr:.3}");
         assert!(fpr <= 0.25, "null FPR {fpr} too high");
@@ -545,6 +548,7 @@ mod verification {
     #[test]
     #[ignore] // nightly: reports the achieved MDE
     fn layer2_power_curve_and_mde() {
+        let _env = crate::test_env::guard();
         let n = 20;
         let t = required_t_for_lift(n, 1.10, ALPHA);
         println!("LAYER 2 sizing: n={n} T={t} targets MDE 1.10x at 80% power");
@@ -565,6 +569,7 @@ mod verification {
 
     #[test]
     fn layer2_mde_sizing_is_self_consistent() {
+        let _env = crate::test_env::guard();
         // The sizing formula must be monotone and must reproduce the measured plan.
         for n in [5usize, 20, 100] {
             let t10 = required_t_for_lift(n, 1.10, ALPHA);
@@ -582,6 +587,7 @@ mod verification {
 
     #[test]
     fn layer3_control_matrix() {
+        let _env = crate::test_env::guard();
         let (n, t) = (20usize, 4000usize);
         let rows: Vec<(&str, Bias, Vec<&str>)> = vec![
             (
@@ -623,6 +629,7 @@ mod verification {
 
     #[test]
     fn layer3_null_row_is_mostly_silent() {
+        let _env = crate::test_env::guard();
         let got = matrix_row(Bias::None, 20, 4000);
         assert!(
             got.len() <= 1,
@@ -639,6 +646,7 @@ mod verification {
     /// detecting something else and must be deleted, not shipped.
     #[test]
     fn layer4_mutation_silences_each_measure() {
+        let _env = crate::test_env::guard();
         let (n, t) = (20usize, 4000usize);
         struct Case {
             measure: &'static str,
@@ -702,6 +710,7 @@ mod verification {
 
     #[test]
     fn m9_threshold_arithmetic_is_exact_and_its_mutation_is_caught() {
+        let _env = crate::test_env::guard();
         for n in [2u64, 5, 20, 100, 1000] {
             for r in 0..3u32 {
                 let e = threshold_relative_error(n, r, Mutation::default());

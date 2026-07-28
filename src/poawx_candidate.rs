@@ -945,6 +945,7 @@ mod tests {
 
     #[test]
     fn audit_assignment_rejects_forged_solver_pkh() {
+        let _env = crate::test_env::guard();
         use crate::poawx_proposer::ROLE_PROPOSER;
         // Fix #4 (proposer-scoped): AssignmentProofV2::validate binds solver_pkh ==
         // hash160(vrf key) for ROLE_PROPOSER when the audit gate is active, so a proposer
@@ -992,6 +993,7 @@ mod tests {
 
     #[test]
     fn assignment_proof_digest_deterministic_and_sensitive() {
+        let _env = crate::test_env::guard();
         let d0 = compute_assignment_proof_digest(
             1,
             10,
@@ -1100,6 +1102,7 @@ mod tests {
 
     #[test]
     fn assignment_proof_validate_accept_reject() {
+        let _env = crate::test_env::guard();
         let p = AssignmentProofV1::new(1, 10, 1, [0xAAu8; 20], apk(), [0x11u8; 32], [0x22u8; 32]);
         assert!(p.validate(1, 10, 1, &[0x11u8; 32], &[0x22u8; 32]).is_ok());
         assert!(
@@ -1135,6 +1138,7 @@ mod tests {
 
     #[test]
     fn effective_score_rules() {
+        let _env = crate::test_env::guard();
         let s = 1_000_000u64;
         // penalty 0 => score 0.
         assert_eq!(effective_score(s, 1000, 0), 0);
@@ -1148,6 +1152,7 @@ mod tests {
 
     #[test]
     fn candidate_wire_roundtrip() {
+        let _env = crate::test_env::guard();
         let c = RoleCandidate::build(
             1,
             10,
@@ -1171,6 +1176,7 @@ mod tests {
 
     #[test]
     fn candidate_set_root_and_mutation() {
+        let _env = crate::test_env::guard();
         let mut cs = CandidateSet::new(1, 10, [0x22u8; 32]);
         let c1 = RoleCandidate::build(
             1,
@@ -1213,6 +1219,7 @@ mod tests {
 
     #[test]
     fn best_for_role_and_tiebreak() {
+        let _env = crate::test_env::guard();
         let mut cs = CandidateSet::new(1, 10, [0x22u8; 32]);
         // two candidates same role; pick higher effective_score.
         let mut hi = RoleCandidate::build(
@@ -1264,6 +1271,7 @@ mod tests {
 
     #[test]
     fn assignment_v2_prove_verify_and_rejects() {
+        let _env = crate::test_env::guard();
         let secret = [7u8; 32];
         let solver = [0xAAu8; 20];
         let ticket = [0x11u8; 32];
@@ -1326,6 +1334,7 @@ mod tests {
 
     #[test]
     fn phase23a_assignment_v2_deserialize_rejects_bad_length() {
+        let _env = crate::test_env::guard();
         let p = AssignmentProofV2::prove(
             &[7u8; 32],
             1,
@@ -1353,6 +1362,7 @@ mod tests {
 
     #[test]
     fn true_vrf_gates() {
+        let _env = crate::test_env::guard();
         let _g = crate::poawx::poawx_test_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -1372,6 +1382,7 @@ mod tests {
 
     #[test]
     fn gate_logic_pure() {
+        let _env = crate::test_env::guard();
         assert!(!poawx_phase21d_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(poawx_phase21d_gate(1, Some(1), 100));
         assert!(!poawx_phase21d_gate(1, None, 100));

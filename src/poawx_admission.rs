@@ -1101,6 +1101,7 @@ mod tests {
 
     #[test]
     fn enrollment_transport_decision_matrix() {
+        let _env = crate::test_env::guard();
         use EnrollmentTransport::*;
         // Loopback is always admitted, regardless of opt-in / rate — backward compatible
         // with today's loopback-only behaviour.
@@ -1119,6 +1120,7 @@ mod tests {
 
     #[test]
     fn admission_rate_limiter_passes_honest_drops_flood() {
+        let _env = crate::test_env::guard();
         use std::net::{IpAddr, Ipv4Addr};
         std::env::set_var("IRIUM_POAWX_ADMISSION_RATE_WINDOW_SECS", "10");
         std::env::set_var("IRIUM_POAWX_ADMISSION_RATE_MAX", "50");
@@ -1163,6 +1165,7 @@ mod tests {
 
     #[test]
     fn admission_wire_roundtrip_and_digest_sensitivity() {
+        let _env = crate::test_env::guard();
         // Gate-off path: serialize vs the V2 tests and ensure the true-VRF gate is
         // off so a V1 admission validates deterministically.
         let _g = crate::poawx::poawx_test_env_lock()
@@ -1191,6 +1194,7 @@ mod tests {
 
     #[test]
     fn cache_ingest_dedupe_window_and_root() {
+        let _env = crate::test_env::guard();
         let _g = crate::poawx::poawx_test_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -1268,6 +1272,7 @@ mod tests {
 
     #[test]
     fn phase22e_admission_v2_accept_and_reject() {
+        let _env = crate::test_env::guard();
         let _g = crate::poawx::poawx_test_env_lock()
             .lock()
             .unwrap_or_else(|e| e.into_inner());
@@ -1342,6 +1347,7 @@ mod tests {
 
     #[test]
     fn phase22e_gate_off_accepts_v1_admission() {
+        let _env = crate::test_env::guard();
         // (15) with the true-VRF gate off, an old V1 admission still validates and is
         // byte-identical on the wire.
         let _g = crate::poawx::poawx_test_env_lock()
@@ -1369,6 +1375,7 @@ mod tests {
 
     #[test]
     fn phase22e_committed_root_binds_v2() {
+        let _env = crate::test_env::guard();
         // (16) the committed-admission root changes when the V2 proof (output) changes,
         // because the candidate digest = the VRF output.
         use crate::poawx_committed_admission::AdmissionCommitmentV1;
@@ -1399,6 +1406,7 @@ mod tests {
 
     #[test]
     fn phase23a_admission_deserialize_rejects_bad_trailing_length() {
+        let _env = crate::test_env::guard();
         let seed = [0x22u8; 32];
         let a = CandidateAdmissionV1::new(1, 10, seed, cand(1, [0xC1u8; 20], 0x11, &seed));
         // base (V1) length parses; base + junk that is neither V1 nor V2 length rejects.
@@ -1420,6 +1428,7 @@ mod tests {
 
     #[test]
     fn gate_logic_pure_and_mainnet_off() {
+        let _env = crate::test_env::guard();
         assert!(
             !candidate_admission_gate(0, Some(1), 100),
             "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)"
@@ -1442,6 +1451,7 @@ mod tests {
 
     #[test]
     fn phase26d_persist_reload_roundtrip() {
+        let _env = crate::test_env::guard();
         // Accepted admissions are snapshotted to disk on ingest; a fresh cache
         // (simulating a restart with an empty in-memory map) reloads them and
         // exposes the SAME admitted set. phase21e logic is untouched.
@@ -1483,6 +1493,7 @@ mod tests {
 
     #[test]
     fn phase26d_reload_rejects_invalid_records() {
+        let _env = crate::test_env::guard();
         // Reload re-validates EXACTLY like ingest: wrong-network, corrupt,
         // truncated, and tampered records are rejected (never accepted, never
         // panics) — so persistence cannot smuggle an unvalidated admission past
@@ -1529,6 +1540,7 @@ mod tests {
 
     #[test]
     fn stage3a_build_pool_admission_bytes_attributes_miner() {
+        let _env = crate::test_env::guard();
         use crate::poawx::{ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
         let net = 3u8;
         let secret = [0x9Au8; 32];

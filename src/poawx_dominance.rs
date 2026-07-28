@@ -525,6 +525,7 @@ mod tests {
 
     #[test]
     fn no_recent_reward_keeps_full_weight() {
+        let _env = crate::test_env::guard();
         let t = DominanceTracker::new(1);
         let pkh = [0x01u8; 20];
         assert_eq!(t.recent_reward_share_permille(&pkh), 0);
@@ -537,6 +538,7 @@ mod tests {
 
     #[test]
     fn high_recent_reward_reduces_weight_deterministic_ordering() {
+        let _env = crate::test_env::guard();
         let mut t = DominanceTracker::new(1);
         let a = [0xAAu8; 20];
         let b = [0xBBu8; 20];
@@ -556,6 +558,7 @@ mod tests {
 
     #[test]
     fn overflow_safe() {
+        let _env = crate::test_env::guard();
         let mut t = DominanceTracker::new(1);
         let pkh = [0x09u8; 20];
         t.record(pkh, RoleRewardKind::Primary, u64::MAX, 1);
@@ -570,6 +573,7 @@ mod tests {
 
     #[test]
     fn window_reset_prunes() {
+        let _env = crate::test_env::guard();
         let mut t = DominanceTracker::new(1);
         let pkh = [0x05u8; 20];
         t.record(pkh, RoleRewardKind::Primary, 500, 10);
@@ -586,6 +590,7 @@ mod tests {
 
     #[test]
     fn phase20_role_rewards_feed_tracker() {
+        let _env = crate::test_env::guard();
         // Prove a Phase 20 multi-role reward event (RoleReward pkhs + the canonical
         // 55/22/13/10 split) can feed the dominance tracker.
         use crate::poawx::multi_role_amounts;
@@ -610,6 +615,7 @@ mod tests {
 
     #[test]
     fn gate_logic_pure() {
+        let _env = crate::test_env::guard();
         assert!(!anti_domination_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(anti_domination_gate(1, Some(1), 100));
         assert!(!anti_domination_gate(1, None, 100));
@@ -618,6 +624,7 @@ mod tests {
 
     #[test]
     fn enforced_gate_logic_pure() {
+        let _env = crate::test_env::guard();
         assert!(anti_domination_enforced_gate(1, Some(1), true, 100));
         assert!(!anti_domination_enforced_gate(1, Some(1), false, 100));
         assert!(
@@ -630,6 +637,7 @@ mod tests {
 
     #[test]
     fn persistent_apply_revert_exact_inverse() {
+        let _env = crate::test_env::guard();
         let mut d = PersistentDominance::new(100, 2);
         let empty = d.digest();
         let a = [0xA1u8; 20];
@@ -647,6 +655,7 @@ mod tests {
 
     #[test]
     fn persistent_recent_share_and_weight() {
+        let _env = crate::test_env::guard();
         let mut d = PersistentDominance::new(100, 2);
         let a = [0xAAu8; 20];
         let b = [0xBBu8; 20];
@@ -663,6 +672,7 @@ mod tests {
 
     #[test]
     fn persistent_window_rolls_off_recent() {
+        let _env = crate::test_env::guard();
         let mut d = PersistentDominance::new(100, 1); // only current window counts
         let a = [0x01u8; 20];
         d.apply_event(a, RoleRewardKind::Primary, 1_000, 50); // window 0
@@ -673,6 +683,7 @@ mod tests {
 
     #[test]
     fn persistent_prune_is_bounded() {
+        let _env = crate::test_env::guard();
         let mut d = PersistentDominance::new(10, 2);
         let a = [0x07u8; 20];
         for h in 0..2000u64 {
@@ -686,6 +697,7 @@ mod tests {
 
     #[test]
     fn persistent_digest_deterministic_regardless_of_apply_order() {
+        let _env = crate::test_env::guard();
         let a = [0x11u8; 20];
         let b = [0x22u8; 20];
         let mut d1 = PersistentDominance::new(100, 2);
@@ -724,6 +736,7 @@ mod d2a_reorg_symmetry_audit {
     /// rejecting each other's blocks.
     #[test]
     fn prune_retention_must_exceed_max_reorg_depth() {
+        let _env = crate::test_env::guard();
         let window = DEFAULT_ANTI_DOMINATION_WINDOW;
         let lookback = DEFAULT_ANTI_DOMINATION_LOOKBACK;
         let retained_windows = lookback.saturating_sub(1) + PRUNE_MARGIN_WINDOWS;
@@ -745,6 +758,7 @@ mod d2a_reorg_symmetry_audit {
     /// The other half of D2a: within reach of a reorg, apply/revert IS exact.
     #[test]
     fn apply_then_revert_is_exact_within_reorg_reach() {
+        let _env = crate::test_env::guard();
         let mut d = PersistentDominance::new(DEFAULT_ANTI_DOMINATION_WINDOW, DEFAULT_ANTI_DOMINATION_LOOKBACK);
         let pkh = [0x5u8; 20];
         let before = d.digest();

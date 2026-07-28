@@ -72,6 +72,7 @@ mod tests {
 
     #[test]
     fn source_from_env_defaults_to_mainnet_when_unset() {
+        let _env = crate::test_env::guard();
         let _g = lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("IRIUM_TEST_SOURCE_X");
         assert_eq!(
@@ -82,6 +83,7 @@ mod tests {
 
     #[test]
     fn source_from_env_parses_regtest_and_mainnet_case_insensitively() {
+        let _env = crate::test_env::guard();
         let _g = lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_TEST_SOURCE_Y", " Regtest ");
         assert_eq!(
@@ -98,6 +100,7 @@ mod tests {
 
     #[test]
     fn source_from_env_rejects_unknown_value() {
+        let _env = crate::test_env::guard();
         let _g = lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_TEST_SOURCE_Z", "garbage");
         assert!(Source::from_env("IRIUM_TEST_SOURCE_Z").is_err());
@@ -106,6 +109,7 @@ mod tests {
 
     #[test]
     fn env_u64_returns_default_when_unset() {
+        let _env = crate::test_env::guard();
         let _g = lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("IRIUM_TEST_NUM_X");
         assert_eq!(env_u64("IRIUM_TEST_NUM_X", 42), 42);
@@ -113,6 +117,7 @@ mod tests {
 
     #[test]
     fn env_u64_parses_when_set() {
+        let _env = crate::test_env::guard();
         let _g = lock().lock().unwrap_or_else(|e| e.into_inner());
         std::env::set_var("IRIUM_TEST_NUM_Y", "100");
         assert_eq!(env_u64("IRIUM_TEST_NUM_Y", 1), 100);

@@ -2190,6 +2190,7 @@ mod tests {
 
     #[test]
     fn no_coinbase_returns_false() {
+        let _env = crate::test_env::guard();
         use crate::block::BlockHeader;
         let block = Block {
             header: BlockHeader {
@@ -2209,12 +2210,14 @@ mod tests {
 
     #[test]
     fn no_irx1_output_returns_false() {
+        let _env = crate::test_env::guard();
         let block = make_block_with_coinbase_script(vec![0x51]);
         assert!(!block_has_irx1_commitment(&block));
     }
 
     #[test]
     fn irx1_with_nonzero_root_returns_true() {
+        let _env = crate::test_env::guard();
         let mut root = [0u8; 32];
         root[0] = 0xde;
         root[31] = 0xad;
@@ -2224,12 +2227,14 @@ mod tests {
 
     #[test]
     fn irx1_with_zero_root_returns_false() {
+        let _env = crate::test_env::guard();
         let block = make_block_with_coinbase_script(valid_irx1_script([0u8; 32]));
         assert!(!block_has_irx1_commitment(&block));
     }
 
     #[test]
     fn wrong_tag_returns_false() {
+        let _env = crate::test_env::guard();
         let mut s = vec![0x6a, 0x24];
         s.extend_from_slice(b"irx2");
         s.extend_from_slice(&[0xab; 32]);
@@ -2239,12 +2244,14 @@ mod tests {
 
     #[test]
     fn too_short_script_returns_false() {
+        let _env = crate::test_env::guard();
         let block = make_block_with_coinbase_script(vec![0x6a, 0x24, b'i', b'r', b'x', b'1']);
         assert!(!block_has_irx1_commitment(&block));
     }
 
     #[test]
     fn irx1_root_extraction_works() {
+        let _env = crate::test_env::guard();
         let mut expected = [0u8; 32];
         expected[0] = 0x3a;
         expected[31] = 0xfe;
@@ -2254,6 +2261,7 @@ mod tests {
 
     #[test]
     fn irx1_root_absent_returns_none() {
+        let _env = crate::test_env::guard();
         let block = make_block_with_coinbase_script(vec![0x51]);
         assert_eq!(irx1_root_from_block_bytes(&block), None);
     }
@@ -2276,6 +2284,7 @@ mod tests {
 
     #[test]
     fn audit_receipts_root_deterministic_under_colliding_keys() {
+        let _env = crate::test_env::guard();
         // Fix #1: two receipts that collide on the legacy sort key (height, lane, worker_pkh,
         // commitment_nonce) but differ in `solution` produce an order-INDEPENDENT audit root
         // (sorted by full inner hash), eliminating sort_unstable's undefined tie order -- a
@@ -2309,6 +2318,7 @@ mod tests {
 
     #[test]
     fn phase13a_receipt_serialize_deserialize_roundtrip() {
+        let _env = crate::test_env::guard();
         let r = make_test_receipt(42);
         let bytes = r.serialize();
         assert_eq!(bytes.len(), PoawxBlockReceipt::WIRE_SIZE);
@@ -2327,6 +2337,7 @@ mod tests {
 
     #[test]
     fn phase20_multi_role_amounts_exact_split_and_remainder() {
+        let _env = crate::test_env::guard();
         // 55/22/13/10 of a clean total divides exactly.
         let amts = multi_role_amounts(10_000);
         assert_eq!(amts, [5500, 2200, 1300, 1000]);
@@ -2346,6 +2357,7 @@ mod tests {
 
     #[test]
     fn fanout_amounts_conserve_exactly() {
+        let _env = crate::test_env::guard();
         // Every fan-out sums to EXACTLY the pool (no inflation/deflation), and each
         // payee gets base or base+1 (max spread of 1 unit — fair).
         for &pool in &[0u64, 1, 5, 6, 7, 100, 999, 5_000_000_000, u64::MAX / 4] {
@@ -2376,6 +2388,7 @@ mod tests {
 
     #[test]
     fn pool_admission_section_roundtrips() {
+        let _env = crate::test_env::guard();
         use crate::poawx_candidate::AssignmentProofV2;
         use crate::poawx_penalty::PenaltyStatus;
         use crate::poawx_ticket::{grind_sybil_nonce, TicketProof};
@@ -2424,6 +2437,7 @@ mod tests {
 
     #[test]
     fn phase20_role_reward_wire_roundtrip() {
+        let _env = crate::test_env::guard();
         let r = RoleReward {
             compute_contributor_pkh: [0xC0u8; 20],
             verify_contributor_pkh: [0x7Eu8; 20],
@@ -2445,6 +2459,7 @@ mod tests {
 
     #[test]
     fn phase20_role_reward_json_roundtrip() {
+        let _env = crate::test_env::guard();
         // serde round-trip of the role pkhs (hex) — the persistence carrier shape.
         let r = RoleReward {
             compute_contributor_pkh: [1u8; 20],
@@ -2483,6 +2498,7 @@ mod tests {
 
     #[test]
     fn phase20_bps_constants_total_10000() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             MULTI_ROLE_PRIMARY_BPS
                 + MULTI_ROLE_COMPUTE_BPS
@@ -2495,6 +2511,7 @@ mod tests {
 
     #[test]
     fn phase20_v1_v2_receipt_encoding_unchanged() {
+        let _env = crate::test_env::guard();
         // Adding the multi-role primitives must NOT change the existing receipt
         // wire size or mode-0 encoding (pre-activation byte-identical guarantee).
         assert_eq!(PoawxBlockReceipt::WIRE_SIZE, 166);
@@ -2544,6 +2561,7 @@ mod tests {
 
     #[test]
     fn phase20_fairness_assignment_deterministic_and_sensitive() {
+        let _env = crate::test_env::guard();
         let prev = [0x07u8; 32];
         // same inputs -> same lane (deterministic).
         let a = assign_lane(1, 100, &prev, ROLE_COMPUTE_CONTRIBUTOR, 0);
@@ -2567,6 +2585,7 @@ mod tests {
 
     #[test]
     fn phase20_fairness_distribution_34_33_33() {
+        let _env = crate::test_env::guard();
         // Deterministic (not random): sweep 3600 slot indices.
         let prev = [0x5Au8; 32];
         let n = 3600u32;
@@ -2589,6 +2608,7 @@ mod tests {
 
     #[test]
     fn phase20_lane_and_role_id_roundtrip() {
+        let _env = crate::test_env::guard();
         for l in [
             PoawxLane::CpuFriendly,
             PoawxLane::GpuParallel,
@@ -2616,6 +2636,7 @@ mod tests {
 
     #[test]
     fn phase20_role_claim_wire_roundtrip() {
+        let _env = crate::test_env::guard();
         let prev = [0x11u8; 32];
         let c = fairness_valid_claim(1, 50, &prev, ROLE_SUPPORT_CONTRIBUTOR, 3);
         let bytes = c.serialize();
@@ -2637,6 +2658,7 @@ mod tests {
 
     #[test]
     fn phase20_role_claim_validation_accept_and_reject() {
+        let _env = crate::test_env::guard();
         let net = 1u8;
         let height = 777u64;
         let prev = [0x22u8; 32];
@@ -2706,6 +2728,7 @@ mod tests {
 
     #[test]
     fn phase20_validate_fee_terms() {
+        let _env = crate::test_env::guard();
         let fpkh = [0xFEu8; 20];
         let zero = [0u8; 20];
         // official: fee 0 ok in any mode, no fee_pkh required.
@@ -2730,6 +2753,7 @@ mod tests {
 
     #[test]
     fn phase20_apply_fee_floor_and_remainder() {
+        let _env = crate::test_env::guard();
         // floor + miner keeps remainder; net + fee == gross exactly.
         let g = 5_000_000_001u64;
         let (net, fee) = apply_fee(g, 200);
@@ -2743,6 +2767,7 @@ mod tests {
 
     #[test]
     fn phase20_delegation_binds_fee_terms() {
+        let _env = crate::test_env::guard();
         // fee_bps + fee_pkh round-trip AND are covered by the signed message_hash,
         // so the pool cannot mutate fee terms after the miner signs.
         use k256::ecdsa::signature::hazmat::PrehashSigner;
@@ -2776,6 +2801,7 @@ mod tests {
 
     #[test]
     fn phase20_receipt_ext_wire_roundtrip() {
+        let _env = crate::test_env::guard();
         let prev = [0x33u8; 32];
         let ext = Phase20ReceiptExt {
             role_reward: RoleReward {
@@ -2821,6 +2847,7 @@ mod tests {
 
     #[test]
     fn phase20_hidden_precommit_primitives() {
+        let _env = crate::test_env::guard();
         let secret = [7u8; 32];
         let nonce = [9u8; 32];
         let c = role_precommit_commitment(&secret, &nonce);
@@ -2897,6 +2924,7 @@ mod tests {
 
     #[test]
     fn proposer_registration_build_validate_roundtrip() {
+        let _env = crate::test_env::guard();
         let net = 2u8;
         let anchor_hash = [0x5a_u8; 32];
         let secret = [0x33u8; 32];
@@ -2922,6 +2950,7 @@ mod tests {
 
     #[test]
     fn stage_d_delegated_proposer_key_registration_eligibility() {
+        let _env = crate::test_env::guard();
         // Stage D Step 2 (verification, not a new subsystem): a miner's SEPARATE custodial
         // proposer key -- held by the pool on the miner's behalf because an ASIC miner cannot
         // run proving software -- is registered through the EXISTING self-signed sybil path
@@ -3055,6 +3084,7 @@ mod tests {
     #[test]
     #[ignore]
     fn stage_d_delegated_proposer_registration_rig_e2e() {
+        let _env = crate::test_env::guard();
         let base =
             std::env::var("E2E_NODE").unwrap_or_else(|_| "http://127.0.0.1:38500".to_string());
         let token = std::env::var("E2E_TOKEN").unwrap_or_default();
@@ -3133,6 +3163,7 @@ mod tests {
 
     #[test]
     fn proposer_assignment_section_roundtrip() {
+        let _env = crate::test_env::guard();
         let prev = [0x44u8; 32];
         let proof = crate::poawx_candidate::AssignmentProofV2::prove(
             &[0x11u8; 32],
@@ -3188,6 +3219,7 @@ mod tests {
 
     #[test]
     fn stage_d_revocation_record_roundtrip_and_validate() {
+        let _env = crate::test_env::guard();
         // Stage D Step 4: a DelegationRevocationV1 wire-round-trips and validates only
         // with the miner's genuine signature over its own (network, miner_pubkey, nonce).
         let net = 2u8;
@@ -3212,6 +3244,7 @@ mod tests {
 
     #[test]
     fn stage_d_revocation_registry_semantics() {
+        let _env = crate::test_env::guard();
         // Forward-looking, anti-grief, and exact apply/revert inverse.
         let victim =
             DelegationRevocationV1::build_signed(&[0x11u8; 32], 2, [0x01u8; 32]).unwrap();
@@ -3245,6 +3278,7 @@ mod tests {
 
     #[test]
     fn stage_d_ext_revocation_section_roundtrip() {
+        let _env = crate::test_env::guard();
         // Absent => byte-identical to pre-Step-4 (no RVK1 magic); present => +section.
         let prev = [0x44u8; 32];
         let rec = DelegationRevocationV1::build_signed(&[0x33u8; 32], 2, [0x99u8; 32]).unwrap();
@@ -3297,6 +3331,7 @@ mod tests {
 
     #[test]
     fn proposer_registration_section_roundtrip() {
+        let _env = crate::test_env::guard();
         let prev = [0x44u8; 32];
         let net = 2u8;
         let anchor_h = [0x5au8; 32];
@@ -3350,6 +3385,7 @@ mod tests {
 
     #[test]
     fn phase20_ext_precommit_root_roundtrip_and_digest() {
+        let _env = crate::test_env::guard();
         let prev = [0x44u8; 32];
         let base = || Phase20ReceiptExt {
             role_reward: RoleReward {
@@ -3398,6 +3434,7 @@ mod tests {
 
     #[test]
     fn phase20_ext_ticket_section_roundtrip_backward_compatible() {
+        let _env = crate::test_env::guard();
         let prev = [0x44u8; 32];
         let base = || Phase20ReceiptExt {
             role_reward: RoleReward {
@@ -3492,6 +3529,7 @@ mod tests {
 
     #[test]
     fn phase23a_ext_rejects_malformed_avr2_section() {
+        let _env = crate::test_env::guard();
         use crate::poawx_candidate::AssignmentProofV2;
         let prev = [0x44u8; 32];
         let proofs = [
@@ -3574,6 +3612,7 @@ mod tests {
 
     #[test]
     fn phase22d_ext_true_vrf_section_roundtrip_backward_compatible() {
+        let _env = crate::test_env::guard();
         use crate::poawx_candidate::{AssignmentProofV2, ASSIGNMENT_V2_SECTION_MAGIC};
         let prev = [0x44u8; 32];
         let base = || Phase20ReceiptExt {
@@ -3663,6 +3702,7 @@ mod tests {
 
     #[test]
     fn phase22a_ext_committed_admission_roundtrip_backward_compatible() {
+        let _env = crate::test_env::guard();
         use crate::poawx_candidate::{CandidateSet, RoleCandidate};
         use crate::poawx_committed_admission::{
             AdmissionCommitmentV1, COMMITTED_ADMISSION_SECTION_MAGIC,
@@ -3752,6 +3792,7 @@ mod tests {
 
     #[test]
     fn phase21h_ext_finality_section_roundtrip_backward_compatible() {
+        let _env = crate::test_env::guard();
         use crate::poawx_finality::{FinalityProofV1, FinalityVoteType, FinalityVoteV1};
         let prev = [0x44u8; 32];
         let base = || Phase20ReceiptExt {
@@ -3833,6 +3874,7 @@ mod tests {
 
     #[test]
     fn phase21f_ext_puzzle_section_roundtrip_backward_compatible() {
+        let _env = crate::test_env::guard();
         use crate::poawx_puzzle::{PuzzleSolutionV1, PUZZLE_SECTION_MAGIC};
         let prev = [0x44u8; 32];
         let base = || Phase20ReceiptExt {
@@ -3904,6 +3946,7 @@ mod tests {
 
     #[test]
     fn phase21d_ext_candidate_section_roundtrip_backward_compatible() {
+        let _env = crate::test_env::guard();
         use crate::poawx_candidate::{CandidateSet, RoleCandidate, CANDIDATE_SECTION_MAGIC};
         use crate::poawx_penalty::PenaltyStatus;
         let prev = [0x44u8; 32];
@@ -3984,6 +4027,7 @@ mod tests {
 
     #[test]
     fn phase21c_ext_dominance_section_roundtrip_backward_compatible() {
+        let _env = crate::test_env::guard();
         let prev = [0x44u8; 32];
         let base = || Phase20ReceiptExt {
             role_reward: RoleReward {
@@ -4092,6 +4136,7 @@ mod tests {
 
     #[test]
     fn phase20_block_receipt_v3_element_roundtrip() {
+        let _env = crate::test_env::guard();
         let prev = [0x44u8; 32];
         let mk_ext = || Phase20ReceiptExt {
             role_reward: RoleReward {
@@ -4139,6 +4184,7 @@ mod tests {
 
     #[test]
     fn phase20_root_gating_and_mutation_sensitivity() {
+        let _env = crate::test_env::guard();
         let prev = [0x44u8; 32];
         let mk_ext = |fee_bps: u16, fee_pkh: [u8; 20]| Phase20ReceiptExt {
             role_reward: RoleReward {
@@ -4243,6 +4289,7 @@ mod tests {
 
     #[test]
     fn phase13a_receipt_wire_size_is_166() {
+        let _env = crate::test_env::guard();
         assert_eq!(PoawxBlockReceipt::WIRE_SIZE, 166);
         let r = make_test_receipt(1);
         assert_eq!(r.serialize().len(), 166);
@@ -4250,6 +4297,7 @@ mod tests {
 
     #[test]
     fn phase13a_receipt_truncated_deserialize_fails() {
+        let _env = crate::test_env::guard();
         let r = make_test_receipt(1);
         let bytes = r.serialize();
         // Truncate by 1 byte — must error.
@@ -4263,6 +4311,7 @@ mod tests {
 
     #[test]
     fn phase13a_receipt_section_magic_length() {
+        let _env = crate::test_env::guard();
         assert_eq!(POAWX_RECEIPT_SECTION_MAGIC.len(), 8);
     }
 
@@ -4308,6 +4357,7 @@ mod tests {
 
     #[test]
     fn phase18b_delegation_roundtrip() {
+        let _env = crate::test_env::guard();
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         let bytes = d.serialize();
@@ -4320,6 +4370,7 @@ mod tests {
 
     #[test]
     fn phase18b_delegation_truncated_fails() {
+        let _env = crate::test_env::guard();
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         let bytes = d.serialize();
@@ -4329,6 +4380,7 @@ mod tests {
 
     #[test]
     fn phase18b_delegation_signature_verifies_and_tamper_fails() {
+        let _env = crate::test_env::guard();
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         assert!(d.verify_signature().is_ok());
@@ -4345,6 +4397,7 @@ mod tests {
 
     #[test]
     fn phase18b_delegation_miner_pkh_matches_pubkey() {
+        let _env = crate::test_env::guard();
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         let pkh = d.miner_pkh();
@@ -4355,6 +4408,7 @@ mod tests {
 
     #[test]
     fn phase18b_message_hash_excludes_sig() {
+        let _env = crate::test_env::guard();
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         let h1 = d.message_hash();
@@ -4365,6 +4419,7 @@ mod tests {
 
     #[test]
     fn phase18b_digest_changes_with_any_field() {
+        let _env = crate::test_env::guard();
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         let base = d.digest();
@@ -4384,6 +4439,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode0_root_unchanged() {
+        let _env = crate::test_env::guard();
         let r = make_test_receipt(5);
         let got = irx1_root_from_block_receipts(&[r.clone()]);
         let expected: [u8; 32] = {
@@ -4405,6 +4461,7 @@ mod tests {
 
     #[test]
     fn phase18b_mode1_root_includes_delegation_digest() {
+        let _env = crate::test_env::guard();
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         let r0 = make_test_receipt(5);
@@ -4431,6 +4488,7 @@ mod tests {
 
     #[test]
     fn phase18b_v2_mode0_roundtrip() {
+        let _env = crate::test_env::guard();
         let r = make_test_receipt(9);
         let bytes = r.serialize_v2();
         assert_eq!(bytes.len(), 1 + PoawxBlockReceipt::WIRE_SIZE);
@@ -4443,6 +4501,7 @@ mod tests {
 
     #[test]
     fn phase18b_v2_mode1_roundtrip() {
+        let _env = crate::test_env::guard();
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         let r = mode1_receipt(9, d);
@@ -4460,6 +4519,7 @@ mod tests {
 
     #[test]
     fn phase18b_v2_mixed_stream_roundtrip() {
+        let _env = crate::test_env::guard();
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         let r0 = make_test_receipt(1);
@@ -4475,6 +4535,7 @@ mod tests {
 
     #[test]
     fn phase18b_v2_unknown_mode_and_truncation_fail() {
+        let _env = crate::test_env::guard();
         let sk = test_sk();
         let d = make_signed_delegation(&sk, 0);
         let r = mode1_receipt(3, d);

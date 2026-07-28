@@ -9686,6 +9686,7 @@ mod tests {
     /// Mainnet 2026-07-28: vps sat at -50 on eu while a peer ~13k blocks behind held +2.
     #[test]
     fn fork_choice_refusals_do_not_penalise_the_peer() {
+        let _env = crate::test_env::guard();
         for reason in [
             "keeping current tip (sibling not better)",
             "reorg rejected: depth 42 exceeds max-reorg-depth cap 20 (hardening backstop)",
@@ -9816,6 +9817,7 @@ mod tests {
     /// (1) Demotion ACTIVE => a demoted body passes the stateless precheck.
     #[test]
     fn c2_precheck_admits_demoted_block_when_gate_on() {
+        let _env = crate::test_env::guard();
         let _g = c2_env_lock().lock().unwrap_or_else(|e| e.into_inner());
         c2_set_gate(true);
         let block = c2_block(true);
@@ -9833,6 +9835,7 @@ mod tests {
     /// which is the mainnet path (activation const is None).
     #[test]
     fn c2_precheck_rejects_demoted_block_when_gate_off() {
+        let _env = crate::test_env::guard();
         let _g = c2_env_lock().lock().unwrap_or_else(|e| e.into_inner());
         c2_set_gate(true);
         let block = c2_block(true);
@@ -9849,6 +9852,7 @@ mod tests {
     /// (3) Below the floor => rejected in BOTH modes. A lowered bar, not a removed one.
     #[test]
     fn c2_precheck_rejects_sub_floor_block_in_both_modes() {
+        let _env = crate::test_env::guard();
         let _g = c2_env_lock().lock().unwrap_or_else(|e| e.into_inner());
         c2_set_gate(true);
         let block = c2_block(false);
@@ -9882,6 +9886,7 @@ mod tests {
 
     #[test]
     fn attaches_out_of_order_orphan_headers() {
+        let _env = crate::test_env::guard();
         let _serial = orphan_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let locked = load_locked_genesis().expect("load locked genesis");
         let genesis = block_from_locked(&locked).expect("build genesis block");
@@ -9947,6 +9952,7 @@ mod tests {
 
     #[test]
     fn duplicate_orphan_headers_are_not_reinserted() {
+        let _env = crate::test_env::guard();
         let _serial = orphan_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let locked = load_locked_genesis().expect("load locked genesis");
         let genesis = block_from_locked(&locked).expect("build genesis block");
@@ -9997,6 +10003,7 @@ mod tests {
 
     #[test]
     fn orphan_reinsert_after_removal_is_suppressed_within_ttl() {
+        let _env = crate::test_env::guard();
         let _serial = orphan_test_lock().lock().unwrap_or_else(|e| e.into_inner());
         let locked = load_locked_genesis().expect("load locked genesis");
         let genesis = block_from_locked(&locked).expect("build genesis block");
@@ -10056,6 +10063,7 @@ mod tests {
 
     #[test]
     fn recent_hash_cache_suppresses_duplicates_within_ttl() {
+        let _env = crate::test_env::guard();
         let now = Instant::now();
         let mut cache = RecentHashCache::new(Duration::from_secs(30), 8);
         let hash = [1u8; 32];
@@ -10066,6 +10074,7 @@ mod tests {
 
     #[test]
     fn recent_hash_cache_expires_after_ttl() {
+        let _env = crate::test_env::guard();
         let now = Instant::now();
         let mut cache = RecentHashCache::new(Duration::from_secs(10), 8);
         let hash = [2u8; 32];
@@ -10075,6 +10084,7 @@ mod tests {
 
     #[test]
     fn recent_hash_cache_stays_bounded() {
+        let _env = crate::test_env::guard();
         let now = Instant::now();
         let mut cache = RecentHashCache::new(Duration::from_secs(60), 2);
         assert!(cache.record_at([1u8; 32], now));
@@ -10085,6 +10095,7 @@ mod tests {
 
     #[test]
     fn block_request_cache_key_distinguishes_peers() {
+        let _env = crate::test_env::guard();
         let start_hash = [9u8; 32];
         let a = block_request_cache_key(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 1)), &start_hash, 128);
         let b = block_request_cache_key(IpAddr::V4(Ipv4Addr::new(10, 0, 0, 2)), &start_hash, 128);
@@ -10093,6 +10104,7 @@ mod tests {
 
     #[test]
     fn block_request_cache_key_distinguishes_windows() {
+        let _env = crate::test_env::guard();
         let start_hash = [7u8; 32];
         let ip = IpAddr::V4(Ipv4Addr::new(10, 1, 1, 9));
         let a = block_request_cache_key(ip, &start_hash, 64);
@@ -10102,6 +10114,7 @@ mod tests {
 
     #[test]
     fn recent_hash_cache_allows_retry_for_different_block_request_key() {
+        let _env = crate::test_env::guard();
         let now = Instant::now();
         let mut cache = RecentHashCache::new(Duration::from_secs(30), 8);
         let start_hash = [5u8; 32];
@@ -10115,6 +10128,7 @@ mod tests {
 
     #[tokio::test]
     async fn small_network_temp_ban_is_less_aggressive() {
+        let _env = crate::test_env::guard();
         let failures = Arc::new(Mutex::new(HashMap::new()));
         let bans = Arc::new(StdMutex::new(HashMap::new()));
         let ip = IpAddr::V4(Ipv4Addr::new(203, 0, 113, 9));
@@ -10133,6 +10147,7 @@ mod tests {
 
     #[test]
     fn peer_telemetry_snapshot_keeps_backoff_history_after_expiry() {
+        let _env = crate::test_env::guard();
         let rt = tokio::runtime::Runtime::new().expect("runtime");
         rt.block_on(async {
             let node = P2PNode::new(
@@ -10158,6 +10173,7 @@ mod tests {
 
     #[test]
     fn outbound_failure_classifier_maps_common_reasons() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             classify_outbound_dial_failure("connect timeout after 8s"),
             "timeout"
@@ -10178,6 +10194,7 @@ mod tests {
 
     #[test]
     fn dialable_multiaddr_from_advertised_accepts_public_ipv4() {
+        let _env = crate::test_env::guard();
         assert_eq!(
             dialable_multiaddr_from_advertised("8.8.8.8:38291"),
             Some("/ip4/8.8.8.8/tcp/38291".to_string())
@@ -10190,6 +10207,7 @@ mod tests {
 
     #[test]
     fn dialable_multiaddr_from_advertised_rejects_unroutable() {
+        let _env = crate::test_env::guard();
         // Loopback, private, link-local, broadcast.
         assert_eq!(dialable_multiaddr_from_advertised("127.0.0.1:38291"), None);
         assert_eq!(dialable_multiaddr_from_advertised("10.0.0.5:38291"), None);
@@ -10221,6 +10239,7 @@ mod tests {
 
     #[test]
     fn dialable_multiaddr_from_advertised_rejects_cgnat() {
+        let _env = crate::test_env::guard();
         // RFC6598 CGNAT band: 100.64.0.0/10 → first octet 100, second 64..=127.
         assert_eq!(dialable_multiaddr_from_advertised("100.64.0.1:38291"), None);
         assert_eq!(
@@ -10234,6 +10253,7 @@ mod tests {
 
     #[test]
     fn dialable_multiaddr_from_advertised_rejects_malformed_and_ipv6() {
+        let _env = crate::test_env::guard();
         assert_eq!(dialable_multiaddr_from_advertised(""), None);
         assert_eq!(dialable_multiaddr_from_advertised("not-an-addr"), None);
         assert_eq!(dialable_multiaddr_from_advertised("203.0.113.9"), None);
@@ -10287,6 +10307,7 @@ mod tests {
 
     #[test]
     fn c7_inflight_cap_defaults_to_max_blocks_per_request() {
+        let _env = crate::test_env::guard();
         std::env::remove_var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER");
         assert_eq!(
             max_blocks_inflight_per_peer(),
@@ -10297,6 +10318,7 @@ mod tests {
 
     #[test]
     fn c7_inflight_cap_is_env_tunable_and_clamped() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER", "64");
         assert_eq!(max_blocks_inflight_per_peer(), 64);
         // Never above the protocol maximum: a larger value would be unservable
@@ -10313,6 +10335,7 @@ mod tests {
 
     #[tokio::test]
     async fn c7_request_over_the_inflight_cap_is_refused() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_P2P_MAX_BLOCKS_INFLIGHT_PER_PEER", "16");
         let map: Arc<Mutex<HashMap<IpAddr, BlockRequestState>>> =
             Arc::new(Mutex::new(HashMap::new()));
@@ -10331,6 +10354,7 @@ mod tests {
 
     #[test]
     fn c7_block_request_timeout_defaults_to_60s_and_clamps() {
+        let _env = crate::test_env::guard();
         std::env::remove_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS");
         assert_eq!(block_request_timeout(), Duration::from_secs(60));
         std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "120");
@@ -10352,6 +10376,7 @@ mod tests {
     /// peers mid-sync. This test fails if the timeout is ever made cooldown-derived.
     #[test]
     fn c7_timeout_is_bandwidth_grounded_not_a_cooldown_multiple() {
+        let _env = crate::test_env::guard();
         std::env::remove_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS");
         std::env::remove_var("IRIUM_P2P_SYNC_COOLDOWN_SECS");
 
@@ -10381,6 +10406,7 @@ mod tests {
 
     #[test]
     fn c7_reserved_outbound_slots_default_20_percent() {
+        let _env = crate::test_env::guard();
         std::env::remove_var("IRIUM_P2P_RESERVED_OUTBOUND_SLOTS");
         std::env::set_var("IRIUM_P2P_MAX_PEERS", "100");
         assert_eq!(reserved_outbound_slots_pct(), 20);
@@ -10394,6 +10420,7 @@ mod tests {
 
     #[test]
     fn c7_reserved_outbound_slots_env_tunable_and_capped_at_half() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_P2P_MAX_PEERS", "100");
         std::env::set_var("IRIUM_P2P_RESERVED_OUTBOUND_SLOTS", "40");
         assert_eq!(inbound_peer_limit(), 60);
@@ -10413,6 +10440,7 @@ mod tests {
 
     #[test]
     fn c7_ban_threshold_unchanged_at_20() {
+        let _env = crate::test_env::guard();
         std::env::remove_var("IRIUM_REPUTATION_BAN_SCORE_THRESHOLD");
         assert_eq!(
             reputation_ban_score_threshold(),
@@ -10426,6 +10454,7 @@ mod tests {
     /// paid nothing.
     #[tokio::test]
     async fn c7_timed_out_request_charges_the_peer() {
+        let _env = crate::test_env::guard();
         let dir = c7_isolate_state("timeout");
         std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "5");
 
@@ -10462,6 +10491,7 @@ mod tests {
     /// the reaper sweeps. This is what marking (rather than removing) buys.
     #[tokio::test]
     async fn c7_timeout_penalty_is_idempotent_across_sweeps() {
+        let _env = crate::test_env::guard();
         let dir = c7_isolate_state("idem");
         std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "5");
 
@@ -10497,6 +10527,7 @@ mod tests {
     /// double-charging would corrupt the calibrated eviction bound.
     #[tokio::test]
     async fn c7_delivered_request_is_never_charged_as_a_timeout() {
+        let _env = crate::test_env::guard();
         let dir = c7_isolate_state("delivered");
         std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "5");
 
@@ -10529,6 +10560,7 @@ mod tests {
     /// A request still inside its delivery budget is not yet overdue.
     #[tokio::test]
     async fn c7_request_within_the_budget_is_not_charged() {
+        let _env = crate::test_env::guard();
         let dir = c7_isolate_state("young");
         std::env::set_var("IRIUM_P2P_BLOCK_REQUEST_TIMEOUT_SECS", "600");
 
@@ -10565,6 +10597,7 @@ mod tests {
     /// harness run and the eventual four-part proof are for.
     #[test]
     fn c7_keying_negative_control_inbound_penalties_must_reach_is_banned() {
+        let _env = crate::test_env::guard();
         let dir = c7_isolate_state("keying");
         std::env::remove_var("IRIUM_REPUTATION_BAN_SCORE_THRESHOLD");
 
@@ -10612,6 +10645,7 @@ mod tests {
     /// path, so the two handlers can no longer score the same peer under two names.
     #[test]
     fn c7_both_block_paths_key_reputation_by_ip() {
+        let _env = crate::test_env::guard();
         let sock = SocketAddr::new(c7_ip(32), 51234);
         assert_eq!(
             trusted_anchor_peer_id(sock, false),
@@ -10721,6 +10755,7 @@ mod tests {
     /// second call", which no amount of exercising a single call site can detect.
     #[test]
     fn c7_exactly_two_record_block_call_sites_in_p2p() {
+        let _env = crate::test_env::guard();
         let src = include_str!("p2p.rs");
         // Count in production code only: the test module below legitimately calls
         // record_block on its own manager instances, and this test's own assertion

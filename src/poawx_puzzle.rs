@@ -575,6 +575,7 @@ mod tests {
 
     #[test]
     fn phase24a_puzzle_solution_wire_malformed_rejected() {
+        let _env = crate::test_env::guard();
         assert!(PuzzleSolutionV1::deserialize(&[0u8; PUZZLE_SOLUTION_WIRE - 1]).is_err());
         assert!(PuzzleSolutionV1::deserialize(&[0u8; PUZZLE_SOLUTION_WIRE + 1]).is_err());
         assert!(PuzzleSolutionV1::deserialize(&[]).is_err());
@@ -583,6 +584,7 @@ mod tests {
 
     #[test]
     fn mode_assignment_deterministic_and_bound() {
+        let _env = crate::test_env::guard();
         let (pkh, td, apd, _cd, seed) = ctx();
         let m1 = assign_puzzle_mode(1, 10, 1, &pkh, &td, &apd, &seed);
         let m2 = assign_puzzle_mode(1, 10, 1, &pkh, &td, &apd, &seed);
@@ -607,6 +609,7 @@ mod tests {
 
     #[test]
     fn challenge_digest_mutation_sensitivity() {
+        let _env = crate::test_env::guard();
         let (pkh, td, apd, cd, seed) = ctx();
         let p = PuzzleDifficultyProfile::default();
         let c0 = PuzzleChallengeV1::build(1, 10, 1, pkh, td, apd, cd, seed, p);
@@ -642,6 +645,7 @@ mod tests {
 
     #[test]
     fn solve_and_verify_each_mode() {
+        let _env = crate::test_env::guard();
         let p = PuzzleDifficultyProfile {
             anchor_bits: 6,
             mem_words: 32,
@@ -679,6 +683,7 @@ mod tests {
 
     #[test]
     fn threshold_modes_reject_wrong_nonce_and_below_threshold() {
+        let _env = crate::test_env::guard();
         let p = PuzzleDifficultyProfile {
             anchor_bits: 8,
             mem_words: 32,
@@ -706,6 +711,7 @@ mod tests {
 
     #[test]
     fn wrong_solver_or_seed_changes_challenge_and_invalidates() {
+        let _env = crate::test_env::guard();
         let p = PuzzleDifficultyProfile {
             anchor_bits: 6,
             ..Default::default()
@@ -733,6 +739,7 @@ mod tests {
 
     #[test]
     fn solution_wire_roundtrip() {
+        let _env = crate::test_env::guard();
         let s = PuzzleSolutionV1 {
             mode: 2,
             nonce: 0xDEAD_BEEF,
@@ -746,6 +753,7 @@ mod tests {
 
     #[test]
     fn profile_is_bounded() {
+        let _env = crate::test_env::guard();
         let huge = PuzzleDifficultyProfile {
             anchor_bits: 255,
             mem_words: u32::MAX,
@@ -761,6 +769,7 @@ mod tests {
 
     #[test]
     fn gate_logic_pure_and_mainnet_off() {
+        let _env = crate::test_env::guard();
         assert!(!puzzle_work_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(puzzle_work_gate(1, Some(1), 100));
         assert!(!puzzle_work_gate(1, None, 100));
@@ -793,6 +802,7 @@ mod p2a_anchor_bits_unification {
     /// (`default_profile`) and the producer can no longer disagree about `anchor_bits`.
     #[test]
     fn either_env_name_resolves_identically() {
+        let _env = crate::test_env::guard();
         devnet();
         clear();
         assert_eq!(configured_anchor_bits(), None, "unset => default");
@@ -813,6 +823,7 @@ mod p2a_anchor_bits_unification {
     /// silently pick one) so a misconfigured node cannot quietly fork itself.
     #[test]
     fn conflicting_values_are_rejected_not_silently_resolved() {
+        let _env = crate::test_env::guard();
         clear();
         std::env::set_var("IRIUM_POAWX_PUZZLE_BITS", "10");
         std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "10");
@@ -834,6 +845,7 @@ mod p2a_anchor_bits_unification {
     /// Mainnet has neither var set, which is why the historical split never bit.
     #[test]
     fn unset_matches_the_live_mainnet_configuration() {
+        let _env = crate::test_env::guard();
         clear();
         assert_eq!(
             default_profile().anchor_bits,
@@ -850,6 +862,7 @@ mod p2a_cap_regression {
     /// the producer capped it to 24 -- the exact divergence P2-A removes.
     #[test]
     fn over_large_value_caps_rather_than_failing() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::remove_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS");
         std::env::set_var("IRIUM_POAWX_PUZZLE_BITS", "9999");
@@ -870,6 +883,7 @@ mod d1b_anchor_bits_is_not_env_tunable_on_mainnet {
     /// mainnet lets one node compute a different digest and reject every valid block.
     #[test]
     fn mainnet_ignores_the_env_override_devnet_honours_it() {
+        let _env = crate::test_env::guard();
         std::env::set_var("IRIUM_POAWX_PUZZLE_BITS", "17");
         std::env::set_var("IRIUM_NETWORK", "mainnet");
         assert_eq!(

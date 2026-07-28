@@ -385,6 +385,7 @@ mod tests {
 
     #[test]
     fn penalty_status_roundtrip_and_eligibility() {
+        let _env = crate::test_env::guard();
         for s in [
             PenaltyStatus::Clean,
             PenaltyStatus::Warned,
@@ -407,6 +408,7 @@ mod tests {
 
     #[test]
     fn penalty_weight_multipliers_fixed_point() {
+        let _env = crate::test_env::guard();
         assert_eq!(PenaltyStatus::Clean.weight_multiplier_permille(), 1000);
         assert_eq!(PenaltyStatus::Warned.weight_multiplier_permille(), 1000);
         assert_eq!(
@@ -426,6 +428,7 @@ mod tests {
 
     #[test]
     fn penalty_record_wire_roundtrip() {
+        let _env = crate::test_env::guard();
         let mut r = PenaltyRecord::new();
         r.slash(42);
         r.invalid_count = 7;
@@ -438,6 +441,7 @@ mod tests {
 
     #[test]
     fn record_slash_unslash_exact_inverse() {
+        let _env = crate::test_env::guard();
         let mut r = PenaltyRecord::new();
         assert_eq!(r.status, PenaltyStatus::Clean);
         r.slash(10);
@@ -456,6 +460,7 @@ mod tests {
 
     #[test]
     fn persistent_penalty_apply_revert_exact_inverse() {
+        let _env = crate::test_env::guard();
         let mut p = PersistentPenalty::new();
         let empty = p.digest();
         let off = [0xABu8; 20];
@@ -476,6 +481,7 @@ mod tests {
 
     #[test]
     fn persistent_penalty_multi_offence_per_offender() {
+        let _env = crate::test_env::guard();
         let mut p = PersistentPenalty::new();
         let off = [0x07u8; 20];
         p.apply_slash(off, 100, 0, 150);
@@ -491,6 +497,7 @@ mod tests {
 
     #[test]
     fn persistent_penalty_digest_order_independent() {
+        let _env = crate::test_env::guard();
         let a = [0x11u8; 20];
         let b = [0x22u8; 20];
         let mut p1 = PersistentPenalty::new();
@@ -504,6 +511,7 @@ mod tests {
 
     #[test]
     fn penalty_escalation_and_expiry() {
+        let _env = crate::test_env::guard();
         let t = PenaltyThresholds::default();
         let mut r = PenaltyRecord::new();
         assert!(r.eligible_for_high_trust_role());
@@ -532,6 +540,7 @@ mod tests {
 
     #[test]
     fn penalty_overflow_safe() {
+        let _env = crate::test_env::guard();
         let t = PenaltyThresholds::default();
         let mut r = PenaltyRecord::new();
         r.invalid_count = u32::MAX;
@@ -544,6 +553,7 @@ mod tests {
 
     #[test]
     fn penalty_gate_logic_pure() {
+        let _env = crate::test_env::guard();
         assert!(!penalty_gate(0, Some(1), 100), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(
             penalty_gate(1, Some(1), 100),

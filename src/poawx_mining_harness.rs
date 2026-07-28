@@ -2009,15 +2009,14 @@ fn build_all_gates_block_with(
 mod peer_announce_tests {
     use super::*;
 
-    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     /// The announcement must be readable by `scan_blocks_for_peers` (bin/iriumd.rs), which
     /// assumes `script[0] == OP_RETURN`, `script[1] == payload length`, then the
     /// `IRIUM_PEER ` prefix followed by a parseable socket address.
     #[test]
     fn peer_announcement_round_trips_through_the_reader_format() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("IRIUM_POAWX_ANNOUNCE_PEER", "203.0.113.7:38291");
+        let _env = crate::test_env::guard();
+                std::env::set_var("IRIUM_POAWX_ANNOUNCE_PEER", "203.0.113.7:38291");
         // 203.0.113.0/24 is TEST-NET-3 (documentation) and is correctly refused.
         assert!(peer_announcement_script().is_none(), "documentation range refused");
 
@@ -2042,8 +2041,8 @@ mod peer_announce_tests {
     /// permanent, and every cold node would waste a dial slot on them.
     #[test]
     fn peer_announcement_refuses_undialable_addresses() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        for bad in [
+        let _env = crate::test_env::guard();
+                for bad in [
             "127.0.0.1:38291",     // loopback
             "0.0.0.0:38291",       // unspecified
             "192.168.1.10:38291",  // private
@@ -2068,8 +2067,8 @@ mod peer_announce_tests {
     /// announcement into producers without this is shipping it untested.
     #[test]
     fn peer_announcement_is_safe_under_the_four_role_fanout() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let primary = [0x11u8; 20];
+        let _env = crate::test_env::guard();
+                let primary = [0x11u8; 20];
         let compute = [0x22u8; 20];
         let verify = [0x33u8; 20];
         let support = [0x44u8; 20];
@@ -2116,8 +2115,8 @@ mod peer_announce_tests {
     /// If this ever stops holding, every announcing producer's block is rejected -- so pin it.
     #[test]
     fn extra_zero_value_op_return_does_not_break_coinbase_validation() {
-        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let primary = [0x11u8; 20];
+        let _env = crate::test_env::guard();
+                let primary = [0x11u8; 20];
         let reward = 5_000_000_000u64;
         let p2pkh = |pkh: &[u8; 20]| crate::tx::p2pkh_script(pkh);
 
@@ -2155,6 +2154,7 @@ mod tests {
 
     #[test]
     fn guard_network_accepts_known_networks() {
+        let _env = crate::test_env::guard();
         // E1: harness accepts known Irium networks and refuses unknown ids.
         assert!(guard_network(0).is_ok(), "mainnet (0) allowed");
         assert!(guard_network(1).is_ok(), "testnet (1) allowed");
@@ -2166,6 +2166,7 @@ mod tests {
 
     #[test]
     fn guard_isolated_storage_refuses_default_and_missing() {
+        let _env = crate::test_env::guard();
         // E2: missing dir refused.
         assert!(guard_isolated_storage(None).is_err(), "no dir refused");
         assert!(
@@ -2204,6 +2205,7 @@ mod tests {
 
     #[test]
     fn mine_pow_finds_nonce_with_real_irium_hash() {
+        let _env = crate::test_env::guard();
         // E11 (unit level): grinding the nonce with Irium's actual hash path
         // produces a header that satisfies the target via the SAME check the
         // node validator (`validate_block_header`) uses.
@@ -2227,6 +2229,7 @@ mod tests {
 
     #[test]
     fn build_devnet_all_gates_block_accepts_mainnet() {
+        let _env = crate::test_env::guard();
         assert!(
             build_devnet_all_gates_block(0, 1, [0x44u8; 32], None, 0x207fffff, 1, 1).is_ok(),
             "builder accepts known mainnet network id"
@@ -2235,6 +2238,7 @@ mod tests {
 
     #[test]
     fn unpayable_fanout_extra_is_not_folded_as_winner() {
+        let _env = crate::test_env::guard();
         // Regression for the 2026-07-25 activation halt: a fan-out extra the producer
         // CANNOT pay (no collected bundle for it) must NOT be folded into the candidate
         // set, so the enforced validator's `best_for_role` (chain.rs:2307) always equals
@@ -2362,6 +2366,7 @@ mod tests {
 
     #[test]
     fn worker_and_builder_agree_on_puzzle_challenge_at_height_two() {
+        let _env = crate::test_env::guard();
         // The fix: with the node-authoritative dominance weight on BOTH sides, the worker's
         // solved puzzle verifies against the builder's rebuilt challenge at height >= 2.
         let (proof, _pkh, node_weight, height, prev, profile) = dominance_weight_fixture();
@@ -2376,6 +2381,7 @@ mod tests {
 
     #[test]
     fn hardcoded_weight_breaks_puzzle_verification_at_height_two() {
+        let _env = crate::test_env::guard();
         // Prove-the-break: the OLD behaviour (candidate built with the hardcoded 1000) yields
         // a different candidate digest than the node-weight candidate at height >= 2, so the
         // worker's solution against its 1000-challenge fails against the builder's real
@@ -2395,6 +2401,7 @@ mod tests {
 
     #[test]
     fn seed_non_divergence_endpoint_matches_builder_at_height_two() {
+        let _env = crate::test_env::guard();
         // Lock that the /poawx/role-work seed (expected_epoch_seed) and the collected-builder's
         // reconstruction (admission_epoch_seed grandparent base + seed_components_from_block,
         // which is exactly what /rpc/block emits) are the SAME seed for a real parent block at

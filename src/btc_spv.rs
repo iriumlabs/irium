@@ -732,6 +732,7 @@ mod tests {
 
     #[test]
     fn devnet_btc_spv_returns_some_when_all_env_vars_present() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         clear_btc_spv_env();
         std::env::set_var("IRIUM_BTC_SPV_RELAY_ACTIVATION_HEIGHT", "100");
@@ -762,6 +763,7 @@ mod tests {
 
     #[test]
     fn devnet_btc_spv_returns_none_when_activation_env_missing() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         clear_btc_spv_env();
         std::env::set_var("IRIUM_BTC_ANCHOR_HEIGHT", "880000");
@@ -778,6 +780,7 @@ mod tests {
 
     #[test]
     fn devnet_btc_spv_returns_none_when_anchor_env_partial() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         clear_btc_spv_env();
         std::env::set_var("IRIUM_BTC_SPV_RELAY_ACTIVATION_HEIGHT", "100");
@@ -792,6 +795,7 @@ mod tests {
 
     #[test]
     fn devnet_btc_spv_returns_none_on_malformed_anchor_hash() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         clear_btc_spv_env();
         std::env::set_var("IRIUM_BTC_SPV_RELAY_ACTIVATION_HEIGHT", "100");
@@ -806,6 +810,7 @@ mod tests {
 
     #[test]
     fn devnet_btc_spv_accepts_decimal_bits() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         clear_btc_spv_env();
         std::env::set_var("IRIUM_BTC_SPV_RELAY_ACTIVATION_HEIGHT", "100");
@@ -825,6 +830,7 @@ mod tests {
 
     #[test]
     fn testnet_btc_spv_uses_same_env_path_as_devnet() {
+        let _env = crate::test_env::guard();
         let _guard = env_lock().lock().unwrap();
         clear_btc_spv_env();
         std::env::set_var("IRIUM_BTC_SPV_RELAY_ACTIVATION_HEIGHT", "50");

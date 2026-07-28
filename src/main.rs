@@ -30,6 +30,8 @@ mod tx;
 // (and its `#[cfg(test)] mod tests`) resolves every `crate::` path that the
 // shared modules reference. Not used by `main()` itself; `#![allow(warnings)]`
 // above silences the resulting dead-code warnings. Keep in sync with lib.rs.
+#[cfg(test)]
+mod test_env;
 mod attestor_bond;
 mod btc_p2p;
 mod header_sync;

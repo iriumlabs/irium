@@ -703,7 +703,10 @@ GitHub</a>
       timestamp:     h.time,
       tx_count:      b.tx_hex ? b.tx_hex.length : 0,
       miner_address: b.miner_address,
-      total_reward:  5000000000,
+      // Prefer what the coinbase ACTUALLY paid; fall back to the halving-aware schedule.
+      // The old flat 5000000000 was wrong twice over: it ignored the real coinbase and it
+      // would keep claiming 50 IRM straight through every future halving.
+      total_reward:  rewardSatsFor(b),
       // PoAW-X pays up to four role workers per block (proposer 55% / compute 22% /
       // verify 13% / support 10%). Carry the decoded coinbase payees through so the row
       // can show the real split instead of just the proposer and the full subsidy.
@@ -1047,6 +1050,21 @@ GitHub</a>
     if (m)   m.style.display = 'flex';
   };
 
+  // Subsidy in sats for a block: the sum the coinbase actually paid when the API gave us
+  // the payees, otherwise the scheduled (halving-aware) amount for that height.
+  function rewardSatsFor(b) {
+    var ps = (b && b.coinbase_payees) || [];
+    if (ps.length) {
+      var sum = 0;
+      for (var i = 0; i < ps.length; i++) {
+        sum += (typeof ps[i].amount_irm === 'number' ? ps[i].amount_irm : 0);
+      }
+      if (sum > 0) return Math.round(sum * REWARD_DENOM);
+    }
+    var halvings = Math.floor((b && b.height ? b.height : 0) / HALVING_INTERVAL);
+    return Math.round(50 * Math.pow(0.5, halvings) * REWARD_DENOM);
+  }
+
   function blockReward(height) {
     var halvings = Math.floor(height / HALVING_INTERVAL);
     var reward   = 50 * Math.pow(0.5, halvings);
@@ -1248,7 +1266,9 @@ GitHub</a>
     var hrVal = parseFloat(hrEl.value), huVal = parseInt(huEl.value || '1000000', 10);
     if (!hrVal || isNaN(hrVal) || hrVal <= 0) { dayEl.textContent = 'enter hashrate'; return; }
     if (!st.chainHashrate) { dayEl.textContent = '—'; return; }
-    var daily = (hrVal * huVal / st.chainHashrate) * BLOCKS_DAY * 50;
+    // Was hardcoded 50, which silently overstates earnings after any halving.
+    var rwdIrm = 50 * Math.pow(0.5, Math.floor((st.tipHeight || 0) / HALVING_INTERVAL));
+    var daily = (hrVal * huVal / st.chainHashrate) * BLOCKS_DAY * rwdIrm;
     dayEl.textContent = daily < 0.0001 ? '< 0.0001 IRM' : daily.toFixed(4) + ' IRM';
   }
   window.updateCalc = updateCalc;

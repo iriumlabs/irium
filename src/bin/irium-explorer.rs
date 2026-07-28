@@ -3091,6 +3091,70 @@ async fn blockhash(
 // `/rpc/block_by_hash?hash=..`, which proxy straight to the node (null
 // miner_address). These mirror the node response verbatim and only fill in the
 // derived first-P2PKH miner_address. Display-only; zero consensus effect.
+/// Scan a coinbase tx's raw bytes for its P2PKH outputs -> (base58 address, sats).
+/// Uses the fixed P2PKH output pattern (`<8B value LE> 19 76a914 <20B pkh> 88ac`) rather
+/// than a full tx parse -- coinbase outputs are all P2PKH or OP_RETURN, so this is exact
+/// and avoids depending on a tx deserializer the lib doesn't expose.
+fn decode_coinbase_payees(raw: &[u8]) -> Vec<(String, u64)> {
+    let mut out = Vec::new();
+    let mut i = 8usize; // need 8 value bytes before the script-length byte
+    while i + 26 <= raw.len() {
+        if raw[i] == 0x19
+            && raw[i + 1] == 0x76
+            && raw[i + 2] == 0xa9
+            && raw[i + 3] == 0x14
+            && raw[i + 24] == 0x88
+            && raw[i + 25] == 0xac
+        {
+            let val = u64::from_le_bytes(raw[i - 8..i].try_into().unwrap());
+            let mut pkh = [0u8; 20];
+            pkh.copy_from_slice(&raw[i + 4..i + 24]);
+            out.push((irium_node_rs::storage::base58_p2pkh_from_hash(&pkh), val));
+            i += 26;
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// Coinbase payees of a block JSON as (address, sats), decoded from tx_hex[0].
+fn block_coinbase_payees(block: &Value) -> Vec<(String, u64)> {
+    let cb_hex = block
+        .get("tx_hex")
+        .and_then(|v| v.as_array())
+        .and_then(|a| a.first())
+        .and_then(|v| v.as_str())
+        .or_else(|| block.get("tx_hex").and_then(|v| v.as_str()));
+    match cb_hex.and_then(|h| hex::decode(h.trim()).ok()) {
+        Some(raw) => decode_coinbase_payees(&raw),
+        None => Vec::new(),
+    }
+}
+
+/// Attach `coinbase_payees` (address / amount_irm / share_pct) to a block JSON so
+/// consumers see the PoAW-X reward SPLIT (proposer 55% + worker roles 22/13/10 to
+/// distinct workers) rather than just the proposer + the full height-based subsidy.
+fn attach_coinbase_payees(block: &mut Value, height: u64) {
+    let total_sats = reward_irm_for_height(height) * 1e8;
+    let payees: Vec<Value> = block_coinbase_payees(block)
+        .into_iter()
+        .map(|(addr, sats)| {
+            json!({
+                "address": addr,
+                "amount_irm": (sats as f64) / 1e8,
+                "share_pct": if total_sats > 0.0 {
+                    ((sats as f64) / total_sats * 100.0 * 10.0).round() / 10.0
+                } else { 0.0 },
+            })
+        })
+        .collect();
+    if let Some(obj) = block.as_object_mut() {
+        obj.insert("coinbase_payee_count".into(), json!(payees.len()));
+        obj.insert("coinbase_payees".into(), json!(payees));
+    }
+}
+
 async fn rpc_blocks_enriched(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
@@ -3106,6 +3170,12 @@ async fn rpc_blocks_enriched(
     if let Some(arr) = v.get_mut("blocks").and_then(|b| b.as_array_mut()) {
         for b in arr.iter_mut() {
             enrich_miner_address(b);
+            // Attach the coinbase payees so consumers can show the PoAW-X reward SPLIT
+            // (proposer 55% + compute/verify/support 22/13/10 to distinct workers) rather
+            // than just the proposer and a flat subsidy. This is the endpoint the public
+            // explorer page at irium.org/explorer/ actually reads.
+            let height = b.get("height").and_then(|h| h.as_u64()).unwrap_or(0);
+            attach_coinbase_payees(b, height);
         }
     }
     Ok(Json(v))

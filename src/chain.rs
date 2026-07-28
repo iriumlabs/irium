@@ -912,10 +912,33 @@ impl ChainState {
             .unwrap_or(false)
     }
 
+    /// The target to hold while PoW demotion suppresses LWMA feedback: the one in force
+    /// immediately before demotion activated. `None` when the freeze is not active, or when
+    /// that history is not available (fail open -> unchanged LWMA behaviour).
+    fn demotion_frozen_target(&self, height: u64) -> Option<Target> {
+        if !crate::poawx_proposer::difficulty_demotion_freeze_active(height) {
+            return None;
+        }
+        let act = crate::poawx_proposer::pow_demotion_activation_height()?;
+        let baseline_h = act.checked_sub(1)?;
+        self.chain
+            .get(baseline_h as usize)
+            .map(|b| b.header.target())
+    }
+
     pub fn target_for_height(&self, height: u64) -> Target {
         let legacy_target = self.legacy_target_for_height(height);
         if !self.lwma_active_at(height) {
             return legacy_target;
+        }
+
+        // While PoW demotion is active LWMA has no feedback: eligible proposers only have
+        // to beat the FLOOR, so block times say nothing about the network target and LWMA
+        // ratchets forever (mainnet: 2.76e6 -> 5.91e40 in ~2,500 blocks). Hold the target
+        // at the value in force when demotion began instead of chasing.
+        // See MAINNET_DIFFICULTY_DEMOTION_FREEZE_ACTIVATION_HEIGHT. Inert until activated.
+        if let Some(frozen) = self.demotion_frozen_target(height) {
+            return frozen;
         }
 
         // Use LWMA v2 params if active; otherwise fall back to v1. Both
@@ -7120,6 +7143,93 @@ mod tests {
             next_target >= min_step_target,
             "hardening must respect 2x step clamp"
         );
+    }
+
+    /// LIVE 2026-07-28 runaway: mainnet difficulty went 2.76e6 (h61,000, just before PoW
+    /// demotion) to 5.91e40 (h63,500) -- +19,528% in 24h, still compounding.
+    ///
+    /// Mechanism: LWMA computes `next_target = avg_target * observed / expected`, so it
+    /// tightens whenever blocks beat the protocol interval. Under demotion an eligible
+    /// proposer only has to beat the FLOOR, so block times are set by the floor and carry
+    /// no information about the network target. LWMA reads "too fast", tightens, nothing
+    /// changes, repeat -- feedback loop with the wire cut. It matters because a NON-eligible
+    /// miner must still meet the full target, so the runaway progressively locks out the
+    /// independent miners the chain needs.
+    ///
+    /// Asserts the CONTROL (the spiral is real and reproducible with the freeze off) before
+    /// asserting the fix, so this cannot pass by accident.
+    #[test]
+    fn demotion_difficulty_freeze_stops_the_lwma_runaway() {
+        let _g = chain_poawx_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let activation = 70u64;
+        let demotion_at = 40u64;
+
+        let build = || {
+            let mut chain = difficulty_chain(Some(activation), 0x207fffff);
+            let test_bits = synthetic_working_bits(&chain);
+            let mut time = chain.chain[0].header.time;
+            // Blocks arriving far faster than the protocol interval -- what floor-mining
+            // under demotion looks like to LWMA.
+            for _ in 1..activation {
+                time += 15;
+                push_synthetic_block(&mut chain, time, test_bits);
+            }
+            chain
+        };
+
+        // CONTROL: freeze OFF -> LWMA tightens (target falls below the pre-demotion one).
+        std::env::remove_var("IRIUM_POAWX_DIFFICULTY_FREEZE_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+        let chain = build();
+        let baseline = chain
+            .chain
+            .get((demotion_at - 1) as usize)
+            .expect("baseline block")
+            .header
+            .target()
+            .to_target();
+        let unfrozen = chain.target_for_height(activation).to_target();
+        assert!(
+            unfrozen < baseline,
+            "control: with the freeze off LWMA must ratchet the target DOWN (difficulty up); \
+             otherwise this test is not reproducing the runaway"
+        );
+
+        // FIX: freeze ON (with demotion active) -> target held at the pre-demotion value.
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", demotion_at.to_string());
+        std::env::set_var("IRIUM_POAWX_DIFFICULTY_FREEZE_ACTIVATION_HEIGHT", demotion_at.to_string());
+        assert!(
+            crate::poawx_proposer::difficulty_demotion_freeze_active(activation),
+            "precondition: freeze must be active at this height"
+        );
+        let chain2 = build();
+        let frozen = chain2.target_for_height(activation).to_target();
+        let baseline2 = chain2
+            .chain
+            .get((demotion_at - 1) as usize)
+            .expect("baseline block")
+            .header
+            .target()
+            .to_target();
+        assert_eq!(
+            frozen, baseline2,
+            "frozen target must equal the target in force when demotion began"
+        );
+        assert!(
+            frozen > unfrozen,
+            "the freeze must be LOOSER than the runaway value it replaces"
+        );
+
+        // And it must not drift as more fast blocks arrive.
+        let later = chain2.target_for_height(activation + 5).to_target();
+        assert_eq!(frozen, later, "frozen target must not drift with more fast blocks");
+
+        std::env::remove_var("IRIUM_POAWX_DIFFICULTY_FREEZE_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
     }
 
     #[test]

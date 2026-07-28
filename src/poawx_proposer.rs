@@ -226,6 +226,52 @@ pub fn pow_demotion_gate(network_id: u8, activation: Option<u64>, height: u64) -
 
 /// Whether PoW demotion is active at `height`. Mainnet hard-off; default off on all
 /// networks until the activation-height env is explicitly set.
+/// Freeze the LWMA network target while PoW demotion is active.
+///
+/// THE BUG THIS CLOSES. LWMA sets `next_target = avg_target * observed / expected`, i.e. it
+/// raises difficulty whenever blocks arrive faster than the protocol interval. Under PoW
+/// demotion an eligible proposer only has to beat the FLOOR target, so block times are
+/// governed by the floor and are completely insensitive to the network target. LWMA reads
+/// "too fast", tightens, nothing changes, and it tightens again -- a control loop with its
+/// feedback disconnected. Measured on mainnet: difficulty went 2.76e6 (h61,000, just before
+/// demotion) -> 5.91e40 (h63,500), +19,528% in 24h and still compounding.
+///
+/// Consequences beyond a silly number on the explorer: a NON-eligible miner still has to
+/// meet the full target (that is what stops trivial-PoW spam), so the runaway makes the
+/// chain progressively unmineable by exactly the independent miners it needs to attract,
+/// and disabling demotion would halt the chain outright.
+///
+/// THE FIX. While demotion is active the network target is not being exercised, so it must
+/// not drift. Hold it at the value in force when demotion began -- a real, honest
+/// difficulty produced by real mining -- rather than at whatever the runaway reached.
+/// Setting it to the floor instead would be wrong: the floor is granted only to eligible
+/// proposers, and lowering the network target to it would remove anti-spam PoW for
+/// everyone else.
+///
+/// TIGHTENS/LOOSENS validity, so it is a HARD FORK: ships inert (`None`) and switches on
+/// only at a coordinated activation height.
+/// ARMED at 63,824 (2026-07-28). Chosen ~300 blocks (~5.4h) ahead of the tip at the time
+/// so BOTH hosts are upgraded well before it fires; a host still on the old binary would
+/// compute a different required target and fork at exactly this height.
+pub const MAINNET_DIFFICULTY_DEMOTION_FREEZE_ACTIVATION_HEIGHT: Option<u64> = Some(63_824);
+
+/// Is the demotion difficulty freeze in force at `height`? Mainnet is const-controlled
+/// (env ignored); other networks may set it via env for tests/harnesses.
+pub fn difficulty_demotion_freeze_active(height: u64) -> bool {
+    if crate::activation::network_id_byte() == 0 {
+        return MAINNET_DIFFICULTY_DEMOTION_FREEZE_ACTIVATION_HEIGHT
+            .map(|h| height >= h)
+            .unwrap_or(false)
+            && pow_demotion_active(height);
+    }
+    std::env::var("IRIUM_POAWX_DIFFICULTY_FREEZE_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|h| height >= h)
+        .unwrap_or(false)
+        && pow_demotion_active(height)
+}
+
 pub fn pow_demotion_active(height: u64) -> bool {
     pow_demotion_gate(network_id_byte(), pow_demotion_activation_height(), height)
 }

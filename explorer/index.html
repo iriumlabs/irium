@@ -704,6 +704,10 @@ GitHub</a>
       tx_count:      b.tx_hex ? b.tx_hex.length : 0,
       miner_address: b.miner_address,
       total_reward:  5000000000,
+      // PoAW-X pays up to four role workers per block (proposer 55% / compute 22% /
+      // verify 13% / support 10%). Carry the decoded coinbase payees through so the row
+      // can show the real split instead of just the proposer and the full subsidy.
+      coinbase_payees: b.coinbase_payees || [],
       nonce:         h.nonce,
       bits:          h.bits,
       prev_hash:     h.prev_hash,
@@ -860,16 +864,38 @@ GitHub</a>
       tbody.innerHTML = '<tr><td colspan="6" class="xp-ldg">No blocks found</td></tr>';
     } else {
       tbody.innerHTML = blocks.map(function (b) {
-        var minerCell = b.miner_address
-          ? '<span class="xp-adr" style="cursor:pointer" onclick="event.stopPropagation();showAddr(\'' + b.miner_address + '\')">' + b.miner_address + '</span>'
-          : '—';
+        // Group payees by address (roles that land on the same key are summed) so a
+        // self-filled block still reads as one miner, while a distributed block shows
+        // every worker that was actually paid.
+        var _order = [], _sum = {};
+        (b.coinbase_payees || []).forEach(function (p) {
+          var a = p.address; if (!a) return;
+          if (!(a in _sum)) { _order.push(a); _sum[a] = 0; }
+          _sum[a] += (typeof p.amount_irm === 'number' ? p.amount_irm : 0);
+        });
+        var adrLink = function (a) {
+          return '<span class="xp-adr" style="cursor:pointer" onclick="event.stopPropagation();showAddr(\'' + a + '\')">' + a + '</span>';
+        };
+        var minerCell, rewardCell;
+        if (_order.length > 1) {
+          minerCell = _order.map(function (a, i) {
+            return '<div style="display:flex;align-items:center;gap:6px">' + adrLink(a) +
+              '<span style="font-size:9px;color:rgba(255,255,255,0.35)">' + (i === 0 ? 'proposer' : 'worker') + '</span></div>';
+          }).join('');
+          rewardCell = _order.map(function (a, i) {
+            return '<div style="color:' + (i === 0 ? '#34d399' : '#6ec6ff') + '">' + _sum[a].toFixed(2) + ' IRM</div>';
+          }).join('');
+        } else {
+          minerCell = b.miner_address ? adrLink(b.miner_address) : '—';
+          rewardCell = fmtRwd(b.total_reward);
+        }
         return '<tr class="xp-click" data-ts="' + b.timestamp + '" data-bh="' + b.height + '" onclick="showBlock(' + b.height + ')">' +
           '<td><span class="xp-hl">' + fmtN(b.height) + '</span></td>' +
           '<td><span style="font-family:var(--xp-mono);font-size:11px;color:rgba(255,255,255,0.45);word-break:break-all;">' + (b.hash || '—') + '</span></td>' +
           '<td class="xp-age">' + fmtAge(b.timestamp, b.height) + '</td>' +
           '<td>' + (b.tx_count || 0) + '</td>' +
           '<td>' + minerCell + '</td>' +
-          '<td class="xp-rwd" style="color:#34d399">' + fmtRwd(b.total_reward) + '</td>' +
+          '<td class="xp-rwd" style="color:#34d399">' + rewardCell + '</td>' +
           '</tr>';
       }).join('');
     }

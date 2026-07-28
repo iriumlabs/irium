@@ -2227,6 +2227,10 @@ struct SeedDialInfo {
 
 const BUNDLED_SEEDLIST: &str = include_str!("../../bootstrap/seedlist.txt");
 const BUNDLED_SEEDLIST_SIG: &str = include_str!("../../bootstrap/seedlist.txt.sig");
+/// The signer set `load_signed_seeds` checks the seed list against. Bundled for the same
+/// reason as the list and the signature: all three are one unit, and materialising only
+/// two of them leaves verification unable to run at all.
+const BUNDLED_ALLOWED_SIGNERS: &str = include_str!("../../bootstrap/trust/allowed_signers");
 
 fn ensure_seedlist_in_bootstrap_dir() {
     let dir = storage::bootstrap_dir();
@@ -2238,6 +2242,16 @@ fn ensure_seedlist_in_bootstrap_dir() {
     }
     if !sig_path.exists() {
         let _ = fs::write(&sig_path, BUNDLED_SEEDLIST_SIG);
+    }
+    // Without this the signed-seed path could never succeed on ANY node: ssh-keygen was
+    // handed a path to a file that was only ever created in the source tree, so every
+    // node fell through to unsigned fallback seeds and the signature was decorative.
+    // Observed on all three nodes checked (vps, eu, a fresh node) on 2026-07-28.
+    let trust_dir = dir.join("trust");
+    let signers_path = trust_dir.join("allowed_signers");
+    if !signers_path.exists() {
+        let _ = fs::create_dir_all(&trust_dir);
+        let _ = fs::write(&signers_path, BUNDLED_ALLOWED_SIGNERS);
     }
 }
 
@@ -17555,10 +17569,32 @@ async fn main() {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    // Set up P2P node if configured via IRIUM_P2P_BIND env var or node config.
+    // Set up P2P node. Falls back to the network-wide default bind so that a node with
+    // no configuration at all still joins the network.
+    //
+    // This used to be `Option::None` when neither the env var nor the config named a bind
+    // address, and P2P was then skipped entirely: no listener, no dial, no heartbeat, and
+    // no error — the node served HTTP and sat at height 0 forever. The only trace was
+    // "[mempool-rebroadcast] P2P is disabled; not spawning" buried in startup noise. That
+    // is the whole new-operator experience (clone the repo, run iriumd), so the default
+    // has to be "join the network", not "do nothing quietly".
+    let p2p_bind_defaulted = std::env::var("IRIUM_P2P_BIND").is_err()
+        && node_cfg.as_ref().and_then(|cfg| cfg.p2p_bind.clone()).is_none();
     let p2p_bind_str: Option<String> = std::env::var("IRIUM_P2P_BIND")
         .ok()
-        .or_else(|| node_cfg.as_ref().and_then(|cfg| cfg.p2p_bind.clone()));
+        .or_else(|| node_cfg.as_ref().and_then(|cfg| cfg.p2p_bind.clone()))
+        .or_else(|| {
+            Some(format!(
+                "0.0.0.0:{}",
+                irium_node_rs::constants::DEFAULT_P2P_PORT
+            ))
+        });
+    if p2p_bind_defaulted {
+        eprintln!(
+            "[i] IRIUM_P2P_BIND not set; defaulting to 0.0.0.0:{} (set IRIUM_P2P_BIND to override)",
+            irium_node_rs::constants::DEFAULT_P2P_PORT
+        );
+    }
 
     // NAT-PMP: ask our OWN router to forward the P2P port, then advertise the resulting
     // public address. A node behind NAT can dial out but nobody can dial in, so it can never
@@ -17626,6 +17662,9 @@ async fn main() {
                 // Start listener in the background.
                 if let Err(e) = node.start().await {
                     eprintln!("Failed to start P2P listener on {}: {}", addr, e);
+                    eprintln!(
+                        "[warn] P2P DISABLED — this node cannot sync or receive blocks and will stay at its current height."
+                    );
                     None
                 } else {
                     Some(node)
@@ -17633,27 +17672,31 @@ async fn main() {
             }
             Err(e) => {
                 eprintln!("Invalid P2P bind address {}: {}", bind, e);
+                eprintln!(
+                    "[warn] P2P DISABLED — this node cannot sync or receive blocks and will stay at its current height."
+                );
                 None
             }
         }
     } else {
+        eprintln!(
+            "[warn] P2P DISABLED — this node cannot sync or receive blocks and will stay at its current height."
+        );
         None
     };
 
     // Build seed list: merge config, signed, and runtime seeds; filter locals.
     // Derive default seed port from the configured P2P bind address; 0 = no default.
+    // A bare IP in the seed list means "this host, on the network's port" — it can never
+    // mean "on whatever port I happen to bind". The old code derived this from our own
+    // IRIUM_P2P_BIND and otherwise fell back to 0, so a node on any non-default bind
+    // dialled every seed on its own port and a node with no bind at all dialled port 0.
+    // Both are unreachable. IRIUM_P2P_SEED_PORT remains the override for test networks
+    // that really do run seeds somewhere else.
     let default_seed_port: u16 = std::env::var("IRIUM_P2P_SEED_PORT")
         .ok()
         .and_then(|p| p.parse().ok())
-        .or_else(|| {
-            std::env::var("IRIUM_P2P_BIND")
-                .ok()
-                .or_else(|| node_cfg.as_ref().and_then(|cfg| cfg.p2p_bind.clone()))
-                .as_deref()
-                .and_then(|b| b.split(':').next_back())
-                .and_then(|p| p.parse().ok())
-        })
-        .unwrap_or(0);
+        .unwrap_or(irium_node_rs::constants::DEFAULT_P2P_PORT);
 
     ensure_seedlist_in_bootstrap_dir();
     let add_seed_args: Vec<String> = {
@@ -33073,4 +33116,78 @@ mod agent_version_tests {
         assert!(default_agent.contains(env!("CARGO_PKG_VERSION")), "encodes version: {default_agent}");
         assert_eq!(default_agent, concat!("Irium-Node/", env!("CARGO_PKG_VERSION")));
     }
+
+    /// The bootstrap trio (list, signature, signer set) must be internally consistent.
+    ///
+    /// This is the check that was missing when the live network broke: vps had an edited
+    /// `seedlist.txt` whose signature no longer matched, eu and every fresh node had no
+    /// `allowed_signers` at all, and all three silently fell through to unsigned seeds.
+    /// Nothing failed loudly, because nothing was verifying.
+    #[test]
+    fn bundled_seedlist_verifies_against_the_bundled_signer_set() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        assert!(!crate::BUNDLED_SEEDLIST.trim().is_empty(), "seed list must not be empty");
+        assert!(!crate::BUNDLED_SEEDLIST_SIG.trim().is_empty(), "signature must not be empty");
+        assert!(
+            crate::BUNDLED_ALLOWED_SIGNERS.contains("bootstrap-signer"),
+            "signer set must name the principal load_signed_seeds verifies against"
+        );
+
+        let dir = std::env::temp_dir().join(format!("irium_seedsig_{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let signers = dir.join("allowed_signers");
+        let sig = dir.join("seedlist.txt.sig");
+        std::fs::write(&signers, crate::BUNDLED_ALLOWED_SIGNERS).unwrap();
+        std::fs::write(&sig, crate::BUNDLED_SEEDLIST_SIG).unwrap();
+
+        let mut child = match Command::new("ssh-keygen")
+            .arg("-Y").arg("verify")
+            .arg("-f").arg(&signers)
+            .arg("-I").arg("bootstrap-signer")
+            .arg("-n").arg("file")
+            .arg("-s").arg(&sig)
+            .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => c,
+            // ssh-keygen absent: the node itself degrades to unsigned seeds here, so a
+            // build host without it cannot make a claim either way.
+            Err(_) => return,
+        };
+        child.stdin.as_mut().unwrap().write_all(crate::BUNDLED_SEEDLIST.as_bytes()).unwrap();
+        let ok = child.wait().unwrap().success();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(
+            ok,
+            "bundled seedlist.txt does not verify against bundled seedlist.txt.sig — \
+             re-sign with: ssh-keygen -Y sign -f <key> -n file bootstrap/seedlist.txt"
+        );
+    }
+
+    /// Materialising the list and signature but not the signer set left verification
+    /// unable to run on every node in the network.
+    #[test]
+    fn bootstrap_materialisation_includes_the_signer_set() {
+        // storage:: refuses a bootstrap dir outside HOME, so stage under HOME, not /tmp.
+        let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
+            .join(format!(".irium_bootmat_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::env::set_var("IRIUM_BOOTSTRAP_DIR", &dir);
+        crate::ensure_seedlist_in_bootstrap_dir();
+        for f in ["seedlist.txt", "seedlist.txt.sig", "trust/allowed_signers"] {
+            assert!(dir.join(f).exists(), "{f} must be materialised into the bootstrap dir");
+        }
+        std::env::remove_var("IRIUM_BOOTSTRAP_DIR");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A change here silently partitions the network: nodes on the old value can no
+    /// longer find nodes on the new one, and the seed list carries no port to correct it.
+    #[test]
+    fn default_p2p_port_is_the_live_network_port() {
+        assert_eq!(irium_node_rs::constants::DEFAULT_P2P_PORT, 38291);
+    }
+
 }

@@ -34,6 +34,19 @@ pub const LWMA_MAX_TARGET_UP_FACTOR: u64 = 2; // target may ease by at most 2x p
 pub const LWMA_MAX_TARGET_DOWN_FACTOR: u64 = 2; // target may tighten by at most 2x per block
 pub const LWMA_MIN_DIFFICULTY_FLOOR: u64 = 1; // 1 disables any stricter post-activation max-target cap
 
+/// The port every Irium node listens on for P2P, unless the operator overrides it.
+///
+/// This has to be a network-wide constant, not a per-host choice. The seed list ships
+/// bare IPs with no port, so a node that has never spoken to anyone has exactly one way
+/// to learn where to dial: this number. Before it existed the default was derived from
+/// the node's *own* bind port and otherwise fell back to 0, which meant a fresh node
+/// dialled port 0 and could never join — the live network only found itself because
+/// both hosts happened to carry the same hand-set value in their systemd units.
+///
+/// 38291 is that value: it is what mainnet has been running on, so changing it would
+/// partition the network rather than fix anything.
+pub const DEFAULT_P2P_PORT: u16 = 38291;
+
 #[allow(dead_code)]
 const INITIAL_SUBSIDY: u64 = 50 * 100_000_000; // 50 IRM in sat-equivalent
 

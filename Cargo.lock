@@ -1132,7 +1132,7 @@ dependencies = [
 
 [[package]]
 name = "irium-node-rs"
-version = "1.9.138"
+version = "1.9.139"
 dependencies = [
  "aes-gcm",
  "axum",

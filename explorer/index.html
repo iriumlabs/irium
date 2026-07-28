@@ -491,6 +491,10 @@ body {
         </div>
         <div class="xp-pager">
           <button class="xp-pb" id="xp-newer" onclick="xpPage(-1)" disabled>&#8592; Previous</button>
+          <input id="xp-jump" type="number" min="0" placeholder="go to height"
+                 style="width:120px;margin:0 8px;padding:5px 8px;border-radius:6px;border:1px solid rgba(110,198,255,0.25);background:transparent;color:#d4eeff;font-size:12px"
+                 onkeydown="if(event.key==='Enter')xpJump()">
+          <button class="xp-pb" onclick="xpJump()">Go</button>
           <div class="xp-pager-info">
             <span id="xp-plabel">—</span>
             <span id="xp-ptotal" class="xp-pager-sub">—</span>
@@ -629,7 +633,7 @@ GitHub</a>
 
   var API          = 'https://api.irium.org';
   var POOL         = 'https://api.irium.org/pool-stats/';
-  var PER_PAGE     = 20;
+  var PER_PAGE     = 50;
   var REWARD_DENOM = 1e8;
   var BLOCKS_DAY      = 288;
   var HALVING_INTERVAL = 1050000;
@@ -791,8 +795,14 @@ GitHub</a>
   function loadPoolStats() {
     return get(POOL).then(function (p) {
       st.pool = p;
+      // Pool counters only see miners connected to the STRATUM pool. Producers running a
+      // full node + CLI miner (which is how the chain is currently mined) never appear
+      // there, so this showed 0 while blocks were being found every ~65s. Prefer the
+      // on-chain count computed from who is actually being rewarded; fall back to the pool
+      // number only when we have no block data yet.
       var activeMiners = (p.asic ? (p.asic.active_miners || 0) : 0) + (p.cpu_gpu ? (p.cpu_gpu.active_miners || 0) : 0);
-      set('s-txcount', fmtN(activeMiners));
+      var onChain = onChainParticipants();
+      set('s-txcount', fmtN(onChain != null ? onChain : activeMiners));
       if (st.activeTab === 'ps') renderPoolStats(p);
     }).catch(function (e) { console.error('pool:', e); });
   }
@@ -937,6 +947,23 @@ GitHub</a>
   }
   window.xpPage = xpPage;
 
+  // Jump straight to a height. Walking 63k blocks 50 at a time is ~1,270 clicks, so the
+  // pager alone does not really make the whole chain reachable. offset is measured in
+  // blocks back from the tip, which is exactly tip - target.
+  function xpJump() {
+    var el = $id('xp-jump');
+    if (!el) return;
+    var target = parseInt(el.value, 10);
+    if (isNaN(target) || target < 0) return;
+    var tip = st.tipHeight || 0;
+    if (!tip) return;
+    if (target > tip) target = tip;
+    st.offset = Math.max(0, tip - target);
+    loadOverview();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+  window.xpJump = xpJump;
+
   function refreshAges() {
     var tbody = $id('xp-tbody');
     if (!tbody) return;
@@ -1062,6 +1089,24 @@ GitHub</a>
 
   // Subsidy in sats for a block: the sum the coinbase actually paid when the API gave us
   // the payees, otherwise the scheduled (halving-aware) amount for that height.
+  // Distinct addresses rewarded across the blocks we have loaded -- i.e. identities
+  // actually participating in consensus right now. Returns null when we have no payee
+  // data (older API), so the caller can fall back rather than display a false 0.
+  function onChainParticipants() {
+    var bs = st.lastBlocks || [];
+    if (!bs.length) return null;
+    var seen = {}, any = false;
+    for (var i = 0; i < bs.length; i++) {
+      var ps = bs[i].coinbase_payees || [];
+      for (var j = 0; j < ps.length; j++) {
+        if (ps[j].address) { seen[ps[j].address] = 1; any = true; }
+      }
+      if (!ps.length && bs[i].miner_address) { seen[bs[i].miner_address] = 1; any = true; }
+    }
+    if (!any) return null;
+    return Object.keys(seen).length;
+  }
+
   function rewardSatsFor(b) {
     var ps = (b && b.coinbase_payees) || [];
     if (ps.length) {

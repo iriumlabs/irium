@@ -2061,6 +2061,56 @@ mod peer_announce_tests {
         std::env::remove_var("IRIUM_POAWX_ANNOUNCE_PEER");
     }
 
+    /// CONSENSUS SAFETY under the LIVE payout shape: mainnet pays four roles
+    /// (55/22/13/10), not one. The existing test above pins only the single-payee case, so
+    /// it would not catch a validator that counted outputs differently once role payouts
+    /// are present -- and that is the shape every real block has. Shipping the
+    /// announcement into producers without this is shipping it untested.
+    #[test]
+    fn peer_announcement_is_safe_under_the_four_role_fanout() {
+        let _g = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let primary = [0x11u8; 20];
+        let compute = [0x22u8; 20];
+        let verify = [0x33u8; 20];
+        let support = [0x44u8; 20];
+        let reward = 5_000_000_000u64;
+        let a = crate::poawx::multi_role_amounts(reward);
+        let p2pkh = |pkh: &[u8; 20]| crate::tx::p2pkh_script(pkh);
+        let role = crate::poawx::RoleReward {
+            compute_contributor_pkh: compute,
+            verify_contributor_pkh: verify,
+            support_contributor_pkh: support,
+        };
+
+        // Baseline: irx1 marker + the four role payouts, in canonical order.
+        let mut outs = vec![
+            crate::tx::TxOutput { value: 0, script_pubkey: vec![0x6a, 0x04, b'i', b'r', b'x', b'1'] },
+            crate::tx::TxOutput { value: a[0], script_pubkey: p2pkh(&primary) },
+            crate::tx::TxOutput { value: a[1], script_pubkey: p2pkh(&compute) },
+            crate::tx::TxOutput { value: a[2], script_pubkey: p2pkh(&verify) },
+            crate::tx::TxOutput { value: a[3], script_pubkey: p2pkh(&support) },
+        ];
+        crate::chain::validate_poawx_coinbase_payout(&outs, &primary, reward, Some(&role), None)
+            .expect("four-role baseline must validate");
+
+        // Append the announcement exactly as the builder does.
+        std::env::set_var("IRIUM_POAWX_ANNOUNCE_PEER", "8.8.4.4:38291");
+        let script = peer_announcement_script().expect("routable address announces");
+        std::env::remove_var("IRIUM_POAWX_ANNOUNCE_PEER");
+        outs.push(crate::tx::TxOutput { value: 0, script_pubkey: script });
+        crate::chain::validate_poawx_coinbase_payout(&outs, &primary, reward, Some(&role), None)
+            .expect("announcement must not disturb the four-role payout");
+
+        // Control: give that same output value and the validator MUST reject, proving the
+        // rule protecting us is "zero-value", not "extra outputs are always tolerated".
+        outs.last_mut().unwrap().value = 1;
+        assert!(
+            crate::chain::validate_poawx_coinbase_payout(&outs, &primary, reward, Some(&role), None)
+                .is_err(),
+            "a value-bearing extra output must still be rejected under fan-out"
+        );
+    }
+
     /// CONSENSUS SAFETY: the announcement rides as a zero-value OP_RETURN, which
     /// `validate_poawx_coinbase_payout` ignores like any other non-P2PKH zero-value output.
     /// If this ever stops holding, every announcing producer's block is rejected -- so pin it.

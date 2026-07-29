@@ -38,6 +38,17 @@ What changed since the previous revision of this section:
   full network target.
 - **Ticket-proof and pool-admission enforcement are active** from block 62,236
   (`MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT`).
+- **The difficulty freeze is active** from block 64,291
+  (`MAINNET_DIFFICULTY_DEMOTION_FREEZE_ACTIVATION_HEIGHT`). While demotion is active LWMA has no
+  feedback — an eligible proposer only beats the floor, so block times say nothing about the
+  network target, and LWMA ratchets forever. Unfrozen, the declared difficulty ran from 1.72e6 at
+  block 61,413 to ~9.7e56 by 64,290. The target is now held at the value in force immediately
+  before demotion began (block 61,413: difficulty 1,721,700, bits `1a09be94`). This matters
+  because a NON-eligible miner must still meet the full target, so the runaway was progressively
+  locking out the independent miners the network needs.
+  ⚠️ An earlier arming of this freeze at block 63,824 never took effect: the gate was
+  const-controlled but its baseline lookup read an env var that mainnet ignores, so it silently
+  returned `None`. Fixed and re-armed in v1.9.149.
 
 Limitations that remain, stated plainly:
 

@@ -241,7 +241,18 @@ irium-miner-gpu --list-platforms
 
 You can force a specific one with `--platform <vendor|index>`, e.g. `--platform nvidia` or `--platform 1`. Run multiple GPUs at once with `--devices 0,1,2`.
 
-### Option C — Pool mining (recommended for steady rewards)
+### Option C — Pool mining (Stratum)
+
+> **⚠️ Since PoW demotion activated at block 61,414, Stratum/ASIC hashrate no longer wins mainnet
+> blocks.** A validly-selected PoAW-X proposer only has to beat a constant anti-spam floor, so a
+> commodity CPU produces blocks as fast as any amount of SHA-256d hashrate. The pool currently
+> reports **0 connected sessions, 0 accepted shares and 0 blocks found**, and every recent mainnet
+> block came from a PoAW-X CPU producer.
+>
+> The endpoints below are still running and documented for completeness, but pointing mining
+> hardware at them today will not earn block rewards. **Use [Option D](#option-d--run-your-own-poaw-x-producer-full-node-cpu-permissionless)
+> instead** — that is what actually produces blocks on mainnet now. This is a consequence of
+> hardware-neutral block production, not an outage.
 
 Pool mining splits the reward across many miners so you get small payments regularly instead of waiting for a rare solo block. Connect any Stratum v1 miner — including this repository's `irium-miner-gpu` — to the official public pool:
 

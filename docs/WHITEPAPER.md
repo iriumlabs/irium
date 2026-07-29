@@ -327,10 +327,15 @@ paths: release via secret preimage, or refund via block height timeout.
 ### PoAW-X Proposer Consensus (activates mainnet block 50,000)
 
 From mainnet block height 50,000, Irium activates **PoAW-X** (Proof-of-Adaptive-Work, eXtended), a
-block-proposer layer on top of the SHA-256d proof of work described above. The PoW function and LWMA
-difficulty are unchanged; PoAW-X adds verifiable proposer selection, a multi-role reward split,
-anti-domination, and distributed finality. The activation height is fixed in consensus code and is
-not operator-configurable.
+block-proposer layer on top of the SHA-256d proof of work described above. At activation the PoW
+function and LWMA difficulty were unchanged; PoAW-X added verifiable proposer selection, a
+multi-role reward split, anti-domination, and distributed finality. The activation height is fixed
+in consensus code and is not operator-configurable.
+
+> **Superseded at block 61,414.** The statement that difficulty is unchanged held only between
+> blocks 50,000 and 61,414. PoW demotion and the difficulty freeze described in *Hardware-neutral
+> block production* below have since changed how the header PoW target is applied. Read that
+> subsection before relying on this paragraph.
 
 **Proposer selection.** For each height an eligible proposer is selected by a Verifiable Random
 Function (ECVRF, RFC-9381). The selection proof (`AssignmentProofV2`) is bound to a per-height seed
@@ -357,6 +362,43 @@ set: proposer VRF proof, hidden role-precommit, sybil tickets, committed admissi
 reward split, anti-domination weights, finality (2/3), and audit-hardening checks (deterministic
 receipts root, equivocation and parent-hash validation, signature coverage, lane-byte validation).
 These gates were validated in a 2016-block adversarial soak before activation.
+
+### Hardware-neutral block production (PoW demotion, block 61,414)
+
+From mainnet block **61,414**, a block whose proposer is validly selected by the PoAW-X VRF has its
+header proof of work checked against a **constant anti-spam floor** rather than the full network
+target. Block production therefore no longer scales with hashrate: a commodity CPU produces blocks
+as readily as any quantity of SHA-256d hardware. This is the mechanism by which Irium makes
+participation hardware-neutral.
+
+The floor applies **only** to a validly-selected proposer. A block without a valid proposer
+assignment must still meet the full network target, so trivial-PoW spam remains rejected.
+
+Work accounting follows the same rule: a demoted block is credited only the work it actually
+demonstrated (the floor), not the target its header declares, so fork choice cannot be gamed by
+declaring a hard target and solving an easy one.
+
+**Practical consequence.** SHA-256d hashrate no longer wins mainnet blocks. Merged mining and the
+ASIC-facing Stratum endpoints continue to exist, but block rewards accrue to PoAW-X producers.
+
+### Difficulty freeze under demotion (block 64,291)
+
+Demotion breaks the feedback loop LWMA depends on. LWMA raises difficulty when blocks arrive faster
+than the protocol interval, but a demoted proposer only has to beat the floor, so block times are
+insensitive to the network target: LWMA reads "too fast", tightens, nothing changes, and tightens
+again. On mainnet the declared difficulty ran from **1.72 × 10⁶** at block 61,413 to
+**~9.7 × 10⁵⁶** by block 64,290 — a control loop with its feedback disconnected.
+
+This matters beyond a misleading statistic. A **non-eligible** miner must still meet the full
+target, so an unbounded runaway progressively locks out exactly the independent miners the network
+needs to attract.
+
+From block **64,291** the network target is therefore **held at the value in force immediately
+before demotion began** (block 61,413: difficulty 1,721,700, bits `1a09be94`) for as long as
+demotion is active. The pre-demotion value is used deliberately — it is a real difficulty produced
+by real mining. Freezing at the floor instead would be wrong, because the floor is granted only to
+eligible proposers and lowering the network target to it would remove anti-spam PoW for everyone
+else.
 
 ## 5. Supply Economics
 

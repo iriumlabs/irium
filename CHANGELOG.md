@@ -14,6 +14,59 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 - `agreement-fund` (wallet) refuses OTC agreements whose payer party has role `"buyer"` (legacy direction) with a clear error message directing the user to create a new agreement. No on-chain HTLCs are affected; this is a wallet-side rejection only.
 
+## [1.9.149] - 2026-07-29
+
+Consensus release. **Hard fork at height 64,291.** A node on an older binary computes a
+different required target and forks at exactly that height.
+
+### Fixed
+
+- **The demotion difficulty freeze now actually applies.** It was armed at height 63,824 but
+  never fired: `demotion_frozen_target` gated correctly on a const-controlled activation, then
+  resolved its baseline through `pow_demotion_activation_height()` — an accessor that reads only
+  an environment variable which mainnet deliberately ignores. It returned `None`, the function
+  silently gave up, and nothing was logged. Meanwhile the declared network target ran away from
+  **1.72e6 at height 61,413 to ~9.7e56 by 64,290**, compounding. New
+  `pow_demotion_effective_activation()` resolves the activation the same const-vs-env way the
+  gate decides. **Activated at 64,291**, holding the target at the value in force immediately
+  before demotion began (height 61,413, difficulty **1,721,700**, bits `1a09be94`).
+- **Hashrate is derived from work actually proved, not from the declared target.**
+  `/rpc/mining_metrics`, `/rpc/network_hashrate` and `/rpc/network_status` computed
+  `declared_difficulty * 2^32 / avg_block_time`, which under demotion is meaningless — demoted
+  blocks satisfy only the anti-spam floor. `/api/pool/stats` was reporting **~3.3e59 H/s**, more
+  than any hardware in existence could produce. Now ~1.5e4 H/s, which matches two CPU miners.
+- `require_rpc_auth` now fails **closed**: an unset or empty `IRIUM_RPC_TOKEN` previously
+  authorised every token-guarded endpoint, including `POST /admin/add-seed`. Set
+  `IRIUM_RPC_ALLOW_NO_AUTH=1` to deliberately run an isolated node without credentials.
+- P2P gossip and the HTTP enrollment surface no longer share one per-IP rate-limit budget.
+  Continuous peer gossip consumed the whole allowance, so role workers on the same IP were
+  answered `429` and every block self-filled instead of paying its four role participants.
+
+### Added
+
+- `difficulty_demonstrated` on `/rpc/mining_metrics` — the difficulty actually being solved, as
+  distinct from the declared target. `difficulty` continues to report the declared value.
+
+## [Consensus activations on mainnet since 1.1.0]
+
+The 1.1.0 notes below describe the chain as originally launched. Several parameters and rules
+have since changed by activation height. Current behaviour:
+
+- **Block interval is 120 seconds, not 600** — `BLOCK_TARGET_INTERVAL_V2` takes effect at height
+  **24,250**. The halving interval expands 5× at the same fork
+  (`HALVING_INTERVAL_V2 = 1,050,000`, from 210,000) so the emission calendar stays roughly four
+  years per halving. Total supply is unchanged.
+- **PoAW-X activated at height 50,000.** Every block from that height carries deterministic role
+  receipts committed to the coinbase via an `irx1` `OP_RETURN`, plus proposer-VRF, registration,
+  anti-domination, puzzle, finality-committee and candidate-admission validation.
+- **Non-exclusive proposer eligibility at height 59,900**, closing a lockout in which only the
+  incumbent producer's key could propose.
+- **PoW demotion active at height 61,414.** A validly-selected proposer's block is checked
+  against a constant anti-spam floor instead of the full network target, so block production is
+  hardware-independent. In practice ASIC hashrate no longer wins mainnet blocks — see the mining
+  note in `README.md`.
+- **Difficulty-demotion freeze at height 64,291** (this release).
+
 ## [1.1.0] - 2026-05-01
 
 This release documents everything built across Phases A–F of the Irium chain

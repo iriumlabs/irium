@@ -198,6 +198,20 @@ that submits valid work earns real block rewards directly to the IRM
 address used as the Stratum worker name — the pool runs in SOLO payout
 mode (no fee, no aggregation).
 
+> ### ⚠️ Read this before pointing an ASIC at mainnet
+>
+> **Since PoW demotion activated at block 61,414, ASIC hashrate no longer wins mainnet blocks.**
+> A validly-selected PoAW-X proposer only has to beat a constant anti-spam floor, so a commodity
+> CPU produces blocks as fast as any amount of SHA-256d hashrate. Every recent mainnet block has
+> been produced by PoAW-X CPU producers; the ASIC pool currently reports **0 connected sessions,
+> 0 accepted shares and 0 blocks found**.
+>
+> The Stratum endpoints above are still running and the table is kept for completeness, but
+> pointing mining hardware at them today will not earn block rewards. **If you want to mine
+> mainnet, use the PoAW-X producer path below**, which is what actually wins blocks.
+>
+> This is a consequence of hardware-neutral block production, not an outage.
+
 ### Run your own PoAW-X producer (CPU, permissionless)
 
 From block 50,000, producing a block means running your **own full iriumd node** as a PoAW-X

@@ -518,16 +518,45 @@ pub fn admission_flood_cooldown_secs() -> u64 {
         .ok().and_then(|v| v.trim().parse::<u64>().ok()).unwrap_or(300).clamp(0, 86400)
 }
 
-fn admission_rate_map() -> &'static Mutex<HashMap<IpAddr, AdmissionRate>> {
-    static M: OnceLock<Mutex<HashMap<IpAddr, AdmissionRate>>> = OnceLock::new();
+/// Which traffic class a rate check belongs to. The two share a limiter implementation but
+/// NEVER a budget.
+///
+/// They were one budget until 2026-07-29, and the coupling starved the enrollment surface on
+/// mainnet: two peered producer hosts exchange proposer-registration and candidate-admission
+/// gossip continuously, which consumed the per-IP allowance, so the role workers' ~15 requests
+/// per 10 s from that same IP were answered 429 and every block self-filled. Bulk peer gossip
+/// and a handful of enrollment calls per height are different surfaces with different honest
+/// volumes; sharing one counter means the loud one silently starves the quiet one.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
+pub enum RateClass {
+    /// P2P gossip ingest — candidate admissions, proposer registrations. High volume, bursty.
+    Gossip,
+    /// HTTP enrollment surface — role-work, role bundles, the candidate-admission bridge.
+    /// Low volume: roughly one request per worker per height.
+    Enrollment,
+}
+
+fn admission_rate_map() -> &'static Mutex<HashMap<(RateClass, IpAddr), AdmissionRate>> {
+    static M: OnceLock<Mutex<HashMap<(RateClass, IpAddr), AdmissionRate>>> = OnceLock::new();
     M.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// True if `src` may ingest/propagate one more candidate admission now; false => DROP it.
-/// Per-source sliding window (max per window) + escalating drop-cooldown for a sustained flood.
-/// Honest miners (a few admissions per block, per source) never reach the default limit. This is
-/// DROP-ONLY: it never disconnects/bans the peer or affects any other traffic.
+/// True if `src` may ingest/propagate one more P2P gossip message now; false => DROP it.
+/// Budgeted separately from the enrollment surface — see [`RateClass`].
+pub fn admission_gossip_rate_allowed(src: IpAddr) -> bool {
+    admission_rate_allowed_class(RateClass::Gossip, src)
+}
+
+/// True if `src` may make one more enrollment-surface request now; false => 429.
+/// Budgeted separately from P2P gossip — see [`RateClass`].
 pub fn admission_rate_allowed(src: IpAddr) -> bool {
+    admission_rate_allowed_class(RateClass::Enrollment, src)
+}
+
+/// Per-source sliding window (max per window) + escalating drop-cooldown for a sustained flood,
+/// applied independently within each [`RateClass`]. Honest peers and miners never reach the
+/// default limit. This is DROP-ONLY: it never disconnects/bans the peer or affects other traffic.
+pub fn admission_rate_allowed_class(class: RateClass, src: IpAddr) -> bool {
     let now = Instant::now();
     let window = Duration::from_secs(admission_rate_window_secs());
     let max = admission_rate_max();
@@ -539,7 +568,7 @@ pub fn admission_rate_allowed(src: IpAddr) -> bool {
                 || now.duration_since(r.window_start) < window
         });
     }
-    let e = map.entry(src).or_insert(AdmissionRate {
+    let e = map.entry((class, src)).or_insert(AdmissionRate {
         window_start: now,
         count: 0,
         strikes: 0,
@@ -1146,6 +1175,62 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_ADMISSION_RATE_MAX");
         std::env::remove_var("IRIUM_POAWX_ADMISSION_COOLDOWN_SECS");
     }
+    /// A gossip flood from a peer must NOT consume that peer's enrollment allowance.
+    ///
+    /// This is the mainnet failure of 2026-07-29 in miniature: two peered producer hosts
+    /// gossip proposer registrations and candidate admissions continuously, and while the two
+    /// classes shared one per-IP budget that traffic answered the role workers' enrollment
+    /// calls — from the same IP — with 429, so every block self-filled.
+    #[test]
+    fn gossip_flood_does_not_starve_enrollment_from_same_ip() {
+        let _env = crate::test_env::guard();
+        use std::net::{IpAddr, Ipv4Addr};
+        std::env::set_var("IRIUM_POAWX_ADMISSION_RATE_WINDOW_SECS", "10");
+        std::env::set_var("IRIUM_POAWX_ADMISSION_RATE_MAX", "50");
+        std::env::set_var("IRIUM_POAWX_ADMISSION_COOLDOWN_SECS", "300");
+        admission_rate_reset_for_test();
+
+        let peer = IpAddr::V4(Ipv4Addr::new(10, 0, 0, 3));
+        // Bury the GOSSIP budget for this peer — far past the limit and into cooldown.
+        let mut gossip_dropped = 0u32;
+        for _ in 0..600 {
+            if !admission_gossip_rate_allowed(peer) {
+                gossip_dropped += 1;
+            }
+        }
+        assert!(
+            gossip_dropped >= 540,
+            "gossip flood must still be dropped, dropped={gossip_dropped}"
+        );
+
+        // The enrollment surface for the SAME IP must be untouched: a role worker makes
+        // roughly one call per height, and all of them must be answered.
+        for i in 0..40 {
+            assert!(
+                admission_rate_allowed(peer),
+                "enrollment call {i} starved by a gossip flood from the same IP"
+            );
+        }
+
+        // Control: the classes are genuinely separate budgets, not merely a larger one --
+        // the enrollment budget must still cap an enrollment flood from that same IP.
+        let mut enroll_dropped = 0u32;
+        for _ in 0..600 {
+            if !admission_rate_allowed(peer) {
+                enroll_dropped += 1;
+            }
+        }
+        assert!(
+            enroll_dropped >= 540,
+            "enrollment budget must still cap an enrollment flood, dropped={enroll_dropped}"
+        );
+
+        admission_rate_reset_for_test();
+        std::env::remove_var("IRIUM_POAWX_ADMISSION_RATE_WINDOW_SECS");
+        std::env::remove_var("IRIUM_POAWX_ADMISSION_RATE_MAX");
+        std::env::remove_var("IRIUM_POAWX_ADMISSION_COOLDOWN_SECS");
+    }
+
     use crate::poawx_penalty::PenaltyStatus;
 
     fn cand(role: u8, solver: [u8; 20], tag: u8, seed: &[u8; 32]) -> RoleCandidate {

@@ -7032,7 +7032,7 @@ impl P2PNode {
                             if let Ok(p) =
                                 crate::protocol::PoawxCandidateAdmissionPayload::from_message(&msg)
                             {
-                                if crate::poawx_admission::admission_rate_allowed(addr.ip())
+                                if crate::poawx_admission::admission_gossip_rate_allowed(addr.ip())
                                     && crate::poawx_admission::global_admission_cache()
                                         .ingest_bytes(&p.admission_bytes)
                                         .should_rebroadcast()
@@ -7074,7 +7074,7 @@ impl P2PNode {
                                 // A1: rate-limit registration ingest per source IP, exactly as the
                                 // candidate-admission arm above already does. Registration gossip is
                                 // remotely reachable and was the only unlimited gossip ingest path.
-                                if crate::poawx_admission::admission_rate_allowed(addr.ip())
+                                if crate::poawx_admission::admission_gossip_rate_allowed(addr.ip())
                                     && crate::poawx_proposer::global_proposer_reg_pool()
                                         .ingest_bytes(&p.reg_bytes, |h| {
                                             // A4: recompute the sybil digest against the
@@ -9589,7 +9589,7 @@ async fn handle_incoming_with_sybil(
                         crate::protocol::PoawxProposerRegistrationPayload::from_message(&msg)
                     {
                         // A1: rate-limit registration ingest per source IP (see site above).
-                        if crate::poawx_admission::admission_rate_allowed(addr.ip())
+                        if crate::poawx_admission::admission_gossip_rate_allowed(addr.ip())
                             && crate::poawx_proposer::global_proposer_reg_pool()
                                 .ingest_bytes(&p.reg_bytes, |h| {
                                     // A4: recompute the sybil digest against the real

@@ -1,6 +1,6 @@
 import React, { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { Layers, Coins, Zap, Users, Database, Activity } from 'lucide-react'
 import { api } from '../api'
 import StatCard from '../components/StatCard'
@@ -82,8 +82,12 @@ export default function Home() {
 
   const latest = blocks?.[0]
   const height = latest?.height ?? 0
-  const hashrate = poolStats?.asic?.hashrate_estimate_hps ?? 0
-  const activeMinerPool = poolStats?.total_miners ?? null
+  // `/pool/stats` serves neither an `asic` object nor `total_miners` (verified against the live
+  // endpoint). `chain_active_miners_window` is the real count of miners producing in the recent
+  // window. `pool_hashrate` IS served but currently returns a physically impossible magnitude,
+  // so the hashrate tile stays blank rather than displaying a number that cannot be true.
+  const hashrate = 0
+  const activeMinerPool = poolStats?.chain_active_miners_window ?? null
   const totalMiners = miners?.length ?? null
   const totalSupply = fmtSupply(height)
   const difficulty = blockDetail?.difficulty ?? '—'

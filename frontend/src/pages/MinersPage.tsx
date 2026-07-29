@@ -1,6 +1,6 @@
 
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link } from 'react-router'
 import { api } from '../api'
 import Card from '../components/Card'
 import { satToIrm } from '../lib/fmt'

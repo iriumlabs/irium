@@ -62,3 +62,17 @@ export function fmtAvgBlockTime(height: number): string {
   const s = avg % 60
   return s > 0 ? `${m}m ${s}s` : `${m} min`
 }
+
+/**
+ * Abbreviate a hash/address as `<start>…<end>`, e.g. `00000ebfec…8d9400`.
+ *
+ * Returns the value unchanged when it is not longer than the two ends plus the ellipsis,
+ * so short strings are never padded or made longer by "shortening" them.
+ */
+export function shortHash(hash: string, start = 10, end = 8): string {
+  if (!hash) return ''
+  const s = Math.max(0, start)
+  const e = Math.max(0, end)
+  if (hash.length <= s + e + 1) return hash
+  return `${hash.slice(0, s)}…${hash.slice(hash.length - e)}`
+}

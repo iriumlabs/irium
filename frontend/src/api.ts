@@ -33,6 +33,26 @@ export interface AgreementInfo { agreement_hash: string; anchor_type: string; tx
 export interface MinerStats { address: string; blocks_mined: number; total_reward: number; last_block_height: number | null }
 export interface SearchResponse { result_type: string; value: string }
 
+/**
+ * Shape of GET /pool/stats as the explorer backend actually serves it (verified against the
+ * live endpoint 2026-07-29). Every field is optional because this page must render before the
+ * request resolves, and because the pool can be stopped.
+ *
+ * Note there is no `asic` object and no `total_miners` — an earlier draft of Home.tsx expected
+ * both. `chain_active_miners_window` is the real "how many miners are producing" figure.
+ * `pool_hashrate` is served but currently returns a physically impossible magnitude, so it is
+ * deliberately NOT surfaced as a hashrate until the backend value is trustworthy.
+ */
+export interface PoolStats {
+  pool_hashrate?: number
+  chain_active_miners_window?: number
+  chain_active_miners_window_blocks?: number
+  network_height?: number
+  difficulty?: number
+  backend_connected?: boolean
+  payout_model?: string
+}
+
 export const api = {
   status: () => get<ExplorerStatus>('/status'),
   blocks: (limit = 20, offset = 0) => get<BlockSummary[]>(`/blocks?limit=${limit}&offset=${offset}`),
@@ -43,6 +63,15 @@ export const api = {
   addressTxs: (addr: string, limit = 50) => get<AddressTx[]>(`/address/${addr}/txs?limit=${limit}`),
   addressHtlcs: (addr: string) => get<HtlcInfo[]>(`/address/${addr}/htlcs`),
   agreement: (hash: string) => get<AgreementInfo>(`/agreement/${hash}`),
+  // Verified live against the explorer backend on 2026-07-29: /agreements, /htlcs and /miners
+  // all return 200 with payloads matching the interfaces above.
+  //
+  // /pool/stats is the exception — it is served on the public API host but NOT by the backend
+  // the dev proxy targets, so it 404s in local dev and its tile falls back to "—". That is a
+  // backend deployment gap, not a client bug; the path is the documented one.
+  poolStats: () => get<PoolStats>('/pool/stats'),
   miners: (limit = 50) => get<MinerStats[]>(`/miners?limit=${limit}`),
+  agreements: (limit = 50) => get<AgreementInfo[]>(`/agreements?limit=${limit}`),
+  htlcs: (limit = 50) => get<HtlcInfo[]>(`/htlcs?limit=${limit}`),
   search: (q: string) => get<SearchResponse | null>(`/search?q=${encodeURIComponent(q)}`),
 }

@@ -505,6 +505,69 @@ impl CandidateSet {
         h.finalize().into()
     }
 
+    /// Role order used for exclusive assignment. FIXED: builder and every validator must walk
+    /// it identically or they disagree about who a block owes and the chain forks.
+    pub const EXCLUSIVE_ROLE_ORDER: [u8; 3] = [
+        crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+        crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
+        crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+    ];
+
+    /// THE selection entry point. Every builder and validator site must call this, never
+    /// `best_for_role` directly, so selection can never differ between producing and checking.
+    ///
+    /// With the gate off this is exactly `best_for_role(role_id)` — byte-identical.
+    ///
+    /// With the gate on, a node holds at most ONE role per block. Roles are resolved in
+    /// `EXCLUSIVE_ROLE_ORDER`, each taking the best-scoring candidate whose identity is not
+    /// already taken; `primary_pkh` (the proposer / receipt worker) is taken first, so the
+    /// producer cannot also draw a contributor role. The node chooses nothing: its VRF score is
+    /// bound to (height, role, seed) and every validator recomputes the same assignment.
+    ///
+    /// LIVENESS: if exclusivity leaves a role with no free identity — fewer participants than
+    /// roles, the normal case with two nodes — that role falls back to the unrestricted best
+    /// candidate rather than being unfillable. A rule that cannot be satisfied would halt the
+    /// chain; this one degrades instead.
+    pub fn selected_for_role(
+        &self,
+        role_id: u8,
+        height: u64,
+        primary_pkh: Option<&[u8; 20]>,
+    ) -> Option<&RoleCandidate> {
+        if !crate::poawx_proposer::exclusive_role_assignment_active(height) {
+            return self.best_for_role(role_id);
+        }
+        let mut taken: Vec<[u8; 20]> = Vec::with_capacity(4);
+        if let Some(p) = primary_pkh {
+            taken.push(*p);
+        }
+        for role in Self::EXCLUSIVE_ROLE_ORDER {
+            // Best candidate for this role whose identity is still free.
+            let mut pick: Option<&RoleCandidate> = None;
+            for c in self.candidates.iter().filter(|c| c.role_id == role) {
+                if taken.contains(&c.solver_pkh) {
+                    continue;
+                }
+                match pick {
+                    None => pick = Some(c),
+                    Some(b) if candidate_better(c, b) => pick = Some(c),
+                    _ => {}
+                }
+            }
+            // Fall back to the unrestricted best so a short participant set cannot make the
+            // role unfillable (see LIVENESS above).
+            let chosen = pick.or_else(|| self.best_for_role(role));
+            if role == role_id {
+                return chosen;
+            }
+            if let Some(c) = chosen {
+                taken.push(c.solver_pkh);
+            }
+        }
+        // role_id outside the contributor set (e.g. proposer): no exclusivity to apply.
+        self.best_for_role(role_id)
+    }
+
     /// The best candidate for `role_id` under the deterministic ordering, or None.
     pub fn best_for_role(&self, role_id: u8) -> Option<&RoleCandidate> {
         let mut best: Option<&RoleCandidate> = None;
@@ -1215,6 +1278,123 @@ mod tests {
         let mut cs2 = cs.clone();
         cs2.candidates[0].dominance_weight ^= 1;
         assert_ne!(cs2.root(), r, "mutation changes root");
+    }
+
+    /// One identity must not hold two roles in the same block once the gate is on.
+    ///
+    /// Without it, `best_for_role` resolves each role independently, so a single dominant
+    /// identity sweeps all three contributor roles — which is exactly how one operator host
+    /// came to appear as four distinct payees.
+    #[test]
+    fn exclusive_assignment_gives_one_role_per_identity() {
+        let _env = crate::test_env::guard();
+        let prev_net = std::env::var("IRIUM_NETWORK").ok();
+        let prev_act = std::env::var("IRIUM_POAWX_EXCLUSIVE_ROLE_ACTIVATION_HEIGHT").ok();
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+
+        let h = 10u64;
+        let mut cs = CandidateSet::new(1, h, [0x55u8; 32]);
+        // Three distinct identities, each offering candidacy for ALL THREE contributor roles —
+        // the "one address registered for every role" model.
+        let ids = [[0xA1u8; 20], [0xB2u8; 20], [0xC3u8; 20]];
+        for id in ids.iter() {
+            for role in CandidateSet::EXCLUSIVE_ROLE_ORDER {
+                let c = RoleCandidate::build(
+                    1, h, &cs.seed, role, *id, apk(), [0x11u8; 32],
+                    PenaltyStatus::Clean.id(), 1000, [0x44u8; 32],
+                );
+                cs.candidates.push(c);
+            }
+        }
+        cs.sort_canonical();
+
+        // GATE OFF: independent resolution — nothing stops one identity sweeping the roles.
+        std::env::remove_var("IRIUM_POAWX_EXCLUSIVE_ROLE_ACTIVATION_HEIGHT");
+        let off: Vec<[u8; 20]> = CandidateSet::EXCLUSIVE_ROLE_ORDER
+            .iter()
+            .map(|r| cs.selected_for_role(*r, h, None).unwrap().solver_pkh)
+            .collect();
+        assert_eq!(
+            off.len(), 3,
+            "control precondition: every role must resolve with the gate off"
+        );
+
+        // GATE ON: three roles must land on three DIFFERENT identities.
+        std::env::set_var("IRIUM_POAWX_EXCLUSIVE_ROLE_ACTIVATION_HEIGHT", "0");
+        let on: Vec<[u8; 20]> = CandidateSet::EXCLUSIVE_ROLE_ORDER
+            .iter()
+            .map(|r| cs.selected_for_role(*r, h, None).unwrap().solver_pkh)
+            .collect();
+        let mut uniq = on.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(
+            uniq.len(), 3,
+            "each role must go to a DIFFERENT identity, got {on:?}"
+        );
+
+        // The proposer identity is taken first, so it cannot also draw a contributor role.
+        // Needs FOUR identities: proposer + one per contributor role. With only three, one
+        // role legitimately falls back to the proposer (liveness), which is asserted below.
+        let mut cs4 = CandidateSet::new(1, h, [0x55u8; 32]);
+        let ids4 = [[0xA1u8; 20], [0xB2u8; 20], [0xC3u8; 20], [0xE5u8; 20]];
+        for id in ids4.iter() {
+            for role in CandidateSet::EXCLUSIVE_ROLE_ORDER {
+                cs4.candidates.push(RoleCandidate::build(
+                    1, h, &cs.seed, role, *id, apk(), [0x11u8; 32],
+                    PenaltyStatus::Clean.id(), 1000, [0x44u8; 32],
+                ));
+            }
+        }
+        cs4.sort_canonical();
+        let proposer = ids4[0];
+        let with_primary: Vec<[u8; 20]> = CandidateSet::EXCLUSIVE_ROLE_ORDER
+            .iter()
+            .map(|r| cs4.selected_for_role(*r, h, Some(&proposer)).unwrap().solver_pkh)
+            .collect();
+        assert!(
+            !with_primary.contains(&proposer),
+            "proposer must not also hold a contributor role, got {with_primary:?}"
+        );
+        let mut u4 = with_primary.clone();
+        u4.sort();
+        u4.dedup();
+        assert_eq!(u4.len(), 3, "the three roles must still be three distinct identities");
+
+        // Too few participants to honour exclusivity => falls back rather than failing.
+        // Three identities with the proposer excluded leaves only two for three roles.
+        let short: Vec<[u8; 20]> = CandidateSet::EXCLUSIVE_ROLE_ORDER
+            .iter()
+            .map(|r| cs.selected_for_role(*r, h, Some(&ids[0])).unwrap().solver_pkh)
+            .collect();
+        assert_eq!(short.len(), 3, "every role must still resolve (liveness)");
+
+        // LIVENESS: with a SINGLE identity there are not enough participants to go round, so
+        // roles fall back rather than becoming unfillable — a rule that cannot be satisfied
+        // would halt the chain.
+        let mut solo = CandidateSet::new(1, h, [0x66u8; 32]);
+        for role in CandidateSet::EXCLUSIVE_ROLE_ORDER {
+            solo.candidates.push(RoleCandidate::build(
+                1, h, &solo.seed.clone(), role, [0xD4u8; 20], apk(), [0x11u8; 32],
+                PenaltyStatus::Clean.id(), 1000, [0x44u8; 32],
+            ));
+        }
+        solo.sort_canonical();
+        for role in CandidateSet::EXCLUSIVE_ROLE_ORDER {
+            assert!(
+                solo.selected_for_role(role, h, None).is_some(),
+                "role {role} must still resolve with one participant (liveness)"
+            );
+        }
+
+        match prev_net {
+            Some(v) => std::env::set_var("IRIUM_NETWORK", v),
+            None => std::env::remove_var("IRIUM_NETWORK"),
+        }
+        match prev_act {
+            Some(v) => std::env::set_var("IRIUM_POAWX_EXCLUSIVE_ROLE_ACTIVATION_HEIGHT", v),
+            None => std::env::remove_var("IRIUM_POAWX_EXCLUSIVE_ROLE_ACTIVATION_HEIGHT"),
+        }
     }
 
     #[test]

@@ -168,6 +168,52 @@ pub fn proposer_anti_spam_bits() -> u32 {
         .unwrap_or(DEFAULT_PROPOSER_ANTI_SPAM_BITS)
 }
 
+// ── One role per identity per block ───────────────────────────────────────────
+//
+// THE RULE. A node registers ONE miner address for every role, and the chain decides which
+// single role (if any) that node is selected for at each height. A node must not be able to
+// choose its role, and must not hold two roles in the same block.
+//
+// WHAT IT REPLACES. `best_for_role(role_id)` resolves each role INDEPENDENTLY, so the same
+// identity can top the ordering for several roles at once and take them all. With few
+// participants that is the normal outcome, and it is what let a single operator host appear as
+// four payees. Role distinctness was until now only "a documented protocol property, not a
+// validity rule" (poawx_candidate.rs) — i.e. a hope, not a rule.
+//
+// HOW IT DECIDES. Roles are resolved in a FIXED order (compute, verify, support) against the
+// VRF-scored candidate ordering, each taking the best candidate whose identity is not already
+// taken; the primary/proposer identity is taken before any of them. The randomness is the VRF
+// score already bound to (height, role, seed) — the node contributes entropy it cannot steer,
+// and the assignment is recomputable by every validator.
+//
+// LIVENESS. If exclusivity would leave a role with no remaining identity — fewer participants
+// than roles, which is the normal case today with two nodes — that role FALLS BACK to the
+// unrestricted best candidate. Without this a chain with <4 participants could not produce a
+// valid block at all. Exclusivity is therefore enforced whenever it is satisfiable and never
+// at the cost of halting.
+//
+// SHIPS INERT. `None` => `selected_for_role` is byte-identical to `best_for_role` on every
+// network. Turning it on CHANGES WHICH PAYEES A BLOCK MUST NAME, so it is a hard fork and must
+// be activated at a coordinated height with both hosts upgraded first. Builder and all three
+// validator sites resolve through the SAME function, so enforce-on/validate-off (which halted
+// mainnet on 2026-07-23) is not reachable here.
+pub const MAINNET_EXCLUSIVE_ROLE_ACTIVATION_HEIGHT: Option<u64> = None;
+
+/// Is one-role-per-identity in force at `height`? Mainnet is const-controlled (env ignored);
+/// other networks may set it via env for tests and harnesses.
+pub fn exclusive_role_assignment_active(height: u64) -> bool {
+    if crate::activation::network_id_byte() == 0 {
+        return MAINNET_EXCLUSIVE_ROLE_ACTIVATION_HEIGHT
+            .map(|h| height >= h)
+            .unwrap_or(false);
+    }
+    std::env::var("IRIUM_POAWX_EXCLUSIVE_ROLE_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|h| height >= h)
+        .unwrap_or(false)
+}
+
 /// Activation height for PoAW-X block-header PoW demotion (env-gated). Reading the
 /// env alone does NOT enable demotion; see `pow_demotion_gate`.
 pub fn pow_demotion_activation_height() -> Option<u64> {

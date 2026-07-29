@@ -1458,8 +1458,10 @@ fn build_all_gates_block_with(
         ROLE_VERIFY_CONTRIBUTOR,
         ROLE_SUPPORT_CONTRIBUTOR,
     ] {
+        // Selection MUST route through selected_for_role so the builder and every validator
+        // resolve identically (gate off => identical to best_for_role).
         let cand = cs
-            .best_for_role(role)
+            .selected_for_role(role, height, None)
             .ok_or_else(|| format!("harness: no candidate for role {role}"))?;
         let cdg: [u8; 32] = {
             let mut h = Sha256::new();

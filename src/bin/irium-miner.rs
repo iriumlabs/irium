@@ -3600,16 +3600,70 @@ fn run_poawx_solo() -> Result<(), String> {
                             verify: None,
                             support: None,
                         };
+                        // Select by the CHAIN's randomness, not by arrival order.
+                        //
+                        // This used to be `role => c.compute = Some(rb)` in a loop, i.e. the
+                        // LAST bundle seen for a role became the payee. That let the miner
+                        // decide who gets paid, and on devnet one identity took all three
+                        // contributor roles while two equally-enrolled identities got nothing.
+                        // The node must not choose its own role, nor anyone else's.
+                        //
+                        // Now: rank each role's bundles by the VRF assignment score already
+                        // bound to (height, role, seed) — entropy no participant can steer —
+                        // and walk the roles in a FIXED order, each taking the highest-scoring
+                        // bundle whose identity is not already used. The miner's own payout
+                        // identity is taken first, so a producer cannot also draw a
+                        // contributor role.
+                        //
+                        // LIVENESS: if exclusivity leaves a role with no free identity (fewer
+                        // participants than roles — the normal small-network case) that role
+                        // falls back to the highest scorer overall rather than going unpaid.
+                        let mut all: Vec<RoleBundleV1> = Vec::new();
                         if let Some(arr) = v.get("bundles").and_then(|x| x.as_array()) {
                             for b in arr {
                                 if let Ok(rb) = RoleBundleV1::from_json(&b.to_string()) {
-                                    match rb.role_id {
-                                        ROLE_COMPUTE_CONTRIBUTOR => c.compute = Some(rb),
-                                        ROLE_VERIFY_CONTRIBUTOR => c.verify = Some(rb),
-                                        ROLE_SUPPORT_CONTRIBUTOR => c.support = Some(rb),
-                                        _ => {}
-                                    }
+                                    all.push(rb);
                                 }
+                            }
+                        }
+                        // The miner's own payout identity is taken first: a producer must
+                        // not also draw a contributor role.
+                        let mut taken: Vec<[u8; 20]> = Vec::new();
+                        if let Some(v20) = miner_pubkey_hash() {
+                            if v20.len() == 20 {
+                                let mut own = [0u8; 20];
+                                own.copy_from_slice(&v20);
+                                taken.push(own);
+                            }
+                        }
+                        for role in [
+                            ROLE_COMPUTE_CONTRIBUTOR,
+                            ROLE_VERIFY_CONTRIBUTOR,
+                            ROLE_SUPPORT_CONTRIBUTOR,
+                        ] {
+                            let mut best_free: Option<&RoleBundleV1> = None;
+                            let mut best_any: Option<&RoleBundleV1> = None;
+                            for rb in all.iter().filter(|rb| rb.role_id == role) {
+                                let sc = rb.assignment_proof.score();
+                                if best_any.map(|b| sc > b.assignment_proof.score()).unwrap_or(true) {
+                                    best_any = Some(rb);
+                                }
+                                if taken.contains(&rb.solver_pkh) {
+                                    continue;
+                                }
+                                if best_free.map(|b| sc > b.assignment_proof.score()).unwrap_or(true) {
+                                    best_free = Some(rb);
+                                }
+                            }
+                            let chosen = best_free.or(best_any).cloned();
+                            if let Some(ref rb) = chosen {
+                                taken.push(rb.solver_pkh);
+                            }
+                            match role {
+                                ROLE_COMPUTE_CONTRIBUTOR => c.compute = chosen,
+                                ROLE_VERIFY_CONTRIBUTOR => c.verify = chosen,
+                                ROLE_SUPPORT_CONTRIBUTOR => c.support = chosen,
+                                _ => {}
                             }
                         }
                         if c.is_empty() {

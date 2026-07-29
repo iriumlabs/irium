@@ -491,13 +491,25 @@ pub fn scan_block_registrations(
     out
 }
 
-// ---- Fix 1: per-source candidate-admission flood limiter (anti-DoS) ----
-// The candidate-admission path is mainnet hard-off (candidate_admission_gossip_enabled =>
-// network_id != 0), so this runs ONLY on devnet/testnet. It gates admission INGEST/rebroadcast
-// per SOURCE IP and nothing else: it never disconnects, bans, or touches peer reputation, and
-// never affects any other message type -> it cannot impact honest miners (whose rate is far
-// below the limit) or mainnet peers. A reject-retry flood (~14/s of fresh, dedup-evading
-// admissions) is dropped, and a SUSTAINED flood puts that source in a drop-cooldown.
+// ---- Fix 1: per-source flood limiter (anti-DoS) ----
+//
+// ⚠️ CORRECTED 2026-07-29. This block previously claimed "the candidate-admission path is
+// mainnet hard-off (candidate_admission_gossip_enabled => network_id != 0), so this runs ONLY
+// on devnet/testnet". That is FALSE and appears never to have been true of shipped code:
+// `candidate_admission_gossip_enabled()` is `poawx_effective_activation(...).is_some()`, and on
+// mainnet that substitutes the hardcoded `MAINNET_POAWX_ACTIVATION_HEIGHT = Some(50_000)`
+// regardless of env — so it is `true` on mainnet and this limiter is LIVE there. Believing the
+// old comment cost real time on 2026-07-29: the limiter was ruled out as devnet-only while it
+// was in fact refusing mainnet enrollment traffic.
+//
+// It gates INGEST/rebroadcast per SOURCE IP and nothing else: it never disconnects, bans, or
+// touches peer reputation, and never affects any other message type. A reject-retry flood
+// (~14/s of fresh, dedup-evading admissions) is dropped, and a SUSTAINED flood puts that source
+// in a drop-cooldown.
+//
+// Budgets are per `RateClass` (see below), NOT global per IP: bulk peer gossip and the
+// low-rate HTTP enrollment surface are counted separately, so neither can starve the other
+// while both stay individually bounded.
 struct AdmissionRate {
     window_start: Instant,
     count: u32,

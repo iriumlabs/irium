@@ -312,17 +312,80 @@ fn main() -> Result<(), String> {
         .and_then(|v| v.trim().parse::<u64>().ok())
         .filter(|s| *s > 0)
         .unwrap_or(2);
-    println!("[role-worker] loop mode: role={role_name} poll={poll_secs}s node={base}");
+    // Back off on CONSECUTIVE failures, and only on failures. Retrying a refused node at the
+    // normal poll rate is what turned a transient refusal into a standing one on 2026-07-29:
+    // the node answered 429, the worker retried immediately, and the retries kept the source
+    // over its allowance so it never recovered. Backoff makes that trap unreachable from this
+    // side regardless of how the node budgets requests. Doubling from the poll interval, capped
+    // so a worker still re-enrolls promptly once the node recovers — a role that stays quiet
+    // costs its operator the block's role share.
+    let backoff_cap_secs = std::env::var("IRIUM_POAWX_ROLE_WORKER_BACKOFF_MAX_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|s| *s > 0)
+        .unwrap_or(60);
+    println!(
+        "[role-worker] loop mode: role={role_name} poll={poll_secs}s backoff_max={backoff_cap_secs}s node={base}"
+    );
     let mut last_height: Option<u64> = None;
+    let mut consecutive_errors: u32 = 0;
     loop {
         match enroll_once(
             &client, &base, &token, role, &role_name, net, &secret, &sk, payout_pubkey, payout_pkh,
             last_height,
         ) {
-            Ok(Some(h)) => last_height = Some(h),
-            Ok(None) => {}
-            Err(e) => eprintln!("[role-worker] enrollment error (will retry): {e}"),
+            Ok(Some(h)) => {
+                last_height = Some(h);
+                consecutive_errors = 0;
+            }
+            Ok(None) => consecutive_errors = 0,
+            Err(e) => {
+                consecutive_errors = consecutive_errors.saturating_add(1);
+                let wait = backoff_secs(poll_secs, consecutive_errors, backoff_cap_secs);
+                eprintln!(
+                    "[role-worker] enrollment error #{consecutive_errors} (retry in {wait}s): {e}"
+                );
+            }
         }
-        std::thread::sleep(std::time::Duration::from_secs(poll_secs));
+        let wait = if consecutive_errors == 0 {
+            poll_secs
+        } else {
+            backoff_secs(poll_secs, consecutive_errors, backoff_cap_secs)
+        };
+        std::thread::sleep(std::time::Duration::from_secs(wait));
+    }
+}
+
+/// Exponential backoff for consecutive enrollment failures: `poll * 2^(errors-1)`, capped.
+/// `errors == 0` means "no failure" and is not a backoff case, but is handled as the plain
+/// poll interval so the caller cannot accidentally stall a healthy worker.
+fn backoff_secs(poll_secs: u64, consecutive_errors: u32, cap_secs: u64) -> u64 {
+    if consecutive_errors == 0 {
+        return poll_secs;
+    }
+    let shift = consecutive_errors.saturating_sub(1).min(16);
+    let scaled = poll_secs.saturating_mul(1u64 << shift);
+    scaled.clamp(poll_secs, cap_secs.max(poll_secs))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::backoff_secs;
+
+    #[test]
+    fn backoff_grows_then_caps_and_never_stalls_a_healthy_worker() {
+        // No failures => plain poll interval, never a backoff.
+        assert_eq!(backoff_secs(2, 0, 60), 2);
+        // Consecutive failures double from the poll interval.
+        assert_eq!(backoff_secs(2, 1, 60), 2);
+        assert_eq!(backoff_secs(2, 2, 60), 4);
+        assert_eq!(backoff_secs(2, 3, 60), 8);
+        assert_eq!(backoff_secs(2, 4, 60), 16);
+        // ... and are capped, so a long outage never pushes re-enrollment out to hours.
+        assert_eq!(backoff_secs(2, 20, 60), 60);
+        // A huge error count must not overflow into a tiny or absurd wait.
+        assert_eq!(backoff_secs(2, u32::MAX, 60), 60);
+        // The cap can never drop the wait below the configured poll interval.
+        assert_eq!(backoff_secs(30, 5, 10), 30);
     }
 }

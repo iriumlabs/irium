@@ -3361,6 +3361,30 @@ impl ChainState {
             }
         }
 
+        // Minimum block spacing (gated). Under PoW demotion neither difficulty nor the
+        // proposer round cascade bounded block spacing, so mainnet ran 2.48x its designed
+        // rate (see `poawx_proposer::MAINNET_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT` for the
+        // measurement and the reasoning). Reads only the parent's recorded timestamp -- no
+        // local clock -- so the verdict is identical on every node. Returns `None` below
+        // the activation height, which keeps every persisted block byte-for-byte valid.
+        if let Some(prev) = previous {
+            if let Some(earliest) =
+                crate::poawx_proposer::earliest_block_time(prev.header.time, height)
+            {
+                if block.header.time < earliest {
+                    return Err(format!(
+                        "block too early: timestamp {} is below the earliest allowed {} \
+                         (parent {} + {}s minimum spacing) at height {}",
+                        block.header.time,
+                        earliest,
+                        prev.header.time,
+                        crate::poawx_proposer::min_block_spacing_secs(),
+                        height
+                    ));
+                }
+            }
+        }
+
         // Merkle root (skip recompute for genesis; trust locked genesis file)
         if height > 0 {
             let recalculated_root = block.merkle_root();
@@ -12969,6 +12993,90 @@ mod tests {
     /// challenge is bound to sha256(candidate.serialize()) and the candidate carries its
     /// dominance weight, so a disagreement here would break assembly. The companion
     /// negative control proves that.
+    /// The minimum-spacing floor, driven through the REAL `connect_block` on a real
+    /// multi-block chain. This is the halt question, and the only one that matters before
+    /// arming: if the template clamp and the validator ever disagreed, a node would reject
+    /// every block its own miner built — the exact shape of the 2026-07-23 mainnet halt.
+    /// Proven here by building three consecutive blocks with the gate ACTIVE and watching
+    /// the tip keep advancing, with a too-early block rejected in between.
+    #[test]
+    fn min_block_spacing_chain_keeps_advancing_and_rejects_early_block() {
+        let _env = crate::test_env::guard();
+        use crate::poawx_admission::global_admission_cache;
+        use crate::poawx_committed_admission::seed_components_from_block;
+        use crate::poawx_mining_harness::build_multi_participant_poawx_block_with_parent;
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        for (k, v) in c3_gate_set() {
+            std::env::set_var(k, v);
+        }
+        // Floor governs from height 2, so H1 is a live control for "inert below".
+        const SPACING: u32 = 5;
+        std::env::set_var("IRIUM_POAWX_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT", "2");
+        std::env::set_var("IRIUM_POAWX_MIN_BLOCK_SPACING_SECS", &SPACING.to_string());
+
+        let (worker, kc, kv, ks) = ([0x4Du8; 32], [0x61u8; 32], [0x62u8; 32], [0x63u8; 32]);
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let cache = global_admission_cache();
+
+        let connect = |st: &mut ChainState, h: u64, prev_hash: [u8; 32], time: u32| {
+            let pc = seed_components_from_block(st.chain.last());
+            let bits = st.target_for_height(h).bits;
+            // The epoch seed is bound to the GRANDPARENT, so it must track the real chain
+            // rather than being pinned to genesis (which is only correct at h == 2).
+            let prev_prev = h
+                .checked_sub(2)
+                .and_then(|g| st.chain.get(g as usize).map(|b| b.header.hash_for_height(g)));
+            let built = build_multi_participant_poawx_block_with_parent(
+                &worker, &kc, &kv, &ks, net, h, prev_hash, prev_prev, bits, time, 1, pc,
+            )
+            .unwrap_or_else(|e| panic!("build h{h}: {e}"));
+            cache.clear();
+            cache.set_tip(h);
+            for a in &built.admissions {
+                let _ = cache.ingest_bytes(a);
+            }
+            let hash = built.block_hash;
+            (st.connect_block(built.block), hash)
+        };
+
+        // H1 — below the activation, so the floor does not apply: a 1s gap is fine.
+        let t1 = genesis.header.time + 1;
+        let (r1, h1_hash) = connect(&mut st, 1, genesis_hash, t1);
+        r1.expect("H1 is below the activation height and must connect on a 1s gap");
+        assert_eq!(st.tip_height(), 1);
+
+        // H2 too early — governed, and 1s under a 5s floor. MUST be refused.
+        let (r2_bad, _) = connect(&mut st, 2, h1_hash, t1 + 1);
+        let err = r2_bad.expect_err("a 1s-spaced governed block must be refused");
+        assert!(
+            err.contains("block too early"),
+            "expected the spacing rejection, got: {err}"
+        );
+        assert_eq!(st.tip_height(), 1, "the refused block must not have landed");
+
+        // H2 at the floor — connects. THIS is the anti-halt assertion: the rule admits a
+        // correctly-spaced block rather than rejecting everything.
+        let (r2, h2_hash) = connect(&mut st, 2, h1_hash, t1 + SPACING);
+        r2.expect("a block at exactly the spacing floor must connect");
+        assert_eq!(st.tip_height(), 2);
+
+        // H3 — and the chain keeps going, so the floor is not a one-block fluke.
+        let (r3, _) = connect(&mut st, 3, h2_hash, t1 + 2 * SPACING);
+        r3.expect("the chain must keep advancing under the floor");
+        assert_eq!(st.tip_height(), 3, "chain advanced to 3 with the floor active");
+
+        std::env::remove_var("IRIUM_POAWX_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_MIN_BLOCK_SPACING_SECS");
+        for (k, _) in c3_gate_set() {
+            std::env::remove_var(k);
+        }
+    }
+
     #[test]
     fn c3_block_assembled_from_collected_artifacts_only() {
         let _env = crate::test_env::guard();
@@ -19858,6 +19966,108 @@ mod proposer_consensus_tests {
             "and both must be the floor-derived value for a demoted block, not the \
              declared one -- if this is declared work the symmetry is vacuous"
         );
+    }
+
+    /// CLAUDE.md §12: the spacing floor's mainnet branch reads a COMPILED const and
+    /// IGNORES the env, so only a `network_id == 0` block validation can prove it. The
+    /// rest of the suite runs at `network_id != 0` and would exercise the env branch
+    /// instead — green there says nothing about production. This drives the real
+    /// `validate_block_header` (the exact check `connect_block` runs) in a mainnet
+    /// context, in all three directions: reject too-early, admit properly-spaced, and
+    /// inert below the activation height.
+    #[test]
+    fn min_block_spacing_mainnet_context_rejects_early_admits_spaced_inert_below() {
+        let _env = crate::test_env::guard();
+        let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        assert_eq!(
+            crate::activation::network_id_byte(),
+            0,
+            "this test is vacuous anywhere but a mainnet context"
+        );
+
+        let armed = crate::poawx_proposer::MAINNET_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT
+            .expect("the spacing floor must be armed for this test to mean anything");
+        let spacing = crate::poawx_proposer::min_block_spacing_secs();
+        assert_eq!(
+            spacing,
+            crate::constants::BLOCK_TARGET_INTERVAL_V2,
+            "mainnet spacing is the protocol block-time target, not a separate number"
+        );
+        // The env must be powerless on mainnet — otherwise an operator could relax
+        // consensus with a variable, which is the class of bug that armed an unproven
+        // validator on 2026-07-23.
+        std::env::set_var("IRIUM_POAWX_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT", "999999999");
+        assert!(
+            crate::poawx_proposer::min_block_spacing_active(armed),
+            "mainnet must ignore the env override and use the compiled height"
+        );
+        std::env::remove_var("IRIUM_POAWX_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT");
+
+        const HARD_BITS: u32 = 0x1d00ffff;
+        let locked = crate::genesis::load_locked_genesis().expect("locked genesis");
+        let mut parent = block_from_locked(&locked).expect("genesis block");
+        parent.header.bits = HARD_BITS;
+        let pow_limit = Target { bits: HARD_BITS };
+        let params = ChainParams {
+            genesis_block: parent.clone(),
+            pow_limit,
+            htlcv1_activation_height: None,
+            mpsov1_activation_height: None,
+            lwma: LwmaParams::new(None, pow_limit),
+            lwma_v2: None,
+            auxpow_activation_height: None,
+            btc_spv: None,
+            ltc_spv: None,
+            htlc_btc_swap_v1_activation_height: None,
+            btc_swap_bech32_payment_activation_height: None,
+            htlc_ltc_swap_v1_activation_height: None,
+            swap_order_v1_activation_height: None,
+            ltc_swap_order_v1_activation_height: None,
+            coinbase_header_batch_activation_height: None,
+        };
+        let chain = ChainState::new(params);
+        let parent_time = parent.header.time;
+
+        // (1) REJECT: the spacing actually observed live on mainnet — a 9s gap, which
+        // was the mean for 65% of blocks and the reason emission ran 2.48x hot.
+        let mut early = parent.clone();
+        early.header.prev_hash = parent.header.hash_for_height(armed.saturating_sub(1));
+        early.header.time = parent_time + 9;
+        let err = chain
+            .validate_block_header(&early, armed, Some(&parent))
+            .expect_err("a 9s-spaced block must be rejected at the activation height");
+        assert!(
+            err.contains("block too early"),
+            "expected the spacing rejection, got: {err}"
+        );
+
+        // (2) ADMIT: the same block spaced at the floor clears the gate. It may still
+        // fail a LATER check (merkle/PoW) — the point is that it is no longer rejected
+        // FOR SPACING, which is what distinguishes a working gate from one that rejects
+        // everything. That distinction is exactly what the 2026-07-23 halt lacked.
+        let mut spaced = early.clone();
+        spaced.header.time = parent_time + spacing as u32;
+        if let Err(e) = chain.validate_block_header(&spaced, armed, Some(&parent)) {
+            assert!(
+                !e.contains("block too early"),
+                "a properly-spaced block must not be rejected for spacing; got: {e}"
+            );
+        }
+
+        // (3) INERT BELOW: one height under the activation the floor does not exist, so
+        // the same 9s block is not rejected for spacing. This is what keeps every
+        // already-persisted mainnet block valid on restart — a retroactive activation
+        // would make each node reject its own chain.
+        let below = armed - 1;
+        let mut legacy = early.clone();
+        legacy.header.prev_hash = parent.header.hash_for_height(below.saturating_sub(1));
+        if let Err(e) = chain.validate_block_header(&legacy, below, Some(&parent)) {
+            assert!(
+                !e.contains("block too early"),
+                "below the activation the floor must not apply; got: {e}"
+            );
+        }
     }
 
     #[test]

@@ -63,6 +63,11 @@ pub struct BlockTemplate {
     pub poawx_proposer_freeze_height: Option<u64>,
     #[serde(default)]
     pub poawx_proposer_max_allowed_round: Option<u32>,
+    /// Earliest header time this block may carry, or 0/None when the minimum-spacing
+    /// gate is inactive (or the node predates the field). The miner waits for it so
+    /// timestamps track wall clock rather than drifting ahead of it.
+    #[serde(default)]
+    pub poawx_min_block_time: Option<u32>,
     // Phase 31R proposer-registration fields (None on older nodes).
     #[serde(default)]
     pub poawx_reg_active: Option<bool>,

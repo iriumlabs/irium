@@ -363,6 +363,86 @@ pub fn pow_demotion_active(height: u64) -> bool {
     pow_demotion_gate(network_id_byte(), pow_demotion_activation_height(), height)
 }
 
+// ── Minimum block spacing (gated) ─────────────────────────────────────────────
+//
+// WHY THIS EXISTS. Under PoW demotion NOTHING bounded how fast blocks could be
+// produced, so mainnet emitted far above its designed schedule:
+//
+//   * an eligible proposer validates against the CONSTANT anti-spam floor (20 bits
+//     on mainnet), not the header target, so difficulty has no rate authority --
+//     and since 64,291 the target is frozen outright anyway;
+//   * `min_time_for_round(parent, 0, iv) == parent_time`: round 0 is open the
+//     instant the parent lands, with no minimum gap.
+//
+// Measured on mainnet 2026-07-30 over 956 consecutive-height gaps: mean spacing
+// 48.4s against a 120s target (2.48x too fast) -- 65% of blocks landed a mean 8.9s
+// after their parent, and the remaining 35% waited ~123s only because NEITHER node
+// passed round-0 sortition. That emitted 89,334 IRM/day against a designed 36,000,
+// and pulled the first post-fork halving in from ~3.99 years to ~1.61.
+//
+// THE RULE: a block may not carry a timestamp earlier than
+// `parent_time + min_block_spacing_secs()`. Deterministic -- it reads only the
+// parent's recorded timestamp, never a local clock -- so every node agrees.
+//
+// WHY IT DOES NOT BREAK SORTITION (this is the subtle part). The spacing floor
+// equals `DEFAULT_PROPOSER_ROUND_INTERVAL_SECS`, so at `parent + 120` round 1 is
+// open too, and round 1 admits EVERY eligible key (`slots >= n => tau == MAX`).
+// Selection therefore does not collapse into a latency race: `block_proposer_rank`
+// is `(round, priority)` and a round-0 winner's `(0, _)` beats every `(1, _)`, so
+// fork choice still awards the height to the VRF winner. What the floor removes is
+// precisely the advantage that had nothing to do with the VRF -- at a 9s gap the
+// winner was whichever node refreshed its template first, i.e. the one with the
+// lower network latency.
+//
+// ARMING. Must be a FUTURE height: every persisted block below it violates the
+// rule, so a retroactive activation would make each node reject its own chain (the
+// mistake made once already with the difficulty freeze). Same ordering as that
+// re-arm: stop the miners on BOTH hosts, confirm the tip is frozen and converged,
+// set this to tip+1, deploy to BOTH hosts, and only then restart the miners.
+pub const MAINNET_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT: Option<u64> = Some(64_465);
+
+/// Is the minimum-block-spacing floor in force at `height`? Mainnet is
+/// const-controlled (env ignored); other networks may set it via env for
+/// tests/harnesses.
+pub fn min_block_spacing_active(height: u64) -> bool {
+    if crate::activation::network_id_byte() == 0 {
+        return MAINNET_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT
+            .map(|h| height >= h)
+            .unwrap_or(false);
+    }
+    std::env::var("IRIUM_POAWX_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .map(|h| height >= h)
+        .unwrap_or(false)
+}
+
+/// Minimum seconds between a block and its parent once the gate is active. Mainnet
+/// is pinned to the protocol block-time target (no separate magic number); other
+/// networks may shorten it via env so a harness need not wait two minutes a block.
+pub fn min_block_spacing_secs() -> u64 {
+    if crate::activation::network_id_byte() == 0 {
+        return crate::constants::BLOCK_TARGET_INTERVAL_V2;
+    }
+    std::env::var("IRIUM_POAWX_MIN_BLOCK_SPACING_SECS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(crate::constants::BLOCK_TARGET_INTERVAL_V2)
+        .max(1)
+}
+
+/// Earliest header time a block at `height` may carry, given its parent's recorded
+/// timestamp. `None` when the gate is inactive — deliberately an `Option` rather
+/// than "return `parent_time`", so a caller cannot accidentally impose a
+/// `>= parent_time` floor on legacy heights (blocks below the activation are only
+/// bound by MTP, which permits a timestamp at or below the parent's).
+pub fn earliest_block_time(parent_time: u32, height: u64) -> Option<u32> {
+    if !min_block_spacing_active(height) {
+        return None;
+    }
+    Some(parent_time.saturating_add(min_block_spacing_secs().min(u32::MAX as u64) as u32))
+}
+
 // ── V1 fix: rank-fork-choice length/height floor (gated) ──────────────────────
 //
 // Closes the "one better-ranked block rewinds up to 1000 blocks" gap: rank fork
@@ -1404,6 +1484,88 @@ mod tests {
         let p = tau0 + 1; // above round-0 cut
         assert!(!is_selected(p, n, 0));
         assert!(is_selected(p, n, 3)); // round 3 admits all
+    }
+
+    /// The spacing floor must be armed at a height ABOVE every block already on disk.
+    /// Mainnet ran at a mean 48.4s spacing (65% of blocks ~8.9s apart) up to 64,464, so
+    /// an activation at or below the tip would make every node reject its own persisted
+    /// chain on restart — the mistake already made once with the difficulty freeze.
+    #[test]
+    fn min_block_spacing_activation_is_not_retroactive() {
+        let _env = crate::test_env::guard();
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+
+        let armed = MAINNET_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT
+            .expect("must be armed for this test to mean anything");
+
+        // The last height produced under the old (unbounded) rule, and everything below
+        // it, must remain ungoverned so their recorded timestamps still validate.
+        const LAST_UNGOVERNED_TIP: u64 = 64_464;
+        assert!(
+            armed > LAST_UNGOVERNED_TIP,
+            "spacing floor armed at {armed} would retroactively invalidate blocks up to \
+             {LAST_UNGOVERNED_TIP}, which every node would then reject on restart"
+        );
+        assert!(!min_block_spacing_active(LAST_UNGOVERNED_TIP));
+        assert!(!min_block_spacing_active(armed - 1));
+        assert!(min_block_spacing_active(armed));
+        assert!(min_block_spacing_active(armed + 1));
+    }
+
+    #[test]
+    fn min_block_spacing_floor_and_inertness() {
+        let _env = crate::test_env::guard();
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        let armed = MAINNET_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT.expect("armed");
+
+        // Mainnet spacing is the protocol target itself — no separate magic number, so
+        // the emission calendar and the floor can never drift apart.
+        assert_eq!(min_block_spacing_secs(), crate::constants::BLOCK_TARGET_INTERVAL_V2);
+
+        // `earliest_block_time` is an Option precisely so an inactive gate imposes NO
+        // floor at all. Returning `parent_time` instead would silently forbid the
+        // at-or-below-parent timestamps that MTP still permits on legacy heights.
+        assert_eq!(earliest_block_time(1_000_000, armed - 1), None);
+        assert_eq!(
+            earliest_block_time(1_000_000, armed),
+            Some(1_000_000 + crate::constants::BLOCK_TARGET_INTERVAL_V2 as u32)
+        );
+
+        // The floor equals DEFAULT_PROPOSER_ROUND_INTERVAL_SECS, which is what keeps
+        // sortition meaningful: at the earliest permitted moment round 1 is open too, so
+        // a round-0 winner's rank (0, _) still beats every (1, _) in fork choice rather
+        // than the height collapsing into a pure latency race.
+        assert_eq!(
+            min_block_spacing_secs(),
+            DEFAULT_PROPOSER_ROUND_INTERVAL_SECS,
+            "spacing floor and round interval must stay equal or sortition loses its \
+             head start"
+        );
+        assert_eq!(
+            max_round_for_elapsed(min_block_spacing_secs(), DEFAULT_PROPOSER_ROUND_INTERVAL_SECS),
+            1,
+            "at the earliest permitted time rounds 0 and 1 are both open"
+        );
+    }
+
+    /// Off mainnet the gate is env-driven so harnesses need not wait two minutes a block.
+    #[test]
+    fn min_block_spacing_env_driven_off_mainnet() {
+        let _env = crate::test_env::guard();
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::remove_var("IRIUM_POAWX_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT");
+        assert!(
+            !min_block_spacing_active(1),
+            "absent env => inert off mainnet"
+        );
+        std::env::set_var("IRIUM_POAWX_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT", "10");
+        assert!(!min_block_spacing_active(9));
+        assert!(min_block_spacing_active(10));
+        std::env::set_var("IRIUM_POAWX_MIN_BLOCK_SPACING_SECS", "5");
+        assert_eq!(min_block_spacing_secs(), 5);
+        assert_eq!(earliest_block_time(1_000, 10), Some(1_005));
+        std::env::remove_var("IRIUM_POAWX_MIN_BLOCK_SPACING_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_MIN_BLOCK_SPACING_SECS");
     }
 
     #[test]

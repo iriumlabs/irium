@@ -3,6 +3,52 @@
 All notable changes to Irium are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.9.152] - 2026-07-30
+
+Consensus release. **Hard fork at height 64,465.** A node on an older binary does not apply the
+minimum block spacing and will accept blocks this build rejects, so it forks at the first
+too-early block after 64,465.
+
+### Fixed
+
+- **Block spacing is now bounded. Mainnet was emitting 2.48x too fast.** Under PoW demotion
+  nothing governed how quickly blocks could be produced: an eligible proposer validates against
+  the constant 20-bit anti-spam floor rather than the header target (and since 64,291 the target
+  is frozen outright), so difficulty had no rate authority — and `min_time_for_round(parent, 0, iv)`
+  returned `parent_time`, i.e. round 0 opened the instant the parent landed, with no minimum gap.
+  Measured over 956 consecutive-height gaps: **mean spacing 48.4s against the 120s
+  `BLOCK_TARGET_INTERVAL_V2` target**, with 65% of blocks landing a mean 8.9s after their parent
+  and the other 35% waiting ~123s only because neither node passed round-0 sortition. That emitted
+  **89,334 IRM/day against a designed 36,000** and pulled the first post-fork halving in from
+  ~3.99 years to ~1.61. `validate_block_header` now refuses a block whose timestamp is below
+  `parent_time + min_block_spacing_secs()`; the rule reads only the parent's recorded timestamp,
+  never a local clock, so every node reaches the same verdict.
+
+  Sortition is deliberately preserved. The floor equals `DEFAULT_PROPOSER_ROUND_INTERVAL_SECS`, so
+  at the earliest permitted moment round 1 is open too — and because `block_proposer_rank` is
+  `(round, priority)`, a round-0 winner's `(0, _)` still beats every `(1, _)` in fork choice. What
+  the floor removes is the advantage that had nothing to do with the VRF: at a 9s gap the winner
+  was whichever node refreshed its template first, i.e. the one with lower network latency.
+
+- **Test-suite env race.** `bootstrap_materialisation_includes_the_signer_set` and
+  `runtime_seed_count_is_distinct_hosts_not_file_lines` both drive the process-global
+  `IRIUM_BOOTSTRAP_DIR`, so one test's `remove_var` landed inside the other's set/read window and
+  the first failed in the full suite while passing in isolation. Both now take a shared lock.
+
+### Added
+
+- `getblocktemplate` publishes `poawx_min_block_time`, the earliest header time the block may
+  carry. `time` is also clamped up to it, so a stale miner or the Stratum pool — which copy the
+  template's time verbatim — keep producing valid blocks even when only the node is upgraded. An
+  updated `irium-miner` additionally sleeps until that instant, so timestamps track wall clock
+  instead of drifting into the future.
+
+### Note
+
+One-role-per-identity exclusivity (`MAINNET_EXCLUSIVE_ROLE_ACTIVATION_HEIGHT`) remains `None` and
+is **not** armed here. It is an independent hard fork with no effect at two participants, and
+bundling two consensus activations is what produced the 2026-07-23 halt.
+
 ## [Unreleased]
 
 ### Fixed

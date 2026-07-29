@@ -3315,6 +3315,29 @@ fn run_poawx_solo() -> Result<(), String> {
             }
         };
         let height = tmpl.height;
+        // Minimum block spacing: the node tells us the earliest header time this block may
+        // carry. Wait for it BEFORE doing any work, so the timestamp we stamp is the real
+        // wall-clock moment. Skipping the wait would still produce a valid block (the node
+        // clamps the template's `time` up to this same instant), but every block would then
+        // be stamped in the future and the chain's timestamps would run ahead of reality.
+        // Re-fetch afterwards rather than mining on a stale template: a competing block may
+        // have landed while we slept, in which case this height is gone.
+        let min_block_time = tmpl.poawx_min_block_time.unwrap_or(0);
+        if min_block_time > 0 {
+            let now = Utc::now().timestamp();
+            let wait = (min_block_time as i64).saturating_sub(now);
+            if wait > 0 {
+                // Cap a single sleep so an absurd parent timestamp cannot park the miner
+                // indefinitely; the loop simply re-enters and waits again.
+                let wait = wait.min(600) as u64;
+                println!(
+                    "[poawx] height={height} waiting {wait}s for the minimum block spacing \
+                     (earliest header time {min_block_time})"
+                );
+                thread::sleep(Duration::from_secs(wait));
+                continue;
+            }
+        }
         let prev_hash = poawx_decode_hash32(&tmpl.prev_hash)?;
         let bits = u32::from_str_radix(tmpl.bits.trim_start_matches("0x"), 16)
             .map_err(|e| format!("bad template bits {}: {e}", tmpl.bits))?;

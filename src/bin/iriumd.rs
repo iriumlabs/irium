@@ -1645,6 +1645,12 @@ struct BlockTemplateResponse {
     poawx_proposer_freeze_height: u64,
     #[serde(default)]
     poawx_proposer_max_allowed_round: u32,
+    /// Earliest header time this block may carry (`parent_time + minimum spacing`), or
+    /// 0 when the spacing gate is inactive. An updated miner sleeps until this instant
+    /// so block timestamps track wall clock; `time` above is already clamped to it, so
+    /// a miner that ignores this field still produces a valid block.
+    #[serde(default)]
+    poawx_min_block_time: u32,
     // Phase 31R proposer-registration fields (gated; empty/false when off).
     #[serde(default)]
     poawx_reg_active: bool,
@@ -13743,6 +13749,7 @@ async fn get_block_template(
         proposer_round_interval,
         proposer_freeze_height,
         proposer_max_allowed_round,
+        min_block_time,
         reg_active,
         reg_anchor_height,
         reg_anchor_hash,
@@ -13766,6 +13773,18 @@ async fn get_block_template(
             now.max(mtp.saturating_add(1))
         } else {
             now.max(prev_time.saturating_add(1))
+        };
+        // Minimum block spacing (gated): never hand out a template whose timestamp the
+        // node's own validator would reject. Raising `time` here — rather than relying on
+        // the miner to wait — is what keeps a STALE miner or the Stratum pool safe: they
+        // copy the template's time verbatim, so they keep producing VALID blocks even if
+        // only the node was upgraded. An updated miner additionally sleeps until this
+        // moment (see `poawx_min_block_time` below), so timestamps track wall clock
+        // instead of drifting into the future.
+        let earliest_time = irium_node_rs::poawx_proposer::earliest_block_time(prev_time, height);
+        let time = match earliest_time {
+            Some(earliest) => time.max(earliest),
+            None => time,
         };
         // Phase 31: proposer-VRF template fields, computed atomically under the
         // chain lock. Gated: when inactive the miner sees active=false and builds
@@ -13859,6 +13878,7 @@ async fn get_block_template(
             proposer_round_interval,
             proposer_freeze_height,
             proposer_max_allowed_round,
+            earliest_time.unwrap_or(0),
             reg_active,
             reg_anchor_height,
             reg_anchor_hash,
@@ -14149,6 +14169,7 @@ async fn get_block_template(
         poawx_proposer_round_interval: proposer_round_interval,
         poawx_proposer_freeze_height: proposer_freeze_height,
         poawx_proposer_max_allowed_round: proposer_max_allowed_round,
+        poawx_min_block_time: min_block_time,
         poawx_reg_active: reg_active,
         poawx_reg_anchor_height: reg_anchor_height,
         poawx_reg_anchor_hash: reg_anchor_hash,
@@ -33440,10 +33461,20 @@ mod agent_version_tests {
         );
     }
 
+    /// `IRIUM_BOOTSTRAP_DIR` is PROCESS-GLOBAL, so the two tests below cannot overlap:
+    /// each does `set_var` → read → `remove_var`, and whenever they ran concurrently one
+    /// test's `remove_var` landed inside the other's window, so the reader saw no
+    /// bootstrap dir at all. That made
+    /// `bootstrap_materialisation_includes_the_signer_set` fail in the full suite while
+    /// passing in isolation — a self-inflicted failure that says nothing about the code
+    /// under test. Their directories were already distinct; only the env var races.
+    static BOOTSTRAP_DIR_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     /// Materialising the list and signature but not the signer set left verification
     /// unable to run on every node in the network.
     #[test]
     fn bootstrap_materialisation_includes_the_signer_set() {
+        let _env = BOOTSTRAP_DIR_ENV.lock().unwrap_or_else(|e| e.into_inner());
         // storage:: refuses a bootstrap dir outside HOME, so stage under HOME, not /tmp.
         let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
             .join(format!(".irium_bootmat_test_{}", std::process::id()));
@@ -33470,6 +33501,7 @@ mod agent_version_tests {
     /// not bootstrapped.
     #[test]
     fn runtime_seed_count_is_distinct_hosts_not_file_lines() {
+        let _env = BOOTSTRAP_DIR_ENV.lock().unwrap_or_else(|e| e.into_inner());
         let dir = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()))
             .join(format!(".irium_runtimeseed_test_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

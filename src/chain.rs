@@ -998,7 +998,12 @@ impl ChainState {
     /// in fact unreachable, since a block failing its declared target is rejected by
     /// every validator long before work accounting; the gate is belt-and-braces and
     /// makes the mainnet-inert property directly testable.
-    fn demonstrated_work_target(&self, header: &BlockHeader, height: u64) -> Target {
+    /// `pub` so reporting surfaces (e.g. /rpc/mining_metrics) can state the work that was
+    /// actually PROVED rather than the target a header merely declares. Under demotion the two
+    /// diverge without bound: the declared target keeps ratcheting via LWMA while demoted
+    /// blocks only ever satisfy the floor, so a hashrate derived from the declared target is
+    /// physically impossible. Read-only; this is already the basis of chain-work accounting.
+    pub fn demonstrated_work_target(&self, header: &BlockHeader, height: u64) -> Target {
         let declared = header.target();
         if !crate::poawx_proposer::pow_demotion_active(height) {
             return declared;

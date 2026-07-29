@@ -581,6 +581,10 @@ struct MiningMetricsResponse {
     early_participation_signal: bool,
 
     difficulty: f64,
+    /// Difficulty of the work actually PROVED at the tip. Equals `difficulty` unless PoW
+    /// demotion is active, in which case `difficulty` is the (runaway) declared target and
+    /// this is what miners are really solving. `hashrate` is derived from THIS.
+    difficulty_demonstrated: f64,
     hashrate: Option<f64>,
     avg_block_time: Option<f64>,
 
@@ -3769,6 +3773,29 @@ fn difficulty_from_target(pow_limit: Target, target: Target) -> f64 {
     }
 }
 
+/// Difficulty corresponding to the work the tip block actually **proved**, which is what a
+/// hashrate estimate must be built from.
+///
+/// This differs from the DECLARED difficulty only while PoW demotion is active, and then it
+/// differs without bound. Demoted blocks satisfy the anti-spam floor, not the header's target,
+/// but LWMA still sees blocks arriving fast and keeps raising that target — and raising it
+/// cannot slow them down, because nobody is mining against it. The declared difficulty
+/// therefore ratchets away from reality (observed on mainnet 2026-07-29: 6.2e50, with a 24h
+/// "change" of 3.3e11 %), and `declared * 2^32 / avg_block_time` produced ~6.7e58 H/s on a
+/// chain being mined by two CPUs — a figure no hardware in existence could reach.
+///
+/// `demonstrated_work_target` is the same rule the chain uses to credit work, so this reports
+/// exactly what consensus already banks. With demotion inactive it returns the declared target,
+/// making this identical to the previous behaviour.
+fn demonstrated_difficulty_at_tip(chain: &irium_node_rs::chain::ChainState) -> f64 {
+    let height = chain.tip_height();
+    let target = match chain.chain.last() {
+        Some(b) => chain.demonstrated_work_target(&b.header, height),
+        None => chain.params.genesis_block.header.target(),
+    };
+    difficulty_from_target(chain.params.pow_limit, target)
+}
+
 async fn network_hashrate(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
@@ -3785,6 +3812,10 @@ async fn network_hashrate(
             .map(|b| b.header.target())
             .unwrap_or_else(|| guard.params.genesis_block.header.target());
         let difficulty = difficulty_from_target(guard.params.pow_limit, tip_target);
+        // Hashrate is a physical claim, so it is built from PROVED work, not the declared
+        // target. See `demonstrated_difficulty_at_tip`. `difficulty` below stays the declared
+        // value — that is a real chain quantity and existing consumers read it.
+        let proved_difficulty = demonstrated_difficulty_at_tip(&guard);
 
         if guard.chain.len() < 2 {
             (tip_height, difficulty, None, None, 0usize)
@@ -3806,7 +3837,7 @@ async fn network_hashrate(
                     (tip_height, difficulty, None, None, blocks)
                 } else {
                     let avg_time = (elapsed as f64) / (blocks as f64);
-                    let hashrate = difficulty * 4294967296.0 / avg_time;
+                    let hashrate = proved_difficulty * 4294967296.0 / avg_time;
                     (
                         tip_height,
                         difficulty,
@@ -3853,6 +3884,8 @@ async fn network_status(
         .map(|b| b.header.target())
         .unwrap_or_else(|| guard.params.genesis_block.header.target());
     let difficulty = difficulty_from_target(guard.params.pow_limit, tip_target);
+    // Hashrate from PROVED work, not the declared target — see `demonstrated_difficulty_at_tip`.
+    let proved_difficulty = demonstrated_difficulty_at_tip(&guard);
 
     let (hashrate_estimate, seconds_since_last_block) = if guard.chain.len() >= 2 {
         let end_index = guard.chain.len() - 1;
@@ -3863,7 +3896,7 @@ async fn network_status(
         let elapsed = end_time - start_time;
         let hashrate = if elapsed > 0 {
             let avg_time = (elapsed as f64) / (window as f64);
-            Some(difficulty * 4294967296.0 / avg_time)
+            Some(proved_difficulty * 4294967296.0 / avg_time)
         } else {
             None
         };
@@ -3905,6 +3938,7 @@ async fn mining_metrics(
         tip_height,
         tip_time,
         difficulty,
+        proved_difficulty,
         hashrate,
         avg_block_time,
         sample_blocks,
@@ -3928,6 +3962,10 @@ async fn mining_metrics(
             .map(|b| b.header.target())
             .unwrap_or_else(|| guard.params.genesis_block.header.target());
         let difficulty = difficulty_from_target(guard.params.pow_limit, tip_target);
+        // Hashrate from PROVED work, not the declared target — see `demonstrated_difficulty_at_tip`.
+        // Also reported as `difficulty_demonstrated` so a consumer can show what is actually
+        // being solved instead of the runaway declared figure.
+        let proved_difficulty = demonstrated_difficulty_at_tip(&guard);
 
         let (hashrate, avg_block_time, sample_blocks) = if guard.chain.len() < 2 {
             (None, None, 0usize)
@@ -3949,7 +3987,7 @@ async fn mining_metrics(
                     (None, None, blocks)
                 } else {
                     let avg_time = (elapsed as f64) / (blocks as f64);
-                    let hashrate = difficulty * 4294967296.0 / avg_time;
+                    let hashrate = proved_difficulty * 4294967296.0 / avg_time;
                     (Some(hashrate), Some(avg_time), blocks)
                 }
             }
@@ -4007,6 +4045,7 @@ async fn mining_metrics(
             tip_height,
             tip_time,
             difficulty,
+            proved_difficulty,
             hashrate,
             avg_block_time,
             sample_blocks,
@@ -4028,6 +4067,7 @@ async fn mining_metrics(
         current_network_era_tagline: era.era_tagline.map(str::to_string),
         early_participation_signal: era.early_participation_signal,
         difficulty,
+        difficulty_demonstrated: proved_difficulty,
         hashrate,
         avg_block_time,
         window,
@@ -31176,6 +31216,53 @@ mod tests {
     // check — so it could not simply be deleted. It now shares add_header's coarse
     // admission gate. Restart-after-gap is the path exercised here.
     const C1S2_HARD_BITS: u32 = 0x1d00ffff;
+
+    /// Hashrate must be derived from PROVED work, and the change must be a no-op wherever PoW
+    /// demotion is not active.
+    ///
+    /// The reported hashrate was `declared_difficulty * 2^32 / avg_block_time`. Under demotion
+    /// the declared difficulty ratchets without bound (LWMA raises it, demoted blocks ignore
+    /// it), so mainnet reported ~6.7e58 H/s — more than the observable universe could compute.
+    #[test]
+    fn hashrate_uses_proved_work_and_is_inert_without_demotion() {
+        let chain = c1s2_chain();
+
+        // 1. Inertness: with demotion inactive (genesis height, and mainnet's const activates
+        //    at 61,414) the proved difficulty must EQUAL the declared one, so nodes that are
+        //    not demoting see byte-identical numbers to before this change.
+        let tip_declared_target = chain
+            .chain
+            .last()
+            .map(|b| b.header.target())
+            .unwrap_or_else(|| chain.params.genesis_block.header.target());
+        let declared = difficulty_from_target(chain.params.pow_limit, tip_declared_target);
+        let proved = demonstrated_difficulty_at_tip(&chain);
+        assert_eq!(
+            proved, declared,
+            "without demotion, proved difficulty must equal declared"
+        );
+
+        // 2. The bug, numerically. A demoted block proves only the anti-spam floor. Deriving a
+        //    hashrate from the floor is physically plausible; deriving it from the runaway
+        //    declared difficulty observed on mainnet is not.
+        const AVG_BLOCK_TIME_SECS: f64 = 40.1;
+        let floor_difficulty = difficulty_from_target(
+            chain.params.pow_limit,
+            irium_node_rs::pow::floor_target(20), // mainnet anti-spam bits
+        );
+        let floor_hashrate = floor_difficulty * 4294967296.0 / AVG_BLOCK_TIME_SECS;
+        assert!(
+            floor_hashrate > 0.0 && floor_hashrate < 1e12,
+            "floor-derived hashrate must be a plausible CPU figure, got {floor_hashrate:e}"
+        );
+
+        let observed_runaway_declared = 6.2e50_f64;
+        let runaway_hashrate = observed_runaway_declared * 4294967296.0 / AVG_BLOCK_TIME_SECS;
+        assert!(
+            runaway_hashrate > 1e15,
+            "sanity: the declared-difficulty formula is the impossible one"
+        );
+    }
 
     fn c1s2_chain() -> ChainState {
         let locked = load_locked_genesis().expect("locked genesis");

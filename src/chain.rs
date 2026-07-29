@@ -919,7 +919,11 @@ impl ChainState {
         if !crate::poawx_proposer::difficulty_demotion_freeze_active(height) {
             return None;
         }
-        let act = crate::poawx_proposer::pow_demotion_activation_height()?;
+        // MUST be the effective (const-aware) activation, not the env accessor. The env one is
+        // ignored on mainnet, so it returned None there and this whole function gave up
+        // silently — the freeze was armed at 63,824, the chain passed it, and the target kept
+        // ratcheting (1.7e6 at h61,413 -> 8e51 by h64,000). Gate-on / lookup-off.
+        let act = crate::poawx_proposer::pow_demotion_effective_activation()?;
         let baseline_h = act.checked_sub(1)?;
         self.chain
             .get(baseline_h as usize)

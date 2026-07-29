@@ -176,6 +176,23 @@ pub fn pow_demotion_activation_height() -> Option<u64> {
         .and_then(|v| v.trim().parse::<u64>().ok())
 }
 
+/// The height demotion ACTUALLY activated at, resolved the same const-vs-env way as
+/// `pow_demotion_gate` decides whether it is on.
+///
+/// Use this, never `pow_demotion_activation_height()`, anywhere gated code needs to know WHEN
+/// demotion began. The env accessor is ignored on mainnet — demotion there is driven solely by
+/// the compiled const — so on net 0 it returns `None` even while demotion is unmistakably
+/// active. `demotion_frozen_target` read the env accessor and therefore silently gave up on
+/// mainnet: the freeze was armed at 63,824, the chain passed it, and nothing froze. The gate was
+/// const-aware while the value it needed was env-only, and nothing logged the mismatch.
+pub fn pow_demotion_effective_activation() -> Option<u64> {
+    if crate::activation::network_id_byte() == 0 {
+        MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT
+    } else {
+        pow_demotion_activation_height()
+    }
+}
+
 /// Compiled mainnet activation height for PoAW-X PoW demotion, analogous to
 /// `MAINNET_CONTRIBUTOR_ROLE_BINDING_HEIGHT`. `None` = hard-off on mainnet: no
 /// environment value can enable demotion on net 0. Set to `Some(H)` (a height
@@ -250,10 +267,24 @@ pub fn pow_demotion_gate(network_id: u8, activation: Option<u64>, height: u64) -
 ///
 /// TIGHTENS/LOOSENS validity, so it is a HARD FORK: ships inert (`None`) and switches on
 /// only at a coordinated activation height.
-/// ARMED at 63,824 (2026-07-28). Chosen ~300 blocks (~5.4h) ahead of the tip at the time
-/// so BOTH hosts are upgraded well before it fires; a host still on the old binary would
-/// compute a different required target and fork at exactly this height.
-pub const MAINNET_DIFFICULTY_DEMOTION_FREEZE_ACTIVATION_HEIGHT: Option<u64> = Some(63_824);
+/// ⚠️ RE-ARMED at 64,600 (2026-07-29), replacing 63,824.
+///
+/// 63,824 never fired. The gate was const-controlled and correct, but `demotion_frozen_target`
+/// resolved its baseline through the ENV-only `pow_demotion_activation_height()`, which mainnet
+/// ignores — so it returned `None` and the freeze silently did nothing while the chain sailed
+/// past the armed height and the target ran from 1.7e6 (h61,413) to ~8e51 (h64,000).
+///
+/// The height MUST move forward rather than stay at 63,824. `connect_block` requires
+/// `header.bits == target_for_height(height)` EXACTLY, and every block from 63,824 to now was
+/// produced with the unfrozen (runaway) bits. Honouring the old height retroactively would make
+/// every node reject its own persisted chain on the next restart.
+///
+/// 64,600 is ~560 blocks past the tip at the time of arming (64,042) — several hours, so BOTH
+/// hosts are upgraded well before it fires. A host still on an older binary computes a
+/// different required target and forks at exactly this height, so the deploy must complete
+/// first. Verify after it fires: `/rpc/mining_metrics` `difficulty` should STOP climbing and
+/// settle at the h61,413 value (~1.72e6) instead of compounding.
+pub const MAINNET_DIFFICULTY_DEMOTION_FREEZE_ACTIVATION_HEIGHT: Option<u64> = Some(64_600);
 
 /// Is the demotion difficulty freeze in force at `height`? Mainnet is const-controlled
 /// (env ignored); other networks may set it via env for tests/harnesses.
@@ -1346,6 +1377,105 @@ mod tests {
         assert!(proposer_vrf_gate(1, Some(100), 100));
         assert!(!proposer_vrf_gate(2, Some(100), 99));
         assert!(!proposer_vrf_gate(2, None, 1)); // unset => off
+    }
+
+    /// MAINNET-CONTEXT test (network_id == 0), per CLAUDE.md §12.
+    ///
+    /// The freeze bug survived because the only test covering it ran on DEVNET, where the env
+    /// accessor works. On mainnet the env is ignored, so `pow_demotion_activation_height()`
+    /// returns `None` even though demotion is unmistakably active — and
+    /// `demotion_frozen_target`'s `?` turned that into "no freeze", silently.
+    #[test]
+    fn demotion_effective_activation_is_const_on_mainnet_env_only_elsewhere() {
+        let _env = crate::test_env::guard();
+        let prev_net = std::env::var("IRIUM_NETWORK").ok();
+        let prev_act = std::env::var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT").ok();
+
+        // Mainnet, env deliberately UNSET — exactly the live host configuration.
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+        assert_eq!(
+            pow_demotion_activation_height(),
+            None,
+            "precondition: the env accessor yields nothing on mainnet — this is the trap"
+        );
+        assert_eq!(
+            pow_demotion_effective_activation(),
+            MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT,
+            "mainnet must resolve the activation from the CONST, or the freeze silently no-ops"
+        );
+        assert!(
+            pow_demotion_effective_activation().is_some(),
+            "demotion is live on mainnet; the effective activation must not be None"
+        );
+
+        // Mainnet must IGNORE a contradictory env value, exactly as the gate does.
+        std::env::set_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", "999999");
+        assert_eq!(
+            pow_demotion_effective_activation(),
+            MAINNET_POW_DEMOTION_ACTIVATION_HEIGHT,
+            "mainnet must ignore the env activation"
+        );
+
+        // Non-mainnet keeps the env behaviour tests and harnesses rely on.
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        assert_eq!(pow_demotion_effective_activation(), Some(999_999));
+        std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT");
+        assert_eq!(pow_demotion_effective_activation(), None);
+
+        match prev_net {
+            Some(v) => std::env::set_var("IRIUM_NETWORK", v),
+            None => std::env::remove_var("IRIUM_NETWORK"),
+        }
+        match prev_act {
+            Some(v) => std::env::set_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT", v),
+            None => std::env::remove_var("IRIUM_POAWX_POW_DEMOTION_ACTIVATION_HEIGHT"),
+        }
+    }
+
+    /// The re-arm must NOT be retroactive.
+    ///
+    /// `connect_block` requires `header.bits == target_for_height(height)` exactly. Every block
+    /// between the old armed height (63,824) and the re-arm was produced WITHOUT the freeze, so
+    /// if the freeze applied to those heights every node would reject its own persisted chain on
+    /// restart. This pins that the activation is in the future relative to that damage.
+    #[test]
+    fn difficulty_freeze_rearm_is_not_retroactive() {
+        let _env = crate::test_env::guard();
+        let prev_net = std::env::var("IRIUM_NETWORK").ok();
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+
+        let armed = MAINNET_DIFFICULTY_DEMOTION_FREEZE_ACTIVATION_HEIGHT
+            .expect("freeze must be armed for this test to mean anything");
+
+        // The previously-armed-but-inert height, and every block produced since, must remain
+        // unfrozen so their recorded bits still validate.
+        for h in [63_824u64, 63_900, 64_000, 64_042] {
+            assert!(
+                h < armed,
+                "re-arm height {armed} must be AFTER the blocks already produced unfrozen ({h})"
+            );
+            assert!(
+                !difficulty_demotion_freeze_active(h),
+                "freeze must NOT apply at {h}: those blocks carry unfrozen bits and would be \
+                 rejected by connect_block's exact bits check"
+            );
+        }
+
+        // ...and it must actually switch on at/after the armed height.
+        assert!(
+            difficulty_demotion_freeze_active(armed),
+            "freeze must be active at the armed height"
+        );
+        assert!(difficulty_demotion_freeze_active(armed + 1_000));
+
+        // Below demotion activation the freeze is meaningless and must stay off.
+        assert!(!difficulty_demotion_freeze_active(61_000));
+
+        match prev_net {
+            Some(v) => std::env::set_var("IRIUM_NETWORK", v),
+            None => std::env::remove_var("IRIUM_NETWORK"),
+        }
     }
 
     #[test]

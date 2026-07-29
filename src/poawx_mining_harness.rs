@@ -273,9 +273,34 @@ pub struct CollectedArtifacts {
     pub compute: Option<crate::poawx_role_bundle::RoleBundleV1>,
     pub verify: Option<crate::poawx_role_bundle::RoleBundleV1>,
     pub support: Option<crate::poawx_role_bundle::RoleBundleV1>,
+    /// EVERY enrolled bundle the collector saw for this height, not just the three that
+    /// were selected.
+    ///
+    /// Without this the block's candidate set carried only the SELECTED candidates, so a
+    /// validator could check the payee against a selection over the miner's own shortlist and
+    /// nothing more — it could never tell whether the miner had narrowed the pool. Carrying
+    /// the full set is what lets every validator re-derive the choice independently and makes
+    /// "the chain decides" enforceable rather than merely honoured by a cooperative miner.
+    ///
+    /// Empty => legacy behaviour (the three singular fields are all there is).
+    pub all: Vec<crate::poawx_role_bundle::RoleBundleV1>,
 }
 
 impl CollectedArtifacts {
+    /// Is there an enrolled bundle for this exact (role, solver)? Used to decide whether a
+    /// candidate is PAYABLE — the producer must hold that participant's artifacts to pay it.
+    /// Checks the full enrolled set, falling back to the three selected ones when `all` is
+    /// empty (legacy callers).
+    pub fn payable(&self, role: u8, solver_pkh: &[u8; 20]) -> bool {
+        if !self.all.is_empty() {
+            return self
+                .all
+                .iter()
+                .any(|b| b.role_id == role && &b.solver_pkh == solver_pkh);
+        }
+        self.for_role(role).map(|b| &b.solver_pkh == solver_pkh).unwrap_or(false)
+    }
+
     pub fn for_role(&self, role: u8) -> Option<&crate::poawx_role_bundle::RoleBundleV1> {
         match role {
             r if r == ROLE_COMPUTE_CONTRIBUTOR => self.compute.as_ref(),
@@ -1302,9 +1327,51 @@ fn build_all_gates_block_with(
         None => hash160(worker_pubkey_bytes),
     };
     let member_sk = &ids.member_sk;
-    let compute_solver = ids.compute_solver;
-    let verify_solver = ids.verify_solver;
-    let support_solver = ids.support_solver;
+
+    // ── The CHAIN picks the payees, from the FULL enrolled pool ──────────────────────────
+    //
+    // The caller (miner) proposes `ids.*_solver`, but it must not have the final say. When we
+    // hold a real dominance snapshot AND the collector handed us every enrolled bundle, rank
+    // the whole pool with the SAME `selected_for_role` the validators use and take its answer.
+    // The block's candidate set below then carries that same full pool, so every validator
+    // re-derives the identical choice — which is what makes "the chain decides" checkable
+    // instead of a promise from a cooperative miner.
+    //
+    // `CandidateSet::new` needs a seed, but `candidate_better` orders on candidate fields only
+    // (effective_score, then vrf output, then solver_pkh, then ticket digest) and never reads
+    // the seed, so a placeholder here cannot change the ordering.
+    //
+    // Falls back to the caller's ids when there is no dominance snapshot or no pool — the
+    // standalone-harness and legacy paths stay byte-identical.
+    let (compute_solver, verify_solver, support_solver) = {
+        let fallback = (ids.compute_solver, ids.verify_solver, ids.support_solver);
+        match (dominance_override, ids.collected.as_ref()) {
+            (Some(dom), Some(col)) if !col.all.is_empty() => {
+                let mut pool = crate::poawx_candidate::CandidateSet::new(net, height, [0u8; 32]);
+                for b in &col.all {
+                    let dw = dom.weight(DOMINANCE_BASE_WORK_SCORE, &b.solver_pkh, height);
+                    pool.push(crate::poawx_candidate::RoleCandidate::from_assignment_v2(
+                        &b.assignment_proof,
+                        b.ticket_proof.penalty_status,
+                        dw,
+                        [b.role_id; 32],
+                    ));
+                }
+                pool.sort_canonical();
+                let pick = |role: u8, dflt: [u8; 20]| -> [u8; 20] {
+                    pool.selected_for_role(role, height, Some(&worker_pkh))
+                        .map(|c| c.solver_pkh)
+                        .unwrap_or(dflt)
+                };
+                (
+                    pick(ROLE_COMPUTE_CONTRIBUTOR, fallback.0),
+                    pick(ROLE_VERIFY_CONTRIBUTOR, fallback.1),
+                    pick(ROLE_SUPPORT_CONTRIBUTOR, fallback.2),
+                )
+            }
+            _ => fallback,
+        }
+    };
 
     // Anti-domination weights are validated against the node's PERSISTED dominance
     // state, which evolves as each accepted block credits its role rewards. A
@@ -1413,13 +1480,17 @@ fn build_all_gates_block_with(
     // activation under 2-producer racing. With no payable extras (e.g. sole/self-fill or
     // 2 producers with no external bundles) the set stays the base candidates, so
     // best_for_role == the selected solver by construction. `sort_canonical` dedups.
+    // PAYABLE against the FULL enrolled pool, not just the three selected bundles. This is
+    // what actually enlarges the block's candidate set from "the miner's shortlist" to "every
+    // participant that enrolled", so a validator can see who was in contention.
     let can_pay = |c: &crate::poawx_candidate::RoleCandidate| -> bool {
         ids.collected
             .as_ref()
-            .and_then(|col| col.for_role(c.role_id))
-            .map(|b| b.solver_pkh == c.solver_pkh)
+            .map(|col| col.payable(c.role_id, &c.solver_pkh))
             .unwrap_or(false)
     };
+    // Same dominance view the candidate weights are validated against (phase21d).
+    let dw_pool = |pkh: &[u8; 20]| dom_in.weight(DOMINANCE_BASE_WORK_SCORE, pkh, height);
     let mut folded_any = false;
     for c in ids
         .extra_support_candidates
@@ -1429,6 +1500,23 @@ fn build_all_gates_block_with(
     {
         if can_pay(c) {
             cs.push(c.clone());
+            folded_any = true;
+        }
+    }
+    // Fold EVERY enrolled bundle's candidate into the set, not only the gossip extras. This is
+    // the half of Defect 2 that makes the block self-describing: without it the set holds just
+    // the winners and a validator cannot tell who else was in contention, so it can only check
+    // the miner against the miner's own shortlist. `sort_canonical` dedups, so re-adding the
+    // winners is harmless.
+    if let Some(col) = ids.collected.as_ref() {
+        for b in &col.all {
+            let dw = dw_pool(&b.solver_pkh);
+            cs.push(crate::poawx_candidate::RoleCandidate::from_assignment_v2(
+                &b.assignment_proof,
+                b.ticket_proof.penalty_status,
+                dw,
+                [b.role_id; 32],
+            ));
             folded_any = true;
         }
     }
@@ -1540,6 +1628,26 @@ fn build_all_gates_block_with(
     // caller guarantees by drawing the committee from the registered key set. Empty => no change.
     for v in &ids.extra_finality_votes {
         fproof.push(v.clone());
+    }
+    // Every collected SUPPORT bundle we folded as a candidate is now a COMMITTEE MEMBER, so
+    // the quorum threshold rose with the committee. Its own signed vote must ride along or the
+    // proof cannot reach 2/3 and the block is rejected ("insufficient commit votes"). The
+    // worker supplies the vote at bundle-build time precisely because the builder holds no key
+    // for it. `sort_canonical` dedups, so re-adding a vote already present is harmless.
+    // Dedup by (member_pkh, vote_type): the selected SUPPORT bundle's vote is already in the
+    // proof, and `sort_canonical` only ORDERS — `is_canonical` then rejects duplicate members.
+    if let Some(col) = ids.collected.as_ref() {
+        for b in &col.all {
+            if let Some(v) = b.finality_vote.as_ref() {
+                let dup = fproof
+                    .votes
+                    .iter()
+                    .any(|e| e.member_pkh == v.member_pkh && e.vote_type == v.vote_type);
+                if !dup {
+                    fproof.push(v.clone());
+                }
+            }
+        }
     }
     fproof.sort_canonical();
 

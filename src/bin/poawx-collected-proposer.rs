@@ -35,6 +35,7 @@ fn fetch_collected(
         compute: None,
         verify: None,
         support: None,
+            all: Vec::new(),
     };
     if let Some(arr) = v.get("bundles").and_then(|x| x.as_array()) {
         for b in arr {

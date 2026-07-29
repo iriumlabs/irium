@@ -3599,6 +3599,7 @@ fn run_poawx_solo() -> Result<(), String> {
                             compute: None,
                             verify: None,
                             support: None,
+                            all: Vec::new(),
                         };
                         // Select by the CHAIN's randomness, not by arrival order.
                         //
@@ -3628,6 +3629,10 @@ fn run_poawx_solo() -> Result<(), String> {
                         }
                         // The miner's own payout identity is taken first: a producer must
                         // not also draw a contributor role.
+                        // Hand the builder EVERY enrolled bundle, not just the winners, so
+                        // the block's candidate set carries the full pool and validators can
+                        // re-derive the selection independently.
+                        c.all = all.clone();
                         let mut taken: Vec<[u8; 20]> = Vec::new();
                         if let Some(v20) = miner_pubkey_hash() {
                             if v20.len() == 20 {

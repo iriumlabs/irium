@@ -13041,6 +13041,7 @@ mod tests {
             compute: Some(mk_bundle(&kc, crate::poawx::ROLE_COMPUTE_CONTRIBUTOR, [0x11u8; 32])),
             verify: Some(mk_bundle(&kv, crate::poawx::ROLE_VERIFY_CONTRIBUTOR, [0x12u8; 32])),
             support: None,
+            all: Vec::new(),
         };
         let _ = ks;
         // Each collected bundle is self-validating public material -- no secrets.
@@ -13195,6 +13196,7 @@ mod tests {
             compute: Some(got_c),
             verify: Some(got_v),
             support: Some(got_s),
+            all: Vec::new(),
         };
 
         let pc2 = seed_components_from_block(st.chain.last());

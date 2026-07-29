@@ -267,7 +267,7 @@ pub fn pow_demotion_gate(network_id: u8, activation: Option<u64>, height: u64) -
 ///
 /// TIGHTENS/LOOSENS validity, so it is a HARD FORK: ships inert (`None`) and switches on
 /// only at a coordinated activation height.
-/// ⚠️ RE-ARMED at 64,600 (2026-07-29), replacing 63,824.
+/// ⚠️ RE-ARMED at 64,291 (2026-07-29), replacing 63,824 (and a short-lived 64,600).
 ///
 /// 63,824 never fired. The gate was const-controlled and correct, but `demotion_frozen_target`
 /// resolved its baseline through the ENV-only `pow_demotion_activation_height()`, which mainnet
@@ -279,12 +279,22 @@ pub fn pow_demotion_gate(network_id: u8, activation: Option<u64>, height: u64) -
 /// produced with the unfrozen (runaway) bits. Honouring the old height retroactively would make
 /// every node reject its own persisted chain on the next restart.
 ///
-/// 64,600 is ~560 blocks past the tip at the time of arming (64,042) — several hours, so BOTH
-/// hosts are upgraded well before it fires. A host still on an older binary computes a
-/// different required target and forks at exactly this height, so the deploy must complete
-/// first. Verify after it fires: `/rpc/mining_metrics` `difficulty` should STOP climbing and
-/// settle at the h61,413 value (~1.72e6) instead of compounding.
-pub const MAINNET_DIFFICULTY_DEMOTION_FREEZE_ACTIVATION_HEIGHT: Option<u64> = Some(64_600);
+/// 64,291 is tip+1: BOTH producers were STOPPED first, which freezes the tip at 64,290 on both
+/// hosts, so there is no race between the deploy and the chain reaching this height. That is
+/// strictly safer than picking a height hours ahead and hoping the deploy lands first — with
+/// production halted the activation cannot be crossed until we deliberately restart the miners
+/// on the new binary. It also stops the runaway immediately instead of letting it compound for
+/// another ~10 hours.
+///
+/// The ordering that makes this safe, and which must be repeated for any future re-arm:
+///   1. stop the producers on BOTH hosts and confirm the tip is frozen and converged;
+///   2. set this const to tip+1;
+///   3. deploy the new binary to BOTH hosts;
+///   4. only then restart the producers.
+///
+/// Verify after it fires: `/rpc/mining_metrics` `difficulty` should STOP climbing and settle at
+/// the h61,413 value (~1.72e6) instead of compounding.
+pub const MAINNET_DIFFICULTY_DEMOTION_FREEZE_ACTIVATION_HEIGHT: Option<u64> = Some(64_291);
 
 /// Is the demotion difficulty freeze in force at `height`? Mainnet is const-controlled
 /// (env ignored); other networks may set it via env for tests/harnesses.
@@ -1450,7 +1460,10 @@ mod tests {
 
         // The previously-armed-but-inert height, and every block produced since, must remain
         // unfrozen so their recorded bits still validate.
-        for h in [63_824u64, 63_900, 64_000, 64_042] {
+        // 64,290 is the frozen tip at re-arm time — the last block produced UNFROZEN. If the
+        // freeze reached it, that block's recorded bits would no longer match and the node
+        // would reject its own tip.
+        for h in [63_824u64, 63_900, 64_000, 64_042, 64_290] {
             assert!(
                 h < armed,
                 "re-arm height {armed} must be AFTER the blocks already produced unfrozen ({h})"

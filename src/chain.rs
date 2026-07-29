@@ -1991,7 +1991,9 @@ impl ChainState {
             ];
             for (i, role) in roles.iter().enumerate() {
                 let cand = cs
-                    .selected_for_role(*role, height, None)
+                    // Exclude the block's PRIMARY identity: a proposer must not also draw a
+                    // contributor role. Must match the builder or the block is rejected.
+                    .selected_for_role(*role, height, Some(&r.worker_pkh))
                     .ok_or_else(|| format!("phase21f: no candidate for role {}", role))?;
                 let candidate_digest: [u8; 32] = {
                     let mut h = Sha256::new();
@@ -2205,7 +2207,7 @@ impl ChainState {
             ];
             for (i, role, sel) in roles {
                 let cand = cs
-                    .selected_for_role(role, height, None)
+                    .selected_for_role(role, height, Some(&r.worker_pkh))
                     .ok_or_else(|| format!("phase22d: no candidate for role {}", role))?;
                 if cand.solver_pkh != sel {
                     return Err(format!(
@@ -2334,7 +2336,7 @@ impl ChainState {
             ];
             for (role_id, sel) in selected {
                 let best = cs
-                    .selected_for_role(role_id, height, None)
+                    .selected_for_role(role_id, height, Some(&r.worker_pkh))
                     .ok_or_else(|| format!("phase21d: no candidate for role {}", role_id))?;
                 if best.solver_pkh != sel {
                     return Err(format!(

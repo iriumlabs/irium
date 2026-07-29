@@ -14718,6 +14718,32 @@ fn role_bundle_bridge_guard(addr: &SocketAddr) -> Result<(), StatusCode> {
 /// height so a genuinely SEPARATE proposer process can assemble a block from them (the
 /// R1-R4 collection channel exercised end-to-end with real processes). Loopback-guarded
 /// and refused on mainnet (network_id == 0).
+/// Acquire the chain lock for the role-bundle endpoints, briefly retrying instead of
+/// failing the instant it is contended.
+///
+/// These two endpoints are polled by a miner while it decides who to pay, so they are hit
+/// EXACTLY when the node is busiest — connecting or validating a block. A bare `try_lock`
+/// turned that contention into an immediate 503, the miner read it as "nobody enrolled",
+/// and the block silently paid all four role slices to the producer itself. Measured on a
+/// STALLED mainnet node, ~5% of `/poawx/collected-bundles` calls already 503'd; under an
+/// actively building node it is far worse.
+///
+/// Bounded on purpose: this must never block the HTTP worker for long, so it gives up
+/// after a short spin and still returns 503 — the difference is that a transient blip no
+/// longer looks like an empty pool.
+fn role_bundle_chain_lock(
+    chain: &std::sync::Mutex<ChainState>,
+) -> Result<std::sync::MutexGuard<'_, ChainState>, StatusCode> {
+    const ATTEMPTS: u32 = 40; // ~200ms total
+    for _ in 0..ATTEMPTS {
+        match chain.try_lock() {
+            Ok(g) => return Ok(g),
+            Err(_) => std::thread::sleep(std::time::Duration::from_millis(5)),
+        }
+    }
+    Err(StatusCode::SERVICE_UNAVAILABLE)
+}
+
 async fn poawx_get_collected_bundles(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
@@ -14732,10 +14758,7 @@ async fn poawx_get_collected_bundles(
     // falls back to a solo (self-fill) build, byte-identical to prior mainnet behaviour. The
     // (net!=0-only) refusal was a dev-scoping artifact of the R1-R4 channel; removed here.
     let height = {
-        let g = match state.chain.try_lock() {
-            Ok(g) => g,
-            Err(_) => return Err(StatusCode::SERVICE_UNAVAILABLE),
-        };
+        let g = role_bundle_chain_lock(&state.chain)?;
         g.tip_height().saturating_add(1)
     };
     let pool = irium_node_rs::poawx_role_bundle::global_role_bundle_pool();
@@ -14805,13 +14828,11 @@ async fn poawx_post_role_bundle(
     let net = irium_node_rs::activation::network_id_byte();
     // R4: the SUPPORT finality vote binds to the PARENT block, so ingest needs it to
     // check the vote names the parent we actually expect.
-    let (next_height, parent_hash) = match state.chain.try_lock() {
-        Ok(g) => {
-            let tip = g.tip_height();
-            let ph = g.chain.last().map(|b| b.header.hash_for_height(tip));
-            (tip.saturating_add(1), ph)
-        }
-        Err(_) => return Err(StatusCode::SERVICE_UNAVAILABLE),
+    let (next_height, parent_hash) = {
+        let g = role_bundle_chain_lock(&state.chain)?;
+        let tip = g.tip_height();
+        let ph = g.chain.last().map(|b| b.header.hash_for_height(tip));
+        (tip.saturating_add(1), ph)
     };
     let pool = irium_node_rs::poawx_role_bundle::global_role_bundle_pool();
     let parsed = match irium_node_rs::poawx_role_bundle::RoleBundleV1::from_json(json_s) {

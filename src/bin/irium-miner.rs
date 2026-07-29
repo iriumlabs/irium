@@ -3579,7 +3579,22 @@ fn run_poawx_solo() -> Result<(), String> {
                         if let Some(t) = rpc_token() {
                             req = req.bearer_auth(t);
                         }
-                        let v: serde_json::Value = req.send().ok()?.json().ok()?;
+                        // NOT `.ok()?`: a 503 from the node (its chain mutex was busy -- precisely when a
+                        // miner asks) is TRANSIENT, and collapsing it into None makes it indistinguishable
+                        // from "nobody enrolled". That difference is the whole question when a block pays
+                        // one key instead of four, and on mainnet it was invisible.
+                        let resp = match req.send() {
+                            Ok(r) => r,
+                            Err(e) => { eprintln!("[poawx] fair-distribution: bundle fetch failed: {e}"); return None; }
+                        };
+                        if !resp.status().is_success() {
+                            eprintln!("[poawx] fair-distribution: bundle fetch HTTP {} (transient; retrying inside the wait window)", resp.status());
+                            return None;
+                        }
+                        let v: serde_json::Value = match resp.json() {
+                            Ok(v) => v,
+                            Err(e) => { eprintln!("[poawx] fair-distribution: bundle response undecodable: {e}"); return None; }
+                        };
                         let mut c = irium_node_rs::poawx_mining_harness::CollectedArtifacts {
                             compute: None,
                             verify: None,
@@ -3650,6 +3665,16 @@ fn run_poawx_solo() -> Result<(), String> {
                     println!(
                         "[poawx] fair-distribution: paying {best_n} distinct role participant(s) from collected bundles (waited {}ms)",
                         start.elapsed().as_millis()
+                    );
+                } else {
+                    // Four role slices all paying the producer is the exact failure this mechanism
+                    // exists to prevent, and it happened in total silence: no bundles => None =>
+                    // solo build, nothing logged. On mainnet it ran for every block of a resumed
+                    // producer and was caught only by decoding coinbases by hand.
+                    eprintln!(
+                        "[poawx] fair-distribution: NO collected bundles after {}ms -> SELF-FILL: all four role slices pay THIS producer's own key. Role workers must enroll into the node this miner reads ({}); under cross-enrollment they enroll into the PEER node, so a sole running producer sees an empty pool.",
+                        start.elapsed().as_millis(),
+                        node_rpc_base()
                     );
                 }
                 best

@@ -156,11 +156,20 @@ impl SeedlistManager {
             .unwrap_or(false)
     }
 
+    /// Distinct days a learned peer must have been seen dialable before it is promoted
+    /// into the runtime seedlist.
+    ///
+    /// This is a sybil control, not a tuning knob: whatever is in the runtime seedlist is
+    /// what this node will dial on its next cold start, so anything that gets promoted
+    /// cheaply gets to place itself in the bootstrap path of every node that met it.
+    /// Seven days of *observed, dialable* uptime cannot be faked by an address that
+    /// appears for an afternoon. `seen_days` retains 30 days and dialable records survive
+    /// 14 days idle, so the requirement is reachable for an honest peer.
     fn runtime_seed_min_days() -> i64 {
         std::env::var("IRIUM_RUNTIME_SEED_DAYS")
             .ok()
             .and_then(|v| v.parse::<i64>().ok())
-            .unwrap_or(2)
+            .unwrap_or(7)
             .clamp(1, 30)
     }
 
@@ -895,7 +904,12 @@ impl PeerDirectory {
                     active_days += 1;
                 }
             }
-            if active_days >= 1 {
+            // Must be present on min_days DISTINCT days, not merely once inside the
+            // window. The old `>= 1` made runtime_seed_min_days non-binding at any value:
+            // it widened the lookback but never demanded multi-day presence, so a peer
+            // seen for a single afternoon was promoted into the bootstrap list of every
+            // node that saw it -- a free sybil foothold in the one list a cold node trusts.
+            if active_days >= min_days {
                 if let Some(ip) = normalize_seed(&rec.multiaddr) {
                     seeds.push(ip);
                 }
@@ -949,6 +963,72 @@ mod local_peer_gate_tests {
     /// reconstruction -- which is how an unvalidated fork fix reached production 2026-07-28).
     /// It must be impossible to enable for MAINNET: a mainnet-byte node accepting private
     /// peers is exactly the isolation gap that lets a test node reach the live network.
+    /// Promotion into the runtime seedlist is a SYBIL control, so pin its boundary by
+    /// driving the REAL `refresh_seedlist_with_policy`, not a copy of its arithmetic.
+    ///
+    /// Whatever lands in the runtime seedlist is what this node dials on its next cold
+    /// start — so a cheap promotion lets an address install itself in the bootstrap path
+    /// of every node that ever met it. The rule was `active_days >= 1`, which made
+    /// `runtime_seed_min_days` non-binding at ANY setting: one afternoon of uptime was
+    /// enough to get in.
+    #[test]
+    fn runtime_seed_promotion_requires_min_days_of_distinct_uptime() {
+        let _env = crate::test_env::guard();
+
+        let home = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_else(|_| ".".into()));
+        let sandbox = home.join(format!(".irium_seedpromo_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&sandbox);
+        std::fs::create_dir_all(sandbox.join("bootstrap")).unwrap();
+        std::env::set_var("IRIUM_REPO_ROOT", &sandbox);
+        std::env::set_var("IRIUM_BOOTSTRAP_DIR", sandbox.join("bootstrap"));
+        std::env::set_var("IRIUM_DATA_DIR", &sandbox);
+        std::env::set_var("IRIUM_RUNTIME_SEED_DAYS", "7");
+
+        let today = now_day();
+        let now = now_secs();
+        let mk = |addr: &str, days: i64| {
+            let mut rec = PeerRecord::new(addr.to_string(), None);
+            rec.dialable = true;
+            rec.last_seen = now;               // not idle, so only the day rule decides
+            rec.seen_days = (0..days).map(|d| today - d).collect();
+            rec
+        };
+        let veteran = mk("203.0.113.9:38291", 7);
+        let newcomer = mk("198.51.100.4:38291", 6);
+
+        let mut dir = PeerDirectory::new();
+        dir.records.insert(veteran.multiaddr.clone(), veteran);
+        dir.records.insert(newcomer.multiaddr.clone(), newcomer);
+        dir.refresh_seedlist_with_policy();
+
+        let promoted = dir.seed_manager.load_runtime_entries();
+        let has = |ip: &str| promoted.iter().any(|e| e.starts_with(ip));
+
+        let (v, n) = (has("203.0.113.9"), has("198.51.100.4"));
+        std::env::remove_var("IRIUM_RUNTIME_SEED_DAYS");
+        std::env::remove_var("IRIUM_REPO_ROOT");
+        std::env::remove_var("IRIUM_BOOTSTRAP_DIR");
+        std::env::remove_var("IRIUM_DATA_DIR");
+        let _ = std::fs::remove_dir_all(&sandbox);
+
+        assert!(v, "7 distinct dialable days must be promoted; got {promoted:?}");
+        assert!(
+            !n,
+            "6 days must NOT be promoted — that is the boundary, and under the old \
+             `>= 1` rule this peer (and a one-afternoon peer) sailed in: {promoted:?}"
+        );
+    }
+
+    /// The default is the control that actually ships; an env-only fix protects nobody.
+    #[test]
+    fn runtime_seed_min_days_defaults_to_seven() {
+        let _env = crate::test_env::guard();
+        std::env::remove_var("IRIUM_RUNTIME_SEED_DAYS");
+        assert_eq!(SeedlistManager::runtime_seed_min_days(), 7);
+        // Idle eviction is the other half of the policy and must stay at 24h.
+        assert_eq!(SeedlistManager::runtime_seed_max_idle_hours(), 24.0);
+    }
+
     #[test]
     fn allow_local_peers_is_refused_on_mainnet_and_opt_in_elsewhere() {
         let _env = crate::test_env::guard();

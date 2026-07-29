@@ -76,11 +76,25 @@ fn enroll_once(
 ) -> Result<Option<u64>, String> {
     // ---- fetch the R3 role-work params (works regardless of proposer-VRF: the epoch
     //      seed used for role assignments is provided here, not the proposer-VRF seed) ----
-    let t: serde_json::Value = client
+    // Check the status BEFORE parsing. A busy node answers 503 and a rate-limited one
+    // answers 429 with an EMPTY body; decoding first turned both into
+    // "role-work json: error decoding response body", which reads like malformed data
+    // from a healthy node. That one misleading string cost real time here — the actual
+    // condition was a 429, and nothing in the log said so.
+    let resp = client
         .get(format!("{base}/poawx/role-work"))
         .bearer_auth(token)
         .send()
-        .map_err(|e| format!("role-work fetch: {e}"))?
+        .map_err(|e| format!("role-work fetch: {e}"))?;
+    let status = resp.status();
+    if !status.is_success() {
+        let body = resp.text().unwrap_or_default();
+        return Err(format!(
+            "role-work rejected by node: {status} {}",
+            body.trim()
+        ));
+    }
+    let t: serde_json::Value = resp
         .json()
         .map_err(|e| format!("role-work json: {e}"))?;
     let height = t["height"].as_u64().ok_or("role-work: no height")?;

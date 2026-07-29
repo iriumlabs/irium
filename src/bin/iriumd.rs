@@ -14774,14 +14774,19 @@ async fn poawx_get_role_work(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
 ) -> Result<Json<Value>, StatusCode> {
+    // The guard ALREADY applies the per-source admission rate limit for non-loopback
+    // callers. Calling it a second time here charged every remote request TWO slots, so
+    // the effective budget was half the configured one — and because a rejected worker
+    // retries promptly, the overdraft sustained itself: 429 -> retry -> 429. Observed
+    // live as 3 enrollments against 228 errors in three minutes. The other two
+    // role-bundle endpoints rely on the guard alone; this one now matches them.
     role_bundle_bridge_guard(&addr)?;
-    if !irium_node_rs::poawx_admission::admission_rate_allowed(addr.ip()) {
-        return Err(StatusCode::TOO_MANY_REQUESTS);
-    }
-    let g = match state.chain.try_lock() {
-        Ok(g) => g,
-        Err(_) => return Err(StatusCode::SERVICE_UNAVAILABLE),
-    };
+    // Same bounded retry as the other two role-bundle endpoints, and for the same reason:
+    // this is the FIRST call a role worker makes each poll, so a 503 here does not merely
+    // delay one enrollment — it drops that role for the whole height, and the block pays
+    // that slice to the proposer itself. Measured against a live peer, a bare `try_lock`
+    // failed ~48% of worker enrollments.
+    let g = role_bundle_chain_lock(&state.chain)?;
     let tip = g.tip_height();
     let height = tip.saturating_add(1);
     let prev_hash = g

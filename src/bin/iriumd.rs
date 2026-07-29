@@ -3651,10 +3651,63 @@ fn rpc_body_limit_bytes() -> usize {
         .unwrap_or(32 * 1024 * 1024)
 }
 
+/// Explicit opt-in to serving token-guarded endpoints with NO token configured.
+///
+/// Exists only so an isolated test node can run without credentials. It must be set
+/// deliberately; the absence of a token is never on its own a reason to stop authenticating.
+fn rpc_allow_no_auth() -> bool {
+    // The in-process handler tests call guarded endpoints directly with no token configured,
+    // relying on the pre-2026-07-29 fail-open. Keeping the WRAPPER permissive under cfg(test)
+    // avoids rewriting ~170 unrelated tests and avoids a global env flag that would race with
+    // parallel tests (the exact hazard src/test_env.rs exists to prevent). The real decision
+    // lives in `rpc_auth_decision`, which is pure and IS tested for the fail-closed case.
+    if cfg!(test) {
+        return true;
+    }
+    env::var("IRIUM_RPC_ALLOW_NO_AUTH")
+        .map(|v| v.trim() == "1")
+        .unwrap_or(false)
+}
+
+/// The authentication decision, with no environment access so it can be tested exhaustively.
+///
+/// FAIL CLOSED when no token is configured. This used to `return Ok(())` — an unset or empty
+/// token silently disabled authentication on EVERY guarded endpoint, including
+/// POST /admin/add-seed, which appends to the runtime seedlist a node dials on its next cold
+/// start. The node binds 0.0.0.0 and mainnet hosts allow :38300 from anywhere, and the unit
+/// loads its token via `EnvironmentFile=...(ignore_errors=yes)`, so a missing or truncated env
+/// file would have opened the admin surface to the internet with nothing logged. An
+/// unauthenticated node must refuse, loudly, not serve. `rpc_authorized` already failed closed
+/// for the same condition; the two now agree.
+fn rpc_auth_decision(
+    configured: Option<&str>,
+    allow_no_auth: bool,
+    provided: &str,
+) -> Result<(), StatusCode> {
+    let token = match configured {
+        Some(t) if !t.trim().is_empty() => t,
+        _ => {
+            return if allow_no_auth {
+                Ok(())
+            } else {
+                Err(StatusCode::UNAUTHORIZED)
+            }
+        }
+    };
+    let expected = format!("Bearer {}", token);
+    if provided.as_bytes().ct_eq(expected.as_bytes()).into() {
+        Ok(())
+    } else {
+        Err(StatusCode::UNAUTHORIZED)
+    }
+}
+
 fn require_rpc_auth(headers: &HeaderMap) -> Result<(), StatusCode> {
     let token = match env::var("IRIUM_RPC_TOKEN") {
         Ok(t) if !t.trim().is_empty() => t,
-        _ => return Ok(()),
+        _ => {
+            return rpc_auth_decision(None, rpc_allow_no_auth(), "");
+        }
     };
     let expected = format!("Bearer {}", token);
     let provided = headers
@@ -17390,6 +17443,26 @@ async fn main() {
         state_dir.display(),
         blocks_dir.display()
     );
+    // Say plainly, at boot, whether the RPC is authenticated. A node whose token went missing
+    // now refuses guarded endpoints (see `require_rpc_auth`) instead of silently serving them,
+    // but a refusal only shows up when something calls in — so announce the state up front
+    // rather than leaving an operator to infer it from 401s.
+    match env::var("IRIUM_RPC_TOKEN") {
+        Ok(t) if !t.trim().is_empty() => {}
+        _ if rpc_allow_no_auth() => {
+            println!(
+                "[!] RPC AUTH DISABLED: no IRIUM_RPC_TOKEN and IRIUM_RPC_ALLOW_NO_AUTH=1. \
+                 Token-guarded endpoints (including /admin/add-seed) are OPEN to anyone who can \
+                 reach this port. Intended for isolated test nodes ONLY."
+            );
+        }
+        _ => {
+            println!(
+                "[!] No IRIUM_RPC_TOKEN configured — token-guarded endpoints will be REFUSED (401). \
+                 Set IRIUM_RPC_TOKEN, or IRIUM_RPC_ALLOW_NO_AUTH=1 to deliberately run without auth."
+            );
+        }
+    }
     storage::init_persist_writer();
     // Initialize chain state with locked genesis.
     let locked = load_locked_genesis().expect("load locked genesis");
@@ -28088,6 +28161,63 @@ mod tests {
     fn poawx_env_lock() -> &'static std::sync::Mutex<()> {
         static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
         LOCK.get_or_init(|| std::sync::Mutex::new(()))
+    }
+
+    /// An unset/empty RPC token must REFUSE token-guarded endpoints, not open them.
+    ///
+    /// Tests the pure decision function directly: no environment access, so it cannot race
+    /// other tests and it covers the fail-closed path that the cfg(test) wrapper relaxes.
+    /// Before 2026-07-29 the "no token configured" case returned Ok(()) — a missing or
+    /// truncated env file silently unauthenticated everything, including POST /admin/add-seed,
+    /// on a node that binds 0.0.0.0 with :38300 allowed from anywhere.
+    #[test]
+    fn missing_rpc_token_refuses_instead_of_opening_the_endpoint() {
+        // 1. No token configured => REFUSE (the fix).
+        assert_eq!(
+            rpc_auth_decision(None, false, ""),
+            Err(StatusCode::UNAUTHORIZED),
+            "no token configured must refuse, not authorise"
+        );
+        // Even a caller presenting some bearer must not get in when nothing is configured.
+        assert_eq!(
+            rpc_auth_decision(None, false, "Bearer anything"),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+
+        // 2. Empty / whitespace token counts as unconfigured => REFUSE.
+        assert_eq!(
+            rpc_auth_decision(Some(""), false, ""),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+        assert_eq!(
+            rpc_auth_decision(Some("   "), false, "Bearer    "),
+            Err(StatusCode::UNAUTHORIZED),
+            "blank token must never be matchable"
+        );
+
+        // 3. Deliberate opt-out re-opens it, for isolated test nodes only.
+        assert_eq!(rpc_auth_decision(None, true, ""), Ok(()));
+
+        // 4. With a token configured, behaviour is unchanged: correct passes, wrong and
+        //    absent refuse. Guards against "fail closed" degenerating into "refuse
+        //    everything", which would take the node's own tooling offline.
+        assert_eq!(
+            rpc_auth_decision(Some("s3cr3t-token"), false, "Bearer s3cr3t-token"),
+            Ok(())
+        );
+        assert_eq!(
+            rpc_auth_decision(Some("s3cr3t-token"), false, "Bearer wrong"),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+        assert_eq!(
+            rpc_auth_decision(Some("s3cr3t-token"), false, ""),
+            Err(StatusCode::UNAUTHORIZED)
+        );
+        // A configured token is still required even when the opt-out is set.
+        assert_eq!(
+            rpc_auth_decision(Some("s3cr3t-token"), true, "Bearer wrong"),
+            Err(StatusCode::UNAUTHORIZED)
+        );
     }
 
     #[tokio::test]

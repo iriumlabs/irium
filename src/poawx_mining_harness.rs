@@ -1571,23 +1571,43 @@ fn build_all_gates_block_with(
         // already bound to that worker's solver_pkh and assignment_proof_digest, so the
         // worker's solution is the only one that can verify against it. Verified here
         // rather than trusted -- a mismatch is an assembly error, not a silent bad block.
-        let collected_sol = ids
-            .collected
-            .as_ref()
-            .and_then(|c| c.for_role(role))
-            .map(|b| b.puzzle_solution);
+        // The solution MUST come from the bundle belonging to `cand` -- the candidate
+        // `selected_for_role` actually chose -- not from whichever bundle happens to occupy
+        // the role slot.
+        //
+        // This was the bug. `cand` is picked from the FULL candidate pool by VRF score,
+        // while `for_role(role)` returns the miner's own slot assignment. When the two
+        // disagreed, the challenge was built from `cand`'s solver_pkh/ticket/assignment
+        // digest while the solution came from a different worker, so it could never verify
+        // -- and the mismatch was FATAL, aborting the whole block build. Measured on vps:
+        // 19 consecutive failures, 0 blocks produced, while eu (whose selection happened to
+        // agree with its slot) built fine. It looked exactly like unfair sortition; it was
+        // this. It had already stalled mainnet for 44 minutes at 64,524.
+        let collected_sol = ids.collected.as_ref().and_then(|c| {
+            c.all
+                .iter()
+                .find(|b| b.role_id == role && b.solver_pkh == cand.solver_pkh)
+                .or_else(|| c.for_role(role).filter(|b| b.solver_pkh == cand.solver_pkh))
+                .map(|b| b.puzzle_solution)
+        });
         let sol = match collected_sol {
-            Some(s) => {
-                match crate::poawx_puzzle::verify_solution(&challenge, &s) {
-                    crate::poawx_puzzle::PuzzleVerificationResult::Valid => s,
-                    other => {
-                        return Err(format!(
-                            "harness: collected puzzle solution for role {role} does not \
-                             verify against its challenge: {other:?}"
-                        ))
-                    }
+            Some(s) => match crate::poawx_puzzle::verify_solution(&challenge, &s) {
+                crate::poawx_puzzle::PuzzleVerificationResult::Valid => s,
+                other => {
+                    // Still fatal, deliberately. Now that the solution is guaranteed to
+                    // come from `cand` itself, reaching here means a genuine assembly error
+                    // (e.g. the builder and the worker disagree about dominance weight, so
+                    // the digests differ) -- something the builder must surface rather than
+                    // paper over. `c3_dominance_disagreement_breaks_assembly_explicitly` is
+                    // the negative control that pins this. The DoS the old code allowed came
+                    // from the candidate/slot mismatch above, which can no longer happen.
+                    return Err(format!(
+                        "harness: collected puzzle solution for role {role} from solver {} \
+                         does not verify against its challenge: {other:?}",
+                        hex::encode(cand.solver_pkh)
+                    ));
                 }
-            }
+            },
             None => solve_dev(&challenge).ok_or_else(|| "harness: puzzle solve failed".to_string())?,
         };
         sols.push(sol);

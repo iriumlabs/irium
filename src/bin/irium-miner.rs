@@ -3656,13 +3656,39 @@ fn run_poawx_solo() -> Result<(), String> {
                         // LIVENESS: if exclusivity leaves a role with no free identity (fewer
                         // participants than roles — the normal small-network case) that role
                         // falls back to the highest scorer overall rather than going unpaid.
+                        // Accept ONLY bundles for the height being built, and only ones whose
+                        // puzzle solution matches the current puzzle profile.
+                        //
+                        // A bundle for another height carries a solution bound to a different
+                        // challenge, and one built under a different puzzle mode fails
+                        // `verify_solution` with Invalid("wrong mode") -- and the harness
+                        // treats that as FATAL, aborting the whole block build. Measured on
+                        // vps: 8 build failures against 4 successes, every failure this
+                        // error, while eu (which happened not to collect the bad bundle)
+                        // built cleanly. That is a liveness bug AND the reason one node
+                        // appeared to win most blocks: the other kept losing its slot to a
+                        // poisoned bundle, which looks exactly like unfair sortition but is
+                        // not. It is also a trivial denial-of-service once untrusted
+                        // participants submit bundles, so filter here rather than trusting.
                         let mut all: Vec<RoleBundleV1> = Vec::new();
+                        let mut dropped_stale = 0usize;
                         if let Some(arr) = v.get("bundles").and_then(|x| x.as_array()) {
                             for b in arr {
                                 if let Ok(rb) = RoleBundleV1::from_json(&b.to_string()) {
+                                    if rb.target_height != height {
+                                        dropped_stale += 1;
+                                        continue;
+                                    }
                                     all.push(rb);
                                 }
                             }
+                        }
+                        if dropped_stale > 0 {
+                            eprintln!(
+                                "[poawx] dropped {dropped_stale} collected bundle(s) bound to \
+                                 another height at {height}; kept {}",
+                                all.len()
+                            );
                         }
                         // The miner's own payout identity is taken first: a producer must
                         // not also draw a contributor role.

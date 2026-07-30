@@ -14186,11 +14186,29 @@ async fn get_block_template(
 
     let (poawx_mode_str, poawx_receipts_for_template, receipts_root_str) = {
         if irium_node_rs::activation::poawx_serving_active(height) {
-            let receipts = state
+            // Serve ONLY receipts bound to the height being built.
+            //
+            // This was unfiltered, so a template for height H handed out receipts for
+            // H-1, H-4, H-14 … Every consumer then broke, because a receipt's
+            // `commitment_nonce` is derived from the parent of ITS OWN height:
+            //   * the Stratum pool built a block for H from a receipt for H-3 and was
+            //     refused `commitment_nonce mismatch` on every single attempt — the real
+            //     reason the pool never earned a block, even once the PoW floor and the
+            //     coinbase fan-out were correct;
+            //   * `receipts_root` committed to receipts that did not belong to the block;
+            //   * `poawx_coinbase_payouts` advertised the payees of a previous height.
+            //
+            // The node's own miner never hit this: it builds its own receipt for the
+            // current height via the harness and ignores the pending list, which is why the
+            // defect stayed invisible while only first-party miners produced blocks.
+            let receipts: Vec<PoawxPendingReceipt> = state
                 .poawx_pending_receipts
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .clone();
+                .iter()
+                .filter(|r| r.height == height)
+                .cloned()
+                .collect();
             let root = if receipts.is_empty() {
                 String::new()
             } else {

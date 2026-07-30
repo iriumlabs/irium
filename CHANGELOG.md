@@ -3,6 +3,32 @@
 All notable changes to Irium are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.9.153] - 2026-07-30
+
+Node fix. **Not a consensus change** — no activation height, no fork. It only stops a node from
+discarding its own valid block.
+
+### Fixed
+
+- **A node threw away its own better-ranked block, so fork choice never saw it.** Both miners wake
+  at `parent + 120s`; whichever finishes building first submits and its block propagates. The other
+  node accepted that block, advanced its tip, and then rejected *its own* block for the now-previous
+  height: `[submit_block_extended] reject height_mismatch req=64482 chain=64483`. Because fork choice
+  can only rank blocks that **exist**, `proposer_rank_chain_better` never got to prefer the
+  better-ranked one — so the height went to whichever node built faster, a latency race, which is
+  precisely the advantage PoAW-X removes hashrate in order to avoid. Measured live on 2026-07-30: the
+  lower-ranked key lost heights it should have won.
+
+  `submit_block_extended` now admits a **sibling of the current tip** via `process_block` — the same
+  fork path P2P blocks already take, with full validation against the block's real parent — and lets
+  fork choice decide. The local submit path had been *stricter* than the P2P path, which already
+  accepts an equal-height block and reorgs on rank; this makes them consistent. It admits no block a
+  peer could not already have delivered, which is why it needs no activation height.
+
+  Bounded to exactly one height below the tip (`submit_block_routing`), so old heights cannot be
+  pushed through the submit endpoint. The response tip is now read from the chain rather than from the
+  submitted header, so a miner whose sibling loses fork choice is no longer told it won.
+
 ## [1.9.152] - 2026-07-30
 
 Consensus release. **Hard fork at height 64,465.** A node on an older binary does not apply the

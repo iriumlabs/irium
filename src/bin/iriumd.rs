@@ -14642,6 +14642,35 @@ fn poawx_delegation_active_submit(height: u64) -> bool {
 }
 
 /// Phase 18B step-3: submit-path verification of a mode-1 (delegated) pending
+/// How `submit_block_extended` treats a submitted block, given the chain's
+/// next-expected height. Pure so the boundaries are testable without an HTTP handler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SubmitRouting {
+    /// Extends the current tip: ordinary append via `connect_block`.
+    Extend,
+    /// A sibling of the current tip: admit via the fork path (`process_block`) and let
+    /// fork choice rank it against the incumbent.
+    Sibling,
+    /// Anything else: refuse.
+    Reject,
+}
+
+/// `Sibling` exists because a node used to discard its OWN valid block: both miners wake
+/// at `parent + 120s`, the faster builder's block arrives and advances the tip, and the
+/// slower one's block for the now-previous height was rejected `height_mismatch`. Fork
+/// choice can only rank blocks that exist, so the better-ranked block never entered it and
+/// the height went to whoever built faster rather than to the VRF winner. Bounded to
+/// exactly one height below the tip so old heights cannot be pushed through submit.
+fn submit_block_routing(req_height: u64, chain_next_height: u64) -> SubmitRouting {
+    if req_height == chain_next_height {
+        SubmitRouting::Extend
+    } else if req_height.checked_add(1) == Some(chain_next_height) {
+        SubmitRouting::Sibling
+    } else {
+        SubmitRouting::Reject
+    }
+}
+
 /// receipt. Mirrors the mode-1 checks in chain.rs `validate_poawx_block_receipts`
 /// so the pool gets a clear early rejection; `connect_block` remains the
 /// authoritative validator. `worker_pubkey`/`worker_sig` are the pool delegate's.
@@ -15677,19 +15706,62 @@ async fn submit_block_extended(
     }
     let (new_height, new_tip_hash) = {
         let mut chain = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-        if req.height != chain.height {
+        match submit_block_routing(req.height, chain.height) {
+            SubmitRouting::Extend => {
+            // Extends the tip: the ordinary append path, unchanged.
+            if let Err(e) = chain.connect_block(block.clone()) {
+                eprintln!(
+                    "[submit_block_extended] reject connect_block_failed err={}",
+                    e
+                );
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            }
+            SubmitRouting::Sibling => {
+            // SIBLING OF THE CURRENT TIP -- admit it and let fork choice decide.
+            //
+            // WHY. Both miners wake at `parent + 120s`. Whichever finishes building first
+            // submits, and its block propagates; the other node accepts that block,
+            // advances its tip, and then USED TO REJECT ITS OWN BLOCK for the
+            // now-previous height (`reject height_mismatch req=64482 chain=64483`,
+            // observed repeatedly on eu 2026-07-30). Fork choice can only rank blocks
+            // that EXIST, so the better-ranked block never entered it and the height went
+            // to whichever node built faster -- a latency race, which is precisely the
+            // advantage PoAW-X removes hashrate in order to avoid. Measured effect: the
+            // lower-ranked key won heights it should have lost.
+            //
+            // This made the LOCAL submit path stricter than the P2P path, which already
+            // accepts an equal-height block and reorgs on rank. `process_block` is that
+            // same fork path: it derives the height from the block's real parent, performs
+            // full validation against that parent, stores the sibling, and drives the
+            // reorg if `proposer_rank_chain_better` prefers it. So this admits no block
+            // that a peer could not already have delivered -- it is not a consensus rule
+            // change and needs no activation height. It only stops a node from silently
+            // discarding its own valid, better-ranked block.
+            //
+            // Bounded deliberately to `req.height + 1 == chain.height` (a sibling of the
+            // tip, nothing deeper), so this cannot be used to push arbitrary old heights
+            // through the submit endpoint.
+            if let Err(e) = chain.process_block(block.clone()) {
+                eprintln!(
+                    "[submit_block_extended] reject sibling_rejected height={} err={}",
+                    req.height, e
+                );
+                return Err(StatusCode::BAD_REQUEST);
+            }
+            eprintln!(
+                "[submit_block_extended] sibling admitted at height={} (tip is now {}); fork choice decides on proposer rank",
+                req.height,
+                chain.tip_height()
+            );
+            }
+            SubmitRouting::Reject => {
             eprintln!(
                 "[submit_block_extended] reject height_mismatch req={} chain={}",
                 req.height, chain.height
             );
             return Err(StatusCode::BAD_REQUEST);
-        }
-        if let Err(e) = chain.connect_block(block.clone()) {
-            eprintln!(
-                "[submit_block_extended] reject connect_block_failed err={}",
-                e
-            );
-            return Err(StatusCode::BAD_REQUEST);
+            }
         }
         {
             let mut mempool = state.mempool.lock().unwrap_or_else(|e| e.into_inner());
@@ -15698,8 +15770,11 @@ async fn submit_block_extended(
             }
             evict_invalid_mempool_entries(&chain, &mut mempool);
         }
+        // Read the tip from the CHAIN, not from the submitted header: on the sibling path
+        // our block may have lost fork choice, in which case `block`'s hash is not the tip
+        // and reporting it would tell the miner it won when it did not.
         let new_tip_h = chain.tip_height();
-        let tip_hash = block.header.hash_for_height(new_tip_h);
+        let tip_hash = chain.tip_hash();
         (new_tip_h, hex::encode(tip_hash))
     };
     if let Some(ref anchors) = state.anchors {
@@ -33469,6 +33544,32 @@ mod agent_version_tests {
     /// passing in isolation — a self-inflicted failure that says nothing about the code
     /// under test. Their directories were already distinct; only the env var races.
     static BOOTSTRAP_DIR_ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// The routing that decides whether a node keeps its own block when a competitor's
+    /// block beat it to the tip. Before `Sibling` existed the node discarded it and fork
+    /// choice never saw it, so the faster builder won the height instead of the better
+    /// VRF rank (`reject height_mismatch req=64482 chain=64483`, live on eu 2026-07-30).
+    #[test]
+    fn submit_routing_admits_tip_sibling_but_nothing_deeper() {
+        use crate::{submit_block_routing, SubmitRouting::*};
+        // Chain expects height 100 next (tip is 99).
+        assert_eq!(submit_block_routing(100, 100), Extend, "extends the tip");
+        assert_eq!(
+            submit_block_routing(99, 100),
+            Sibling,
+            "a sibling of the tip must be admitted so fork choice can rank it -- this is \
+             the case that was silently discarded"
+        );
+        // Bounded: nothing deeper, and nothing ahead.
+        assert_eq!(submit_block_routing(98, 100), Reject, "two below the tip");
+        assert_eq!(submit_block_routing(50, 100), Reject, "far below the tip");
+        assert_eq!(submit_block_routing(101, 100), Reject, "ahead of the chain");
+        assert_eq!(submit_block_routing(0, 100), Reject, "genesis height");
+        // Genesis-era and overflow boundaries must not panic or wrap into Sibling.
+        assert_eq!(submit_block_routing(0, 0), Extend);
+        assert_eq!(submit_block_routing(0, 1), Sibling);
+        assert_eq!(submit_block_routing(u64::MAX, 0), Reject, "no wrap on overflow");
+    }
 
     /// Materialising the list and signature but not the signer set left verification
     /// unable to run on every node in the network.

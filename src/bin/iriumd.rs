@@ -14059,7 +14059,24 @@ async fn get_block_template(
         })
         .collect();
 
-    let coinbase_value = block_reward(height).saturating_add(total_fees);
+    // Under shared reward, advertise the SUBSIDY ALONE -- not subsidy+fees.
+    //
+    // The pool cannot re-derive coinbase amounts; it emits `poawx_coinbase_payouts`
+    // verbatim and checks the set sums to `coinbase_value`. Consensus derives the expected
+    // payouts from `block_reward(height)` alone, and the PoAW-X builder deliberately does
+    // not claim transaction fees. So advertising subsidy+fees made a faithful builder pay
+    // 55% of (subsidy+fees) against a validator expecting 55% of the subsidy, and EVERY
+    // pool block was rejected the moment the mempool held one fee-paying transaction:
+    //   shared-reward: output 0 amount 2794000000 != expected 2750000000
+    //
+    // Claiming less than subsidy+fees is always allowed by the generic coinbase ceiling
+    // (the fees are simply burned), and `total_fees` below still reports the real total.
+    // Non-shared-reward heights are unchanged.
+    let coinbase_value = if irium_node_rs::chain::shared_reward_active(height) {
+        block_reward(height)
+    } else {
+        block_reward(height).saturating_add(total_fees)
+    };
 
     // v1.9.62 issue #60: build coinbase extra outputs from the cycle's
     // cached headers if the coinbase batch activation height has been

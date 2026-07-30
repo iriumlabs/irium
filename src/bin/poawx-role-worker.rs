@@ -57,9 +57,9 @@ fn role_id(name: &str) -> u8 {
     }
 }
 
-/// Build + self-verify + submit one enrollment for the current role-work height. Returns
-/// `Ok(Some(height))` after enrolling that height, or `Ok(None)` if the height is unchanged
-/// from `last_height` (nothing to do this poll).
+/// Build + self-verify + submit one enrollment for the current role-work slot. Returns
+/// `Ok(Some((height, prev_hash)))` after enrolling, or `Ok(None)` if BOTH the height and the
+/// parent are unchanged from `last_slot` (nothing to do this poll).
 #[allow(clippy::too_many_arguments)]
 fn enroll_once(
     client: &reqwest::blocking::Client,
@@ -72,8 +72,8 @@ fn enroll_once(
     sk: &SigningKey,
     payout_pubkey: [u8; 33],
     payout_pkh: [u8; 20],
-    last_height: Option<u64>,
-) -> Result<Option<u64>, String> {
+    last_slot: Option<(u64, [u8; 32])>,
+) -> Result<Option<(u64, [u8; 32])>, String> {
     // ---- fetch the R3 role-work params (works regardless of proposer-VRF: the epoch
     //      seed used for role assignments is provided here, not the proposer-VRF seed) ----
     // Check the status BEFORE parsing. A busy node answers 503 and a rate-limited one
@@ -98,11 +98,24 @@ fn enroll_once(
         .json()
         .map_err(|e| format!("role-work json: {e}"))?;
     let height = t["height"].as_u64().ok_or("role-work: no height")?;
-    // In loop mode, only enroll once per new height.
-    if last_height == Some(height) {
+    let prev_hash = h32(t["prev_hash"].as_str().ok_or("role-work: no prev_hash")?);
+    // In loop mode, enroll once per (height, PARENT) -- not once per height.
+    //
+    // Every artifact below is bound to `prev_hash`: the sybil ticket, the role claim, the
+    // finality vote, and -- critically -- the assigned puzzle, whose MODE is seeded from it
+    // (`assign_puzzle_mode`). So when the parent changes while the height does not (a sibling
+    // lands, or a reorg replaces the tip), a bundle enrolled against the OLD parent describes
+    // a puzzle no builder will ever derive. It cannot verify, at any producer, ever.
+    //
+    // Keying on height alone meant the worker never re-enrolled and stayed poisoned for that
+    // whole height. Measured on mainnet at 64,560: all three eu role bundles were bound to a
+    // parent vps did not hold, so vps could not use any of them; before v1.9.159 that aborted
+    // its block build outright (~250 retries, 20 minutes, zero blocks), and after v1.9.159 it
+    // costs eu its 22/13/10 share for the block instead. Re-binding on a parent change is
+    // what actually gets the worker PAID rather than merely ignored.
+    if last_slot == Some((height, prev_hash)) {
         return Ok(None);
     }
-    let prev_hash = h32(t["prev_hash"].as_str().ok_or("role-work: no prev_hash")?);
     let seed = h32(t["epoch_seed"].as_str().ok_or("role-work: no epoch_seed")?);
     let puzzle_bits = t["puzzle_anchor_bits"].as_u64().unwrap_or(8) as u8;
     let sybil_bits = t["sybil_bits"].as_u64().unwrap_or(8) as u32;
@@ -244,7 +257,7 @@ fn enroll_once(
         .unwrap_or(true);
     if !submit {
         println!("{}", serde_json::to_string_pretty(&bundle).unwrap());
-        return Ok(Some(height));
+        return Ok(Some((height, prev_hash)));
     }
     let resp = client
         .post(format!("{base}/poawx/role-bundle"))
@@ -265,7 +278,7 @@ fn enroll_once(
         hex::encode(payout_pkh),
         body.trim()
     );
-    Ok(Some(height))
+    Ok(Some((height, prev_hash)))
 }
 
 fn main() -> Result<(), String> {
@@ -327,15 +340,24 @@ fn main() -> Result<(), String> {
     println!(
         "[role-worker] loop mode: role={role_name} poll={poll_secs}s backoff_max={backoff_cap_secs}s node={base}"
     );
-    let mut last_height: Option<u64> = None;
+    let mut last_slot: Option<(u64, [u8; 32])> = None;
     let mut consecutive_errors: u32 = 0;
     loop {
         match enroll_once(
             &client, &base, &token, role, &role_name, net, &secret, &sk, payout_pubkey, payout_pkh,
-            last_height,
+            last_slot,
         ) {
-            Ok(Some(h)) => {
-                last_height = Some(h);
+            Ok(Some(slot)) => {
+                if let Some((h, p)) = last_slot {
+                    if h == slot.0 && p != slot.1 {
+                        println!(
+                            "[role-worker] re-enrolled role={role_name} height={h}: parent changed                              {} -> {}; the previous bundle was bound to a parent no builder holds",
+                            hex::encode(&p[..4]),
+                            hex::encode(&slot.1[..4])
+                        );
+                    }
+                }
+                last_slot = Some(slot);
                 consecutive_errors = 0;
             }
             Ok(None) => consecutive_errors = 0,

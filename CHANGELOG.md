@@ -3,6 +3,37 @@
 All notable changes to Irium are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.9.155] - 2026-07-30
+
+Node fix + groundwork for a consensus-valid pool coinbase. **Not a consensus change.**
+
+### Fixed
+
+- **A sibling that lost fork choice was reported as rejected.** `process_block` returns
+  `Err("block stored on side chain")` when a block is STORED successfully but does not become the
+  tip — which is the normal, expected outcome for the tip-sibling path added in v1.9.153, since
+  losing on proposer rank is a legitimate result. That was mapped to `400 Bad Request`, so a miner
+  whose block had in fact been accepted and put in front of fork choice was told it failed
+  (`reject sibling_rejected height=64523 err=block stored on side chain`, observed live). The
+  three outcomes are now distinguished: won fork choice, admitted-but-lost, and genuinely rejected.
+  Behaviour was already correct — only the reporting was wrong.
+
+### Added
+
+- **`getblocktemplate` publishes `poawx_coinbase_payouts`** — the exact coinbase outputs consensus
+  requires, in canonical order with exact amounts: `[proposer 55%, compute 22%, verify 13%,
+  support 10%]` plus a third-party fee output where one applies. Consensus compares amounts, not
+  proportions, and rejects anything else with `poawx coinbase: expected N payout outputs, found M`.
+
+  The Stratum pool pays a **single** output to its own address, so every pool block would be refused
+  even with the PoW floor fix now in place. This gives a builder the list to emit verbatim.
+
+- `chain::expected_poawx_coinbase_payouts()` extracted as the single source of truth:
+  `validate_poawx_coinbase_payout` checks against it and the template advertises it, so a builder
+  and the validator cannot diverge on who gets paid what. Computed in the node deliberately — the
+  pool links a possibly-stale copy of this crate (currently `/home/irium/irium` at an old branch)
+  and must never deserialize a consensus structure to learn the payees.
+
 ## [1.9.154] - 2026-07-30
 
 Node fix. **Not a consensus change** — adds template fields only.

@@ -4649,13 +4649,19 @@ fn validate_pool_member_admission(
 /// output in official mode, and any over/underpay. Callers gate by activation/mode
 /// and verify `fee_pkh`/`fee_bps` against the signed delegation. Exposed `pub`
 /// for the stratum pool's Step 3 parity dev-tests (see validate_phase20_production_payout).
-pub fn validate_poawx_coinbase_payout(
-    outputs: &[crate::tx::TxOutput],
+/// The EXACT coinbase payout list consensus requires, in canonical order.
+///
+/// Single source of truth, deliberately: `validate_poawx_coinbase_payout` checks a block
+/// against this, and `getblocktemplate` advertises it to external builders (the Stratum
+/// pool), so a builder and the validator cannot disagree about who gets paid what. The pool
+/// links a possibly-stale copy of this crate, so it must NOT recompute this itself — it
+/// consumes the list the node hands it.
+pub fn expected_poawx_coinbase_payouts(
     primary_pkh: &[u8; 20],
     total_reward: u64,
     role: Option<&crate::poawx::RoleReward>,
     fee: Option<(u16, [u8; 20])>,
-) -> Result<(), String> {
+) -> Vec<([u8; 20], u64)> {
     // PRIMARY gross + the (untaxed) role outputs.
     let (primary_gross, role_outs): (u64, Vec<([u8; 20], u64)>) = match role {
         Some(r) => {
@@ -4679,13 +4685,23 @@ pub fn validate_poawx_coinbase_payout(
         }
         _ => (primary_gross, None),
     };
-    // Build expected outputs in canonical order.
     let mut expected: Vec<([u8; 20], u64)> = Vec::with_capacity(6);
     expected.push((*primary_pkh, primary_net));
     expected.extend(role_outs);
     if let Some(fo) = fee_out {
         expected.push(fo);
     }
+    expected
+}
+
+pub fn validate_poawx_coinbase_payout(
+    outputs: &[crate::tx::TxOutput],
+    primary_pkh: &[u8; 20],
+    total_reward: u64,
+    role: Option<&crate::poawx::RoleReward>,
+    fee: Option<(u16, [u8; 20])>,
+) -> Result<(), String> {
+    let expected = expected_poawx_coinbase_payouts(primary_pkh, total_reward, role, fee);
     // Collect actual p2pkh outputs; reject value-bearing non-p2pkh (hidden fee).
     let mut p2pkh: Vec<([u8; 20], u64)> = Vec::new();
     for out in outputs {

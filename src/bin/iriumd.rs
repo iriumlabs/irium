@@ -1593,6 +1593,14 @@ struct SubmitBlockExtendedRequest {
     poawx_receipts_root: String,
 }
 
+/// One required coinbase payout output. `value` is exact — consensus compares amounts, not
+/// proportions, so a builder must emit these verbatim rather than re-deriving them.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct TemplateCoinbasePayout {
+    pkh: String,
+    value: u64,
+}
+
 #[derive(Serialize)]
 struct BlockTemplateResponse {
     height: u64,
@@ -1655,6 +1663,13 @@ struct BlockTemplateResponse {
     /// demotion gate or the frozen proposer registry, so without it the pool grinds the
     /// full network target (1,721,700 live) for a block the chain would accept at 20 bits,
     /// roughly 7 billion times more work than required.
+    /// The exact coinbase payout outputs consensus requires, in canonical order:
+    /// `[proposer 55%, compute 22%, verify 13%, support 10%]` (plus a third-party fee output
+    /// when one applies). A builder MUST emit precisely these, in order, or the block is
+    /// rejected. Empty when the shared-reward gate is off or no primary receipt is pending,
+    /// in which case the legacy single-payout coinbase applies.
+    #[serde(default)]
+    poawx_coinbase_payouts: Vec<TemplateCoinbasePayout>,
     #[serde(default)]
     poawx_demotion_available: bool,
     /// Compact bits of that floor target, same `{:08x}` encoding as `bits` so a builder can
@@ -14187,6 +14202,50 @@ async fn get_block_template(
         }
     };
 
+    // Authoritative coinbase payout list for external builders (the Stratum pool).
+    //
+    // Consensus fixes the coinbase to EXACTLY these outputs, in this order, with these
+    // amounts (`validate_poawx_coinbase_payout`); a builder paying anything else is rejected
+    // with "poawx coinbase: expected N payout outputs, found M". The pool had been paying a
+    // single output to its own address, so every pool block would have been refused even
+    // after the PoW floor fix.
+    //
+    // Computed through the SAME `expected_poawx_coinbase_payouts()` the validator checks
+    // against, so builder and validator cannot diverge — and computed HERE rather than in
+    // the pool because the pool links a possibly-stale copy of this crate and must never
+    // have to deserialize a consensus structure to know who gets paid.
+    let poawx_coinbase_payouts: Vec<TemplateCoinbasePayout> =
+        if irium_node_rs::chain::shared_reward_active(height) {
+            poawx_receipts_for_template
+                .iter()
+                .filter_map(pending_receipt_to_block_receipt)
+                .find_map(|br| {
+                    let ext = br.phase20_ext.as_ref()?;
+                    // The PRIMARY receipt is the one carrying the proposer assignment; its
+                    // worker is the primary payee.
+                    ext.proposer_assignment.as_ref()?;
+                    Some(irium_node_rs::chain::expected_poawx_coinbase_payouts(
+                        &br.worker_pkh,
+                        coinbase_value,
+                        Some(&ext.role_reward),
+                        if ext.fee_bps > 0 {
+                            Some((ext.fee_bps, ext.fee_pkh))
+                        } else {
+                            None
+                        },
+                    ))
+                })
+                .unwrap_or_default()
+                .into_iter()
+                .map(|(pkh, value)| TemplateCoinbasePayout {
+                    pkh: hex::encode(pkh),
+                    value,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
+
     Ok(Json(BlockTemplateResponse {
         height,
         prev_hash,
@@ -14215,6 +14274,7 @@ async fn get_block_template(
         poawx_proposer_round_interval: proposer_round_interval,
         poawx_proposer_freeze_height: proposer_freeze_height,
         poawx_proposer_max_allowed_round: proposer_max_allowed_round,
+        poawx_coinbase_payouts,
         poawx_demotion_available: demotion_available,
         poawx_job_bits: job_bits_hex,
         poawx_job_target: job_target_hex,
@@ -15791,18 +15851,30 @@ async fn submit_block_extended(
             // Bounded deliberately to `req.height + 1 == chain.height` (a sibling of the
             // tip, nothing deeper), so this cannot be used to push arbitrary old heights
             // through the submit endpoint.
-            if let Err(e) = chain.process_block(block.clone()) {
-                eprintln!(
-                    "[submit_block_extended] reject sibling_rejected height={} err={}",
-                    req.height, e
-                );
-                return Err(StatusCode::BAD_REQUEST);
+            // `process_block` reports Err("block stored on side chain") when the block was
+            // STORED successfully but did not become the tip. That is a SUCCESS here, not a
+            // failure: the whole point of admitting the sibling is to put it in front of fork
+            // choice, and losing on rank is a legitimate outcome. Treating it as a rejection
+            // returned 400 to a miner whose block had in fact been accepted and considered.
+            match chain.process_block(block.clone()) {
+                Ok(_) => eprintln!(
+                    "[submit_block_extended] sibling admitted at height={} and WON fork choice (tip is now {})",
+                    req.height,
+                    chain.tip_height()
+                ),
+                Err(e) if e == "block stored on side chain" => eprintln!(
+                    "[submit_block_extended] sibling admitted at height={} and lost fork choice on proposer rank (tip stays {})",
+                    req.height,
+                    chain.tip_height()
+                ),
+                Err(e) => {
+                    eprintln!(
+                        "[submit_block_extended] reject sibling_rejected height={} err={}",
+                        req.height, e
+                    );
+                    return Err(StatusCode::BAD_REQUEST);
+                }
             }
-            eprintln!(
-                "[submit_block_extended] sibling admitted at height={} (tip is now {}); fork choice decides on proposer rank",
-                req.height,
-                chain.tip_height()
-            );
             }
             SubmitRouting::Reject => {
             eprintln!(

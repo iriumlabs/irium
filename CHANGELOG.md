@@ -3,6 +3,37 @@
 All notable changes to Irium are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.9.154] - 2026-07-30
+
+Node fix. **Not a consensus change** — adds template fields only.
+
+### Added
+
+- **`getblocktemplate` now tells external builders the PoW-demotion floor.** The Stratum pool was
+  asking miners for the full network target (difficulty **1,721,700**, ~7.4e15 hashes) for a block the
+  chain accepts at the **20-bit floor** (~1e6 hashes) from an eligible proposer — roughly **7 billion
+  times more work than required**, which is why no pool share ever became a block. The pool cannot
+  work this out for itself: it has no view of the demotion activation height or the frozen proposer
+  registry. Three new fields:
+  - `poawx_demotion_available` — demotion is in force at this height,
+  - `poawx_job_bits` — compact bits of the floor, same `{:08x}` encoding as `bits`,
+  - `poawx_job_target` — the floor as a 256-bit target hex, same encoding as `target`.
+
+  The header must still **declare** `bits`; only the threshold a share must beat changes. Mirrors the
+  validator exactly, which sets `pow_target = floor_target(anti_spam_bits)` — it *replaces* the
+  network target rather than taking a max, so adopting the floor is correct even where the floor is
+  the harder of the two (devnet).
+
+  Deliberately **not** gated on `poawx_proposer_eligible_count > 0`: with an empty registry
+  `check_block_proposer` skips the eligibility test and `proposer_threshold(0, _)` is permissive, so
+  demotion applies *more* readily then — gating on a non-empty registry would wrongly report
+  "unavailable" during bootstrap.
+
+  Not derived from `poawx_effective_sybil_bits`, which is `poawx_ticket::effective_sybil_bits()` — the
+  *ticket* sybil constant that merely happens to equal 20 on mainnet today. Coupling to that
+  coincidence is how the difficulty freeze ended up silently inert. A regression test pins that the
+  floor is ~1e9+ times easier than the frozen target.
+
 ## [1.9.153] - 2026-07-30
 
 Node fix. **Not a consensus change** — no activation height, no fork. It only stops a node from

@@ -1649,6 +1649,27 @@ struct BlockTemplateResponse {
     /// 0 when the spacing gate is inactive. An updated miner sleeps until this instant
     /// so block timestamps track wall clock; `time` above is already clamped to it, so
     /// a miner that ignores this field still produces a valid block.
+    /// True when PoW demotion is available at this height: an eligible proposer's block is
+    /// validated against the constant anti-spam FLOOR rather than the declared `bits`. An
+    /// external builder (the Stratum pool) must be told this — it has no view of the
+    /// demotion gate or the frozen proposer registry, so without it the pool grinds the
+    /// full network target (1,721,700 live) for a block the chain would accept at 20 bits,
+    /// roughly 7 billion times more work than required.
+    #[serde(default)]
+    poawx_demotion_available: bool,
+    /// Compact bits of that floor target, same `{:08x}` encoding as `bits` so a builder can
+    /// substitute it directly. Empty when demotion is unavailable.
+    ///
+    /// NOTE: do NOT derive this from `poawx_effective_sybil_bits`. That is
+    /// `poawx_ticket::effective_sybil_bits()` — the TICKET sybil constant — which merely
+    /// happens to equal the proposer anti-spam floor (both 20) on mainnet today. They are
+    /// independent knobs, and coupling to the coincidence is how the difficulty freeze
+    /// ended up silently inert.
+    #[serde(default)]
+    poawx_job_bits: String,
+    /// The same floor as a full 256-bit target hex, matching `target`'s encoding.
+    #[serde(default)]
+    poawx_job_target: String,
     #[serde(default)]
     poawx_min_block_time: u32,
     // Phase 31R proposer-registration fields (gated; empty/false when off).
@@ -13888,6 +13909,31 @@ async fn get_block_template(
         )
     };
 
+    // Demotion-aware job target for external builders (the Stratum pool). Computed from
+    // values that already escape the chain-lock block above, so it needs no extra locking.
+    //
+    // These are exactly the gates `proposer_demotion_applies` checks that do not need a
+    // built block. Whether THIS block is ultimately demoted still depends on its own
+    // proposer assignment being valid and sortition-selected — but that is already a
+    // precondition for the block being valid at all, so advertising the floor here adds no
+    // risk: a block with a bad assignment is rejected regardless of which target it met.
+    //
+    // Deliberately NOT gated on `proposer_eligible_count > 0`. With an EMPTY registry
+    // `check_block_proposer` skips the eligibility test and `proposer_threshold(0, _)` is
+    // permissive, so demotion applies MORE readily then, not less — gating on a non-empty
+    // registry would wrongly report "unavailable" during bootstrap and make a pool grind the
+    // full target for a block the chain would accept at the floor.
+    let demotion_available = irium_node_rs::poawx_proposer::pow_demotion_active(height)
+        && irium_node_rs::poawx_proposer::proposer_vrf_enforced(height);
+    let (job_bits_hex, job_target_hex) = if demotion_available {
+        let floor = irium_node_rs::pow::floor_target(
+            irium_node_rs::poawx_proposer::proposer_anti_spam_bits(),
+        );
+        (format!("{:08x}", floor.bits), target_hex(floor.bits))
+    } else {
+        (String::new(), String::new())
+    };
+
     let mut mempool_entries = state
         .mempool
         .lock()
@@ -14169,6 +14215,9 @@ async fn get_block_template(
         poawx_proposer_round_interval: proposer_round_interval,
         poawx_proposer_freeze_height: proposer_freeze_height,
         poawx_proposer_max_allowed_round: proposer_max_allowed_round,
+        poawx_demotion_available: demotion_available,
+        poawx_job_bits: job_bits_hex,
+        poawx_job_target: job_target_hex,
         poawx_min_block_time: min_block_time,
         poawx_reg_active: reg_active,
         poawx_reg_anchor_height: reg_anchor_height,

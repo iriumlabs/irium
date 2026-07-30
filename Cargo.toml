@@ -1,6 +1,6 @@
 [package]
 name = "irium-node-rs"
-version = "1.9.153"
+version = "1.9.154"
 edition = "2021"
 
 [dependencies]

@@ -1548,6 +1548,37 @@ mod tests {
         );
     }
 
+    /// The demotion floor a template advertises to external builders (the Stratum pool) must
+    /// be far EASIER than the frozen mainnet target, or the pool gains nothing by adopting it.
+    /// The pool had been asking miners for the full network target (difficulty 1,721,700)
+    /// while the chain accepts 20 bits from an eligible proposer -- billions of times more
+    /// work than required, which is why no share ever became a block.
+    ///
+    /// Guards the FLOOR CONSTANT specifically. Do not derive it from
+    /// `poawx_ticket::effective_sybil_bits()`, which merely happens to equal 20 today.
+    #[test]
+    fn mainnet_demotion_floor_is_far_easier_than_the_frozen_target() {
+        let _env = crate::test_env::guard();
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+
+        assert_eq!(proposer_anti_spam_bits(), 20, "mainnet anti-spam floor is 20 bits");
+        let floor = crate::pow::floor_target(proposer_anti_spam_bits()).to_target();
+        // The frozen mainnet target since 64,291.
+        let frozen = crate::pow::Target { bits: 0x1a09be94 }.to_target();
+        assert!(
+            floor > frozen,
+            "the floor must be numerically LARGER (easier) than the frozen target, else \
+             advertising it would make an external builder do MORE work"
+        );
+        // Expected work is ~2^20 hashes at the floor versus ~D * 2^32 at the frozen target,
+        // so the ratio is enormous. Pin the order of magnitude, not an exact figure.
+        let ratio = &floor / &frozen;
+        assert!(
+            ratio > num_bigint::BigUint::from(1_000_000_000u64),
+            "floor/frozen ratio should be ~1e9 or more, got {ratio}"
+        );
+    }
+
     /// Off mainnet the gate is env-driven so harnesses need not wait two minutes a block.
     #[test]
     fn min_block_spacing_env_driven_off_mainnet() {

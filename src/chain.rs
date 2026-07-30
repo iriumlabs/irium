@@ -13526,6 +13526,119 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
+    /// The half of transaction inclusion the build-only test above does NOT cover, and the
+    /// regression test for the ~14-minute mainnet stall on 2026-07-30.
+    ///
+    /// Building the block right is not enough — the block still has to be TRANSMITTED right.
+    /// `build_poawx_submit_request` shipped `tx_hex: [coinbase]` unconditionally. Once the
+    /// builder started carrying mempool transactions, the header committed to 17 of them
+    /// while the submit carried 1, so the node rebuilt a different block and rejected every
+    /// one on the merkle root. Because the handler answers with a bare `Err(StatusCode)`
+    /// there was no body to read, and a build-only test suite stayed green throughout.
+    ///
+    /// So this reconstructs what the NODE reconstructs: decode each `tx_hex` entry with
+    /// `decode_full_tx` (the node's own decoder, not the builder's) and recompute the root.
+    #[test]
+    fn poawx_submit_request_carries_every_transaction_so_the_merkle_root_matches() {
+        let _env = crate::test_env::guard();
+        use crate::poawx_committed_admission::seed_components_from_block;
+        use crate::poawx_mining_harness::{
+            build_solo_poawx_block_with_proposer_and_solver_and_collected_and_txs,
+            default_cpu_nonce_solver,
+        };
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = c3_gate_set();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let worker = [0x4Du8; 32];
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let dom = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        let pc = seed_components_from_block(st.chain.last());
+        let bits = st.target_for_height(1).bits;
+        let t = genesis.header.time + 1;
+
+        // Two transactions, not one: a subset bug that happens to keep the last element
+        // would still pass with a single payload.
+        let payload = |tag: u8| Transaction {
+            version: 1,
+            inputs: vec![TxInput {
+                prev_txid: [tag; 32],
+                prev_index: 0,
+                script_sig: vec![0x51],
+                sequence: 0xffff_ffff,
+            }],
+            outputs: vec![TxOutput {
+                value: 1_000,
+                script_pubkey: crate::tx::p2pkh_script(&[tag; 20]),
+            }],
+            locktime: 0,
+        };
+        let txs = vec![payload(0x9A), payload(0x9B)];
+
+        let proof = build_solo_poawx_block_with_proposer_and_solver_and_collected_and_txs(
+            &worker, net, 1, genesis_hash, None, bits, t, 1, pc, &dom, None, None, None,
+            &default_cpu_nonce_solver, None, &txs,
+        )
+        .expect("block builds");
+
+        let req = crate::poawx_miner_client::build_poawx_submit_request(&proof)
+            .expect("submit request builds");
+        let wire: Vec<String> = req["tx_hex"]
+            .as_array()
+            .expect("tx_hex is an array")
+            .iter()
+            .map(|v| v.as_str().expect("tx_hex entry is a string").to_string())
+            .collect();
+
+        assert_eq!(
+            wire.len(),
+            proof.block.transactions.len(),
+            "the submit must carry EVERY transaction the header commits to, not just the \
+             coinbase -- shipping a subset is an unconditional merkle mismatch"
+        );
+
+        // Decode the way the node does, then rebuild the block it would reconstruct.
+        let decoded: Vec<Transaction> = wire
+            .iter()
+            .map(|h| {
+                let raw = hex::decode(h).expect("tx_hex is valid hex");
+                crate::tx::decode_full_tx(&raw).expect("the node's decoder accepts what we send")
+            })
+            .collect();
+        assert_eq!(
+            decoded, proof.block.transactions,
+            "the node must reconstruct exactly the transactions we mined"
+        );
+
+        let rebuilt = Block {
+            header: proof.block.header.clone(),
+            transactions: decoded,
+            auxpow: None,
+            poawx_receipts: None,
+        };
+        assert_eq!(
+            rebuilt.merkle_root(),
+            proof.block.header.merkle_root,
+            "the root the node recomputes from the submitted transactions must equal the one \
+             the header commits to -- this is the exact check that rejected every block on \
+             2026-07-30"
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     /// The LIVE-path counterpart of the control above, and the regression test for the
     /// mainnet producer halt at height 64,560.
     ///

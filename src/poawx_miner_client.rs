@@ -308,10 +308,9 @@ pub fn build_poawx_submit_request(
     proof: &crate::poawx_mining_harness::AllGatesProof,
 ) -> Result<serde_json::Value, String> {
     let block = &proof.block;
-    let coinbase = block
-        .transactions
-        .first()
-        .ok_or("missing coinbase in built block")?;
+    if block.transactions.is_empty() {
+        return Err("missing coinbase in built block".to_string());
+    }
     let receipt = block
         .poawx_receipts
         .as_ref()
@@ -334,7 +333,23 @@ pub fn build_poawx_submit_request(
             "nonce": header.nonce,
             "hash": hex::encode(proof.block_hash),
         },
-        "tx_hex": [hex::encode(coinbase.serialize())],
+        // EVERY transaction, not just the coinbase. The node rebuilds the block from this
+        // list and checks it against `header.merkle_root`; sending a subset while the header
+        // commits to the full set is an unconditional merkle mismatch. That is exactly what
+        // happened on 2026-07-30: v1.9.161 started carrying mempool transactions in
+        // `block.transactions` (so the root covered 17 txs) while this line still shipped
+        // one, and every submit came back `HTTP 400` with an EMPTY body — empty because the
+        // handler returns a bare `Err(StatusCode)`, so there was no message to read and the
+        // cause looked like an encoding fault for a day. Both hosts were blocked at once and
+        // mainnet stalled ~14 minutes.
+        //
+        // Coinbase-only blocks are unaffected: a one-element list is what this produced
+        // before, byte for byte.
+        "tx_hex": block
+            .transactions
+            .iter()
+            .map(|tx| hex::encode(tx.serialize()))
+            .collect::<Vec<String>>(),
         "submit_source": "irium-miner-poawx",
         "poawx_receipts": [{
             "height": receipt.height,

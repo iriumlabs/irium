@@ -1,5 +1,5 @@
 use crate::{AppState, LiveCache, CachedMiner};
-use crate::upstream::{get_stratum, get_node_blocks, get_node_status};
+use crate::upstream::{get_stratum, get_explorer_blocks, get_node_status};
 use crate::db;
 use std::collections::{HashMap, VecDeque};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -132,7 +132,8 @@ async fn tick(
     let chain_height = get_node_status(&state.client, &cfg.iriumd_rpc).await.height;
 
     if chain_height > db_tip {
-        let blocks = get_node_blocks(&state.client, &cfg.iriumd_rpc, db_tip + 1, 100).await;
+        let fetch_count = (chain_height - db_tip).min(500) + 1;
+        let blocks = get_explorer_blocks(&state.client, &cfg.explorer_url, fetch_count).await;
         let conn = state.db.lock().unwrap();
         let mut inserted = 0u64;
         for b in &blocks {
@@ -141,10 +142,10 @@ async fn tick(
                     height:        b.height,
                     miner_address: b.miner_address.clone(),
                     block_time:    b.header.time,
-                    difficulty:    u32::from_str_radix(b.header.bits.as_str(), 16).unwrap_or(0) as f64,
-                    reward_sats:   5_000_000_000,
+                    difficulty:    0.0,
+                    reward_sats:   b.miner_reward_sats(),
                     hash:          b.header.hash.clone(),
-                    found_at_unix: b.header.time,
+                    found_at_unix: now,
                 };
                 if db::upsert_block(&conn, &row).is_ok() {
                     inserted += 1;

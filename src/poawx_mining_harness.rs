@@ -326,6 +326,25 @@ pub struct AllGatesIdentities {
     /// Base entropy for the deterministic per-(height,role) hidden-precommit claim
     /// secret/nonce. Identity-bound so H-1 commit and H reveal derive identically.
     pub claim_seed: [u8; 32],
+    /// Mempool transactions to include in the block, after the coinbase.
+    ///
+    /// A PoAW-X block used to be coinbase-ONLY (`transactions: vec![coinbase]`, hardcoded),
+    /// which meant the chain could not confirm a single user transaction for as long as
+    /// PoAW-X was the producer -- every block from 60,000 through 64,620 carries exactly one
+    /// transaction. That went unnoticed until a payout run put 16 transactions in the mempool
+    /// and none of them could ever be mined.
+    ///
+    /// The coinbase deliberately still pays exactly `block_reward(height)` and does NOT claim
+    /// the fees of these transactions. That keeps this OFF the consensus path:
+    /// `validate_phase20_production_block` derives its expected payout from
+    /// `block_reward(height)` alone (chain.rs:4858), and the generic ceiling only requires
+    /// `coinbase_total <= subsidy + fees` (chain.rs:3673). Claiming less is always valid, so
+    /// nodes on older binaries accept these blocks unchanged -- no fork, no activation.
+    /// Unclaimed fees are simply burned; wiring them into the split is a separate consensus
+    /// change and is NOT done here.
+    ///
+    /// Empty => byte-identical to the previous coinbase-only behaviour.
+    pub extra_transactions: Vec<Transaction>,
     /// C3: pre-made PUBLIC artifacts collected from foreign role-workers, per role.
     /// When present for a role, the builder uses that worker's own assignment proof,
     /// claim reveal material and puzzle solution instead of deriving them from a
@@ -390,6 +409,7 @@ impl AllGatesIdentities {
             verify_assign: [8u8; 32],
             support_assign: [9u8; 32],
             claim_seed: [0x2Au8; 32],
+            extra_transactions: Vec::new(),
             collected: None,
             worker_pkh_override: None,
             delegation: None,
@@ -434,6 +454,7 @@ impl AllGatesIdentities {
             verify_assign: *miner_secret,
             support_assign: *miner_secret,
             claim_seed: derive(b"claim"),
+            extra_transactions: Vec::new(),
             collected: None,
             worker_pkh_override: None,
             delegation: None,
@@ -506,6 +527,7 @@ impl AllGatesIdentities {
             verify_assign: *verify_secret,
             support_assign: *support_secret,
             claim_seed: derive(b"claim"),
+            extra_transactions: Vec::new(),
             collected: None,
             worker_pkh_override: None,
             delegation: None,
@@ -562,6 +584,7 @@ impl AllGatesIdentities {
             verify_assign: derive(b"verify"),
             support_assign: derive(b"support"),
             claim_seed: derive(b"claim"),
+            extra_transactions: Vec::new(),
             collected: None,
             worker_pkh_override: Some(delegation.miner_pkh()),
             delegation: Some(delegation),
@@ -1069,6 +1092,54 @@ pub fn build_solo_poawx_block_with_proposer_and_solver_and_fanout(
 /// `build_collected_poawx_block_with_parent`, this passes the real `proposer_ctx` / `node_gates`
 /// / `registration_section`, so the block is a FULL all-gates block (proposer-VRF included).
 #[allow(clippy::too_many_arguments)]
+/// As `..._and_collected`, but also includes `txs` (mempool transactions) in the block.
+///
+/// Separate entry point rather than an extra parameter so every existing caller keeps
+/// working unchanged; passing an empty slice is byte-identical to the coinbase-only build.
+/// See `AllGatesIdentities::extra_transactions` for why the coinbase does not claim their
+/// fees and why this is therefore not a consensus change.
+#[allow(clippy::too_many_arguments)]
+pub fn build_solo_poawx_block_with_proposer_and_solver_and_collected_and_txs(
+    miner_secret: &[u8; 32],
+    network_id: u8,
+    height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    bits: u32,
+    time: u32,
+    receipt_difficulty_bits: u32,
+    parent_seed_components: ([u8; 32], [u8; 32]),
+    dominance: &PersistentDominance,
+    node_gates: Option<&NodeGateFlags>,
+    proposer_ctx: Option<&ProposerCtx>,
+    registration_section: Option<&crate::poawx::ProposerRegistrationSection>,
+    solver: &dyn Fn(&mut BlockHeader, u64, Target) -> Result<u32, String>,
+    collected: Option<CollectedArtifacts>,
+    txs: &[Transaction],
+) -> Result<AllGatesProof, String> {
+    let mut ids = match collected {
+        Some(c) if !c.is_empty() => AllGatesIdentities::with_collected(miner_secret, c)?,
+        _ => AllGatesIdentities::solo(miner_secret)?,
+    };
+    ids.extra_transactions = txs.to_vec();
+    build_all_gates_block_with(
+        &ids,
+        network_id,
+        height,
+        prev_hash,
+        parent_prev_hash,
+        bits,
+        time,
+        receipt_difficulty_bits,
+        parent_seed_components,
+        Some(dominance),
+        node_gates,
+        proposer_ctx,
+        registration_section,
+        solver,
+    )
+}
+
 pub fn build_solo_poawx_block_with_proposer_and_solver_and_collected(
     miner_secret: &[u8; 32],
     network_id: u8,
@@ -2211,7 +2282,14 @@ fn build_all_gates_block_with(
             bits,
             nonce: 0,
         },
-        transactions: vec![coinbase],
+        transactions: {
+            // Coinbase first, then the mempool transactions the caller supplied. The merkle
+            // root below is computed over the whole set, so the header commits to them.
+            let mut txs = Vec::with_capacity(1 + ids.extra_transactions.len());
+            txs.push(coinbase);
+            txs.extend(ids.extra_transactions.iter().cloned());
+            txs
+        },
         auxpow: None,
         poawx_receipts: Some(vec![receipt]),
     };

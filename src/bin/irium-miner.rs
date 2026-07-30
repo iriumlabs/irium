@@ -712,6 +712,78 @@ struct PeersResponse {
     peers: Vec<PeerInfo>,
 }
 
+/// Transactions from the node's template, ready to go into a PoAW-X block.
+///
+/// PoAW-X blocks were coinbase-only, so no user transaction could confirm while PoAW-X was
+/// the producer -- every block from 60,000 to 64,620 carried exactly one transaction, and it
+/// only surfaced when a payout run left 16 valid transactions stuck in the mempool.
+///
+/// iriumd has already validated everything it puts in the template, so this does not
+/// re-validate against consensus state the miner may not have (the same reasoning as
+/// `mempool_entries_from_template`, which this deliberately mirrors). It applies only the
+/// checks that are cheap, local, and protect the block we are about to sign:
+///   * structural sanity, so a malformed template cannot produce an unmineable block;
+///   * within-block double-spend rejection, since two template txs claiming one outpoint
+///     would make the whole block invalid and waste the PoW;
+///   * a total size cap, so a large mempool cannot push the block past what peers relay.
+///
+/// The caller does NOT add these fees to the coinbase -- see
+/// `AllGatesIdentities::extra_transactions` for why that keeps this off the consensus path.
+fn poawx_block_txs_from_template(template: &BlockTemplate) -> Vec<irium_node_rs::tx::Transaction> {
+    const MAX_BLOCK_TX_BYTES: usize = 900_000;
+    let mut out = Vec::new();
+    let mut claimed: HashSet<irium_node_rs::chain::OutPoint> = HashSet::new();
+    let mut bytes = 0usize;
+    let mut skipped_conflict = 0usize;
+    let mut skipped_size = 0usize;
+    for tx in &template.txs {
+        let raw = match hex::decode(&tx.hex) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("[poawx] skipping template tx with bad hex: {e}");
+                continue;
+            }
+        };
+        if bytes + raw.len() > MAX_BLOCK_TX_BYTES {
+            skipped_size += 1;
+            continue;
+        }
+        let tx_obj = decode_compact_tx(&raw);
+        if tx_obj.inputs.is_empty() || tx_obj.outputs.is_empty() {
+            eprintln!("[poawx] skipping malformed template tx (no inputs or outputs)");
+            continue;
+        }
+        let conflicts = tx_obj.inputs.iter().any(|inp| {
+            claimed.contains(&irium_node_rs::chain::OutPoint {
+                txid: inp.prev_txid,
+                index: inp.prev_index,
+            })
+        });
+        if conflicts {
+            skipped_conflict += 1;
+            continue;
+        }
+        for inp in &tx_obj.inputs {
+            claimed.insert(irium_node_rs::chain::OutPoint {
+                txid: inp.prev_txid,
+                index: inp.prev_index,
+            });
+        }
+        bytes += raw.len();
+        out.push(tx_obj);
+    }
+    // Never silent about what was left out: a transaction dropped here simply does not
+    // confirm, and the sender has no way to see why from the chain.
+    if skipped_conflict > 0 || skipped_size > 0 {
+        eprintln!(
+            "[poawx] template txs: included {}, skipped {skipped_conflict} conflicting, \
+             {skipped_size} over the {MAX_BLOCK_TX_BYTES}-byte block cap",
+            out.len()
+        );
+    }
+    out
+}
+
 /// Load mempool transactions, accepting either the new structured mempool
 /// file or the legacy hex-only format.
 fn mempool_entries_from_template(
@@ -3807,14 +3879,24 @@ fn run_poawx_solo() -> Result<(), String> {
         // Stage G0: pass the default CPU nonce solver explicitly (grinds the header
         // nonce with mine_pow, exactly as before). Stage G1's GPU miner calls the
         // same entry point with a GPU-backed solver instead.
+        // Mempool transactions for this block. Without these the block is coinbase-only and
+        // NOTHING a user sends can ever confirm.
+        let block_txs = poawx_block_txs_from_template(&tmpl);
+        if !block_txs.is_empty() {
+            println!(
+                "[poawx] including {} mempool transaction(s) at height {height}",
+                block_txs.len()
+            );
+        }
         let build_result = if collected.is_some() {
             // Pay distinct participants for the contributor roles from the collected bundles.
-            irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver_and_collected(
+            irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver_and_collected_and_txs(
                 &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,
                 parent_seed_components, &dominance, node_gates.as_ref(), proposer_ctx.as_ref(),
                 registration_section.as_ref(),
                 &irium_node_rs::poawx_mining_harness::default_cpu_nonce_solver,
                 collected,
+                &block_txs,
             )
         } else {
             irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver_and_fanout(

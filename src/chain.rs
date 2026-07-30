@@ -13419,6 +13419,113 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
+    /// Regression test for the chain being unable to confirm ANY user transaction.
+    ///
+    /// `build_all_gates_block_with` hardcoded `transactions: vec![coinbase]`, so every PoAW-X
+    /// block carried exactly one transaction -- verified on mainnet across 60,000..64,620.
+    /// Nothing a user sent could ever be mined; it surfaced only when a payout run left 16
+    /// valid transactions stuck in the mempool with no block able to include them.
+    ///
+    /// Pins the three properties that make the fix correct AND non-consensus:
+    ///   1. the supplied transactions actually land in the block;
+    ///   2. the header's merkle root commits to them (it must differ from the coinbase-only
+    ///      build, or the block would not be bound to its own contents);
+    ///   3. the coinbase total is UNCHANGED and still exactly `block_reward(height)` -- the
+    ///      fees are deliberately not claimed, which is what keeps validators that derive
+    ///      their expectation from `block_reward` alone (chain.rs:4858) accepting these
+    ///      blocks with no activation and no fork.
+    #[test]
+    fn poawx_block_includes_mempool_transactions_without_touching_the_coinbase() {
+        let _env = crate::test_env::guard();
+        use crate::poawx_committed_admission::seed_components_from_block;
+        use crate::poawx_mining_harness::{
+            build_solo_poawx_block_with_proposer_and_solver_and_collected_and_txs,
+            default_cpu_nonce_solver,
+        };
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = c3_gate_set();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let worker = [0x4Du8; 32];
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let dom = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        let pc = seed_components_from_block(st.chain.last());
+        let bits = st.target_for_height(1).bits;
+        let t = genesis.header.time + 1;
+
+        let payload = Transaction {
+            version: 1,
+            inputs: vec![TxInput {
+                prev_txid: [0x9Au8; 32],
+                prev_index: 0,
+                script_sig: vec![0x51],
+                sequence: 0xffff_ffff,
+            }],
+            outputs: vec![TxOutput {
+                value: 1_000,
+                script_pubkey: crate::tx::p2pkh_script(&[0x7Cu8; 20]),
+            }],
+            locktime: 0,
+        };
+
+        let build = |txs: &[Transaction]| {
+            build_solo_poawx_block_with_proposer_and_solver_and_collected_and_txs(
+                &worker, net, 1, genesis_hash, None, bits, t, 1, pc, &dom, None, None, None,
+                &default_cpu_nonce_solver, None, txs,
+            )
+            .expect("block builds")
+        };
+
+        let bare = build(&[]);
+        let with_tx = build(std::slice::from_ref(&payload));
+
+        assert_eq!(bare.block.transactions.len(), 1, "baseline is coinbase-only");
+        assert_eq!(
+            with_tx.block.transactions.len(),
+            2,
+            "the supplied transaction must be in the block"
+        );
+        assert_eq!(
+            with_tx.block.transactions[1], payload,
+            "and it must be the transaction we supplied, verbatim"
+        );
+        assert_ne!(
+            with_tx.block.header.merkle_root, bare.block.header.merkle_root,
+            "the header must commit to the added transaction"
+        );
+        assert_eq!(
+            with_tx.block.header.merkle_root,
+            with_tx.block.merkle_root(),
+            "merkle root must be recomputed over the FULL transaction set"
+        );
+
+        let sum = |b: &Block| -> u64 { b.transactions[0].outputs.iter().map(|o| o.value).sum() };
+        assert_eq!(
+            sum(&with_tx.block),
+            sum(&bare.block),
+            "adding transactions must not change the coinbase"
+        );
+        assert_eq!(
+            sum(&with_tx.block),
+            crate::chain::block_reward(1),
+            "coinbase still pays exactly the subsidy: fees are NOT claimed, so validators \
+             deriving their expectation from block_reward alone still accept the block"
+        );
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     /// The LIVE-path counterpart of the control above, and the regression test for the
     /// mainnet producer halt at height 64,560.
     ///

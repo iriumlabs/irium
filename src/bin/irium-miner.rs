@@ -3322,7 +3322,21 @@ fn run_poawx_solo() -> Result<(), String> {
         // be stamped in the future and the chain's timestamps would run ahead of reality.
         // Re-fetch afterwards rather than mining on a stale template: a competing block may
         // have landed while we slept, in which case this height is gone.
-        let min_block_time = tmpl.poawx_min_block_time.unwrap_or(0);
+        // Receipt-export mode (the PoAW-X receipt producer) does NOT wait: it wants a
+        // RECEIPT, never a block, and returns before submitting anything. A receipt is not
+        // bound to the header timestamp, so the spacing floor is irrelevant to it — while
+        // honouring the wait would cost up to 120s per receipt, by which time the chain has
+        // usually moved on and the producer discards the receipt for the wrong height
+        // ("skipped receipt height=X template_height=Y"). That would starve the Stratum pool
+        // of the receipts it needs to use the extended submit endpoint at all.
+        let receipt_export_mode = env::var("IRIUM_POAWX_EXPORT_RECEIPT_JSON")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let min_block_time = if receipt_export_mode {
+            0
+        } else {
+            tmpl.poawx_min_block_time.unwrap_or(0)
+        };
         if min_block_time > 0 {
             let now = Utc::now().timestamp();
             let wait = (min_block_time as i64).saturating_sub(now);

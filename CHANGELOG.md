@@ -3,6 +3,27 @@
 All notable changes to Irium are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [1.9.156] - 2026-07-30
+
+Miner fix. **Not a consensus change.**
+
+### Fixed
+
+- **Receipt-export mode no longer waits for the block-spacing floor.** The PoAW-X receipt producer
+  runs the miner with `IRIUM_POAWX_EXPORT_RECEIPT_JSON=1` to obtain a *receipt*, and that path
+  `return`s before submitting anything. Since v1.9.152 the miner waits up to 120s for the minimum
+  block spacing before building, so each receipt took up to two minutes — by which time the chain had
+  usually moved on and the producer discarded it as being for the wrong height
+  (`skipped receipt height=X template_height=Y`). That starved the Stratum pool of the receipts it
+  needs to use `/rpc/submit_block_extended` at all, which is why all three of its block candidates
+  were refused with `poawx active; use /rpc/submit_block_extended with puzzle receipts`. A receipt is
+  not bound to the header timestamp, so the floor is irrelevant to it and is now skipped in that mode.
+
+  Note the script still passes `IRIUM_POAWX_SKIP_HEADER_POW=1`, which no longer exists in the miner.
+  Harmless — it means the export path grinds the 20-bit floor (~1-2s) unnecessarily — but the flag is
+  dead and should be dropped from `poawx-receipt-producer.sh` rather than left implying it does
+  something.
+
 ## [1.9.155] - 2026-07-30
 
 Node fix + groundwork for a consensus-valid pool coinbase. **Not a consensus change.**

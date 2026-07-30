@@ -13419,6 +13419,131 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
+    /// The LIVE-path counterpart of the control above, and the regression test for the
+    /// mainnet producer halt at height 64,560.
+    ///
+    /// Same unusable bundle, but the builder now holds a real dominance snapshot — which is
+    /// what every mainnet producer passes. The bundle must be DROPPED before it can reach
+    /// selection, the block must still BUILD, and that role must self-fill. Aborting instead
+    /// (the old behaviour, still pinned above for the snapshot-less path) froze vps for 20
+    /// minutes: it retried the same bad bundle ~250 times and produced nothing while eu, which
+    /// had not collected it, kept winning. That is a liveness failure that presents as unfair
+    /// proposer selection, and it is a one-line denial of service once bundles come from
+    /// untrusted participants.
+    ///
+    /// The property the fatal branch protected is preserved and strengthened: a solution that
+    /// does not verify never enters a block. It is now excluded before selection rather than
+    /// after, so selection cannot commit to a payee the block is unable to pay.
+    #[test]
+    fn unusable_collected_bundle_is_dropped_not_fatal_when_dominance_is_known() {
+        let _env = crate::test_env::guard();
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_collected_poawx_block_with_parent, simulate_role_worker_bundle,
+            CollectedArtifacts,
+        };
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = c3_gate_set();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let (worker, kc) = ([0x4Du8; 32], [0x71u8; 32]);
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let seed1 = expected_epoch_seed(1, genesis_hash, None);
+        let profile = crate::poawx_puzzle::default_profile();
+
+        let mut skewed = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        let sk = k256::ecdsa::SigningKey::from_bytes(&kc.into()).unwrap();
+        let cpkh = hash160(sk.verifying_key().to_encoded_point(true).as_bytes());
+        skewed.apply_event(
+            cpkh,
+            crate::poawx_dominance::RoleRewardKind::Primary,
+            5_000_000_000,
+            1,
+        );
+
+        let bundle = simulate_role_worker_bundle(
+            &kc,
+            net,
+            1,
+            crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+            [0x11u8; 32],
+            seed1,
+            genesis_hash,
+            &skewed,
+            profile,
+        )
+        .expect("worker builds against its own (skewed) view");
+        // `all` populated: this is the live shape, where the pool hands over every enrolled
+        // bundle and the filter is what stands between a bad one and the candidate set.
+        let collected = CollectedArtifacts {
+            compute: Some(bundle.clone()),
+            all: vec![bundle],
+            ..Default::default()
+        };
+
+        // The builder's TRUE view: empty. It disagrees with the worker, exactly as before.
+        let truth = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        let pc = seed_components_from_block(st.chain.last());
+        let bits = st.target_for_height(1).bits;
+        let proof = build_collected_poawx_block_with_parent(
+            &worker,
+            collected,
+            net,
+            1,
+            genesis_hash,
+            None,
+            bits,
+            genesis.header.time + 1,
+            1,
+            pc,
+            Some(&truth),
+        )
+        .expect("an unusable bundle must be dropped, NOT abort the build");
+
+        let cb = &proof.block.transactions[0];
+        let builder_pkh = pkh_of(&k256::ecdsa::SigningKey::from_bytes(&worker.into()).unwrap());
+        assert_eq!(
+            cb.outputs[2].script_pubkey,
+            crate::tx::p2pkh_script(&builder_pkh),
+            "the dropped role must self-fill to the builder"
+        );
+        assert_ne!(
+            cb.outputs[2].script_pubkey,
+            crate::tx::p2pkh_script(&cpkh),
+            "a worker whose solution does not verify must NOT be paid"
+        );
+        // Buildable is not enough: the self-filled block must also be ACCEPTED. If the drop
+        // left the coinbase paying an identity absent from the candidate set, every validator
+        // re-deriving the selection would reject it and the halt would simply move from the
+        // producer to the network.
+        let cache = crate::poawx_admission::global_admission_cache();
+        cache.clear();
+        cache.set_tip(1);
+        for a in &proof.admissions {
+            let _ = cache.ingest_bytes(a);
+        }
+        let mut st = st;
+        st.connect_block(proof.block)
+            .expect("a block that self-filled a dropped role must still validate");
+        assert_eq!(st.tip_height(), 1);
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     #[test]
     #[ignore] // rig: reads REAL role-worker bundles from IRIUM_M3_DIR and lands their attributed identities on-chain
     fn phase4_real_worker_bundles_land_block_distinct_recipients() {

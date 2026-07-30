@@ -1328,6 +1328,112 @@ fn build_all_gates_block_with(
     };
     let member_sk = &ids.member_sk;
 
+    // ── Drop collected bundles that CANNOT be used, before anything reads them ────────────
+    //
+    // A collected bundle is usable only if its OWN puzzle solution verifies against the
+    // challenge derived from its OWN candidate. The puzzle MODE is seeded by
+    // (network, height, role, solver_pkh, ticket_digest, assignment_proof_digest, prev_hash)
+    // — see `assign_puzzle_mode` — so a bundle whose worker had a different view of ANY of
+    // those solved a different puzzle entirely and yields Invalid("wrong mode"). No slot
+    // assignment, ordering or re-selection can rescue it: it can never verify here.
+    //
+    // Filtering at the SOURCE, rather than where the solution is consumed, is what matters:
+    //
+    //   * LIVENESS. An unusable bundle used to reach the fatal branch further down and abort
+    //     the entire block build, which the miner then retried forever against the same bad
+    //     bundle. Measured on mainnet at height 64,560: vps logged ~250 identical
+    //     `Invalid("wrong mode")` failures over 20 minutes and produced nothing, while eu —
+    //     which had not collected that bundle — kept building. One producer silently frozen
+    //     is indistinguishable from unfair sortition when you only look at who won, and that
+    //     is exactly how it was first (mis)reported.
+    //   * CONSENSUS. `selected_for_role` must never choose a candidate this block cannot
+    //     supply a verifying solution for. Filtering before the pool is folded into the
+    //     candidate set keeps selection over usable participants only, so the block stays
+    //     buildable after selection instead of being decided into an impossible state.
+    //
+    // Dropping the bundle degrades that role to self-fill: the producer keeps the role share
+    // rather than the chain stopping. That is a payout-fairness cost, deliberately taken —
+    // a role paid to nobody is better than a producer paid nothing forever. It is also the
+    // only safe default once bundles arrive from untrusted participants, where an unusable
+    // bundle is a one-line denial of service against every producer that collects it.
+    //
+    // Only applies when a real dominance snapshot is present (the live path — the weight
+    // feeds the candidate digest the challenge binds to). Without one the collected bundles
+    // are harness-generated and consistent by construction, so that path stays untouched
+    // and byte-identical.
+    let mut dropped_roles: Vec<(u8, [u8; 20])> = Vec::new();
+    let collected_filtered: Option<CollectedArtifacts> =
+        match (dominance_override, ids.collected.as_ref()) {
+            (Some(dom), Some(col)) if !col.all.is_empty() => {
+                let profile = match node_gates {
+                    Some(g) => crate::poawx_puzzle::profile_with_bits(g.puzzle_anchor_bits as u8),
+                    None => default_profile(),
+                };
+                let unusable_reason =
+                    |b: &crate::poawx_role_bundle::RoleBundleV1| -> Option<String> {
+                        let dw = dom.weight(DOMINANCE_BASE_WORK_SCORE, &b.solver_pkh, height);
+                        let cand = crate::poawx_candidate::RoleCandidate::from_assignment_v2(
+                            &b.assignment_proof,
+                            b.ticket_proof.penalty_status,
+                            dw,
+                            [b.role_id; 32],
+                        );
+                        let cdg: [u8; 32] = {
+                            let mut h = Sha256::new();
+                            h.update(cand.serialize());
+                            h.finalize().into()
+                        };
+                        let challenge = PuzzleChallengeV1::build(
+                            net,
+                            height,
+                            b.role_id,
+                            cand.solver_pkh,
+                            cand.ticket_digest,
+                            cand.assignment_proof_digest,
+                            cdg,
+                            prev_hash,
+                            profile,
+                        );
+                        match crate::poawx_puzzle::verify_solution(&challenge, &b.puzzle_solution) {
+                            crate::poawx_puzzle::PuzzleVerificationResult::Valid => None,
+                            other => Some(format!("{other:?}")),
+                        }
+                    };
+                let mut keep: Vec<crate::poawx_role_bundle::RoleBundleV1> =
+                    Vec::with_capacity(col.all.len());
+                for b in &col.all {
+                    match unusable_reason(b) {
+                        None => keep.push(b.clone()),
+                        // Never silent: name the role, the solver and the reason. A dropped
+                        // bundle costs that participant its share, so it must be visible.
+                        Some(why) => {
+                            dropped_roles.push((b.role_id, b.solver_pkh));
+                            eprintln!(
+                                "[poawx] harness: dropped unusable collected bundle at height \
+                                 {height} role={} solver={} -- {why}; that role self-fills",
+                                b.role_id,
+                                hex::encode(b.solver_pkh)
+                            );
+                        }
+                    }
+                }
+                let kept = |o: &Option<crate::poawx_role_bundle::RoleBundleV1>| {
+                    o.clone().filter(|b| {
+                        keep.iter()
+                            .any(|k| k.role_id == b.role_id && k.solver_pkh == b.solver_pkh)
+                    })
+                };
+                Some(CollectedArtifacts {
+                    compute: kept(&col.compute),
+                    verify: kept(&col.verify),
+                    support: kept(&col.support),
+                    all: keep,
+                })
+            }
+            _ => ids.collected.clone(),
+        };
+    let collected = collected_filtered.as_ref();
+
     // ── The CHAIN picks the payees, from the FULL enrolled pool ──────────────────────────
     //
     // The caller (miner) proposes `ids.*_solver`, but it must not have the final say. When we
@@ -1344,8 +1450,27 @@ fn build_all_gates_block_with(
     // Falls back to the caller's ids when there is no dominance snapshot or no pool — the
     // standalone-harness and legacy paths stay byte-identical.
     let (compute_solver, verify_solver, support_solver) = {
-        let fallback = (ids.compute_solver, ids.verify_solver, ids.support_solver);
-        match (dominance_override, ids.collected.as_ref()) {
+        // A solver that came from a bundle we just dropped must not stay the payee: the role
+        // self-fills, so the payout has to follow the work back to the builder. Leaving it
+        // pointed at the dropped worker produces a block whose coinbase pays an identity that
+        // is NOT in the candidate set (we filtered it out), so every validator re-deriving the
+        // selection rejects it -- the halt would move from the builder to the network.
+        // Only roles whose solver IS a dropped bundle's solver change; every other lineage
+        // (dev/solo/multi-participant with no drops) is untouched and byte-identical.
+        let self_fill_pkh = hash160(ids.worker_sk.verifying_key().to_encoded_point(true).as_bytes());
+        let after_drop = |role: u8, cur: [u8; 20]| -> [u8; 20] {
+            if dropped_roles.iter().any(|(r, s)| *r == role && *s == cur) {
+                self_fill_pkh
+            } else {
+                cur
+            }
+        };
+        let fallback = (
+            after_drop(ROLE_COMPUTE_CONTRIBUTOR, ids.compute_solver),
+            after_drop(ROLE_VERIFY_CONTRIBUTOR, ids.verify_solver),
+            after_drop(ROLE_SUPPORT_CONTRIBUTOR, ids.support_solver),
+        );
+        match (dominance_override, collected) {
             (Some(dom), Some(col)) if !col.all.is_empty() => {
                 let mut pool = crate::poawx_candidate::CandidateSet::new(net, height, [0u8; 32]);
                 for b in &col.all {
@@ -1431,9 +1556,7 @@ fn build_all_gates_block_with(
             // C3: for a COLLECTED role use the worker's own proof verbatim. The builder
             // holds no secret for that worker and must not fabricate a proof on its
             // behalf -- the proof IS the worker's attributable work.
-            let collected_proof = ids
-                .collected
-                .as_ref()
+            let collected_proof = collected
                 .and_then(|c| c.for_role(role))
                 .map(|b| b.assignment_proof.clone());
             let p = match collected_proof {
@@ -1484,7 +1607,7 @@ fn build_all_gates_block_with(
     // what actually enlarges the block's candidate set from "the miner's shortlist" to "every
     // participant that enrolled", so a validator can see who was in contention.
     let can_pay = |c: &crate::poawx_candidate::RoleCandidate| -> bool {
-        ids.collected
+        collected
             .as_ref()
             .map(|col| col.payable(c.role_id, &c.solver_pkh))
             .unwrap_or(false)
@@ -1508,7 +1631,7 @@ fn build_all_gates_block_with(
     // the winners and a validator cannot tell who else was in contention, so it can only check
     // the miner against the miner's own shortlist. `sort_canonical` dedups, so re-adding the
     // winners is harmless.
-    if let Some(col) = ids.collected.as_ref() {
+    if let Some(col) = collected {
         for b in &col.all {
             let dw = dw_pool(&b.solver_pkh);
             cs.push(crate::poawx_candidate::RoleCandidate::from_assignment_v2(
@@ -1583,7 +1706,7 @@ fn build_all_gates_block_with(
         // 19 consecutive failures, 0 blocks produced, while eu (whose selection happened to
         // agree with its slot) built fine. It looked exactly like unfair sortition; it was
         // this. It had already stalled mainnet for 44 minutes at 64,524.
-        let collected_sol = ids.collected.as_ref().and_then(|c| {
+        let collected_sol = collected.and_then(|c| {
             c.all
                 .iter()
                 .find(|b| b.role_id == role && b.solver_pkh == cand.solver_pkh)
@@ -1621,9 +1744,7 @@ fn build_all_gates_block_with(
     // verbatim -- reconstructing it is impossible and re-signing it with member_sk
     // would produce a vote from a non-committee member, which is exactly how the C3
     // proof first failed.
-    if let Some(v) = ids
-        .collected
-        .as_ref()
+    if let Some(v) = collected
         .and_then(|c| c.for_role(ROLE_SUPPORT_CONTRIBUTOR))
         .and_then(|b| b.finality_vote.clone())
     {
@@ -1656,7 +1777,7 @@ fn build_all_gates_block_with(
     // for it. `sort_canonical` dedups, so re-adding a vote already present is harmless.
     // Dedup by (member_pkh, vote_type): the selected SUPPORT bundle's vote is already in the
     // proof, and `sort_canonical` only ORDERS — `is_canonical` then rejects duplicate members.
-    if let Some(col) = ids.collected.as_ref() {
+    if let Some(col) = collected {
         for b in &col.all {
             if let Some(v) = b.finality_vote.as_ref() {
                 let dup = fproof
@@ -1680,7 +1801,7 @@ fn build_all_gates_block_with(
     let precommit_root = if hp_active {
         let leaf = |role: u8, solver: [u8; 20]| -> [u8; 32] {
             // Must mirror the reveal path exactly, including collected material.
-            let (s, n) = match ids.collected.as_ref().and_then(|c| c.for_role(role)) {
+            let (s, n) = match collected.and_then(|c| c.for_role(role)) {
                 Some(b) => (b.claim_secret, b.claim_nonce),
                 None => (
                     derive_claim_secret(&claim_seed, height, role),
@@ -1712,9 +1833,7 @@ fn build_all_gates_block_with(
         // commitment committed in precommit_root and the reveal in the receipt agree
         // with what that worker actually computed. Deriving from the builder's
         // claim_seed would commit to material the worker never produced.
-        let collected_claim = ids
-            .collected
-            .as_ref()
+        let collected_claim = collected
             .and_then(|c| c.for_role(role))
             .map(|b| (b.claim_secret, b.claim_nonce));
         let (secret, nonce) = match (hp_active, collected_claim) {

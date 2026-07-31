@@ -13604,6 +13604,120 @@ mod tests {
     }
 
     #[test]
+    fn role_bundle_gossip_round_trips_and_relays_only_new_bundles() {
+        let _env = crate::test_env::guard();
+        use crate::protocol::{MessageType, PoawxRoleBundlePayload};
+        // The wire type must survive a round trip, and must be recognised by number so an
+        // older peer's `Unknown message type: 31` is the only failure mode (drop-safe).
+        assert_eq!(
+            MessageType::try_from(31u8).unwrap(),
+            MessageType::PoawxRoleBundle
+        );
+        let m = PoawxRoleBundlePayload {
+            bundle_bytes: b"{\"role_id\":1}".to_vec(),
+        }
+        .to_message();
+        assert_eq!(m.msg_type, MessageType::PoawxRoleBundle);
+        assert_eq!(
+            PoawxRoleBundlePayload::from_message(&m).unwrap().bundle_bytes,
+            b"{\"role_id\":1}".to_vec()
+        );
+        // A message of a DIFFERENT type must not decode as a bundle -- otherwise the relay
+        // arm would ingest arbitrary payloads.
+        let other = crate::protocol::PoawxCandidateAdmissionPayload {
+            admission_bytes: vec![9],
+        }
+        .to_message();
+        assert!(PoawxRoleBundlePayload::from_message(&other).is_err());
+    }
+
+    /// The defect this closes: a bundle existed ONLY in the node it was POSTed to, so a
+    /// contributor could be selected by that node and no other. Role workers had to be
+    /// hand-pointed at a producing node, and the Core app -- which enrols into the user's
+    /// OWN node -- could never be picked up by anyone else.
+    ///
+    /// Models two nodes: the bundle is POSTed to A, and must become selectable on B.
+    #[test]
+    fn a_bundle_posted_to_one_node_becomes_selectable_on_another() {
+        let _env = crate::test_env::guard();
+        use crate::poawx_committed_admission::expected_epoch_seed;
+        use crate::poawx_mining_harness::simulate_role_worker_bundle;
+        use crate::poawx_role_bundle::{BundleOutcome, NodeRoleBundlePool};
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = c3_gate_set();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let net = crate::activation::network_id_byte();
+        let seed1 = expected_epoch_seed(1, genesis_hash, None);
+        let dom = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        let bundle = simulate_role_worker_bundle(
+            &[0x91u8; 32],
+            net,
+            1,
+            crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+            [0x11u8; 32],
+            seed1,
+            genesis_hash,
+            &dom,
+            crate::poawx_puzzle::default_profile(),
+        )
+        .expect("contributor builds a bundle");
+
+        let ip = |n: u8| std::net::IpAddr::from([10, 0, 0, n]);
+
+        // Node A: the contributor POSTs here. This always worked.
+        let node_a = NodeRoleBundlePool::default();
+        assert!(matches!(
+            node_a
+                .ingest_tiered(ip(1), bundle.clone(), net, 1, Some(seed1), Some(genesis_hash))
+                .expect("A accepts"),
+            BundleOutcome::AcceptedNew
+        ));
+
+        // Node B is a DIFFERENT producer that never received the POST. Before gossip this
+        // pool stayed empty and B could never pay this contributor.
+        let node_b = NodeRoleBundlePool::default();
+        assert_eq!(node_b.len(), 0, "B has not seen the bundle yet");
+
+        // Gossip: the exact bytes A would broadcast, arriving at B and revalidated there.
+        let wire = bundle.to_json();
+        let relayed = crate::poawx_role_bundle::RoleBundleV1::from_json(&wire)
+            .expect("B parses the gossiped bundle");
+        let outcome = node_b
+            .ingest_tiered(ip(2), relayed, net, 1, Some(seed1), Some(genesis_hash))
+            .expect("B must accept a validly gossiped bundle");
+        assert!(
+            matches!(outcome, BundleOutcome::AcceptedNew),
+            "first arrival at B is new, so B relays it onward"
+        );
+        assert_eq!(node_b.len(), 1, "the contributor is now selectable on B");
+
+        // A second copy arriving by another path must NOT be relayed again, or the flood
+        // never terminates.
+        let dup = crate::poawx_role_bundle::RoleBundleV1::from_json(&wire).unwrap();
+        let again = node_b
+            .ingest_tiered(ip(3), dup, net, 1, Some(seed1), Some(genesis_hash))
+            .expect("duplicate is accepted but not new");
+        assert!(
+            matches!(again, BundleOutcome::Duplicate),
+            "a duplicate must report Duplicate so the relay arm stops the flood"
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    #[test]
     fn control_old_template_fn_gets_the_many_member_case_wrong() {
         // The function getblocktemplate used to call. Proves the bug was real: for two
         // members per role it emits FOUR outputs where consensus requires SIX.

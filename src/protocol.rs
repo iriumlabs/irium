@@ -110,6 +110,18 @@ pub enum MessageType {
     /// `ProposerRegistrationV1` wire bytes (opaque; the node pool light-validates +
     /// stores; full anchor-bound validation at block inclusion). Drop-safe.
     PoawxProposerRegistration = 30,
+    /// Gossip: PoAW-X contributor role bundle. Payload: the bundle's JSON bytes,
+    /// opaque here (same pattern as the admission/vote/registration payloads); the
+    /// receiving node fully validates it — VRF assignment proof, sybil ticket and
+    /// puzzle solution — through `NodeRoleBundlePool::ingest_tiered` before pooling
+    /// or relaying, so a peer is never trusted.
+    ///
+    /// Without this, a bundle existed ONLY in the node it was HTTP-POSTed to, so a
+    /// contributor could only ever be paid by that one node. That is why role workers
+    /// had to be hand-pointed at a producing node, and why the Core app — which enrols
+    /// into the user's OWN node — could never be selected by anyone else. Drop-safe
+    /// forward-compat: older nodes reject the unknown type and continue.
+    PoawxRoleBundle = 31,
     Disconnect = 99,
 }
 
@@ -150,6 +162,7 @@ impl TryFrom<u8> for MessageType {
             28 => PoawxCandidateAdmission,
             29 => PoawxFinalityVote,
             30 => PoawxProposerRegistration,
+            31 => PoawxRoleBundle,
             99 => Disconnect,
             other => return Err(format!("Unknown message type: {}", other)),
         };
@@ -919,6 +932,30 @@ impl PoawxCandidateAdmissionPayload {
         }
         Ok(PoawxCandidateAdmissionPayload {
             admission_bytes: msg.payload.clone(),
+        })
+    }
+}
+
+/// Wire payload for `MessageType::PoawxRoleBundle`. Opaque bytes (the bundle's JSON);
+/// the receiving node revalidates in full before pooling or relaying.
+pub struct PoawxRoleBundlePayload {
+    pub bundle_bytes: Vec<u8>,
+}
+
+impl PoawxRoleBundlePayload {
+    pub fn to_message(&self) -> Message {
+        Message {
+            msg_type: MessageType::PoawxRoleBundle,
+            payload: self.bundle_bytes.clone(),
+        }
+    }
+
+    pub fn from_message(msg: &Message) -> Result<Self, String> {
+        if msg.msg_type != MessageType::PoawxRoleBundle {
+            return Err("Not a poawx role bundle".to_string());
+        }
+        Ok(PoawxRoleBundlePayload {
+            bundle_bytes: msg.payload.clone(),
         })
     }
 }

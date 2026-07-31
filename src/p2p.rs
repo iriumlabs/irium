@@ -4541,6 +4541,20 @@ impl P2PNode {
         let _ = broadcast_raw(&self.peers, &serialized).await;
     }
 
+    /// Broadcast a PoAW-X contributor role bundle to all peers.
+    ///
+    /// Receivers revalidate in full (VRF proof, sybil ticket, puzzle solution) and
+    /// rate-limit per source before pooling or relaying, so this is a best-effort flood
+    /// that trusts nobody. Without it a bundle reached only the node it was POSTed to, so
+    /// a contributor could be selected by that node alone.
+    pub async fn broadcast_role_bundle(&self, bundle_bytes: &[u8]) {
+        let payload = crate::protocol::PoawxRoleBundlePayload {
+            bundle_bytes: bundle_bytes.to_vec(),
+        };
+        let serialized = payload.to_message().serialize();
+        let _ = broadcast_raw(&self.peers, &serialized).await;
+    }
+
     pub async fn broadcast_proposer_registration(&self, reg_bytes: &[u8]) {
         let payload = crate::protocol::PoawxProposerRegistrationPayload {
             reg_bytes: reg_bytes.to_vec(),
@@ -7024,6 +7038,59 @@ impl P2PNode {
                                     .serialize();
                                     let _ = broadcast_raw(&peers_vec, &bytes).await;
                                 }
+                            }
+                        }
+                    }
+                    MessageType::PoawxRoleBundle => {
+                        // Relay contributor bundles so EVERY producer can see EVERY
+                        // enrolled contributor, which is what lets the chain select role
+                        // winners from the whole network instead of from whoever happened
+                        // to POST to it.
+                        //
+                        // Nothing here trusts the peer: `ingest_tiered` rate-limits per
+                        // source BEFORE validating, then runs the full bundle validation
+                        // (VRF assignment proof, sybil ticket, puzzle solution) against
+                        // OUR view of the tip. Only a bundle that is genuinely new to this
+                        // node is relayed, so the flood terminates.
+                        if let Ok(p) = crate::protocol::PoawxRoleBundlePayload::from_message(&msg) {
+                            let ingested = (|| {
+                                let chain_arc = chain_for_sync.as_ref()?;
+                                let (next_height, parent_hash) = {
+                                    let g = chain_arc.lock().unwrap_or_else(|e| e.into_inner());
+                                    let tip = g.tip_height();
+                                    let ph = g.chain.last().map(|b| b.header.hash_for_height(tip));
+                                    (tip.saturating_add(1), ph)
+                                };
+                                let json_s = std::str::from_utf8(&p.bundle_bytes).ok()?;
+                                let bundle =
+                                    crate::poawx_role_bundle::RoleBundleV1::from_json(json_s)
+                                        .ok()?;
+                                let net = crate::activation::network_id_byte();
+                                crate::poawx_role_bundle::global_role_bundle_pool()
+                                    .ingest_tiered(
+                                        addr.ip(),
+                                        bundle,
+                                        net,
+                                        next_height,
+                                        None,
+                                        parent_hash,
+                                    )
+                                    .ok()
+                            })();
+                            // Relay only genuinely-new bundles. A duplicate means the flood
+                            // already reached us by another path; rebroadcasting it would
+                            // never terminate.
+                            if matches!(
+                                ingested,
+                                Some(crate::poawx_role_bundle::BundleOutcome::AcceptedNew)
+                                    | Some(crate::poawx_role_bundle::BundleOutcome::ReplacedLower)
+                            ) {
+                                let bytes = crate::protocol::PoawxRoleBundlePayload {
+                                    bundle_bytes: p.bundle_bytes,
+                                }
+                                .to_message()
+                                .serialize();
+                                let _ = broadcast_raw(&peers_vec, &bytes).await;
                             }
                         }
                     }

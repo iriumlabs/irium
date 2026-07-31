@@ -15163,7 +15163,25 @@ async fn poawx_post_role_bundle(
         }
     };
     match pool.ingest_tiered(addr.ip(), parsed, net, next_height, None, parent_hash) {
-        Ok(o) => Ok(Json(json!({
+        Ok(o) => {
+            // Relay it to the network. A bundle used to exist ONLY in the node it was
+            // POSTed to, so a contributor could be selected by that node and no other --
+            // which is why role workers had to be hand-pointed at a producing node, and
+            // why the Core app (which enrols into the user's OWN node) could never be
+            // picked up by anyone else. Gossiping it is what lets the chain choose role
+            // winners from every enrolled miner on the network.
+            //
+            // Only genuinely-new bundles are broadcast; a duplicate is already in flight.
+            if matches!(
+                o,
+                irium_node_rs::poawx_role_bundle::BundleOutcome::AcceptedNew
+                    | irium_node_rs::poawx_role_bundle::BundleOutcome::ReplacedLower
+            ) {
+                if let Some(ref p2p) = state.p2p {
+                    p2p.broadcast_role_bundle(body.as_ref()).await;
+                }
+            }
+            Ok(Json(json!({
             "status": match o {
                 irium_node_rs::poawx_role_bundle::BundleOutcome::AcceptedNew => "accepted",
                 irium_node_rs::poawx_role_bundle::BundleOutcome::ReplacedLower => "replaced",
@@ -15171,7 +15189,8 @@ async fn poawx_post_role_bundle(
             },
             "height": next_height,
             "collected": pool.len(),
-        }))),
+            })))
+        }
         Err(e) => {
             eprintln!("[poawx] role bundle rejected: {e}");
             Err(StatusCode::BAD_REQUEST)

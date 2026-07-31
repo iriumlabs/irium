@@ -1923,6 +1923,10 @@ fn build_all_gates_block_with(
         // 19 consecutive failures, 0 blocks produced, while eu (whose selection happened to
         // agree with its slot) built fine. It looked exactly like unfair sortition; it was
         // this. It had already stalled mainnet for 44 minutes at 64,524.
+        // This builder's own identity: the one solver whose role work we may legitimately
+        // produce ourselves.
+        let self_solver_pkh =
+            hash160(ids.worker_sk.verifying_key().to_encoded_point(true).as_bytes());
         let collected_sol = collected.and_then(|c| {
             c.all
                 .iter()
@@ -1934,18 +1938,36 @@ fn build_all_gates_block_with(
             Some(s) => match crate::poawx_puzzle::verify_solution(&challenge, &s) {
                 crate::poawx_puzzle::PuzzleVerificationResult::Valid => s,
                 other => {
-                    // Still fatal, deliberately. Now that the solution is guaranteed to
-                    // come from `cand` itself, reaching here means a genuine assembly error
-                    // (e.g. the builder and the worker disagree about dominance weight, so
-                    // the digests differ) -- something the builder must surface rather than
-                    // paper over. `c3_dominance_disagreement_breaks_assembly_explicitly` is
-                    // the negative control that pins this. The DoS the old code allowed came
-                    // from the candidate/slot mismatch above, which can no longer happen.
-                    return Err(format!(
-                        "harness: collected puzzle solution for role {role} from solver {} \
-                         does not verify against its challenge: {other:?}",
-                        hex::encode(cand.solver_pkh)
-                    ));
+                    // SAME-SOLVER case: the conflicting candidate and solution both belong to
+                    // THIS builder. Two candidates exist for our own key -- the one
+                    // `build_roles` makes and the one rebuilt from our own enrolled bundle --
+                    // and selection can pick the former while this lookup finds the latter.
+                    // Different digests, same pkh, so the solution can never verify. That is
+                    // not a disagreement with anyone; it is us against ourselves, and it
+                    // halted vps at 64,957 the moment our own role worker enrolled.
+                    //
+                    // We own this identity, so we can legitimately solve our own role work.
+                    // Solve against the SELECTED candidate's challenge and carry on.
+                    if cand.solver_pkh == self_solver_pkh {
+                        eprintln!(
+                            "[poawx] role {role}: own enrolled bundle does not match the \
+                             selected candidate ({other:?}); solving locally for our own key \
+                             {} instead of aborting the block",
+                            hex::encode(cand.solver_pkh)
+                        );
+                        solve_dev(&challenge)
+                            .ok_or_else(|| "harness: puzzle solve failed".to_string())?
+                    } else {
+                        // A FOREIGN solver still aborts, deliberately. We do not hold their
+                        // identity, so solving it ourselves would fabricate their
+                        // contribution and pay them for work nobody did.
+                        // `c3_dominance_disagreement_breaks_assembly_explicitly` pins this.
+                        return Err(format!(
+                            "harness: collected puzzle solution for role {role} from solver {} \
+                             does not verify against its challenge: {other:?}",
+                            hex::encode(cand.solver_pkh)
+                        ));
+                    }
                 }
             },
             None => solve_dev(&challenge).ok_or_else(|| "harness: puzzle solve failed".to_string())?,

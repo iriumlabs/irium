@@ -14546,6 +14546,120 @@ mod tests {
         );
     }
 
+    /// SAME-SOLVER: the builder's own enrolled bundle conflicting with its own selected
+    /// candidate must NOT abort the block.
+    ///
+    /// Two candidates exist for the builder's key -- the one `build_roles` makes and the one
+    /// rebuilt from its own enrolled bundle. Selection can pick the former while the solution
+    /// lookup finds the latter; different digests, same pkh, so the puzzle can never verify.
+    /// That is the builder against itself, not a disagreement with a peer, and it halted vps
+    /// at 64,957 the moment its own role worker enrolled.
+    ///
+    /// We own that identity, so solving our own role work locally is legitimate. A FOREIGN
+    /// solver must still abort -- solving someone else's would fabricate their contribution --
+    /// which `c3_dominance_disagreement_breaks_assembly_explicitly` pins.
+    #[test]
+    fn own_conflicting_bundle_solves_locally_instead_of_halting() {
+        let _env = crate::test_env::guard();
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_collected_poawx_block_with_parent, simulate_role_worker_bundle,
+            CollectedArtifacts,
+        };
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = c3_gate_set();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        // The BUILDER's own secret, and a bundle enrolled by that same identity.
+        let worker = [0x4Du8; 32];
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let seed1 = expected_epoch_seed(1, genesis_hash, None);
+
+        // Build the bundle against a SKEWED view so its digest cannot match the selected
+        // candidate the builder derives from its own (empty) view -- the exact conflict.
+        let mut skewed = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        let self_pkh = pkh_of(&k256::ecdsa::SigningKey::from_bytes(&worker.into()).unwrap());
+        skewed.apply_event(
+            self_pkh,
+            crate::poawx_dominance::RoleRewardKind::Primary,
+            5_000_000_000,
+            1,
+        );
+        let own_bundle = simulate_role_worker_bundle(
+            &worker,
+            net,
+            1,
+            crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+            [0x11u8; 32],
+            seed1,
+            genesis_hash,
+            &skewed,
+            crate::poawx_puzzle::default_profile(),
+        )
+        .expect("our own worker builds a bundle");
+        assert_eq!(
+            own_bundle.solver_pkh, self_pkh,
+            "the bundle must belong to the BUILDER for this to be the same-solver case"
+        );
+
+        let truth = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        let collected = CollectedArtifacts {
+            support: Some(own_bundle.clone()),
+            all: vec![own_bundle],
+            ..Default::default()
+        };
+        let pc = seed_components_from_block(st.chain.last());
+        let bits = st.target_for_height(1).bits;
+
+        // MUST build. Before the fix this returned
+        //   "collected puzzle solution for role 3 ... does not verify against its challenge"
+        // and the producer stopped entirely.
+        let proof = build_collected_poawx_block_with_parent(
+            &worker,
+            collected,
+            net,
+            1,
+            genesis_hash,
+            None,
+            bits,
+            genesis.header.time + 1,
+            1,
+            pc,
+            Some(&truth),
+        )
+        .expect("our own conflicting bundle must not halt the builder");
+
+        // And the block must still be ACCEPTED -- solving locally is only correct if the
+        // result validates.
+        let cache = crate::poawx_admission::global_admission_cache();
+        cache.clear();
+        cache.set_tip(1);
+        for a in &proof.admissions {
+            let _ = cache.ingest_bytes(a);
+        }
+        let mut st = st;
+        st.connect_block(proof.block)
+            .expect("a locally-solved own role must still validate");
+        assert_eq!(st.tip_height(), 1);
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     #[test]
     fn control_old_template_fn_gets_the_many_member_case_wrong() {
         // The function getblocktemplate used to call. Proves the bug was real: for two

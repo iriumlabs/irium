@@ -9672,6 +9672,102 @@ async fn handle_incoming_with_sybil(
                     }
                 }
             }
+            MessageType::PoawxRoleBundle => {
+                // THE SECOND MESSAGE LOOP. `handle_incoming_with_sybil` serves inbound-accepted
+                // peers; the other loop serves outbound-dialled ones. Every other gossip type
+                // has an arm in BOTH -- role bundles had one, so a bundle arriving over an
+                // inbound connection fell through to the catch-all and vanished with no trace.
+                //
+                // That is why 2026-07-31 showed vps logging three `recv PoawxRoleBundle`,
+                // dropping none, and pooling one: the messages were never dispatched here at
+                // all. Three rounds of adding logs to the OTHER loop could not have found it --
+                // the code being instrumented was not the code being reached.
+                if let Ok(p) = crate::protocol::PoawxRoleBundlePayload::from_message(&msg) {
+                    let ingested = (|| {
+                        let chain_arc = match chain.as_ref() {
+                            Some(c) => c,
+                            None => {
+                                eprintln!(
+                                    "[poawx] role bundle from {}: dropped, no chain handle",
+                                    addr.ip()
+                                );
+                                return None;
+                            }
+                        };
+                        let (next_height, parent_hash) = {
+                            let g = chain_arc.lock().unwrap_or_else(|e| e.into_inner());
+                            let tip = g.tip_height();
+                            let ph = g.chain.last().map(|b| b.header.hash_for_height(tip));
+                            (tip.saturating_add(1), ph)
+                        };
+                        let json_s = match std::str::from_utf8(&p.bundle_bytes) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                eprintln!(
+                                    "[poawx] role bundle from {}: dropped, not UTF-8: {e}",
+                                    addr.ip()
+                                );
+                                return None;
+                            }
+                        };
+                        let bundle =
+                            match crate::poawx_role_bundle::RoleBundleV1::from_json(json_s) {
+                                Ok(b) => b,
+                                Err(e) => {
+                                    eprintln!(
+                                        "[poawx] role bundle from {} at height {}: dropped, \
+                                         cannot parse: {e}",
+                                        addr.ip(),
+                                        next_height
+                                    );
+                                    return None;
+                                }
+                            };
+                        let net = crate::activation::network_id_byte();
+                        match crate::poawx_role_bundle::global_role_bundle_pool().ingest_tiered(
+                            addr.ip(),
+                            bundle,
+                            net,
+                            next_height,
+                            None,
+                            parent_hash,
+                        ) {
+                            Ok(o) => {
+                                // Log the ACCEPTED outcomes too, so received-vs-pooled
+                                // reconciles by arithmetic rather than inference.
+                                eprintln!(
+                                    "[poawx] role bundle from {} at height {}: {:?}",
+                                    addr.ip(),
+                                    next_height,
+                                    o
+                                );
+                                Some(o)
+                            }
+                            Err(e) => {
+                                eprintln!(
+                                    "[poawx] role bundle from {} REJECTED at height {}: {}",
+                                    addr.ip(),
+                                    next_height,
+                                    e
+                                );
+                                None
+                            }
+                        }
+                    })();
+                    if matches!(
+                        ingested,
+                        Some(crate::poawx_role_bundle::BundleOutcome::AcceptedNew)
+                            | Some(crate::poawx_role_bundle::BundleOutcome::ReplacedLower)
+                    ) {
+                        let bytes = crate::protocol::PoawxRoleBundlePayload {
+                            bundle_bytes: p.bundle_bytes,
+                        }
+                        .to_message()
+                        .serialize();
+                        let _ = broadcast_raw(&peers, &bytes).await;
+                    }
+                }
+            }
             MessageType::PoawxCandidateAdmission => {
                 if crate::poawx_admission::candidate_admission_gossip_enabled() {
                     if let Ok(p) =

@@ -13717,6 +13717,89 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
+    /// `docs/POAWX.md` (Mining): "The miner requests the current role assignment from your
+    /// node, performs the role work, and submits role receipts." The CHAIN assigns the role.
+    ///
+    /// Before this, `/poawx/assignment` returned no role and took no identity, `poawx-role-worker`
+    /// read its role from argv[1], and the Core GUI picked one with `secret[0] % 3`.
+    #[test]
+    fn chain_assigns_each_identity_one_role_deterministically() {
+        let _env = crate::test_env::guard();
+        use crate::poawx::{
+            ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+        };
+        use crate::poawx_proposer::assigned_role_for_identity;
+        use std::collections::{HashMap, HashSet};
+
+        let seed = [0x5Au8; 32];
+        let pkh = |n: u8| [n; 20];
+
+        // Deterministic: every node must derive the same role, or it is advisory, not consensus.
+        for n in 0..50u8 {
+            let a = assigned_role_for_identity(0, 100, &seed, &pkh(n));
+            let b = assigned_role_for_identity(0, 100, &seed, &pkh(n));
+            assert_eq!(a, b, "same inputs must always give the same role");
+            assert!(
+                [
+                    ROLE_COMPUTE_CONTRIBUTOR,
+                    ROLE_VERIFY_CONTRIBUTOR,
+                    ROLE_SUPPORT_CONTRIBUTOR
+                ]
+                .contains(&a),
+                "must be one of the three contributor roles"
+            );
+        }
+
+        // Identity-bound: different miners are not all herded onto one role.
+        let mut spread: HashMap<u8, usize> = HashMap::new();
+        for n in 0..200u8 {
+            *spread
+                .entry(assigned_role_for_identity(0, 100, &seed, &pkh(n)))
+                .or_insert(0) += 1;
+        }
+        assert_eq!(spread.len(), 3, "all three roles must be used across a population");
+        for (role, count) in &spread {
+            assert!(
+                *count > 20,
+                "role {role} got only {count}/200 -- assignment is not spreading miners"
+            );
+        }
+
+        // Height-bound: a miner's role rotates as the chain advances, so no one is stuck on
+        // (or permanently owns) a role.
+        let me = pkh(7);
+        let over_heights: HashSet<u8> = (100..160u64)
+            .map(|h| assigned_role_for_identity(0, h, &seed, &me))
+            .collect();
+        assert!(
+            over_heights.len() > 1,
+            "one identity must not hold the same role forever"
+        );
+
+        // Seed-bound: the seed comes from the parent block, so the assignment cannot be known
+        // (or shopped for) before that block exists.
+        let other_seed = [0xA5u8; 32];
+        let changed = (100..160u64)
+            .filter(|h| {
+                assigned_role_for_identity(0, *h, &seed, &me)
+                    != assigned_role_for_identity(0, *h, &other_seed, &me)
+            })
+            .count();
+        assert!(
+            changed > 0,
+            "assignment must depend on the seed, or it is predictable arbitrarily far ahead"
+        );
+
+        // Network-bound: a devnet assignment must not carry over to mainnet.
+        let differs = (100..160u64)
+            .filter(|h| {
+                assigned_role_for_identity(0, *h, &seed, &me)
+                    != assigned_role_for_identity(1, *h, &seed, &me)
+            })
+            .count();
+        assert!(differs > 0, "assignment must be bound to the network id");
+    }
+
     #[test]
     fn control_old_template_fn_gets_the_many_member_case_wrong() {
         // The function getblocktemplate used to call. Proves the bug was real: for two

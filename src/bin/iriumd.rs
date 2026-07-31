@@ -15409,10 +15409,23 @@ async fn poawx_finality_votes_get(
     Ok(Json(json!({ "votes": hexes })))
 }
 
+/// `docs/POAWX.md` (Mining): *"The miner requests the current role assignment from your node,
+/// performs the role work, and submits role receipts."*
+///
+/// This returned a seed and a difficulty and NO ROLE, and accepted no identity, so every
+/// caller got the same answer and no miner was ever told what to work on. `poawx-role-worker`
+/// took its role from `argv[1]`; the Core GUI picked one with `secret[0] % 3`. Miners
+/// self-selected and the producer arbitrated afterwards.
+///
+/// Pass `?pkh=<40-hex>` (the miner's payout identity) and the node answers with the role the
+/// CHAIN assigns that identity at this height — deterministic, identity-bound, and
+/// unpredictable before the parent block. Omitting `pkh` keeps the old identity-free response
+/// verbatim, so existing callers are unaffected.
 async fn poawx_get_assignment(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
     headers: HeaderMap,
+    Query(q): Query<std::collections::HashMap<String, String>>,
 ) -> Result<Json<Value>, StatusCode> {
     check_rate_with_auth(&state, &addr, &headers)?;
     let poawx_h = state
@@ -15452,14 +15465,39 @@ async fn poawx_get_assignment(
         hex::encode(seed),
         bits
     );
-    Ok(Json(serde_json::json!({
+    let mut body = serde_json::json!({
         "height": height,
         "seed": hex::encode(seed),
         "commitment_nonce": hex::encode(commitment_nonce),
         "puzzle_difficulty": poawx_puzzle_difficulty_bits() as u64,
         "lane": "cpu",
         "pow_bits": format!("{:08x}", bits),
-    })))
+    });
+    // The role THIS identity is assigned. A malformed pkh is a client error, not a silent
+    // omission: answering without a role would send the miner back to guessing, which is the
+    // behaviour being removed.
+    if let Some(raw) = q.get("pkh") {
+        let bytes = hex::decode(raw.trim()).map_err(|_| StatusCode::BAD_REQUEST)?;
+        if bytes.len() != 20 {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let mut pkh = [0u8; 20];
+        pkh.copy_from_slice(&bytes);
+        let net = irium_node_rs::activation::network_id_byte();
+        let role = irium_node_rs::poawx_proposer::assigned_role_for_identity(
+            net,
+            height.saturating_add(1),
+            &seed,
+            &pkh,
+        );
+        body["role_id"] = serde_json::json!(role);
+        body["role"] = serde_json::json!(match role {
+            r if r == irium_node_rs::poawx::ROLE_COMPUTE_CONTRIBUTOR => "compute",
+            r if r == irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR => "verify",
+            _ => "support",
+        });
+    }
+    Ok(Json(body))
 }
 
 async fn poawx_post_receipt(
@@ -28569,7 +28607,13 @@ mod tests {
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_MODE", "active");
         let ok =
-            poawx_get_assignment(ConnectInfo(addr), State(state.clone()), headers.clone()).await;
+            poawx_get_assignment(
+                ConnectInfo(addr),
+                State(state.clone()),
+                headers.clone(),
+                Query(Default::default()),
+            )
+            .await;
         assert!(ok.is_ok(), "devnet genesis must serve assignment");
         let v = ok.unwrap().0;
         assert_eq!(v["height"].as_u64(), Some(0), "genesis height 0");
@@ -28586,7 +28630,12 @@ mod tests {
         // mainnet: rejected (hard-off preserved).
         std::env::set_var("IRIUM_NETWORK", "mainnet");
         assert!(
-            poawx_get_assignment(ConnectInfo(addr), State(state.clone()), headers.clone())
+            poawx_get_assignment(
+                ConnectInfo(addr),
+                State(state.clone()),
+                headers.clone(),
+                Query(Default::default()),
+            )
                 .await
                 .is_err(),
             "mainnet must reject assignment"
@@ -28595,7 +28644,12 @@ mod tests {
         std::env::set_var("IRIUM_NETWORK", "devnet");
         std::env::set_var("IRIUM_POAWX_MODE", "off");
         assert!(
-            poawx_get_assignment(ConnectInfo(addr), State(state), headers)
+            poawx_get_assignment(
+                ConnectInfo(addr),
+                State(state),
+                headers,
+                Query(Default::default()),
+            )
                 .await
                 .is_err(),
             "inactive poawx must reject assignment"

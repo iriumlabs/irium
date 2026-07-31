@@ -106,6 +106,49 @@ pub fn pool_sortition_admitted(priority: u64, eligible_count: u64, k: u64) -> bo
     priority < pool_sortition_threshold(eligible_count, k)
 }
 
+/// THE CHAIN'S ROLE ASSIGNMENT for one identity at one height.
+///
+/// `docs/POAWX.md` (Mining): *"The miner requests the current role assignment from your node,
+/// performs the role work, and submits role receipts."* The chain decides which role a miner
+/// works — the miner does not choose.
+///
+/// It did not exist. `/poawx/assignment` returned a seed and a difficulty and **no role at
+/// all**, and took no identity, so every caller got the same answer. `poawx-role-worker` took
+/// its role from `argv[1]` and the Core GUI picked one with `secret[0] % 3`. Miners
+/// self-selected and the producer arbitrated afterwards — the opposite of the design.
+///
+/// Deterministic, identity-bound, and unpredictable before the parent block (the seed comes
+/// from it), so nobody can shop for a role. Every node derives the same answer for the same
+/// (network, height, seed, identity), which is what makes it verifiable rather than advisory.
+///
+/// Exactly ONE contributor role per identity per height, rotating as the seed changes. Among
+/// the identities assigned a given role, the single winner is still chosen by VRF score
+/// (`CandidateSet::best_for_role`) — so N miners assigned COMPUTE yield one COMPUTE payee,
+/// which is the blueprint's "four roles, four distinct participants".
+pub fn assigned_role_for_identity(
+    network_id: u8,
+    height: u64,
+    seed: &[u8; 32],
+    pkh: &[u8; 20],
+) -> u8 {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"IRIUM_POAWX_ROLE_ASSIGNMENT_V1");
+    h.update([network_id]);
+    h.update(height.to_le_bytes());
+    h.update(seed);
+    h.update(pkh);
+    let d: [u8; 32] = h.finalize().into();
+    // Uniform over the three contributor roles. The PROPOSER role is not assigned here: it
+    // has its own registered-key VRF sortition (`proposer_threshold`), per the blueprint's
+    // separate "VRF proposer system" section.
+    match d[0] % 3 {
+        0 => crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+        1 => crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
+        _ => crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+    }
+}
+
 /// Target pool/committee size K for a contributor role (env-overridable on devnet;
 /// fixed default per role). SUPPORT is the finality committee; VERIFY the "other
 /// workers" pool. `>= 1`.

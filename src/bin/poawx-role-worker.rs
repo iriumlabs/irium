@@ -302,6 +302,43 @@ fn main() -> Result<(), String> {
     let token = std::env::var("IRIUM_RPC_TOKEN").unwrap_or_default();
     let client = reqwest::blocking::Client::new();
 
+    // ASK THE CHAIN which role to work, per docs/POAWX.md: "The miner requests the current
+    // role assignment from your node, performs the role work, and submits role receipts."
+    //
+    // The role used to come from argv[1] alone -- the miner chose, and the producer arbitrated
+    // afterwards. `auto` (and no argument at all) now takes the node's answer for THIS
+    // identity, which is deterministic, identity-bound and unpredictable before the parent
+    // block, so a role cannot be shopped for. An explicit role argument still overrides, which
+    // keeps every existing harness and negative-control test working unchanged.
+    let (role, role_name) = if role_name == "auto" {
+        let url = format!(
+            "{}/poawx/assignment?pkh={}",
+            base.trim_end_matches('/'),
+            hex::encode(payout_pkh)
+        );
+        let mut req = client.get(&url);
+        if !token.is_empty() {
+            req = req.bearer_auth(&token);
+        }
+        // Fail loudly rather than silently falling back to a self-chosen role: a miner working
+        // a role the chain did not assign is exactly the behaviour being removed, and a silent
+        // fallback would make it invisible again.
+        let v: serde_json::Value = req
+            .send()
+            .map_err(|e| format!("role assignment request failed: {e}"))?
+            .json()
+            .map_err(|e| format!("role assignment decode failed: {e}"))?;
+        let name = v
+            .get("role")
+            .and_then(|x| x.as_str())
+            .ok_or("node returned no role assignment (is it running a build with assignment support?)")?
+            .to_string();
+        println!("[role-worker] chain assigned role={name} for pkh={}", hex::encode(payout_pkh));
+        (role_id(&name), name)
+    } else {
+        (role, role_name)
+    };
+
     let loop_mode = std::env::var("IRIUM_POAWX_ROLE_WORKER_LOOP")
         .map(|v| v.trim() == "1")
         .unwrap_or(false);

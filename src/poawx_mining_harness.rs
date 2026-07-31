@@ -1701,12 +1701,6 @@ fn build_all_gates_block_with(
             .map(|col| col.payable(c.role_id, &c.solver_pkh))
             .unwrap_or(false)
     };
-    // Apply the draw, if the node supplied one. Done after selection so the legacy path is
-    // byte-identical when `drawn_role_holders` is None.
-    let (compute_solver, verify_solver, support_solver) = match drawn_solvers {
-        Some((c, v, sp)) => (c, v, sp),
-        None => (compute_solver, verify_solver, support_solver),
-    };
 
     // Same dominance view the candidate weights are validated against (phase21d).
     let dw_pool = |pkh: &[u8; 20]| dom_in.weight(DOMINANCE_BASE_WORK_SCORE, pkh, height);
@@ -1759,6 +1753,41 @@ fn build_all_gates_block_with(
     if folded_any {
         cs.sort_canonical();
     }
+
+    // Apply the draw. An explicit `drawn_role_holders` wins; otherwise, once the four-role
+    // gate is active, DERIVE it from the very candidate set this block will carry -- the same
+    // inputs `connect_block` re-derives from, through the same function. Producer and
+    // validator therefore agree by construction, with no RPC round-trip and nothing for the
+    // producer to choose: it cannot pay a set of holders its own block does not justify.
+    let derived_draw: Option<[([u8; 20], u8); 4]> = if drawn_solvers.is_none()
+        && crate::chain::four_role_payout_active(height)
+    {
+        let mut revealed: Vec<([u8; 20], u8, u64)> = Vec::new();
+        for c in &cs.candidates {
+            let pr = crate::poawx_proposer::role_priority(&c.assignment_proof_digest, c.role_id);
+            if !revealed
+                .iter()
+                .any(|(p, r, _)| *p == c.solver_pkh && *r == c.role_id)
+            {
+                revealed.push((c.solver_pkh, c.role_id, pr));
+            }
+        }
+        if let Some(pc) = proposer_ctx {
+            let ppkh = hash160(&pc.assignment.proof.assignment_public_key);
+            let pr = crate::poawx_proposer::role_priority(&pc.assignment.proof.vrf_output, 0);
+            if !revealed.iter().any(|(p, r, _)| *p == ppkh && *r == 0) {
+                revealed.push((ppkh, 0, pr));
+            }
+        }
+        crate::poawx_proposer::select_role_holders_from_revealed(&revealed)
+    } else {
+        None
+    };
+    let (compute_solver, verify_solver, support_solver) = match (drawn_solvers, derived_draw) {
+        (Some((c, v, sp)), _) => (c, v, sp),
+        (None, Some(d)) => (d[1].0, d[2].0, d[3].0),
+        (None, None) => (compute_solver, verify_solver, support_solver),
+    };
     // Fail closed on the promise above. A candidate we cannot prove is not admissible, so
     // drop it rather than emit a block the node is guaranteed to reject: an unpayable
     // candidate costs a missing name in the contention record, an unprovable one costs

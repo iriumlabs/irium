@@ -417,6 +417,24 @@ impl NodeRoleBundlePool {
         }
     }
 
+    /// Every pooled bundle at `height` as `(solver_pkh, role_id, vrf_output)`.
+    ///
+    /// This node's OWN record of who revealed a role claim. Private sortition selects from the
+    /// reveals, and a producer must not be able to shrink that set: if selection used only the
+    /// candidates a block chose to carry, a producer could simply omit anyone with a better
+    /// priority and hand itself the role. Unioning this in means a candidate THIS node already
+    /// saw cannot be hidden from it.
+    pub fn revealed_at(&self, height: u64) -> Vec<([u8; 20], u8, [u8; 32])> {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        if g.height != height {
+            return Vec::new();
+        }
+        g.best
+            .values()
+            .map(|b| (b.solver_pkh, b.role_id, b.assignment_proof.vrf_output))
+            .collect()
+    }
+
     pub fn len(&self) -> usize {
         self.inner
             .lock()

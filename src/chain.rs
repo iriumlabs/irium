@@ -1077,23 +1077,60 @@ impl ChainState {
             );
             eligible.sort_unstable();
             eligible.dedup();
-            let prev_h = previous
-                .map(|b| b.header.hash_for_height(expected_height.saturating_sub(1)))
-                .unwrap_or([0u8; 32]);
-            let parts = crate::poawx_committed_admission::seed_components_from_block(previous);
-            let seed = crate::poawx_proposer::role_draw_seed(
-                expected_height,
-                prev_h,
-                previous.map(|b| b.header.prev_hash),
-                parts.0,
-                parts.1,
-            );
-            crate::poawx_proposer::select_block_role_holders(
-                crate::activation::network_id_byte(),
-                expected_height,
-                &seed,
-                &eligible,
-            )
+            // PRIVATE SORTITION selects from what miners REVEALED, not from a public draw
+            // over the eligible set. A public draw is knowable the instant the parent lands,
+            // which exposes the four addresses the next block needs; a miner's priority comes
+            // from its ECVRF output, so only it knows its standing until it submits work.
+            //
+            // Reveals are taken from BOTH the block's candidate set and this node's own
+            // bundle pool. Using the block alone would let a producer omit anyone with a
+            // better priority and hand itself the role; unioning our own record means a
+            // candidate we already saw cannot be hidden from us.
+            let mut revealed: Vec<([u8; 20], u8, u64)> = Vec::new();
+            let mut push = |pkh: [u8; 20], role: u8, vrf_output: [u8; 32]| {
+                let pr = crate::poawx_proposer::role_priority(&vrf_output, role);
+                if !revealed
+                    .iter()
+                    .any(|(p, r, _)| *p == pkh && *r == role)
+                {
+                    revealed.push((pkh, role, pr));
+                }
+            };
+            if let Some(ext) = block
+                .poawx_receipts
+                .as_ref()
+                .and_then(|rs| rs.first())
+                .and_then(|r| r.phase20_ext.as_ref())
+            {
+                if let Some(cs) = ext.candidate_set.as_ref() {
+                    for c in &cs.candidates {
+                        push(c.solver_pkh, c.role_id, c.assignment_proof_digest);
+                    }
+                }
+                // The proposer reveals through its own assignment proof.
+                if let Some(pa) = ext.proposer_assignment.as_ref() {
+                    push(hash160(&pa.proof.assignment_public_key), 0, pa.proof.vrf_output);
+                }
+            }
+            // DELIBERATELY NOT unioned with this node's own bundle pool.
+            //
+            // Unioning looked safer -- it stops a producer hiding a better candidate -- but it
+            // CANNOT CONVERGE. Two nodes hold different reveals: a node that happens to know
+            // one extra candidate selects a different winner and rejects an otherwise-valid
+            // block, so honest nodes split on pool contents alone. That is the 2026-07-28
+            // fork class, and a fork is fatal where a stolen role is merely economic.
+            //
+            // Validation is therefore a pure function of the BLOCK: every node re-derives the
+            // same holders from the same bytes and agrees. The omission vector is real and is
+            // addressed outside consensus -- bundle gossip (MessageType 31) converges what
+            // producers see, so a candidate that propagated is one a producer cannot plausibly
+            // claim not to have had. Closing it INSIDE consensus needs a proof that the
+            // producer saw a candidate, which a validator cannot construct locally.
+            //
+            // Only miners in the eligible set count: revealing without having paid the sybil
+            // cost to be eligible must not buy a role.
+            revealed.retain(|(pkh, _, _)| eligible.binary_search(pkh).is_ok());
+            crate::poawx_proposer::select_role_holders_from_revealed(&revealed)
         } else {
             None
         };
@@ -14150,6 +14187,86 @@ mod tests {
         assert!(
             select_role_holders_from_revealed(&missing).is_none(),
             "an unfilled role must not be quietly handed to someone"
+        );
+    }
+
+    /// CONVERGENCE: honest nodes holding different reveals must accept the SAME block.
+    ///
+    /// Selection over "the block's candidates UNION this node's own pool" stops a producer
+    /// hiding a better candidate — but it cannot converge. A node that happens to hold one
+    /// extra reveal picks a different winner and rejects an otherwise-valid block, so honest
+    /// nodes split on pool contents alone. That is the 2026-07-28 fork class, and a fork is
+    /// fatal where a stolen role is economic.
+    ///
+    /// So validation is a pure function of the block. This pins both halves: the union
+    /// diverges, and the block-only rule agrees.
+    #[test]
+    fn nodes_with_different_reveals_agree_on_the_same_block() {
+        let _env = crate::test_env::guard();
+        use crate::poawx::{
+            ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+        };
+        use crate::poawx_proposer::{role_priority, select_role_holders_from_revealed};
+
+        let pkh = |n: u8| [n; 20];
+        // What the block carries: a complete, valid set of reveals.
+        let in_block: Vec<([u8; 20], u8, u64)> = vec![
+            (pkh(9), 0u8, role_priority(&[0x09u8; 32], 0)),
+            (
+                pkh(1),
+                ROLE_COMPUTE_CONTRIBUTOR,
+                role_priority(&[0x01u8; 32], ROLE_COMPUTE_CONTRIBUTOR),
+            ),
+            (
+                pkh(7),
+                ROLE_VERIFY_CONTRIBUTOR,
+                role_priority(&[0x07u8; 32], ROLE_VERIFY_CONTRIBUTOR),
+            ),
+            (
+                pkh(8),
+                ROLE_SUPPORT_CONTRIBUTOR,
+                role_priority(&[0x08u8; 32], ROLE_SUPPORT_CONTRIBUTOR),
+            ),
+        ];
+        let from_block = select_role_holders_from_revealed(&in_block).expect("valid block");
+
+        // Node A holds nothing extra. Node B happens to hold one more COMPUTE reveal, with a
+        // better priority than the block's winner.
+        let block_compute_pr = in_block[1].2;
+        let mut better = None;
+        for n in 20..90u8 {
+            let pr = role_priority(&[n; 32], ROLE_COMPUTE_CONTRIBUTOR);
+            if pr < block_compute_pr {
+                better = Some((pkh(n), pr));
+                break;
+            }
+        }
+        let (extra_pkh, extra_pr) = better.expect("a lower priority exists");
+
+        // THE UNION RULE DIVERGES: node B selects a winner the block does not name, so it
+        // would reject a block node A accepts. Pinned so the reasoning cannot be undone.
+        let mut union_b = in_block.clone();
+        union_b.push((extra_pkh, ROLE_COMPUTE_CONTRIBUTOR, extra_pr));
+        let from_union = select_role_holders_from_revealed(&union_b).expect("selects");
+        assert_ne!(
+            from_union[1].0, from_block[1].0,
+            "the union rule makes node B disagree with node A — this is the fork"
+        );
+
+        // THE BLOCK-ONLY RULE CONVERGES: both nodes re-derive from the same bytes, so an
+        // extra reveal changes nothing about whether the block is accepted.
+        let node_a = select_role_holders_from_revealed(&in_block).expect("A");
+        let node_b = select_role_holders_from_revealed(&in_block).expect("B");
+        assert_eq!(node_a, node_b, "same block bytes must give the same holders");
+        assert_eq!(node_a, from_block, "and match what the producer built");
+
+        // Determinism must not depend on the order reveals happen to arrive in.
+        let mut shuffled = in_block.clone();
+        shuffled.reverse();
+        assert_eq!(
+            select_role_holders_from_revealed(&shuffled).expect("shuffled"),
+            from_block,
+            "arrival order must not change the outcome"
         );
     }
 

@@ -14287,12 +14287,23 @@ async fn get_block_template(
             let seed = irium_node_rs::poawx_proposer::role_draw_seed(
                 height, tip_arr, parent_prev, parts.0, parts.1,
             );
-            irium_node_rs::poawx_proposer::select_block_role_holders(
-                irium_node_rs::activation::network_id_byte(),
-                height,
-                &seed,
-                &eligible,
-            )
+            // Same private-sortition selection connect_block will apply: over the reveals
+            // this node holds, not a public draw. The pool builds the coinbase for exactly
+            // the holders the node will accept.
+            let mut revealed: Vec<([u8; 20], u8, u64)> = Vec::new();
+            for (pkh, role, out) in
+                irium_node_rs::poawx_role_bundle::global_role_bundle_pool().revealed_at(height)
+            {
+                if eligible.binary_search(&pkh).is_ok() {
+                    revealed.push((
+                        pkh,
+                        role,
+                        irium_node_rs::poawx_proposer::role_priority(&out, role),
+                    ));
+                }
+            }
+            let _ = &seed; // seed still reported for consumers; selection is reveal-driven
+            irium_node_rs::poawx_proposer::select_role_holders_from_revealed(&revealed)
             .map(|drawn| {
                 irium_node_rs::chain::expected_drawn_role_payouts(&drawn, coinbase_value)
                     .into_iter()

@@ -298,6 +298,11 @@ pub enum BundleOutcome {
 struct Inner {
     /// Only bundles for this height are retained; advancing prunes everything older.
     height: u64,
+    /// Highest height at which ANY bundle was ever accepted. Deliberately NOT cleared when
+    /// the height advances: it is the only way to tell "no role workers exist" from "role
+    /// workers exist and are one height behind", and those need opposite responses from a
+    /// producer -- self-fill immediately, or wait for them.
+    last_enrolled_height: u64,
     best: BTreeMap<(u8, [u8; 20]), RoleBundleV1>,
 }
 
@@ -330,6 +335,9 @@ impl NodeRoleBundlePool {
             && !g.best.contains_key(&(bundle.role_id, bundle.solver_pkh))
         {
             return Err("role bundle: pool full".to_string());
+        }
+        if expected_height > g.last_enrolled_height {
+            g.last_enrolled_height = expected_height;
         }
         let key = (bundle.role_id, bundle.solver_pkh);
         match g.best.get(&key) {
@@ -433,6 +441,15 @@ impl NodeRoleBundlePool {
             .values()
             .map(|b| (b.solver_pkh, b.role_id, b.assignment_proof.vrf_output))
             .collect()
+    }
+
+    /// Highest height at which any worker enrolled, ever. `0` => no role worker has EVER
+    /// been seen by this node, so a producer is genuinely solo and must not wait.
+    pub fn last_enrolled_height(&self) -> u64 {
+        self.inner
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .last_enrolled_height
     }
 
     pub fn len(&self) -> usize {

@@ -3678,6 +3678,21 @@ fn run_poawx_solo() -> Result<(), String> {
                 };
                 use irium_node_rs::poawx_role_bundle::RoleBundleV1;
                 // One snapshot read of the node's currently-enrolled PAYABLE bundles.
+                // One cheap read of the node's worker-liveness marker. `None` on any failure
+                // (old node, transient error) so the caller can fall back explicitly rather
+                // than silently treating a hiccup as "no workers".
+                let read_last_enrolled_height = || -> Option<u64> {
+                    let url = format!(
+                        "{}/poawx/collected-bundles",
+                        node_rpc_base().trim_end_matches('/')
+                    );
+                    let mut req = client.get(&url);
+                    if let Some(t) = rpc_token() {
+                        req = req.bearer_auth(t);
+                    }
+                    let v: serde_json::Value = req.send().ok()?.json().ok()?;
+                    v.get("last_enrolled_height")?.as_u64()
+                };
                 let read_bundles =
                     || -> Option<irium_node_rs::poawx_mining_harness::CollectedArtifacts> {
                         let url = format!(
@@ -3845,23 +3860,35 @@ fn run_poawx_solo() -> Result<(), String> {
                 // So scale the wait to the chain: give workers a real share of the block
                 // interval the node itself advertises (`poawx_min_block_time`). An explicit
                 // IRIUM_POAWX_FANOUT_WAIT_MS still wins, so a sole producer can set 0.
+                // Ask the node whether role workers EXIST before deciding how long to wait.
+                // `last_enrolled_height` is the highest height at which anything ever enrolled
+                // and is never cleared, so:
+                //   0                     -> no worker has ever been seen; genuinely solo, do
+                //                            not wait at all
+                //   >= height - 2         -> workers are live and merely a height behind; this
+                //                            is the RACE, so wait for them
+                // Keying off the block interval instead was wrong: a chain that advertises no
+                // spacing floor fell straight back to the short wait, which is exactly the
+                // configuration where the race bites hardest (fast blocks). Worker liveness is
+                // the signal that actually distinguishes the two cases.
+                let workers_live = read_last_enrolled_height().map(|h| {
+                    h > 0 && h.saturating_add(2) >= height
+                });
                 let wait_ms = match env::var("IRIUM_POAWX_FANOUT_WAIT_MS")
                     .ok()
                     .and_then(|v| v.trim().parse::<u64>().ok())
                 {
                     Some(v) => v,
-                    None => {
-                        // Half the spacing floor, clamped to something sane: long enough for a
-                        // worker's poll+grind, never long enough to stall block production.
-                        let spacing_ms = tmpl
-                            .poawx_min_block_time
-                            .map(|t| {
-                                let now = Utc::now().timestamp();
-                                ((t as i64 - now).max(0) as u64).saturating_mul(1000)
-                            })
-                            .unwrap_or(0);
-                        spacing_ms.saturating_div(2).clamp(3000, 30_000)
-                    }
+                    None => match workers_live {
+                        // Workers running: give them a real chance. Capped so a stalled worker
+                        // cannot hold up block production indefinitely.
+                        Some(true) => 30_000,
+                        // Nobody has ever enrolled here: waiting only delays a solo block.
+                        Some(false) => 0,
+                        // Node too old to report it: fall back to the previous fixed window
+                        // rather than guess in either direction.
+                        None => 3000,
+                    },
                 };
                 let start = std::time::Instant::now();
                 let mut best = read_bundles();

@@ -15153,7 +15153,16 @@ async fn poawx_get_collected_bundles(
         .iter()
         .filter_map(|b| serde_json::from_str::<Value>(&b.to_json()).ok())
         .collect();
-    Ok(Json(json!({ "height": height, "bundles": bundles })))
+    // `last_enrolled_height` lets a producer tell "no role workers exist" (never wait --
+    // genuinely solo) from "workers exist and are a height behind" (wait, or their share is
+    // silently taken). Without it an empty pool reads the same either way, which is how every
+    // block on a fast chain self-filled while three workers were running.
+    Ok(Json(json!({
+        "height": height,
+        "bundles": bundles,
+        "last_enrolled_height":
+            irium_node_rs::poawx_role_bundle::global_role_bundle_pool().last_enrolled_height(),
+    })))
 }
 
 async fn poawx_get_role_work(

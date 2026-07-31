@@ -106,47 +106,88 @@ pub fn pool_sortition_admitted(priority: u64, eligible_count: u64, k: u64) -> bo
     priority < pool_sortition_threshold(eligible_count, k)
 }
 
-/// THE CHAIN'S ROLE ASSIGNMENT for one identity at one height.
+/// THE CHAIN DRAWS THE BLOCK'S FOUR ROLE HOLDERS — one distinct node miner per role.
 ///
-/// `docs/POAWX.md` (Mining): *"The miner requests the current role assignment from your node,
-/// performs the role work, and submits role receipts."* The chain decides which role a miner
-/// works — the miner does not choose.
+/// For every new block the chain selects four role holders from the eligible miner set:
+/// PROPOSER, COMPUTE, VERIFY, SUPPORT. **No miner may hold two roles in the same block**, and
+/// no miner has any say in which role it gets. Selection is a deterministic draw WITHOUT
+/// REPLACEMENT over (network, height, seed, identity), so every node computes the same four
+/// holders and can verify them; the seed comes from the parent block, so the outcome cannot be
+/// known or shopped for in advance.
 ///
-/// It did not exist. `/poawx/assignment` returned a seed and a difficulty and **no role at
-/// all**, and took no identity, so every caller got the same answer. `poawx-role-worker` took
-/// its role from `argv[1]` and the Core GUI picked one with `secret[0] % 3`. Miners
-/// self-selected and the producer arbitrated afterwards — the opposite of the design.
+/// `docs/POAWX.md`: *"In solo mining, one identity fills all four roles and receives the full
+/// reward; in collaborative mining the roles are paid to distinct participants."* With fewer
+/// than four eligible miners the draw wraps — the same identity may take several roles, which
+/// is the documented solo case — and with four or more the holders are always distinct.
 ///
-/// Deterministic, identity-bound, and unpredictable before the parent block (the seed comes
-/// from it), so nobody can shop for a role. Every node derives the same answer for the same
-/// (network, height, seed, identity), which is what makes it verifiable rather than advisory.
+/// Two earlier shapes were wrong and are replaced by this:
+///   * roles were SELF-SELECTED — `poawx-role-worker` read its role from `argv[1]` and the
+///     Core GUI picked one with `secret[0] % 3`, so the miner chose and the producer
+///     arbitrated afterwards;
+///   * then (23db0fb0) each identity was hashed to a role INDEPENDENTLY. That still let many
+///     miners land on one role while another went unfilled, gave no guarantee of four distinct
+///     holders, and did not stop one miner holding a contributor role while also proposing.
+///     A per-identity hash cannot express "pick four distinct" — only a draw over the set can.
 ///
-/// Exactly ONE contributor role per identity per height, rotating as the seed changes. Among
-/// the identities assigned a given role, the single winner is still chosen by VRF score
-/// (`CandidateSet::best_for_role`) — so N miners assigned COMPUTE yield one COMPUTE payee,
-/// which is the blueprint's "four roles, four distinct participants".
-pub fn assigned_role_for_identity(
+/// `eligible` is the registered miner set. Order does not matter: it is sorted canonically
+/// here, so two nodes holding the same set in different orders still agree.
+pub fn select_block_role_holders(
     network_id: u8,
     height: u64,
     seed: &[u8; 32],
-    pkh: &[u8; 20],
-) -> u8 {
+    eligible: &[[u8; 20]],
+) -> Option<[([u8; 20], u8); 4]> {
     use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(b"IRIUM_POAWX_ROLE_ASSIGNMENT_V1");
-    h.update([network_id]);
-    h.update(height.to_le_bytes());
-    h.update(seed);
-    h.update(pkh);
-    let d: [u8; 32] = h.finalize().into();
-    // Uniform over the three contributor roles. The PROPOSER role is not assigned here: it
-    // has its own registered-key VRF sortition (`proposer_threshold`), per the blueprint's
-    // separate "VRF proposer system" section.
-    match d[0] % 3 {
-        0 => crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
-        1 => crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
-        _ => crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+    if eligible.is_empty() {
+        return None;
     }
+    // Canonical, deduplicated order so the draw is independent of how the set was assembled.
+    let mut pool: Vec<[u8; 20]> = eligible.to_vec();
+    pool.sort_unstable();
+    pool.dedup();
+
+    // Role 0 is the PROPOSER; 1/2/3 are the contributor roles.
+    const ROLES: [u8; 4] = [
+        0,
+        crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+        crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
+        crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+    ];
+    let priority = |role: u8, pkh: &[u8; 20]| -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(b"IRIUM_POAWX_BLOCK_ROLE_DRAW_V1");
+        h.update([network_id]);
+        h.update(height.to_le_bytes());
+        h.update(seed);
+        h.update([role]);
+        h.update(pkh);
+        h.finalize().into()
+    };
+
+    let mut remaining = pool.clone();
+    let mut out: [([u8; 20], u8); 4] = [([0u8; 20], 0); 4];
+    for (slot, role) in ROLES.iter().enumerate() {
+        // Fewer eligible miners than roles: refill so the draw can continue. This is the
+        // blueprint's solo case, where one identity legitimately fills several roles.
+        if remaining.is_empty() {
+            remaining = pool.clone();
+        }
+        // Lowest priority wins, ties broken by pkh so the result is total-ordered.
+        let mut best_i = 0usize;
+        let mut best_p = priority(*role, &remaining[0]);
+        for (i, pkh) in remaining.iter().enumerate().skip(1) {
+            let p = priority(*role, pkh);
+            if (p, pkh) < (best_p, &remaining[best_i]) {
+                best_p = p;
+                best_i = i;
+            }
+        }
+        // Drawn WITHOUT replacement: taking the winner out is what makes one miner unable to
+        // hold two roles in the same block.
+        let winner = remaining.remove(best_i);
+        out[slot] = (winner, *role);
+    }
+    Some(out)
 }
 
 /// Target pool/committee size K for a contributor role (env-overridable on devnet;

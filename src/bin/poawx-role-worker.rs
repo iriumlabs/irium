@@ -310,6 +310,12 @@ fn main() -> Result<(), String> {
     // identity, which is deterministic, identity-bound and unpredictable before the parent
     // block, so a role cannot be shopped for. An explicit role argument still overrides, which
     // keeps every existing harness and negative-control test working unchanged.
+    // ONE NODE, ONE MINING ADDRESS. `IRIUM_POAWX_ROLE_SECRET_HEX` is this node's single
+    // mining identity and the chain draws at most one role for it per block. Running several
+    // identities from one node -- as `poawx-role-workers-only.sh` did by deriving a distinct
+    // key per role, sha256("IRIUM_POAWX_WORKER_v1|<role>|<secret>") -- put three addresses on
+    // the chain for a single machine and let one operator occupy several role slots at once.
+    // Run ONE worker in `auto` mode per node instead.
     let (role, role_name) = if role_name == "auto" {
         let url = format!(
             "{}/poawx/assignment?pkh={}",
@@ -328,13 +334,27 @@ fn main() -> Result<(), String> {
             .map_err(|e| format!("role assignment request failed: {e}"))?
             .json()
             .map_err(|e| format!("role assignment decode failed: {e}"))?;
-        let name = v
-            .get("role")
-            .and_then(|x| x.as_str())
-            .ok_or("node returned no role assignment (is it running a build with assignment support?)")?
-            .to_string();
-        println!("[role-worker] chain assigned role={name} for pkh={}", hex::encode(payout_pkh));
-        (role_id(&name), name)
+        // No `role` means this address was NOT DRAWN for this block. That is the normal case
+        // once more miners are registered than there are roles, and it must mean DO NOTHING --
+        // falling back to a self-chosen role is precisely the behaviour being removed.
+        match v.get("role").and_then(|x| x.as_str()) {
+            Some(name) => {
+                println!(
+                    "[role-worker] chain drew role={name} for pkh={} (holders={})",
+                    hex::encode(payout_pkh),
+                    v.get("role_holders").map(|h| h.to_string()).unwrap_or_default()
+                );
+                (role_id(name), name.to_string())
+            }
+            None => {
+                println!(
+                    "[role-worker] not drawn for this block (pkh={}); idling until the next \
+                     height -- a miner may NOT pick its own role",
+                    hex::encode(payout_pkh)
+                );
+                return Ok(());
+            }
+        }
     } else {
         (role, role_name)
     };

@@ -15435,9 +15435,13 @@ async fn poawx_get_assignment(
     if !irium_node_rs::activation::poawx_serving_active(poawx_h) {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-    let (height, tip_hash_bytes, bits) = {
+    let (height, tip_hash_bytes, bits, eligible) = {
         let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
         let tip_h = guard.tip_height();
+        // The registered miner set the chain draws this block's role holders FROM.
+        let eligible = guard
+            .proposer_registry
+            .eligible_pkhs(tip_h.saturating_add(1));
         // Phase 24F: serve the assignment at the genesis tip (tip_h == 0) on test
         // networks too, so a fresh devnet/testnet can produce its first PoAW-X block.
         // Mainnet + inactive are already rejected above; the seed derives from the
@@ -15448,7 +15452,7 @@ async fn poawx_get_assignment(
             .map(|b| b.header.hash_for_height(tip_h))
             .unwrap_or([0u8; 32]);
         let target = guard.target_for_height(tip_h);
-        (tip_h, tip_hash, target.bits)
+        (tip_h, tip_hash, target.bits, eligible)
     };
     let mut seed_hasher = Sha256::new();
     seed_hasher.update(&tip_hash_bytes);
@@ -15473,9 +15477,42 @@ async fn poawx_get_assignment(
         "lane": "cpu",
         "pow_bits": format!("{:08x}", bits),
     });
-    // The role THIS identity is assigned. A malformed pkh is a client error, not a silent
-    // omission: answering without a role would send the miner back to guessing, which is the
-    // behaviour being removed.
+    // THE CHAIN'S DRAW for this block: four role holders, one distinct miner each, decided
+    // here from the registered set and the parent-derived seed. No miner supplies anything and
+    // none can influence the outcome -- a miner only reads whether it was drawn.
+    let net = irium_node_rs::activation::network_id_byte();
+    let role_name = |r: u8| match r {
+        0 => "proposer",
+        r if r == irium_node_rs::poawx::ROLE_COMPUTE_CONTRIBUTOR => "compute",
+        r if r == irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR => "verify",
+        _ => "support",
+    };
+    let drawn = irium_node_rs::poawx_proposer::select_block_role_holders(
+        net,
+        height.saturating_add(1),
+        &seed,
+        &eligible,
+    );
+    match &drawn {
+        Some(holders) => {
+            body["eligible_count"] = serde_json::json!(eligible.len());
+            body["role_holders"] = serde_json::json!(holders
+                .iter()
+                .map(|(pkh, role)| serde_json::json!({
+                    "role": role_name(*role),
+                    "role_id": role,
+                    "pkh": hex::encode(pkh),
+                }))
+                .collect::<Vec<_>>());
+        }
+        None => {
+            // No registered miners yet: say so rather than inventing an assignment.
+            body["eligible_count"] = serde_json::json!(0);
+            body["role_holders"] = serde_json::json!([]);
+        }
+    }
+    // Convenience for a miner reading its own standing. Absent `role` means NOT DRAWN this
+    // block -- which the worker must treat as "do nothing", not as a licence to pick a role.
     if let Some(raw) = q.get("pkh") {
         let bytes = hex::decode(raw.trim()).map_err(|_| StatusCode::BAD_REQUEST)?;
         if bytes.len() != 20 {
@@ -15483,19 +15520,12 @@ async fn poawx_get_assignment(
         }
         let mut pkh = [0u8; 20];
         pkh.copy_from_slice(&bytes);
-        let net = irium_node_rs::activation::network_id_byte();
-        let role = irium_node_rs::poawx_proposer::assigned_role_for_identity(
-            net,
-            height.saturating_add(1),
-            &seed,
-            &pkh,
-        );
-        body["role_id"] = serde_json::json!(role);
-        body["role"] = serde_json::json!(match role {
-            r if r == irium_node_rs::poawx::ROLE_COMPUTE_CONTRIBUTOR => "compute",
-            r if r == irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR => "verify",
-            _ => "support",
-        });
+        if let Some(holders) = &drawn {
+            if let Some((_, role)) = holders.iter().find(|(p, _)| *p == pkh) {
+                body["role_id"] = serde_json::json!(role);
+                body["role"] = serde_json::json!(role_name(*role));
+            }
+        }
     }
     Ok(Json(body))
 }

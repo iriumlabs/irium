@@ -13717,87 +13717,87 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
-    /// `docs/POAWX.md` (Mining): "The miner requests the current role assignment from your
-    /// node, performs the role work, and submits role receipts." The CHAIN assigns the role.
+    /// THE CHAIN DRAWS THE BLOCK'S FOUR ROLE HOLDERS.
     ///
-    /// Before this, `/poawx/assignment` returned no role and took no identity, `poawx-role-worker`
-    /// read its role from argv[1], and the Core GUI picked one with `secret[0] % 3`.
+    /// For every new block the chain picks four role holders — proposer, compute, verify,
+    /// support — from the registered miner set. **One node miner, one address, at most one
+    /// role per block.** No miner chooses, and none can hold two roles at once.
+    ///
+    /// Two earlier shapes were wrong: roles were self-selected from `argv[1]` / `secret[0] % 3`,
+    /// and then each identity was hashed to a role independently — which still let many miners
+    /// pile onto one role, left others unfilled, and never guaranteed four distinct holders. A
+    /// per-identity hash cannot express "pick four distinct"; only a draw over the set can.
     #[test]
-    fn chain_assigns_each_identity_one_role_deterministically() {
+    fn chain_draws_four_distinct_role_holders_one_role_each() {
         let _env = crate::test_env::guard();
-        use crate::poawx::{
-            ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
-        };
-        use crate::poawx_proposer::assigned_role_for_identity;
-        use std::collections::{HashMap, HashSet};
+        use crate::poawx_proposer::select_block_role_holders;
+        use std::collections::HashSet;
 
         let seed = [0x5Au8; 32];
         let pkh = |n: u8| [n; 20];
+        let miners: Vec<[u8; 20]> = (1..=20u8).map(pkh).collect();
 
-        // Deterministic: every node must derive the same role, or it is advisory, not consensus.
-        for n in 0..50u8 {
-            let a = assigned_role_for_identity(0, 100, &seed, &pkh(n));
-            let b = assigned_role_for_identity(0, 100, &seed, &pkh(n));
-            assert_eq!(a, b, "same inputs must always give the same role");
-            assert!(
-                [
-                    ROLE_COMPUTE_CONTRIBUTOR,
-                    ROLE_VERIFY_CONTRIBUTOR,
-                    ROLE_SUPPORT_CONTRIBUTOR
-                ]
-                .contains(&a),
-                "must be one of the three contributor roles"
-            );
+        let drawn = select_block_role_holders(0, 100, &seed, &miners).expect("a draw");
+        assert_eq!(drawn.len(), 4, "exactly four roles are filled");
+
+        // Four DISTINCT miners: no node holds two roles in one block.
+        let holders: HashSet<[u8; 20]> = drawn.iter().map(|(p, _)| *p).collect();
+        assert_eq!(holders.len(), 4, "four distinct miners, one role each");
+
+        // Every role filled exactly once, proposer included.
+        let roles: HashSet<u8> = drawn.iter().map(|(_, r)| *r).collect();
+        assert_eq!(roles.len(), 4, "proposer + compute + verify + support, one each");
+        assert!(roles.contains(&0), "the proposer role is drawn by the chain too");
+
+        // Only registered miners can be drawn.
+        for (p, _) in &drawn {
+            assert!(miners.contains(p), "a drawn holder must be from the eligible set");
         }
 
-        // Identity-bound: different miners are not all herded onto one role.
-        let mut spread: HashMap<u8, usize> = HashMap::new();
-        for n in 0..200u8 {
-            *spread
-                .entry(assigned_role_for_identity(0, 100, &seed, &pkh(n)))
-                .or_insert(0) += 1;
-        }
-        assert_eq!(spread.len(), 3, "all three roles must be used across a population");
-        for (role, count) in &spread {
-            assert!(
-                *count > 20,
-                "role {role} got only {count}/200 -- assignment is not spreading miners"
-            );
-        }
+        // Deterministic: every node must derive the same four holders, or this is advisory.
+        let again = select_block_role_holders(0, 100, &seed, &miners).unwrap();
+        assert_eq!(drawn, again, "same inputs must give the same draw on every node");
 
-        // Height-bound: a miner's role rotates as the chain advances, so no one is stuck on
-        // (or permanently owns) a role.
-        let me = pkh(7);
-        let over_heights: HashSet<u8> = (100..160u64)
-            .map(|h| assigned_role_for_identity(0, h, &seed, &me))
-            .collect();
-        assert!(
-            over_heights.len() > 1,
-            "one identity must not hold the same role forever"
+        // Set order must not matter — two nodes may hold the same set differently.
+        let mut shuffled = miners.clone();
+        shuffled.reverse();
+        assert_eq!(
+            select_block_role_holders(0, 100, &seed, &shuffled).unwrap(),
+            drawn,
+            "the draw must not depend on how the eligible set was assembled"
         );
 
-        // Seed-bound: the seed comes from the parent block, so the assignment cannot be known
-        // (or shopped for) before that block exists.
-        let other_seed = [0xA5u8; 32];
-        let changed = (100..160u64)
-            .filter(|h| {
-                assigned_role_for_identity(0, *h, &seed, &me)
-                    != assigned_role_for_identity(0, *h, &other_seed, &me)
-            })
-            .count();
+        // Seed-bound: the seed comes from the parent block, so the draw cannot be known or
+        // shopped for before that block exists.
+        let other = select_block_role_holders(0, 100, &[0xA5u8; 32], &miners).unwrap();
+        assert_ne!(other, drawn, "a different seed must give a different draw");
+
+        // Rotation: holders change as the chain advances, so nobody owns a role.
+        let mut seen: HashSet<[u8; 20]> = HashSet::new();
+        for h in 100..140u64 {
+            for (p, _) in select_block_role_holders(0, h, &seed, &miners).unwrap() {
+                seen.insert(p);
+            }
+        }
         assert!(
-            changed > 0,
-            "assignment must depend on the seed, or it is predictable arbitrarily far ahead"
+            seen.len() > 4,
+            "role holders must rotate across heights, not be owned by four miners"
         );
 
-        // Network-bound: a devnet assignment must not carry over to mainnet.
-        let differs = (100..160u64)
-            .filter(|h| {
-                assigned_role_for_identity(0, *h, &seed, &me)
-                    != assigned_role_for_identity(1, *h, &seed, &me)
-            })
-            .count();
-        assert!(differs > 0, "assignment must be bound to the network id");
+        // Solo case, per docs/POAWX.md: "In solo mining, one identity fills all four roles."
+        let solo = select_block_role_holders(0, 100, &seed, &[pkh(9)]).unwrap();
+        assert!(
+            solo.iter().all(|(p, _)| *p == pkh(9)),
+            "a lone miner fills all four roles"
+        );
+        assert_eq!(
+            solo.iter().map(|(_, r)| *r).collect::<HashSet<_>>().len(),
+            4,
+            "and still fills each role exactly once"
+        );
+
+        // Empty registry: say nothing rather than invent an assignment.
+        assert!(select_block_role_holders(0, 100, &seed, &[]).is_none());
     }
 
     #[test]

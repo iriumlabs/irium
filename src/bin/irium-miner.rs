@@ -3833,10 +3833,36 @@ fn run_poawx_solo() -> Result<(), String> {
                 // race winner has always waited and distributes. Bounded latency, only when
                 // fan-out is enabled. NOTE: the wait must exceed the worker's max enroll latency
                 // (poll interval + grind); role-workers should poll ~1s.
-                let wait_ms = env::var("IRIUM_POAWX_FANOUT_WAIT_MS")
+                //
+                // ENROLLMENT RACE. A worker cannot enroll for height N until it has seen N-1,
+                // so there is always a window after a block lands in which the pool is empty.
+                // A FIXED wait cannot cover it: whether 3s is generous or hopeless depends
+                // entirely on the block interval. Proven on devnet at ~2s blocks -- workers
+                // polling every 2s stayed permanently a height behind and EVERY block silently
+                // self-filled, the producer taking all 50 IRM while three enrolled workers got
+                // nothing. It only distributed once production stopped and the pool caught up.
+                //
+                // So scale the wait to the chain: give workers a real share of the block
+                // interval the node itself advertises (`poawx_min_block_time`). An explicit
+                // IRIUM_POAWX_FANOUT_WAIT_MS still wins, so a sole producer can set 0.
+                let wait_ms = match env::var("IRIUM_POAWX_FANOUT_WAIT_MS")
                     .ok()
                     .and_then(|v| v.trim().parse::<u64>().ok())
-                    .unwrap_or(3000);
+                {
+                    Some(v) => v,
+                    None => {
+                        // Half the spacing floor, clamped to something sane: long enough for a
+                        // worker's poll+grind, never long enough to stall block production.
+                        let spacing_ms = tmpl
+                            .poawx_min_block_time
+                            .map(|t| {
+                                let now = Utc::now().timestamp();
+                                ((t as i64 - now).max(0) as u64).saturating_mul(1000)
+                            })
+                            .unwrap_or(0);
+                        spacing_ms.saturating_div(2).clamp(3000, 30_000)
+                    }
+                };
                 let start = std::time::Instant::now();
                 let mut best = read_bundles();
                 let mut best_n = role_n(&best);
@@ -3865,9 +3891,19 @@ fn run_poawx_solo() -> Result<(), String> {
                     // exists to prevent, and it happened in total silence: no bundles => None =>
                     // solo build, nothing logged. On mainnet it ran for every block of a resumed
                     // producer and was caught only by decoding coinbases by hand.
+                    // Self-fill is normal for a genuinely sole producer and a SILENT FAILURE
+                    // for anyone else: three workers can be enrolled and earning nothing while
+                    // every block looks healthy. Say which case this is, in the strongest terms
+                    // available, rather than logging one line that reads the same either way.
                     eprintln!(
-                        "[poawx] fair-distribution: NO collected bundles after {}ms -> SELF-FILL: all four role slices pay THIS producer's own key. Role workers must enroll into the node this miner reads ({}); under cross-enrollment they enroll into the PEER node, so a sole running producer sees an empty pool.",
+                        "[poawx] ⚠ fair-distribution: NO collected bundles after {}ms -> SELF-FILL: \
+                         all four role slices pay THIS producer's own key. If ANY role worker is \
+                         running, this is a LOST DISTRIBUTION, not a solo block -- the wait \
+                         ({}ms) is shorter than the workers' enroll cycle, or they enroll into a \
+                         different node than this miner reads ({}). Raise \
+                         IRIUM_POAWX_FANOUT_WAIT_MS or point the workers here.",
                         start.elapsed().as_millis(),
+                        wait_ms,
                         node_rpc_base()
                     );
                 }

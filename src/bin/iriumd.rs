@@ -14259,16 +14259,43 @@ async fn get_block_template(
                     // The PRIMARY receipt is the one carrying the proposer assignment; its
                     // worker is the primary payee.
                     ext.proposer_assignment.as_ref()?;
-                    Some(irium_node_rs::chain::expected_poawx_coinbase_payouts(
+                    // Under shared reward the coinbase is NOT the fixed 4-output shape:
+                    // VERIFY's 13% and SUPPORT's 10% are split across EVERY admitted pool
+                    // member (that is what PLA1 admits them for), so two workers enrolled for
+                    // one role means six outputs, not four.
+                    //
+                    // This used `expected_poawx_coinbase_payouts`, which only ever emits four.
+                    // The pool copies this list verbatim and cannot re-derive it, so the moment
+                    // a second worker enrolled for VERIFY or SUPPORT the advertised list said
+                    // four while consensus required six, and every pool-found block would have
+                    // been rejected:
+                    //   shared-reward: expected 6 role outputs, found 4
+                    // It stayed invisible because with exactly one worker per role the split is
+                    // one-way and the two shapes coincide -- so the pool was correct only by
+                    // accident of there being no contention, and was one enrolment away from
+                    // breaking. Observed live 2026-07-31: chain paying 6, template advertising 4.
+                    //
+                    // `expected_shared_multi_role_payouts` is the SAME function
+                    // `validate_shared_multi_role_coinbase` checks against, so builder and
+                    // validator cannot diverge -- the property this block comment already
+                    // claimed and did not have.
+                    match irium_node_rs::chain::expected_shared_multi_role_payouts(
                         &br.worker_pkh,
+                        ext,
                         coinbase_value,
-                        Some(&ext.role_reward),
-                        if ext.fee_bps > 0 {
-                            Some((ext.fee_bps, ext.fee_pkh))
-                        } else {
+                    ) {
+                        Ok(v) => Some(v),
+                        Err(e) => {
+                            // Never silently fall back to a shape consensus will reject: an
+                            // empty list makes the pool fail closed and say why, which is
+                            // recoverable, where a wrong list mines a doomed block.
+                            eprintln!(
+                                "[poawx] template: cannot derive shared-reward payouts at height \
+                                 {height}: {e}; advertising none"
+                            );
                             None
-                        },
-                    ))
+                        }
+                    }
                 })
                 .unwrap_or_default()
                 .into_iter()

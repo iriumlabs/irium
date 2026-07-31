@@ -4453,15 +4453,26 @@ fn validate_multi_role_coinbase_outputs(
 /// stuff the VERIFY/SUPPORT pools with its own pkhs. That gating is a separate concern
 /// (tickets/committed-admission); this validator only guarantees the split is exact and
 /// deterministic over whatever candidate set the block's other gates admitted.
-fn validate_shared_multi_role_coinbase(
-    outputs: &[crate::tx::TxOutput],
+/// The EXACT shared-reward coinbase payout list, in canonical order.
+///
+/// Single source of truth for the multi-payee (§6 fan-out) shape, for the same reason
+/// `expected_poawx_coinbase_payouts` is one for the 4-output shape: the Stratum pool cannot
+/// re-derive coinbase amounts, it emits `poawx_coinbase_payouts` from the template verbatim.
+/// `getblocktemplate` used the 4-output function even under shared reward, so the moment
+/// VERIFY/SUPPORT had more than one admitted member the advertised list said 4 outputs while
+/// consensus required 6 — and every pool-found block would have been rejected with
+/// `shared-reward: expected 6 role outputs, found 4`. Invisible while exactly one worker
+/// enrolled per role, because then the split is one-way and the two shapes coincide.
+///
+/// PRIMARY(55% + remainder), COMPUTE(22%, the single best worker), then EVERY admitted VERIFY
+/// candidate sharing 13%, then every admitted SUPPORT candidate sharing 10% — each in the
+/// candidate set's canonical order.
+pub fn expected_shared_multi_role_payouts(
     primary_pkh: &[u8; 20],
     ext: &crate::poawx::Phase20ReceiptExt,
     total_reward: u64,
-) -> Result<(), String> {
-    use crate::poawx::{
-        ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
-    };
+) -> Result<Vec<([u8; 20], u64)>, String> {
+    use crate::poawx::{ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
     let cs = ext
         .candidate_set
         .as_ref()
@@ -4483,8 +4494,8 @@ fn validate_shared_multi_role_coinbase(
     if support_payees.is_empty() {
         return Err("shared-reward: no SUPPORT candidates to receive the 10% pool".to_string());
     }
-    // Build the expected p2pkh outputs in canonical order.
-    let mut expected: Vec<([u8; 20], u64)> = Vec::with_capacity(2 + verify_payees.len() + support_payees.len());
+    let mut expected: Vec<([u8; 20], u64)> =
+        Vec::with_capacity(2 + verify_payees.len() + support_payees.len());
     expected.push((*primary_pkh, amts[0])); // PRIMARY 55% + remainder
     expected.push((ext.role_reward.compute_contributor_pkh, amts[1])); // COMPUTE 22% (best worker)
     for (pkh, a) in verify_payees
@@ -4499,6 +4510,16 @@ fn validate_shared_multi_role_coinbase(
     {
         expected.push((*pkh, a));
     }
+    Ok(expected)
+}
+
+fn validate_shared_multi_role_coinbase(
+    outputs: &[crate::tx::TxOutput],
+    primary_pkh: &[u8; 20],
+    ext: &crate::poawx::Phase20ReceiptExt,
+    total_reward: u64,
+) -> Result<(), String> {
+    let expected = expected_shared_multi_role_payouts(primary_pkh, ext, total_reward)?;
     // Collect actual value-bearing p2pkh outputs; reject any value-bearing non-p2pkh.
     let mut p2pkh: Vec<([u8; 20], u64)> = Vec::new();
     for out in outputs {
@@ -13417,6 +13438,124 @@ mod tests {
             std::env::remove_var(k);
         }
         std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// The Stratum pool copies `poawx_coinbase_payouts` from the template VERBATIM — it
+    /// cannot re-derive amounts. So that list must be byte-for-byte what consensus requires,
+    /// or every pool-found block is rejected.
+    ///
+    /// `getblocktemplate` used `expected_poawx_coinbase_payouts`, which only ever emits the
+    /// fixed 4-output shape. But under shared reward VERIFY's 13% and SUPPORT's 10% are split
+    /// across EVERY admitted pool member, so two workers on one role means SIX outputs. The
+    /// template kept saying four:
+    ///   shared-reward: expected 6 role outputs, found 4
+    ///
+    /// It hid because with one worker per role the split is one-way and the two shapes
+    /// coincide — the pool was correct only by accident of there being no contention, and was
+    /// a single enrolment away from breaking. Seen live on 2026-07-31: chain paying 6 payees
+    /// while the template advertised 4.
+    ///
+    /// Pins that the function the template calls agrees with the validator in BOTH shapes.
+    #[test]
+    fn control_old_template_fn_gets_the_many_member_case_wrong() {
+        // The function getblocktemplate used to call. Proves the bug was real: for two
+        // members per role it emits FOUR outputs where consensus requires SIX.
+        let _env = crate::test_env::guard();
+        let primary = [0xA1u8; 20];
+        let reward = crate::chain::block_reward(1);
+        let rr = crate::poawx::RoleReward {
+            compute_contributor_pkh: [0xC0u8; 20],
+            verify_contributor_pkh: [0x41u8; 20],
+            support_contributor_pkh: [0x51u8; 20],
+        };
+        let old = crate::chain::expected_poawx_coinbase_payouts(&primary, reward, Some(&rr), None);
+        assert_eq!(old.len(), 4, "the old function only ever emits four outputs");
+    }
+
+    #[test]
+    fn template_payouts_match_the_validator_for_one_and_many_members_per_role() {
+        let _env = crate::test_env::guard();
+        use crate::poawx::{ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
+        use crate::poawx_candidate::{CandidateSet, RoleCandidate};
+
+        let primary = [0xA1u8; 20];
+        let compute = [0xC0u8; 20];
+        let reward = crate::chain::block_reward(1);
+
+        // Only role_id + solver_pkh matter to the payout shape; the rest is inert here.
+        let cand = |role: u8, pkh: [u8; 20]| RoleCandidate {
+            role_id: role,
+            solver_pkh: pkh,
+            assignment_public_key: [0u8; 33],
+            ticket_digest: [0u8; 32],
+            penalty_status: 0,
+            assignment_proof_digest: [0u8; 32],
+            dominance_weight: 1,
+            penalty_weight: 1,
+            effective_score: 1,
+            role_claim_digest: [0u8; 32],
+        };
+        let mk_ext = |members: Vec<RoleCandidate>| {
+            let mut ext = rev_ext(Vec::new());
+            ext.role_reward.compute_contributor_pkh = compute;
+            let mut cs = CandidateSet::new(0, 1, [0u8; 32]);
+            for m in members {
+                cs.push(m);
+            }
+            ext.candidate_set = Some(cs);
+            ext
+        };
+
+        // ---- one member per role: the shape the live chain runs in ----
+        let one = mk_ext(vec![
+            cand(ROLE_VERIFY_CONTRIBUTOR, [0x41u8; 20]),
+            cand(ROLE_SUPPORT_CONTRIBUTOR, [0x51u8; 20]),
+        ]);
+        let got =
+            crate::chain::expected_shared_multi_role_payouts(&primary, &one, reward).expect("one");
+        assert_eq!(got.len(), 4, "one member per role => the 4-output shape");
+        assert_eq!(got[0], (primary, 2_750_000_000), "PRIMARY 55%");
+        assert_eq!(got[1], (compute, 1_100_000_000), "COMPUTE 22%");
+        assert_eq!(got[2].1, 650_000_000, "VERIFY 13% undivided");
+        assert_eq!(got[3].1, 500_000_000, "SUPPORT 10% undivided");
+
+        // ---- two members per role: what the template got wrong ----
+        let two = mk_ext(vec![
+            cand(ROLE_VERIFY_CONTRIBUTOR, [0x11u8; 20]),
+            cand(ROLE_VERIFY_CONTRIBUTOR, [0x12u8; 20]),
+            cand(ROLE_SUPPORT_CONTRIBUTOR, [0x21u8; 20]),
+            cand(ROLE_SUPPORT_CONTRIBUTOR, [0x22u8; 20]),
+        ]);
+        let got =
+            crate::chain::expected_shared_multi_role_payouts(&primary, &two, reward).expect("two");
+        assert_eq!(
+            got.len(),
+            6,
+            "two members per role => SIX outputs; advertising 4 here is what broke the pool"
+        );
+        assert_eq!(got[2].1 + got[3].1, 650_000_000, "VERIFY 13% split, conserved");
+        assert_eq!(got[4].1 + got[5].1, 500_000_000, "SUPPORT 10% split, conserved");
+        assert_eq!(
+            got.iter().map(|(_, v)| *v).sum::<u64>(),
+            reward,
+            "the advertised set must always sum to the full reward, or the pool fails closed"
+        );
+
+        // And the validator agrees with the list in both shapes: build the exact coinbase the
+        // template advertises and check it passes.
+        for ext in [&one, &two] {
+            let exp = crate::chain::expected_shared_multi_role_payouts(&primary, ext, reward)
+                .expect("expected payouts");
+            let outs: Vec<crate::tx::TxOutput> = exp
+                .iter()
+                .map(|(pkh, v)| crate::tx::TxOutput {
+                    value: *v,
+                    script_pubkey: crate::tx::p2pkh_script(pkh),
+                })
+                .collect();
+            validate_shared_multi_role_coinbase(&outs, &primary, ext, reward)
+                .expect("a coinbase built from the advertised list must validate");
+        }
     }
 
     /// Regression test for the chain being unable to confirm ANY user transaction.

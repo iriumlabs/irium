@@ -293,6 +293,20 @@ pub const MAINNET_COMBINED_ACTIVATION_HEIGHT: Option<u64> = Some(61_414);
 //        unaffected (no halt).
 //  COORDINATED HARD FORK: nodes not on the activation binary reject the new blocks.
 pub const MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT: Option<u64> = Some(62236u64);
+
+/// Mainnet activation for the BLUEPRINT four-output coinbase: exactly four P2PKH outputs,
+/// one distinct participant per role, each the chain's `best_for_role` winner.
+///
+/// `docs/POAWX.md` specifies four outputs and four distinct participants. The shipped
+/// validator instead splits VERIFY's 13% and SUPPORT's 10% across every admitted candidate,
+/// so N enrolled workers produce N outputs per role. `chain::four_role_payout_active` gates
+/// the correction.
+///
+/// **`None` deliberately, and it must be armed at a FUTURE height only.** Heights
+/// 64,852–64,864 carry 6-payee blocks produced under the legacy rule; arming this at or
+/// below them would make the node reject its own chain on restart — the class of failure
+/// recorded in CLAUDE.md §12. Choosing the height is an operator decision.
+pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = None;
 // ══════════════════════════════════════════════════════════════════════════════
 
 /// Activation binary (v1.9.127): mainnet activation height for delegated (mode-1)

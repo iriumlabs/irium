@@ -14283,6 +14283,7 @@ async fn get_block_template(
                         &br.worker_pkh,
                         ext,
                         coinbase_value,
+                        height,
                     ) {
                         Ok(v) => Some(v),
                         Err(e) => {

@@ -4231,6 +4231,35 @@ pub fn multi_role_reward_active(height: u64) -> bool {
 /// no configuration can enable it on mainnet). Testnet/devnet gate on
 /// `IRIUM_POAWX_SHARED_REWARD_ACTIVATION_HEIGHT`. When off, the canonical 4-output
 /// multi-role coinbase (`validate_poawx_coinbase_payout`) is unchanged.
+/// True when the coinbase must pay the BLUEPRINT shape: exactly FOUR outputs, one distinct
+/// participant per role, the winner chosen by the chain via `best_for_role`.
+///
+/// `docs/POAWX.md`: "the split is materialized as four P2PKH coinbase outputs paying each
+/// role's address … in collaborative mining the roles are paid to distinct participants."
+/// Four roles, four miners, one role each — however many are enrolled.
+///
+/// The shipped validator does something else for VERIFY and SUPPORT: it pays EVERY admitted
+/// candidate a share of that role's slice, so N enrolled verify workers produce N outputs of
+/// 13%/N. The code holds both models at once and they contradict — `best_for_role` already
+/// picks exactly one winner per role and `role_reward` records it, but the coinbase ignores
+/// `role_reward` for verify/support. COMPUTE is already blueprint-correct (one winner, 22%).
+///
+/// `None` => inert, legacy split preserved. This CANNOT simply be switched on: heights
+/// 64,852–64,864 carry 6-payee blocks under the legacy rule, so arming it at a PAST height
+/// would make the node reject its own chain on restart. Set a FUTURE height only.
+pub fn four_role_payout_active(height: u64) -> bool {
+    if crate::activation::network_id_byte() == 0 {
+        return matches!(crate::activation::MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT, Some(h) if height >= h);
+    }
+    match std::env::var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+    {
+        Some(h) => height >= h,
+        None => false,
+    }
+}
+
 pub fn shared_reward_active(height: u64) -> bool {
     if crate::activation::network_id_byte() == 0 {
         // mainnet: the combined deploy knob only (env is never honored on mainnet).
@@ -4471,8 +4500,22 @@ pub fn expected_shared_multi_role_payouts(
     primary_pkh: &[u8; 20],
     ext: &crate::poawx::Phase20ReceiptExt,
     total_reward: u64,
+    height: u64,
 ) -> Result<Vec<([u8; 20], u64)>, String> {
     use crate::poawx::{ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
+    if four_role_payout_active(height) {
+        // BLUEPRINT: four outputs, one distinct participant per role. `role_reward` already
+        // holds the chain's `best_for_role` winner for each contributor role -- the same
+        // winner the rest of the validator checks the block against -- so paying it is both
+        // the documented shape and internally consistent. Fees are not permitted under
+        // shared reward (checked by the caller), hence `None`.
+        return Ok(expected_poawx_coinbase_payouts(
+            primary_pkh,
+            total_reward,
+            Some(&ext.role_reward),
+            None,
+        ));
+    }
     let cs = ext
         .candidate_set
         .as_ref()
@@ -4518,8 +4561,9 @@ fn validate_shared_multi_role_coinbase(
     primary_pkh: &[u8; 20],
     ext: &crate::poawx::Phase20ReceiptExt,
     total_reward: u64,
+    height: u64,
 ) -> Result<(), String> {
-    let expected = expected_shared_multi_role_payouts(primary_pkh, ext, total_reward)?;
+    let expected = expected_shared_multi_role_payouts(primary_pkh, ext, total_reward, height)?;
     // Collect actual value-bearing p2pkh outputs; reject any value-bearing non-p2pkh.
     let mut p2pkh: Vec<([u8; 20], u64)> = Vec::new();
     for out in outputs {
@@ -4920,6 +4964,7 @@ fn validate_phase20_production_block(
                 &r.worker_pkh,
                 ext,
                 total_reward,
+                height,
             )?;
         } else {
             validate_phase20_production_payout(
@@ -13456,6 +13501,108 @@ mod tests {
     /// while the template advertised 4.
     ///
     /// Pins that the function the template calls agrees with the validator in BOTH shapes.
+    /// The BLUEPRINT rule, from `docs/POAWX.md`:
+    ///
+    /// > "the split is materialized as four P2PKH coinbase outputs paying each role's address
+    /// > … in collaborative mining the roles are paid to distinct participants."
+    ///
+    /// Four roles, four distinct participants, ONE role each — however many miners are
+    /// enrolled. If 100 are connected, the chain picks 4.
+    ///
+    /// The shipped validator does not do that: it pays EVERY admitted VERIFY/SUPPORT
+    /// candidate a share of that role's slice, so N enrolled verify workers produce N outputs
+    /// of 13%/N. Observed live on 2026-07-31 as six payees per block. The code holds both
+    /// models at once — `best_for_role` picks exactly one winner per role and `role_reward`
+    /// records it, but the coinbase ignores `role_reward` for verify/support.
+    ///
+    /// Gated because heights 64,852–64,864 carry 6-payee blocks under the legacy rule:
+    /// arming at or below them makes the node reject its own chain on restart.
+    #[test]
+    fn four_role_payout_pays_exactly_four_however_many_enrol() {
+        let _env = crate::test_env::guard();
+        use crate::poawx::{ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
+        use crate::poawx_candidate::{CandidateSet, RoleCandidate};
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT", "10");
+
+        let primary = [0xA1u8; 20];
+        let reward = crate::chain::block_reward(1);
+        let cand = |role: u8, pkh: [u8; 20]| RoleCandidate {
+            role_id: role,
+            solver_pkh: pkh,
+            assignment_public_key: [0u8; 33],
+            ticket_digest: [0u8; 32],
+            penalty_status: 0,
+            assignment_proof_digest: [0u8; 32],
+            dominance_weight: 1,
+            penalty_weight: 1,
+            effective_score: 1,
+            role_claim_digest: [0u8; 32],
+        };
+        // TEN enrolled workers across verify/support -- the "100 miners connected" case.
+        let mut ext = rev_ext(Vec::new());
+        ext.role_reward.compute_contributor_pkh = [0xC0u8; 20];
+        ext.role_reward.verify_contributor_pkh = [0x41u8; 20];
+        ext.role_reward.support_contributor_pkh = [0x51u8; 20];
+        let mut cs = CandidateSet::new(0, 1, [0u8; 32]);
+        for i in 0..5u8 {
+            cs.push(cand(ROLE_VERIFY_CONTRIBUTOR, [0x40 + i; 20]));
+            cs.push(cand(ROLE_SUPPORT_CONTRIBUTOR, [0x50 + i; 20]));
+        }
+        ext.candidate_set = Some(cs);
+
+        // Below activation: the legacy split, one output per admitted candidate.
+        let legacy = crate::chain::expected_shared_multi_role_payouts(&primary, &ext, reward, 9)
+            .expect("legacy");
+        assert_eq!(legacy.len(), 12, "legacy rule pays every admitted candidate");
+
+        // At/after activation: the blueprint shape, regardless of how many enrolled.
+        let bp = crate::chain::expected_shared_multi_role_payouts(&primary, &ext, reward, 10)
+            .expect("blueprint");
+        assert_eq!(
+            bp.len(),
+            4,
+            "blueprint: FOUR outputs, one distinct participant per role, however many enrol"
+        );
+        assert_eq!(bp[0], (primary, 2_750_000_000), "proposer 55%");
+        assert_eq!(bp[1], ([0xC0u8; 20], 1_100_000_000), "compute 22% -- one winner");
+        assert_eq!(bp[2], ([0x41u8; 20], 650_000_000), "verify 13% -- ONE winner, not split");
+        assert_eq!(bp[3], ([0x51u8; 20], 500_000_000), "support 10% -- ONE winner, not split");
+        assert_eq!(bp.iter().map(|(_, v)| *v).sum::<u64>(), reward, "conserved");
+        assert_eq!(
+            bp.iter().map(|(p, _)| *p).collect::<std::collections::HashSet<_>>().len(),
+            4,
+            "four DISTINCT participants"
+        );
+
+        // A coinbase built to the blueprint list must validate under the armed gate.
+        let outs: Vec<crate::tx::TxOutput> = bp
+            .iter()
+            .map(|(pkh, v)| crate::tx::TxOutput {
+                value: *v,
+                script_pubkey: crate::tx::p2pkh_script(pkh),
+            })
+            .collect();
+        validate_shared_multi_role_coinbase(&outs, &primary, &ext, reward, 10)
+            .expect("blueprint coinbase must validate at/after activation");
+
+        // And the legacy 12-output coinbase must STILL validate below it, so the 13 historical
+        // 6-payee blocks survive a restart.
+        let outs_legacy: Vec<crate::tx::TxOutput> = legacy
+            .iter()
+            .map(|(pkh, v)| crate::tx::TxOutput {
+                value: *v,
+                script_pubkey: crate::tx::p2pkh_script(pkh),
+            })
+            .collect();
+        validate_shared_multi_role_coinbase(&outs_legacy, &primary, &ext, reward, 9)
+            .expect("pre-activation history must remain valid");
+
+        std::env::remove_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     #[test]
     fn control_old_template_fn_gets_the_many_member_case_wrong() {
         // The function getblocktemplate used to call. Proves the bug was real: for two
@@ -13512,7 +13659,7 @@ mod tests {
             cand(ROLE_SUPPORT_CONTRIBUTOR, [0x51u8; 20]),
         ]);
         let got =
-            crate::chain::expected_shared_multi_role_payouts(&primary, &one, reward).expect("one");
+            crate::chain::expected_shared_multi_role_payouts(&primary, &one, reward, 1).expect("one");
         assert_eq!(got.len(), 4, "one member per role => the 4-output shape");
         assert_eq!(got[0], (primary, 2_750_000_000), "PRIMARY 55%");
         assert_eq!(got[1], (compute, 1_100_000_000), "COMPUTE 22%");
@@ -13527,7 +13674,7 @@ mod tests {
             cand(ROLE_SUPPORT_CONTRIBUTOR, [0x22u8; 20]),
         ]);
         let got =
-            crate::chain::expected_shared_multi_role_payouts(&primary, &two, reward).expect("two");
+            crate::chain::expected_shared_multi_role_payouts(&primary, &two, reward, 1).expect("two");
         assert_eq!(
             got.len(),
             6,
@@ -13544,7 +13691,7 @@ mod tests {
         // And the validator agrees with the list in both shapes: build the exact coinbase the
         // template advertises and check it passes.
         for ext in [&one, &two] {
-            let exp = crate::chain::expected_shared_multi_role_payouts(&primary, ext, reward)
+            let exp = crate::chain::expected_shared_multi_role_payouts(&primary, ext, reward, 1)
                 .expect("expected payouts");
             let outs: Vec<crate::tx::TxOutput> = exp
                 .iter()
@@ -13553,7 +13700,7 @@ mod tests {
                     script_pubkey: crate::tx::p2pkh_script(pkh),
                 })
                 .collect();
-            validate_shared_multi_role_coinbase(&outs, &primary, ext, reward)
+            validate_shared_multi_role_coinbase(&outs, &primary, ext, reward, 1)
                 .expect("a coinbase built from the advertised list must validate");
         }
     }

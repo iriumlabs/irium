@@ -345,6 +345,14 @@ pub struct AllGatesIdentities {
     ///
     /// Empty => byte-identical to the previous coinbase-only behaviour.
     pub extra_transactions: Vec<Transaction>,
+    /// The CHAIN'S DRAW for this block: `[(pkh, role); 4]` in proposer/compute/verify/support
+    /// order, from `select_block_role_holders`.
+    ///
+    /// When set, these four addresses ARE the coinbase payees and the role_reward contributor
+    /// entries — the CLI stops self-filling roles from whatever bundles reached it, and pays
+    /// exactly whom the chain chose. `None` keeps the legacy bundle-derived behaviour, so
+    /// every existing test and the pre-activation chain are unaffected.
+    pub drawn_role_holders: Option<[([u8; 20], u8); 4]>,
     /// C3: pre-made PUBLIC artifacts collected from foreign role-workers, per role.
     /// When present for a role, the builder uses that worker's own assignment proof,
     /// claim reveal material and puzzle solution instead of deriving them from a
@@ -410,6 +418,7 @@ impl AllGatesIdentities {
             support_assign: [9u8; 32],
             claim_seed: [0x2Au8; 32],
             extra_transactions: Vec::new(),
+            drawn_role_holders: None,
             collected: None,
             worker_pkh_override: None,
             delegation: None,
@@ -455,6 +464,7 @@ impl AllGatesIdentities {
             support_assign: *miner_secret,
             claim_seed: derive(b"claim"),
             extra_transactions: Vec::new(),
+            drawn_role_holders: None,
             collected: None,
             worker_pkh_override: None,
             delegation: None,
@@ -528,6 +538,7 @@ impl AllGatesIdentities {
             support_assign: *support_secret,
             claim_seed: derive(b"claim"),
             extra_transactions: Vec::new(),
+            drawn_role_holders: None,
             collected: None,
             worker_pkh_override: None,
             delegation: None,
@@ -585,6 +596,7 @@ impl AllGatesIdentities {
             support_assign: derive(b"support"),
             claim_seed: derive(b"claim"),
             extra_transactions: Vec::new(),
+            drawn_role_holders: None,
             collected: None,
             worker_pkh_override: Some(delegation.miner_pkh()),
             delegation: Some(delegation),
@@ -1520,6 +1532,12 @@ fn build_all_gates_block_with(
     //
     // Falls back to the caller's ids when there is no dominance snapshot or no pool — the
     // standalone-harness and legacy paths stay byte-identical.
+    // THE CHAIN'S DRAW WINS. When the node has told us who holds each role this block, those
+    // addresses are the payees -- not whichever bundles happened to arrive here. This is what
+    // stops the CLI self-filling roles and makes it pay exactly the miners the chain chose,
+    // identically to the pool and the Core app.
+    let drawn_solvers: Option<([u8; 20], [u8; 20], [u8; 20])> =
+        ids.drawn_role_holders.map(|d| (d[1].0, d[2].0, d[3].0));
     let (compute_solver, verify_solver, support_solver) = {
         // A solver that came from a bundle we just dropped must not stay the payee: the role
         // self-fills, so the payout has to follow the work back to the builder. Leaving it
@@ -1683,6 +1701,13 @@ fn build_all_gates_block_with(
             .map(|col| col.payable(c.role_id, &c.solver_pkh))
             .unwrap_or(false)
     };
+    // Apply the draw, if the node supplied one. Done after selection so the legacy path is
+    // byte-identical when `drawn_role_holders` is None.
+    let (compute_solver, verify_solver, support_solver) = match drawn_solvers {
+        Some((c, v, sp)) => (c, v, sp),
+        None => (compute_solver, verify_solver, support_solver),
+    };
+
     // Same dominance view the candidate weights are validated against (phase21d).
     let dw_pool = |pkh: &[u8; 20]| dom_in.weight(DOMINANCE_BASE_WORK_SCORE, pkh, height);
     let mut folded_any = false;

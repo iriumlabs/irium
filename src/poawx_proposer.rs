@@ -2343,3 +2343,198 @@ mod a4_sybil_recompute {
         std::env::remove_var("IRIUM_NETWORK");
     }
 }
+
+// ── Miner address registry: the eligible set the chain draws role holders from ────────────
+
+/// Every miner address that has announced itself, whichever client it runs.
+///
+/// The draw needs ONE eligible set containing every miner: `irium-miner --poawx` (CLI), the
+/// Irium Core app, and each address mining through a Stratum pool. The proposer registry could
+/// not serve that — it is keyed on a registered **VRF public key**, and a pool miner has an
+/// address but no key, so its 10 addresses in a 30-miner network were simply not drawable.
+///
+/// Height-scoped: an address stays eligible for `MINER_ELIGIBILITY_WINDOW` blocks after it
+/// last announced, so a miner that stops mining drops out on its own and the set tracks who
+/// is actually here rather than everyone who ever appeared.
+///
+/// Sybil cost IS charged: `announce_with_work` requires a `compute_sybil_digest` meeting the
+/// same threshold the role tickets use, bound to (network, prev_hash, pkh, epoch). One
+/// address, one payment, per epoch — so flooding the eligible set costs proportionally, and
+/// the work for one address cannot be reused for another.
+pub const MINER_ELIGIBILITY_WINDOW: u64 = 64;
+
+#[derive(Default)]
+pub struct MinerAddressRegistry {
+    inner: std::sync::Mutex<std::collections::BTreeMap<[u8; 20], u64>>,
+}
+
+impl MinerAddressRegistry {
+    /// Announce `pkh` as mining at `height`, having PAID SYBIL WORK for the privilege.
+    ///
+    /// Registering must not be free. The draw picks four addresses out of the eligible set, so
+    /// a free announce lets one operator flood it with addresses and take a share of every
+    /// block far beyond one miner's — the set would decide real money and cost nothing to
+    /// stuff. `nonce` must satisfy the same `compute_sybil_digest` / `meets_sybil_target`
+    /// threshold the role tickets already use, bound to (network, prev_hash, pkh, epoch), so
+    /// the cost is per-address, per-epoch and cannot be reused for a second address.
+    ///
+    /// Returns the rejection reason verbatim so the RPC layer can say WHY rather than a
+    /// generic failure.
+    pub fn announce_with_work(
+        &self,
+        network_id: u8,
+        prev_hash: &[u8; 32],
+        pkh: [u8; 20],
+        height: u64,
+        epoch: u64,
+        assignment_public_key: &[u8; 33],
+        nonce: &[u8; 32],
+    ) -> Result<(), String> {
+        let bits = crate::poawx_ticket::effective_sybil_bits();
+        if bits > 0 {
+            let d = crate::poawx_ticket::compute_sybil_digest(
+                network_id,
+                prev_hash,
+                &pkh,
+                epoch,
+                assignment_public_key,
+                nonce,
+            );
+            if !crate::poawx_ticket::meets_sybil_target(&d, bits) {
+                return Err(format!(
+                    "miner announce: sybil work below the {bits}-bit threshold for {}",
+                    hex::encode(pkh)
+                ));
+            }
+        }
+        self.announce(pkh, height);
+        Ok(())
+    }
+
+    /// Announce `pkh` as mining at `height`. Idempotent: re-announcing refreshes the window.
+    pub fn announce(&self, pkh: [u8; 20], height: u64) {
+        let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let slot = g.entry(pkh).or_insert(0);
+        if height > *slot {
+            *slot = height;
+        }
+    }
+
+    /// Addresses still inside the eligibility window at `target_height`, canonically ordered
+    /// so every node derives the same set (and therefore the same draw) from the same
+    /// announcements.
+    pub fn eligible(&self, target_height: u64) -> Vec<[u8; 20]> {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        let lo = target_height.saturating_sub(MINER_ELIGIBILITY_WINDOW);
+        let mut out: Vec<[u8; 20]> = g
+            .iter()
+            .filter(|(_, last)| **last >= lo && **last <= target_height)
+            .map(|(pkh, _)| *pkh)
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.lock().unwrap_or_else(|e| e.into_inner()).len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+static GLOBAL_MINER_REGISTRY: std::sync::OnceLock<MinerAddressRegistry> =
+    std::sync::OnceLock::new();
+
+pub fn global_miner_registry() -> &'static MinerAddressRegistry {
+    GLOBAL_MINER_REGISTRY.get_or_init(MinerAddressRegistry::default)
+}
+
+/// The seed the role draw MUST use — canonical, multi-source, and ungrindable.
+///
+/// A draw is only fair if nobody can predict or steer it. Seeding from the TIP hash fails
+/// both: the producer of the parent block chooses that hash by grinding nonces, so it can
+/// retry until the next block's draw favours its own addresses, and everyone learns the draw
+/// the moment the parent is published.
+///
+/// This uses the same seed the rest of PoAW-X already agrees on:
+///   * base = `admission_epoch_seed(parent_prev_hash, prev_hash)` — the GRANDPARENT hash, so
+///     the seed for height H was fixed when block H-2 was made and the parent's producer
+///     cannot grind it;
+///   * mixed with the parent's finality-proof digest and precommit root, which come from the
+///     committee rather than the producer, so no single party controls the outcome.
+///
+/// Honest bound: a miner must learn its role in time to DO the role work, so the assignment
+/// is necessarily knowable once the parent exists. What this guarantees is that it cannot be
+/// known earlier, and cannot be steered by whoever produces the parent — which is the
+/// property that actually matters. Absolute secrecy until selection would require the work to
+/// happen after the block, which the design does not do.
+pub fn role_draw_seed(
+    target_height: u64,
+    prev_hash: [u8; 32],
+    parent_prev_hash: Option<[u8; 32]>,
+    finality_sig_digest: [u8; 32],
+    precommit_digest: [u8; 32],
+) -> [u8; 32] {
+    let base = crate::poawx_committed_admission::admission_epoch_seed(parent_prev_hash, prev_hash);
+    crate::poawx_committed_admission::resolve_epoch_seed_parts(
+        target_height,
+        base,
+        finality_sig_digest,
+        precommit_digest,
+    )
+}
+
+/// PRIVATE SORTITION: the priority a miner gets for a role, computable only by that miner.
+///
+/// `vrf_output` is the ECVRF output over the draw seed (`AssignmentProofV2`), which requires
+/// the miner's SECRET key — so nobody else can compute this, and nobody learns who holds a
+/// role until that miner reveals its proof by submitting the role work.
+///
+/// This is what closes the gap the public draw left open. `select_block_role_holders` picks
+/// four addresses from a public set with a public seed: correct, deterministic and
+/// verifiable, but knowable by everyone the moment the parent block lands. That hands an
+/// attacker the exact four addresses the next block depends on, in time to knock them offline
+/// and stall production — and it lets a selected miner sell or collude on its slot in advance.
+pub fn role_priority(vrf_output: &[u8; 32], role: u8) -> u64 {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"IRIUM_POAWX_ROLE_PRIORITY_V1");
+    h.update([role]);
+    h.update(vrf_output);
+    let d: [u8; 32] = h.finalize().into();
+    u64::from_be_bytes(d[0..8].try_into().unwrap_or([0u8; 8]))
+}
+
+/// Pick the block's four role holders from the priorities miners REVEALED.
+///
+/// Each entry is `(pkh, role, priority)` from a verified `AssignmentProofV2`. Lowest priority
+/// wins a role; a miner that has already won one is skipped, so the four holders are distinct
+/// — the same "one node miner, one address, one role" rule as the public draw, reached without
+/// anyone being able to predict it.
+///
+/// Returns `None` if any role has no revealed candidate: better to produce nothing than to
+/// silently fall back to letting one miner take an unclaimed slot.
+pub fn select_role_holders_from_revealed(
+    revealed: &[([u8; 20], u8, u64)],
+) -> Option<[([u8; 20], u8); 4]> {
+    const ROLES: [u8; 4] = [
+        0,
+        crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+        crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
+        crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+    ];
+    let mut taken: Vec<[u8; 20]> = Vec::with_capacity(4);
+    let mut out: [([u8; 20], u8); 4] = [([0u8; 20], 0); 4];
+    for (slot, role) in ROLES.iter().enumerate() {
+        let winner = revealed
+            .iter()
+            .filter(|(pkh, r, _)| r == role && !taken.contains(pkh))
+            // Ties broken by pkh so every node agrees on a total order.
+            .min_by_key(|(pkh, _, p)| (*p, *pkh))?;
+        taken.push(winner.0);
+        out[slot] = (winner.0, *role);
+    }
+    Some(out)
+}

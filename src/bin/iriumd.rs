@@ -14249,8 +14249,65 @@ async fn get_block_template(
     // against, so builder and validator cannot diverge — and computed HERE rather than in
     // the pool because the pool links a possibly-stale copy of this crate and must never
     // have to deserialize a consensus structure to know who gets paid.
-    let poawx_coinbase_payouts: Vec<TemplateCoinbasePayout> =
-        if irium_node_rs::chain::shared_reward_active(height) {
+    // THE POOL'S COINBASE. It copies this list verbatim and cannot re-derive it, so whatever
+    // is advertised here is what a pool-found block pays.
+    //
+    // Under the four-role gate the payees are the CHAIN'S DRAW: the four addresses
+    // `select_block_role_holders` picked from the eligible set, one role each. That is what
+    // makes a pool miner earn exactly like a CLI or Core app miner -- one entry in one set,
+    // paid only when drawn. Below the gate the legacy bundle-derived list is preserved
+    // byte-for-byte so existing history stays valid.
+    let drawn_payouts: Option<Vec<TemplateCoinbasePayout>> =
+        if irium_node_rs::chain::four_role_payout_active(height) {
+            let eligible = {
+                let g = state.chain.lock().unwrap_or_else(|e| e.into_inner());
+                let mut e = g.proposer_registry.eligible_pkhs(height);
+                e.extend(irium_node_rs::poawx_proposer::global_miner_registry().eligible(height));
+                e.sort_unstable();
+                e.dedup();
+                e
+            };
+            // Same seed derivation the assignment endpoint publishes, so the pool builds the
+            // coinbase for the draw miners were told about.
+            // Same canonical, ungrindable seed the assignment endpoint publishes, so the
+            // pool builds the coinbase for exactly the draw miners were told about.
+            let (tip_arr, parent_prev, parts) = {
+                let g = state.chain.lock().unwrap_or_else(|e| e.into_inner());
+                let tb = g.chain.last();
+                let mut a = [0u8; 32];
+                if let Some(b) = tb {
+                    a = b.header.hash_for_height(g.tip_height());
+                }
+                (
+                    a,
+                    tb.map(|b| b.header.prev_hash),
+                    irium_node_rs::poawx_committed_admission::seed_components_from_block(tb),
+                )
+            };
+            let seed = irium_node_rs::poawx_proposer::role_draw_seed(
+                height, tip_arr, parent_prev, parts.0, parts.1,
+            );
+            irium_node_rs::poawx_proposer::select_block_role_holders(
+                irium_node_rs::activation::network_id_byte(),
+                height,
+                &seed,
+                &eligible,
+            )
+            .map(|drawn| {
+                irium_node_rs::chain::expected_drawn_role_payouts(&drawn, coinbase_value)
+                    .into_iter()
+                    .map(|(pkh, value)| TemplateCoinbasePayout {
+                        pkh: hex::encode(pkh),
+                        value,
+                    })
+                    .collect()
+            })
+        } else {
+            None
+        };
+    let poawx_coinbase_payouts: Vec<TemplateCoinbasePayout> = if let Some(d) = drawn_payouts {
+        d
+    } else if irium_node_rs::chain::shared_reward_active(height) {
             poawx_receipts_for_template
                 .iter()
                 .filter_map(pending_receipt_to_block_receipt)
@@ -14279,11 +14336,14 @@ async fn get_block_template(
                     // `validate_shared_multi_role_coinbase` checks against, so builder and
                     // validator cannot diverge -- the property this block comment already
                     // claimed and did not have.
+                    // `None`: this is the LEGACY branch, reached only below the four-role
+                    // gate. The draw-based list is built above in `drawn_payouts`.
                     match irium_node_rs::chain::expected_shared_multi_role_payouts(
                         &br.worker_pkh,
                         ext,
                         coinbase_value,
                         height,
+                        None,
                     ) {
                         Ok(v) => Some(v),
                         Err(e) => {
@@ -15421,6 +15481,81 @@ async fn poawx_finality_votes_get(
 /// CHAIN assigns that identity at this height — deterministic, identity-bound, and
 /// unpredictable before the parent block. Omitting `pkh` keeps the old identity-free response
 /// verbatim, so existing callers are unaffected.
+/// POST `/poawx/miner` — announce a mining address so the chain can draw it for a role.
+///
+/// The single door into the eligible set for EVERY client: `irium-miner --poawx`, the Irium
+/// Core app, and a Stratum pool announcing each connected miner's payout address. To the
+/// chain they are indistinguishable — one address, one entry, one chance of being drawn.
+///
+/// Body: `{"address":"<40-hex pkh>"}`. Re-announcing refreshes the eligibility window.
+async fn poawx_post_miner(
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    AxumJson(req): AxumJson<Value>,
+) -> Result<Json<Value>, StatusCode> {
+    check_rate_with_auth(&state, &addr, &headers)?;
+    let raw = req
+        .get("address")
+        .and_then(|v| v.as_str())
+        .ok_or(StatusCode::BAD_REQUEST)?;
+    let bytes = hex::decode(raw.trim()).map_err(|_| StatusCode::BAD_REQUEST)?;
+    if bytes.len() != 20 {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let mut pkh = [0u8; 20];
+    pkh.copy_from_slice(&bytes);
+    let (height, prev_hash) = {
+        let g = state.chain.lock().unwrap_or_else(|e| e.into_inner());
+        let tip = g.tip_height();
+        let ph = g
+            .chain
+            .last()
+            .map(|b| b.header.hash_for_height(tip))
+            .unwrap_or([0u8; 32]);
+        (tip.saturating_add(1), ph)
+    };
+    // Sybil work, or the eligible set is free to stuff. Bound to (network, prev_hash, pkh,
+    // epoch): one payment per address per epoch, not reusable for a second address.
+    let get32 = |k: &str| -> Option<[u8; 32]> {
+        let h = req.get(k)?.as_str()?;
+        let b = hex::decode(h.trim()).ok()?;
+        if b.len() != 32 {
+            return None;
+        }
+        let mut o = [0u8; 32];
+        o.copy_from_slice(&b);
+        Some(o)
+    };
+    let nonce = get32("sybil_nonce").ok_or(StatusCode::BAD_REQUEST)?;
+    let apk = {
+        let h = req
+            .get("assignment_public_key")
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+        let b = hex::decode(h.trim()).unwrap_or_default();
+        if b.len() != 33 {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let mut o = [0u8; 33];
+        o.copy_from_slice(&b);
+        o
+    };
+    let epoch = req.get("epoch").and_then(|v| v.as_u64()).unwrap_or(height);
+    let net = irium_node_rs::activation::network_id_byte();
+    let reg = irium_node_rs::poawx_proposer::global_miner_registry();
+    if let Err(e) = reg.announce_with_work(net, &prev_hash, pkh, height, epoch, &apk, &nonce) {
+        eprintln!("[poawx] miner announce rejected: {e}");
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    Ok(Json(serde_json::json!({
+        "status": "announced",
+        "address": hex::encode(pkh),
+        "height": height,
+        "eligible_miners": reg.eligible(height).len(),
+    })))
+}
+
 async fn poawx_get_assignment(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
@@ -15435,13 +15570,29 @@ async fn poawx_get_assignment(
     if !irium_node_rs::activation::poawx_serving_active(poawx_h) {
         return Err(StatusCode::SERVICE_UNAVAILABLE);
     }
-    let (height, tip_hash_bytes, bits, eligible) = {
+    let (height, tip_hash_bytes, bits, eligible, parent_prev, seed_parts) = {
         let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
         let tip_h = guard.tip_height();
-        // The registered miner set the chain draws this block's role holders FROM.
-        let eligible = guard
+        // The eligible set the chain draws this block's role holders FROM: every announced
+        // miner address (CLI, Core app, pool) UNION the registered proposer keys. A pool
+        // miner has an address but no VRF key, so the proposer registry alone would leave it
+        // undrawable -- which is exactly why a 30-miner network only ever drew from the few
+        // that happened to hold keys.
+        let tip_block = guard.chain.last();
+        // Grandparent hash + the parent's finality/precommit digests: the inputs the role
+        // draw seed is built from, none of which the parent's producer controls.
+        let parent_prev = tip_block.map(|b| b.header.prev_hash);
+        let seed_parts =
+            irium_node_rs::poawx_committed_admission::seed_components_from_block(tip_block);
+        let mut eligible = guard
             .proposer_registry
             .eligible_pkhs(tip_h.saturating_add(1));
+        eligible.extend(
+            irium_node_rs::poawx_proposer::global_miner_registry()
+                .eligible(tip_h.saturating_add(1)),
+        );
+        eligible.sort_unstable();
+        eligible.dedup();
         // Phase 24F: serve the assignment at the genesis tip (tip_h == 0) on test
         // networks too, so a fresh devnet/testnet can produce its first PoAW-X block.
         // Mainnet + inactive are already rejected above; the seed derives from the
@@ -15452,7 +15603,7 @@ async fn poawx_get_assignment(
             .map(|b| b.header.hash_for_height(tip_h))
             .unwrap_or([0u8; 32]);
         let target = guard.target_for_height(tip_h);
-        (tip_h, tip_hash, target.bits, eligible)
+        (tip_h, tip_hash, target.bits, eligible, parent_prev, seed_parts)
     };
     let mut seed_hasher = Sha256::new();
     seed_hasher.update(&tip_hash_bytes);
@@ -15487,12 +15638,23 @@ async fn poawx_get_assignment(
         r if r == irium_node_rs::poawx::ROLE_VERIFY_CONTRIBUTOR => "verify",
         _ => "support",
     };
+    // The DRAW seed is the canonical multi-source one -- NOT the tip-hash seed above, which
+    // the parent's producer can grind by choosing nonces until the next draw favours its own
+    // addresses. `seed` is still reported unchanged for existing consumers.
+    let draw_seed = irium_node_rs::poawx_proposer::role_draw_seed(
+        height.saturating_add(1),
+        tip_hash_bytes,
+        parent_prev,
+        seed_parts.0,
+        seed_parts.1,
+    );
     let drawn = irium_node_rs::poawx_proposer::select_block_role_holders(
         net,
         height.saturating_add(1),
-        &seed,
+        &draw_seed,
         &eligible,
     );
+    body["draw_seed"] = serde_json::json!(hex::encode(draw_seed));
     match &drawn {
         Some(holders) => {
             body["eligible_count"] = serde_json::json!(eligible.len());
@@ -20328,6 +20490,7 @@ async fn main() {
         .route("/rpc/submit_block", post(submit_block))
         .route("/rpc/submit_block_extended", post(submit_block_extended))
         .route("/poawx/assignment", get(poawx_get_assignment))
+        .route("/poawx/miner", post(poawx_post_miner))
         .route("/poawx/receipt", post(poawx_post_receipt))
         // Phase 20 Step 6D: loopback-only role-gossip bridge (testnet/devnet,
         // mainnet-hard-off, disabled unless role gossip enabled).

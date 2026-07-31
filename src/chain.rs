@@ -1066,7 +1066,38 @@ impl ChainState {
         let previous = self.chain.last();
         self.validate_block_header(&block, expected_height, previous)?;
         validate_poawx_coinbase(&block, expected_height)?;
-        validate_poawx_block_receipts(&block, expected_height, previous)?;
+        // THE CHAIN'S DRAW, computed here from OUR OWN state: the eligible miner set (every
+        // announced address plus registered proposer keys) and the canonical ungrindable
+        // seed. Nothing in the submitted block feeds this, so a miner cannot influence what
+        // its coinbase is checked against.
+        let drawn = if four_role_payout_active(expected_height) {
+            let mut eligible = self.proposer_registry.eligible_pkhs(expected_height);
+            eligible.extend(
+                crate::poawx_proposer::global_miner_registry().eligible(expected_height),
+            );
+            eligible.sort_unstable();
+            eligible.dedup();
+            let prev_h = previous
+                .map(|b| b.header.hash_for_height(expected_height.saturating_sub(1)))
+                .unwrap_or([0u8; 32]);
+            let parts = crate::poawx_committed_admission::seed_components_from_block(previous);
+            let seed = crate::poawx_proposer::role_draw_seed(
+                expected_height,
+                prev_h,
+                previous.map(|b| b.header.prev_hash),
+                parts.0,
+                parts.1,
+            );
+            crate::poawx_proposer::select_block_role_holders(
+                crate::activation::network_id_byte(),
+                expected_height,
+                &seed,
+                &eligible,
+            )
+        } else {
+            None
+        };
+        validate_poawx_block_receipts(&block, expected_height, previous, drawn.as_ref())?;
         // A1/A2 fix (gated): bound the VERIFY/SUPPORT fan-out pool + finality committee to
         // ~K per role via VRF sortition, so pool-stuffing and registration-inflation cannot
         // exceed the sortition-admitted set. Needs the frozen eligible_count (&self), so it
@@ -4482,6 +4513,35 @@ fn validate_multi_role_coinbase_outputs(
 /// stuff the VERIFY/SUPPORT pools with its own pkhs. That gating is a separate concern
 /// (tickets/committed-admission); this validator only guarantees the split is exact and
 /// deterministic over whatever candidate set the block's other gates admitted.
+
+
+/// The coinbase the chain's DRAW requires: exactly four outputs paying exactly the four
+/// drawn role holders, 55 / 22 / 13 / 10.
+///
+/// This is what makes "only 4 of the 30 get paid" true. Every miner address — from the CLI
+/// (`irium-miner --poawx`), from the Irium Core app, or a pool miner's payout address relayed
+/// by the pool — sits in ONE eligible set. The chain draws four of them, one role each
+/// (`select_block_role_holders`), and the reward goes to those four and nobody else. A miner
+/// that was not drawn earns nothing that round, whichever client it runs.
+///
+/// The shipped coinbase does something unrelated to the draw: it pays `role_reward`, whose
+/// contributor entries come from whichever role bundles reached the producing node, and then
+/// splits VERIFY/SUPPORT across every admitted candidate. That pays whoever enrolled, not
+/// whom the chain chose, and pays more than four.
+///
+/// `drawn` is `[(pkh, role); 4]` from `select_block_role_holders`, ordered proposer, compute,
+/// verify, support. Amounts come from `multi_role_amounts`, so the remainder lands on the
+/// proposer exactly as in every other payout path and the outputs always sum to the reward.
+pub fn expected_drawn_role_payouts(
+    drawn: &[([u8; 20], u8); 4],
+    total_reward: u64,
+) -> Vec<([u8; 20], u64)> {
+    let amts = crate::poawx::multi_role_amounts(total_reward);
+    // Positional by construction: `select_block_role_holders` returns proposer, compute,
+    // verify, support in that order, which is the canonical coinbase order.
+    (0..4).map(|i| (drawn[i].0, amts[i])).collect()
+}
+
 /// The EXACT shared-reward coinbase payout list, in canonical order.
 ///
 /// Single source of truth for the multi-payee (§6 fan-out) shape, for the same reason
@@ -4501,8 +4561,15 @@ pub fn expected_shared_multi_role_payouts(
     ext: &crate::poawx::Phase20ReceiptExt,
     total_reward: u64,
     height: u64,
+    drawn: Option<&[([u8; 20], u8); 4]>,
 ) -> Result<Vec<([u8; 20], u64)>, String> {
     use crate::poawx::{ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR};
+    if let Some(drawn) = drawn.filter(|_| four_role_payout_active(height)) {
+        // ENFORCEMENT: the coinbase must pay exactly the four addresses the chain drew, in
+        // role order. Without this the draw is convention -- a modified miner could publish a
+        // block paying any four it liked and every node would accept it.
+        return Ok(expected_drawn_role_payouts(drawn, total_reward));
+    }
     if four_role_payout_active(height) {
         // BLUEPRINT: four outputs, one distinct participant per role. `role_reward` already
         // holds the chain's `best_for_role` winner for each contributor role -- the same
@@ -4556,14 +4623,28 @@ pub fn expected_shared_multi_role_payouts(
     Ok(expected)
 }
 
+/// Test-visible alias so the enforcement test can drive the real validator.
+pub fn validate_shared_multi_role_coinbase_for_test(
+    outputs: &[crate::tx::TxOutput],
+    primary_pkh: &[u8; 20],
+    ext: &crate::poawx::Phase20ReceiptExt,
+    total_reward: u64,
+    height: u64,
+    drawn: Option<&[([u8; 20], u8); 4]>,
+) -> Result<(), String> {
+    validate_shared_multi_role_coinbase(outputs, primary_pkh, ext, total_reward, height, drawn)
+}
+
 fn validate_shared_multi_role_coinbase(
     outputs: &[crate::tx::TxOutput],
     primary_pkh: &[u8; 20],
     ext: &crate::poawx::Phase20ReceiptExt,
     total_reward: u64,
     height: u64,
+    drawn: Option<&[([u8; 20], u8); 4]>,
 ) -> Result<(), String> {
-    let expected = expected_shared_multi_role_payouts(primary_pkh, ext, total_reward, height)?;
+    let expected =
+        expected_shared_multi_role_payouts(primary_pkh, ext, total_reward, height, drawn)?;
     // Collect actual value-bearing p2pkh outputs; reject any value-bearing non-p2pkh.
     let mut p2pkh: Vec<([u8; 20], u64)> = Vec::new();
     for out in outputs {
@@ -4915,6 +4996,7 @@ fn validate_phase20_production_block(
     height: u64,
     prev_hash: &[u8; 32],
     previous: Option<&Block>,
+    drawn: Option<&[([u8; 20], u8); 4]>,
 ) -> Result<(), String> {
     let coinbase = block
         .transactions
@@ -4965,6 +5047,7 @@ fn validate_phase20_production_block(
                 ext,
                 total_reward,
                 height,
+                drawn,
             )?;
         } else {
             validate_phase20_production_payout(
@@ -5173,6 +5256,11 @@ fn validate_poawx_block_receipts(
     block: &Block,
     height: u64,
     previous: Option<&Block>,
+    // The chain's role draw for this height, computed by the CALLER from its own eligible set
+    // and the canonical seed -- never from the block. Passed explicitly rather than stashed in
+    // a thread-local: a hidden ambient value is exactly the kind of seam that makes a
+    // consensus rule silently not apply, and it could not be reasoned about at the call site.
+    drawn: Option<&[([u8; 20], u8); 4]>,
 ) -> Result<(), String> {
     // Phase 18B (fail-closed): mode-1 (delegated) receipts are NEVER valid on
     // mainnet. This is checked before any activation early-return so a malicious
@@ -5472,7 +5560,7 @@ fn validate_poawx_block_receipts(
     // validator enforces role claims + RoleReward + the canonical fee-aware
     // multi-role coinbase, and a missing extension fails closed.
     if phase20_active {
-        validate_phase20_production_block(block, receipts, height, &parent_hash, previous)?;
+        validate_phase20_production_block(block, receipts, height, &parent_hash, previous, drawn)?;
     } else {
         validate_poawx_reward_split_from_block(block, receipts, height)?;
     }
@@ -9471,7 +9559,7 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_MODE");
         let parent = phase13b_parent_block();
         let block = make_poawx_test_block(vec![0x51]);
-        assert!(validate_poawx_block_receipts(&block, 100, Some(&parent)).is_ok());
+        assert!(validate_poawx_block_receipts(&block, 100, Some(&parent), None).is_ok());
         std::env::remove_var("IRIUM_POAWX_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_NETWORK");
     }
@@ -9487,7 +9575,7 @@ mod tests {
         std::env::set_var("IRIUM_NETWORK", "testnet");
         let parent = phase13b_parent_block();
         let block = make_poawx_test_block(vec![0x51]);
-        assert!(validate_poawx_block_receipts(&block, 99, Some(&parent)).is_ok());
+        assert!(validate_poawx_block_receipts(&block, 99, Some(&parent), None).is_ok());
         std::env::remove_var("IRIUM_POAWX_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_POAWX_MODE");
         std::env::remove_var("IRIUM_NETWORK");
@@ -9505,7 +9593,7 @@ mod tests {
         let parent = phase13b_parent_block();
         let block = make_poawx_test_block(vec![0x51]);
         assert!(
-            validate_poawx_block_receipts(&block, 100, Some(&parent)).is_ok(),
+            validate_poawx_block_receipts(&block, 100, Some(&parent), None).is_ok(),
             "mainnet must skip poawx receipt check"
         );
         std::env::remove_var("IRIUM_POAWX_ACTIVATION_HEIGHT");
@@ -9528,7 +9616,7 @@ mod tests {
         let mut root = [0u8; 32];
         root[0] = 0xde;
         let block = make_poawx_test_block(irx1_script_for_chain(root));
-        let result = validate_poawx_block_receipts(&block, 10, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, 10, Some(&parent), None);
         assert!(result.is_err(), "missing receipts must be rejected");
         assert!(result.unwrap_err().contains("missing or empty"));
         std::env::remove_var("IRIUM_POAWX_ACTIVATION_HEIGHT");
@@ -9552,7 +9640,7 @@ mod tests {
         root[0] = 0xde;
         let mut block = make_poawx_test_block(irx1_script_for_chain(root));
         block.poawx_receipts = Some(vec![]);
-        let result = validate_poawx_block_receipts(&block, 10, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, 10, Some(&parent), None);
         assert!(result.is_err(), "empty receipts must be rejected");
         std::env::remove_var("IRIUM_POAWX_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_POAWX_MODE");
@@ -9573,7 +9661,7 @@ mod tests {
         let parent = phase13b_parent_block();
         let mut block = make_poawx_test_block(irx1_script_for_chain([0u8; 32]));
         block.poawx_receipts = Some(vec![]);
-        let result = validate_poawx_block_receipts(&block, 10, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, 10, Some(&parent), None);
         assert!(result.is_err(), "zero irx1 root must be rejected");
         std::env::remove_var("IRIUM_POAWX_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_POAWX_MODE");
@@ -9597,7 +9685,7 @@ mod tests {
         let height = 1u64;
         let receipt = make_test_receipt(height, &sk, parent_hash, 1);
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(
             result.is_ok(),
             "valid poawx block must be accepted: {:?}",
@@ -9957,7 +10045,7 @@ mod tests {
         let height = 1u64;
         let receipt = make_mode1_receipt(height, &miner, &pool, parent_hash, 1, 1, 1000, 0);
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(
             result.is_ok(),
             "valid mode-1 block must be accepted: {result:?}"
@@ -9984,7 +10072,7 @@ mod tests {
         // (A) AT activation height on mainnet: accepted.
         let receipt = make_mode1_receipt(h, &miner, &pool, parent_hash, diff, 0, h + 1000, 0);
         let block = make_valid_poawx_block(parent_hash, h, receipt, true);
-        let at = validate_poawx_block_receipts(&block, h, Some(&parent));
+        let at = validate_poawx_block_receipts(&block, h, Some(&parent), None);
         // The delegation GATE must be OPEN at H: validation proceeds past the mainnet
         // delegation guard (any remaining Err is downstream block-construction, e.g. the
         // multi-role irx1 root, NOT a delegation rejection). Full valid-block acceptance
@@ -9996,7 +10084,7 @@ mod tests {
         // (B) one block BELOW activation height on mainnet: rejected fail-safe.
         let receipt_b = make_mode1_receipt(h - 1, &miner, &pool, parent_hash, diff, 0, h + 1000, 0);
         let block_b = make_valid_poawx_block(parent_hash, h - 1, receipt_b, true);
-        let below = validate_poawx_block_receipts(&block_b, h - 1, Some(&parent));
+        let below = validate_poawx_block_receipts(&block_b, h - 1, Some(&parent), None);
         assert!(below.is_err(), "mainnet must REJECT a delegated block below activation height");
         assert!(below.as_ref().unwrap_err().contains("before delegation activation"), "reject reason: {below:?}");
         std::env::remove_var("IRIUM_NETWORK");
@@ -10018,7 +10106,7 @@ mod tests {
         let height = 1u64;
         let receipt = make_mode1_receipt(height, &miner, &pool, parent_hash, 1, 1, 1000, 0);
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err(), "mode-1 before activation must reject");
         assert!(result.unwrap_err().contains("before delegation activation"));
         clear_mode1_env();
@@ -10040,7 +10128,7 @@ mod tests {
         // network_id 0 = mainnet; the mainnet hard-reject fires first regardless.
         let receipt = make_mode1_receipt(height, &miner, &pool, parent_hash, 1, 0, 1000, 0);
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err(), "mode-1 on mainnet must hard-reject");
         assert!(result.unwrap_err().contains("rejected on mainnet"));
         clear_mode1_env();
@@ -10062,7 +10150,7 @@ mod tests {
         // worker_pkh no longer equals HASH160(delegation.miner_pubkey).
         receipt.worker_pkh = [0xff; 20];
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("miner_pkh != worker_pkh"));
         clear_mode1_env();
@@ -10086,7 +10174,7 @@ mod tests {
         }
         // Rebuild block so the irx1 root matches the (tampered) receipt digest.
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -10109,7 +10197,7 @@ mod tests {
         // expiry_height 1 < block height 2 -> expired.
         let receipt = make_mode1_receipt(height, &miner, &pool, parent_hash, 1, 1, 1, 0);
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("expired"));
         clear_mode1_env();
@@ -10130,7 +10218,7 @@ mod tests {
         // network_id 2 (devnet) but node is testnet (1).
         let receipt = make_mode1_receipt(height, &miner, &pool, parent_hash, 1, 2, 1000, 0);
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("network_id mismatch"));
         clear_mode1_env();
@@ -10153,7 +10241,7 @@ mod tests {
         // Signer pubkey no longer matches the delegated pool_pubkey.
         receipt.worker_pubkey = pubkey33(&other);
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err());
         assert!(result
             .unwrap_err()
@@ -10176,7 +10264,7 @@ mod tests {
         // fee_bps = 100 must fail closed in step 1 (official pool 0%).
         let receipt = make_mode1_receipt(height, &miner, &pool, parent_hash, 1, 1, 1000, 100);
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("nonzero delegation fee_bps"));
         clear_mode1_env();
@@ -10198,7 +10286,7 @@ mod tests {
         // proving the split keys on the MINER pkh (not the pool).
         let receipt = make_mode1_receipt(height, &miner, &pool, parent_hash, 1, 1, 1000, 0);
         let block = make_valid_poawx_block(parent_hash, height, receipt, false);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("underpaid"));
         clear_mode1_env();
@@ -10899,7 +10987,7 @@ mod tests {
         // (13) valid Phase 20 production block accepted.
         let ext = p20_ext(net, height, &parent_hash, 0, [0u8; 20]);
         let ok = build(&ext);
-        let r = validate_poawx_block_receipts(&ok, height, Some(&parent));
+        let r = validate_poawx_block_receipts(&ok, height, Some(&parent), None);
         assert!(
             r.is_ok(),
             "valid phase20 production block must be accepted: {:?}",
@@ -10910,7 +10998,7 @@ mod tests {
         let mut e = ext.clone();
         e.compute_claim.role_id = crate::poawx::ROLE_VERIFY_CONTRIBUTOR;
         assert!(
-            validate_poawx_block_receipts(&build(&e), height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&build(&e), height, Some(&parent), None).is_err(),
             "bad role claim must reject"
         );
 
@@ -10918,7 +11006,7 @@ mod tests {
         let mut e = ext.clone();
         e.role_reward.support_contributor_pkh = [0xDEu8; 20];
         assert!(
-            validate_poawx_block_receipts(&build(&e), height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&build(&e), height, Some(&parent), None).is_err(),
             "RoleReward mismatch must reject"
         );
 
@@ -10926,7 +11014,7 @@ mod tests {
         let mut b = build(&ext);
         b.transactions[0].outputs.swap(1, 2);
         assert!(
-            validate_poawx_block_receipts(&b, height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&b, height, Some(&parent), None).is_err(),
             "wrong coinbase order must reject"
         );
 
@@ -10934,7 +11022,7 @@ mod tests {
         let mut b = build(&ext);
         b.transactions[0].outputs[1].value += 1;
         assert!(
-            validate_poawx_block_receipts(&b, height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&b, height, Some(&parent), None).is_err(),
             "wrong coinbase amount must reject"
         );
 
@@ -10945,7 +11033,7 @@ mod tests {
             script_pubkey: p2pkh_script(&[0x9Au8; 20]),
         });
         assert!(
-            validate_poawx_block_receipts(&b, height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&b, height, Some(&parent), None).is_err(),
             "hidden extra payout must reject"
         );
 
@@ -10953,7 +11041,7 @@ mod tests {
         let mut e = ext.clone();
         e.compute_claim.claim_digest = [0xAAu8; 32];
         assert!(
-            validate_poawx_block_receipts(&build(&e), height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&build(&e), height, Some(&parent), None).is_err(),
             "forged (tampered-digest) role claim must reject"
         );
 
@@ -10968,7 +11056,7 @@ mod tests {
             e.role_reward.compute_contributor_pkh,
         );
         assert!(
-            validate_poawx_block_receipts(&build(&e), height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&build(&e), height, Some(&parent), None).is_err(),
             "stale-assignment (wrong-prev) role claim must reject"
         );
 
@@ -10976,12 +11064,12 @@ mod tests {
         let fee_pkh = [0xFEu8; 20];
         let extf = p20_ext(net, height, &parent_hash, 200, fee_pkh);
         assert!(
-            validate_poawx_block_receipts(&build(&extf), height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&build(&extf), height, Some(&parent), None).is_err(),
             "third-party fee without mode must reject"
         );
         std::env::set_var("IRIUM_POAWX_THIRD_PARTY_FEE_ACTIVATION_HEIGHT", "1");
         std::env::set_var("IRIUM_POAWX_THIRD_PARTY_POOL_MODE", "1");
-        let rf = validate_poawx_block_receipts(&build(&extf), height, Some(&parent));
+        let rf = validate_poawx_block_receipts(&build(&extf), height, Some(&parent), None);
         assert!(
             rf.is_ok(),
             "third-party fee with gate+mode must be accepted: {:?}",
@@ -10991,7 +11079,7 @@ mod tests {
         // (21) fee over cap (201 bps) rejects even with mode enabled.
         let over = p20_ext(net, height, &parent_hash, 201, fee_pkh);
         assert!(
-            validate_poawx_block_receipts(&build(&over), height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&build(&over), height, Some(&parent), None).is_err(),
             "fee over cap must reject"
         );
         std::env::remove_var("IRIUM_POAWX_THIRD_PARTY_FEE_ACTIVATION_HEIGHT");
@@ -11048,7 +11136,7 @@ mod tests {
                 auxpow: None,
                 poawx_receipts: Some(vec![receipt]),
             };
-            let res = validate_poawx_block_receipts(&block, height, Some(&parent));
+            let res = validate_poawx_block_receipts(&block, height, Some(&parent), None);
             assert!(
                 res.is_err(),
                 "missing extension after activation must reject"
@@ -11062,7 +11150,7 @@ mod tests {
         std::env::set_var("IRIUM_NETWORK", "mainnet");
         assert!(!phase20_production_active(height), "below the mainnet activation height; NOT hard-off (see activation::mainnet_gate_truth)");
         assert!(
-            validate_poawx_block_receipts(&ok, height, Some(&parent)).is_ok(),
+            validate_poawx_block_receipts(&ok, height, Some(&parent), None).is_ok(),
             "mainnet must skip phase20 production enforcement"
         );
 
@@ -13553,12 +13641,12 @@ mod tests {
         ext.candidate_set = Some(cs);
 
         // Below activation: the legacy split, one output per admitted candidate.
-        let legacy = crate::chain::expected_shared_multi_role_payouts(&primary, &ext, reward, 9)
+        let legacy = crate::chain::expected_shared_multi_role_payouts(&primary, &ext, reward, 9, None)
             .expect("legacy");
         assert_eq!(legacy.len(), 12, "legacy rule pays every admitted candidate");
 
         // At/after activation: the blueprint shape, regardless of how many enrolled.
-        let bp = crate::chain::expected_shared_multi_role_payouts(&primary, &ext, reward, 10)
+        let bp = crate::chain::expected_shared_multi_role_payouts(&primary, &ext, reward, 10, None)
             .expect("blueprint");
         assert_eq!(
             bp.len(),
@@ -13584,7 +13672,7 @@ mod tests {
                 script_pubkey: crate::tx::p2pkh_script(pkh),
             })
             .collect();
-        validate_shared_multi_role_coinbase(&outs, &primary, &ext, reward, 10)
+        validate_shared_multi_role_coinbase(&outs, &primary, &ext, reward, 10, None)
             .expect("blueprint coinbase must validate at/after activation");
 
         // And the legacy 12-output coinbase must STILL validate below it, so the 13 historical
@@ -13596,7 +13684,7 @@ mod tests {
                 script_pubkey: crate::tx::p2pkh_script(pkh),
             })
             .collect();
-        validate_shared_multi_role_coinbase(&outs_legacy, &primary, &ext, reward, 9)
+        validate_shared_multi_role_coinbase(&outs_legacy, &primary, &ext, reward, 9, None)
             .expect("pre-activation history must remain valid");
 
         std::env::remove_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT");
@@ -13800,6 +13888,271 @@ mod tests {
         assert!(select_block_role_holders(0, 100, &seed, &[]).is_none());
     }
 
+    /// "10 CLI miners + 10 Core app miners + 10 pool miners = 30. Only 4 addresses get
+    /// selected, one role each, and only those 4 get paid for that block."
+    ///
+    /// The client a miner runs is irrelevant: every payout address is one entry in one
+    /// eligible set. This pins the whole rule end to end — draw four from thirty, pay exactly
+    /// those four, pay nobody else.
+    #[test]
+    fn thirty_miners_four_drawn_and_only_those_four_are_paid() {
+        let _env = crate::test_env::guard();
+        use crate::chain::expected_drawn_role_payouts;
+        use crate::poawx_proposer::select_block_role_holders;
+        use std::collections::HashSet;
+
+        // 30 miner addresses across the three clients. Nothing distinguishes them to the
+        // chain, which is the point.
+        let cli: Vec<[u8; 20]> = (1..=10u8).map(|n| [n; 20]).collect();
+        let core: Vec<[u8; 20]> = (11..=20u8).map(|n| [n; 20]).collect();
+        let pool: Vec<[u8; 20]> = (21..=30u8).map(|n| [n; 20]).collect();
+        let everyone: Vec<[u8; 20]> = cli
+            .iter()
+            .chain(core.iter())
+            .chain(pool.iter())
+            .copied()
+            .collect();
+        assert_eq!(everyone.len(), 30);
+
+        let seed = [0x5Au8; 32];
+        let reward = crate::chain::block_reward(1);
+        let drawn = select_block_role_holders(0, 100, &seed, &everyone).expect("draw");
+
+        // Four addresses, four roles, no address twice.
+        let winners: HashSet<[u8; 20]> = drawn.iter().map(|(p, _)| *p).collect();
+        assert_eq!(winners.len(), 4, "exactly four addresses out of thirty");
+        assert_eq!(
+            drawn.iter().map(|(_, r)| *r).collect::<HashSet<_>>().len(),
+            4,
+            "one role each: proposer, compute, verify, support"
+        );
+
+        // The payout pays those four and only those four.
+        let payouts = expected_drawn_role_payouts(&drawn, reward);
+        assert_eq!(payouts.len(), 4, "four outputs — no extra miners are paid");
+        assert_eq!(
+            payouts.iter().map(|(p, _)| *p).collect::<HashSet<_>>(),
+            winners,
+            "the paid addresses are exactly the drawn addresses"
+        );
+        assert_eq!(
+            payouts.iter().map(|(_, v)| *v).sum::<u64>(),
+            reward,
+            "the whole reward is distributed, no more and no less"
+        );
+        // 55 / 22 / 13 / 10, proposer first.
+        assert_eq!(payouts[0].1, 2_750_000_000, "proposer 55%");
+        assert_eq!(payouts[1].1, 1_100_000_000, "compute 22%");
+        assert_eq!(payouts[2].1, 650_000_000, "verify 13%");
+        assert_eq!(payouts[3].1, 500_000_000, "support 10%");
+
+        // The 26 miners who were not drawn earn nothing this block.
+        let unpaid: Vec<[u8; 20]> = everyone
+            .iter()
+            .filter(|p| !winners.contains(*p))
+            .copied()
+            .collect();
+        assert_eq!(unpaid.len(), 26);
+        for p in &unpaid {
+            assert!(
+                !payouts.iter().any(|(paid, _)| paid == p),
+                "a miner that was not drawn must not be paid"
+            );
+        }
+
+        // No client is favoured: across many heights, all three populations get drawn.
+        let mut from_cli = 0usize;
+        let mut from_core = 0usize;
+        let mut from_pool = 0usize;
+        for h in 100..400u64 {
+            for (p, _) in select_block_role_holders(0, h, &seed, &everyone).unwrap() {
+                if cli.contains(&p) {
+                    from_cli += 1;
+                } else if core.contains(&p) {
+                    from_core += 1;
+                } else if pool.contains(&p) {
+                    from_pool += 1;
+                }
+            }
+        }
+        assert!(
+            from_cli > 100 && from_core > 100 && from_pool > 100,
+            "CLI/Core/pool addresses must all be drawn — got {from_cli}/{from_core}/{from_pool}"
+        );
+    }
+
+    /// ENFORCEMENT: a block must pay exactly the four addresses the chain drew.
+    ///
+    /// Without this the draw is only a convention — a modified miner could publish a block
+    /// paying any four addresses it liked and every node would accept it, which would make
+    /// "only 4 of the 30 get paid, chosen by the chain" untrue in the one place it matters.
+    #[test]
+    fn a_block_paying_the_wrong_four_is_rejected() {
+        let _env = crate::test_env::guard();
+        use crate::chain::{
+            expected_drawn_role_payouts, validate_shared_multi_role_coinbase_for_test,
+        };
+        use crate::poawx_proposer::select_block_role_holders;
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT", "1");
+
+        let miners: Vec<[u8; 20]> = (1..=30u8).map(|n| [n; 20]).collect();
+        let seed = [0x5Au8; 32];
+        let reward = crate::chain::block_reward(1);
+        let height = 100u64;
+        let drawn = select_block_role_holders(0, height, &seed, &miners).expect("draw");
+
+        // The draw the node will check against — derived from its own eligible set, never
+        // from the submitted block, and now passed EXPLICITLY rather than through ambient
+        // state, so the call site shows exactly what the rule is applied against.
+
+        let outs = |list: &[([u8; 20], u64)]| -> Vec<crate::tx::TxOutput> {
+            list.iter()
+                .map(|(pkh, v)| crate::tx::TxOutput {
+                    value: *v,
+                    script_pubkey: crate::tx::p2pkh_script(pkh),
+                })
+                .collect()
+        };
+        let ext = rev_ext(Vec::new());
+        let primary = drawn[0].0;
+
+        // Honest block: pays exactly the drawn four.
+        let honest = expected_drawn_role_payouts(&drawn, reward);
+        validate_shared_multi_role_coinbase_for_test(
+            &outs(&honest), &primary, &ext, reward, height, Some(&drawn),
+        )
+        .expect("a block paying the chain's draw must be accepted");
+
+        // Cheating block: same amounts, but one payee swapped for a miner that was NOT drawn.
+        let mut cheat = honest.clone();
+        let undrawn = miners
+            .iter()
+            .find(|m| !drawn.iter().any(|(p, _)| p == *m))
+            .copied()
+            .expect("26 miners were not drawn");
+        cheat[1].0 = undrawn;
+        let err = validate_shared_multi_role_coinbase_for_test(
+            &outs(&cheat), &primary, &ext, reward, height, Some(&drawn),
+        )
+        .expect_err("paying an address the chain did not draw must be REJECTED");
+        assert!(!err.is_empty(), "rejection must say why");
+
+        // Cheating block: right addresses, wrong split (proposer pays itself more).
+        let mut skew = honest.clone();
+        skew[0].1 += 1;
+        skew[3].1 -= 1;
+        validate_shared_multi_role_coinbase_for_test(
+            &outs(&skew), &primary, &ext, reward, height, Some(&drawn),
+        )
+        .expect_err("re-weighting the 55/22/13/10 split must be REJECTED");
+
+        // Cheating block: a fifth payee appended.
+        let mut extra = honest.clone();
+        extra.push((undrawn, 0));
+        validate_shared_multi_role_coinbase_for_test(
+            &outs(&extra), &primary, &ext, reward, height, Some(&drawn),
+        )
+        .expect_err("paying a fifth miner must be REJECTED");
+
+        std::env::remove_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// PRIVATE SORTITION: nobody can work out who holds a role until that miner reveals it.
+    ///
+    /// The public draw was deterministic and verifiable but knowable by everyone the instant
+    /// the parent block landed — which hands an attacker the exact four addresses the next
+    /// block depends on, in time to knock them offline, and lets a selected miner sell its
+    /// slot in advance. Priority is now derived from the miner's ECVRF output, which needs its
+    /// SECRET key, so only that miner knows its own standing until it submits the work.
+    #[test]
+    fn role_priority_is_private_and_winners_are_four_distinct_miners() {
+        let _env = crate::test_env::guard();
+        use crate::poawx::{
+            ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+        };
+        use crate::poawx_proposer::{role_priority, select_role_holders_from_revealed};
+        use std::collections::HashSet;
+
+        // Priority is a pure function of the VRF OUTPUT — the value only the key holder can
+        // produce. Same output, same priority on every node; different output, different
+        // priority. An observer without the secret key has neither.
+        let out_a = [0x11u8; 32];
+        let out_b = [0x22u8; 32];
+        assert_eq!(role_priority(&out_a, 1), role_priority(&out_a, 1));
+        assert_ne!(
+            role_priority(&out_a, 1),
+            role_priority(&out_b, 1),
+            "a different VRF output must give a different standing"
+        );
+        assert_ne!(
+            role_priority(&out_a, 1),
+            role_priority(&out_a, 2),
+            "standing must be per-role, so winning one role does not imply winning another"
+        );
+
+        // 30 miners reveal for various roles; lowest priority takes each role.
+        let pkh = |n: u8| [n; 20];
+        let mut revealed: Vec<([u8; 20], u8, u64)> = Vec::new();
+        for n in 1..=30u8 {
+            let role = match n % 4 {
+                0 => 0,
+                1 => ROLE_COMPUTE_CONTRIBUTOR,
+                2 => ROLE_VERIFY_CONTRIBUTOR,
+                _ => ROLE_SUPPORT_CONTRIBUTOR,
+            };
+            revealed.push((pkh(n), role, (n as u64) * 1000));
+        }
+        let winners = select_role_holders_from_revealed(&revealed).expect("all roles revealed");
+        assert_eq!(winners.len(), 4);
+        assert_eq!(
+            winners.iter().map(|(p, _)| *p).collect::<HashSet<_>>().len(),
+            4,
+            "four distinct miners — one address, one role"
+        );
+        assert_eq!(
+            winners.iter().map(|(_, r)| *r).collect::<HashSet<_>>().len(),
+            4,
+            "proposer + compute + verify + support"
+        );
+        // Lowest revealed priority takes each role.
+        for (p, r) in &winners {
+            let best = revealed
+                .iter()
+                .filter(|(_, rr, _)| rr == r)
+                .min_by_key(|(_, _, pr)| *pr)
+                .unwrap();
+            assert_eq!(*p, best.0, "role {r} must go to the lowest revealed priority");
+        }
+
+        // A miner that would win two roles takes only the first; the second goes to the next
+        // best, so one address can never occupy two slots.
+        let greedy = vec![
+            (pkh(1), 0u8, 1u64),
+            (pkh(1), ROLE_COMPUTE_CONTRIBUTOR, 1u64),
+            (pkh(2), ROLE_COMPUTE_CONTRIBUTOR, 5u64),
+            (pkh(3), ROLE_VERIFY_CONTRIBUTOR, 5u64),
+            (pkh(4), ROLE_SUPPORT_CONTRIBUTOR, 5u64),
+        ];
+        let w = select_role_holders_from_revealed(&greedy).expect("all roles covered");
+        assert_eq!(w[0].0, pkh(1), "it wins proposer");
+        assert_eq!(w[1].0, pkh(2), "and compute passes to the next best, not back to it");
+        assert_eq!(w.iter().map(|(p, _)| *p).collect::<HashSet<_>>().len(), 4);
+
+        // A role with nobody revealed produces NO block rather than a silent reassignment.
+        let missing = vec![
+            (pkh(1), 0u8, 1u64),
+            (pkh(2), ROLE_COMPUTE_CONTRIBUTOR, 1u64),
+            (pkh(3), ROLE_VERIFY_CONTRIBUTOR, 1u64),
+        ];
+        assert!(
+            select_role_holders_from_revealed(&missing).is_none(),
+            "an unfilled role must not be quietly handed to someone"
+        );
+    }
+
     #[test]
     fn control_old_template_fn_gets_the_many_member_case_wrong() {
         // The function getblocktemplate used to call. Proves the bug was real: for two
@@ -13856,7 +14209,7 @@ mod tests {
             cand(ROLE_SUPPORT_CONTRIBUTOR, [0x51u8; 20]),
         ]);
         let got =
-            crate::chain::expected_shared_multi_role_payouts(&primary, &one, reward, 1).expect("one");
+            crate::chain::expected_shared_multi_role_payouts(&primary, &one, reward, 1, None).expect("one");
         assert_eq!(got.len(), 4, "one member per role => the 4-output shape");
         assert_eq!(got[0], (primary, 2_750_000_000), "PRIMARY 55%");
         assert_eq!(got[1], (compute, 1_100_000_000), "COMPUTE 22%");
@@ -13871,7 +14224,7 @@ mod tests {
             cand(ROLE_SUPPORT_CONTRIBUTOR, [0x22u8; 20]),
         ]);
         let got =
-            crate::chain::expected_shared_multi_role_payouts(&primary, &two, reward, 1).expect("two");
+            crate::chain::expected_shared_multi_role_payouts(&primary, &two, reward, 1, None).expect("two");
         assert_eq!(
             got.len(),
             6,
@@ -13888,7 +14241,7 @@ mod tests {
         // And the validator agrees with the list in both shapes: build the exact coinbase the
         // template advertises and check it passes.
         for ext in [&one, &two] {
-            let exp = crate::chain::expected_shared_multi_role_payouts(&primary, ext, reward, 1)
+            let exp = crate::chain::expected_shared_multi_role_payouts(&primary, ext, reward, 1, None)
                 .expect("expected payouts");
             let outs: Vec<crate::tx::TxOutput> = exp
                 .iter()
@@ -13897,7 +14250,7 @@ mod tests {
                     script_pubkey: crate::tx::p2pkh_script(pkh),
                 })
                 .collect();
-            validate_shared_multi_role_coinbase(&outs, &primary, ext, reward, 1)
+            validate_shared_multi_role_coinbase(&outs, &primary, ext, reward, 1, None)
                 .expect("a coinbase built from the advertised list must validate");
         }
     }
@@ -18645,7 +18998,7 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_TICKETS_REQUIRED");
         let ext_plain = p20_ext(net, height, &parent_hash, 0, [0u8; 20]);
         assert!(
-            validate_poawx_block_receipts(&build(&ext_plain), height, Some(&parent)).is_ok(),
+            validate_poawx_block_receipts(&build(&ext_plain), height, Some(&parent), None).is_ok(),
             "gate off: ticketless ext must accept"
         );
 
@@ -18654,21 +19007,21 @@ mod tests {
         std::env::set_var("IRIUM_POAWX_TICKETS_REQUIRED", "1");
         // (2) gate on + missing tickets -> reject.
         assert!(
-            validate_poawx_block_receipts(&build(&ext_plain), height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&build(&ext_plain), height, Some(&parent), None).is_err(),
             "gate on: missing ticket proofs must reject"
         );
         // (3) gate on + valid tickets -> accept.
         let mut ext_ok = ext_plain.clone();
         ext_ok.role_ticket_proofs = Some(tickets(100, PenaltyStatus::Clean.id()));
         assert!(
-            validate_poawx_block_receipts(&build(&ext_ok), height, Some(&parent)).is_ok(),
+            validate_poawx_block_receipts(&build(&ext_ok), height, Some(&parent), None).is_ok(),
             "gate on: valid tickets must accept"
         );
         // (5) gate on + expired ticket -> reject.
         let mut ext_exp = ext_plain.clone();
         ext_exp.role_ticket_proofs = Some(tickets(1, PenaltyStatus::Clean.id())); // expiry==height
         assert!(
-            validate_poawx_block_receipts(&build(&ext_exp), height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&build(&ext_exp), height, Some(&parent), None).is_err(),
             "gate on: expired ticket must reject"
         );
         // (12) penalty enforced + suspended VERIFY (high-trust) -> reject.
@@ -18677,13 +19030,13 @@ mod tests {
         let mut ext_susp = ext_plain.clone();
         ext_susp.role_ticket_proofs = Some(tickets(100, PenaltyStatus::SuspendedForEpoch.id()));
         assert!(
-            validate_poawx_block_receipts(&build(&ext_susp), height, Some(&parent)).is_err(),
+            validate_poawx_block_receipts(&build(&ext_susp), height, Some(&parent), None).is_err(),
             "penalty on: suspended high-trust role must reject"
         );
         // (13) penalty NOT enforced: same suspended ticket accepts.
         std::env::remove_var("IRIUM_POAWX_PENALTY_STATE_REQUIRED");
         assert!(
-            validate_poawx_block_receipts(&build(&ext_susp), height, Some(&parent)).is_ok(),
+            validate_poawx_block_receipts(&build(&ext_susp), height, Some(&parent), None).is_ok(),
             "penalty off: suspended ticket accepts (penalty not enforced)"
         );
 
@@ -18783,7 +19136,7 @@ mod tests {
         // (1) ext fee == delegation fee (150): accepted (mode-1 fee relaxation +
         // fee-aware multi-role coinbase + ext↔delegation binding all hold).
         let (ok_block, _r) = build(fee_bps);
-        let res = validate_poawx_block_receipts(&ok_block, height, Some(&parent));
+        let res = validate_poawx_block_receipts(&ok_block, height, Some(&parent), None);
         assert!(
             res.is_ok(),
             "mode-1 third-party fee block must be accepted: {res:?}"
@@ -18791,7 +19144,7 @@ mod tests {
 
         // (2) ext fee (100) != signed delegation fee (150): binding rejects.
         let (bad_block, _r) = build(100);
-        let res = validate_poawx_block_receipts(&bad_block, height, Some(&parent));
+        let res = validate_poawx_block_receipts(&bad_block, height, Some(&parent), None);
         assert!(res.is_err(), "ext/delegation fee mismatch must reject");
         assert!(
             res.unwrap_err().contains("extension fee terms"),
@@ -18801,7 +19154,7 @@ mod tests {
         // (3) same valid block rejects once the third-party gate is off (the
         // delegation fee>0 is no longer permitted).
         std::env::remove_var("IRIUM_POAWX_THIRD_PARTY_POOL_MODE");
-        let res = validate_poawx_block_receipts(&ok_block, height, Some(&parent));
+        let res = validate_poawx_block_receipts(&ok_block, height, Some(&parent), None);
         assert!(res.is_err(), "third-party fee rejected when mode off");
 
         std::env::remove_var("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT");
@@ -18958,22 +19311,22 @@ mod tests {
         // Block 1 = activation-height grace (a single special block).
         let block1 = build(1, &parent_hash, &mk_ext(1, &parent_hash, Some(root_for(1))));
         assert!(
-            validate_poawx_block_receipts(&block1, 1, Some(&parent)).is_ok(),
+            validate_poawx_block_receipts(&block1, 1, Some(&parent), None).is_ok(),
             "grace block: {:?}",
-            validate_poawx_block_receipts(&block1, 1, Some(&parent))
+            validate_poawx_block_receipts(&block1, 1, Some(&parent), None)
         );
         let h1 = block1.header.hash_for_height(1);
 
         // Fix A1 self-commit: block 2 commits the root of its OWN leaves; any miner
         // can extend block 1 (no dependency on block 1's miner).
         let block2 = build(2, &h1, &mk_ext(2, &h1, Some(root_for(2))));
-        let r2 = validate_poawx_block_receipts(&block2, 2, Some(&block1));
+        let r2 = validate_poawx_block_receipts(&block2, 2, Some(&block1), None);
         assert!(r2.is_ok(), "self-commit reveal: {:?}", r2);
 
         // Negative: block commits the WRONG own root => reject.
         let block2_w = build(2, &h1, &mk_ext(2, &h1, Some(root_for(99))));
         assert!(
-            validate_poawx_block_receipts(&block2_w, 2, Some(&block1)).is_err(),
+            validate_poawx_block_receipts(&block2_w, 2, Some(&block1), None).is_err(),
             "wrong own root rejects"
         );
 
@@ -18982,14 +19335,14 @@ mod tests {
         ext2_mut.compute_claim.commitment_hash = Some([0xEEu8; 32]);
         let block2_mut = build(2, &h1, &ext2_mut);
         assert!(
-            validate_poawx_block_receipts(&block2_mut, 2, Some(&block1)).is_err(),
+            validate_poawx_block_receipts(&block2_mut, 2, Some(&block1), None).is_err(),
             "mutated commitment rejects"
         );
 
         // Negative: block missing its OWN precommit_root (above activation) => reject.
         let block2_noown = build(2, &h1, &mk_ext(2, &h1, None));
         assert!(
-            validate_poawx_block_receipts(&block2_noown, 2, Some(&block1)).is_err(),
+            validate_poawx_block_receipts(&block2_noown, 2, Some(&block1), None).is_err(),
             "missing own precommit_root rejects"
         );
 
@@ -19032,7 +19385,7 @@ mod tests {
         {
             irx1_out.script_pubkey[10] ^= 0xff;
         }
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err(), "irx1 root mismatch must be rejected");
         assert!(
             result.unwrap_err().contains("mismatch"),
@@ -19104,7 +19457,7 @@ mod tests {
             auxpow: None,
             poawx_receipts: Some(vec![receipt]),
         };
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err(), "wrong nonce must be rejected");
         assert!(
             result.unwrap_err().contains("nonce"),
@@ -19136,7 +19489,7 @@ mod tests {
         receipt.worker_sig[32] ^= 0xff;
         // Rebuild block with matching irx1 root.
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err(), "corrupted sig must be rejected");
         std::env::remove_var("IRIUM_POAWX_ACTIVATION_HEIGHT");
         std::env::remove_var("IRIUM_POAWX_MODE");
@@ -19163,7 +19516,7 @@ mod tests {
         receipt.worker_pkh[0] ^= 0xff;
         // Rebuild block with matching irx1 root (root uses binary fields).
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err(), "spoofed pkh must be rejected");
         assert!(
             result.unwrap_err().contains("mismatch"),
@@ -19194,7 +19547,7 @@ mod tests {
         // Require 20 bits — near-zero chance the 1-bit solution also satisfies 20 bits.
         std::env::set_var("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "20");
         let block = make_valid_poawx_block(parent_hash, height, receipt, true);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(
             result.is_err(),
             "low-difficulty solution should be rejected at higher difficulty"
@@ -19222,7 +19575,7 @@ mod tests {
         let receipt = make_test_receipt(height, &sk, parent_hash, 1);
         // payout_ok=false → worker receives 0 (underpaid).
         let block = make_valid_poawx_block(parent_hash, height, receipt, false);
-        let result = validate_poawx_block_receipts(&block, height, Some(&parent));
+        let result = validate_poawx_block_receipts(&block, height, Some(&parent), None);
         assert!(result.is_err(), "missing worker payout must be rejected");
         assert!(
             result.unwrap_err().contains("underpaid"),

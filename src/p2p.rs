@@ -7066,7 +7066,7 @@ impl P2PNode {
                                     crate::poawx_role_bundle::RoleBundleV1::from_json(json_s)
                                         .ok()?;
                                 let net = crate::activation::network_id_byte();
-                                crate::poawx_role_bundle::global_role_bundle_pool()
+                                match crate::poawx_role_bundle::global_role_bundle_pool()
                                     .ingest_tiered(
                                         addr.ip(),
                                         bundle,
@@ -7074,8 +7074,27 @@ impl P2PNode {
                                         next_height,
                                         None,
                                         parent_hash,
-                                    )
-                                    .ok()
+                                    ) {
+                                    Ok(o) => Some(o),
+                                    Err(e) => {
+                                        // NEVER silent (CLAUDE.md 9). A gossiped bundle that
+                                        // arrives and is refused is indistinguishable from one
+                                        // that never arrived -- and those have completely
+                                        // different causes. Dropping this string cost exactly
+                                        // that answer on 2026-07-31: vps logged three
+                                        // `recv PoawxRoleBundle` from eu and pooled none, with
+                                        // nothing to say why. A contributor silently earning
+                                        // nothing is the whole failure class this gossip
+                                        // exists to remove.
+                                        eprintln!(
+                                            "[poawx] role bundle from {} REJECTED at height {}: {}",
+                                            addr.ip(),
+                                            next_height,
+                                            e
+                                        );
+                                        None
+                                    }
+                                }
                             })();
                             // Relay only genuinely-new bundles. A duplicate means the flood
                             // already reached us by another path; rebroadcasting it would

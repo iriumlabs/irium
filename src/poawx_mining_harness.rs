@@ -1705,6 +1705,19 @@ fn build_all_gates_block_with(
     // Same dominance view the candidate weights are validated against (phase21d).
     let dw_pool = |pkh: &[u8; 20]| dom_in.weight(DOMINANCE_BASE_WORK_SCORE, pkh, height);
     let mut folded_any = false;
+    // Foreign candidates are NOT folded in verbatim. A `RoleCandidate` carries the
+    // `dominance_weight` computed against the dominance view of the node it was built on, and
+    // `phase21d` validates that weight against the LOCAL view. Cloning a gossiped candidate
+    // therefore embeds another node's number and the block is rejected:
+    //   phase21d: candidate dominance weight mismatch got 680 expected 956
+    // which halted mainnet at 64,923 on 2026-07-31 as soon as bundle gossip started
+    // delivering eu's candidates to vps. The bundle is valid where it was built and invalid
+    // where it lands.
+    //
+    // Dropping the clone is lossless: `can_pay` only passes a candidate that HAS a collected
+    // bundle here, and the `col.all` fold below pushes a candidate rebuilt from that bundle
+    // with `dw_pool` -- this node's own weight. So every payable foreign participant still
+    // reaches the candidate set, with a weight this node's validator agrees with.
     for c in ids
         .extra_support_candidates
         .iter()
@@ -1712,7 +1725,7 @@ fn build_all_gates_block_with(
         .chain(ids.extra_verify_candidates.iter())
     {
         if can_pay(c) {
-            cs.push(c.clone());
+            // Counted, not pushed: the rebuilt candidate comes from the bundle fold.
             folded_any = true;
         }
     }

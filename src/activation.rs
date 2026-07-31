@@ -302,11 +302,16 @@ pub const MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT: Option<u64> = Some(62236u
 /// so N enrolled workers produce N outputs per role. `chain::four_role_payout_active` gates
 /// the correction.
 ///
-/// **`None` deliberately, and it must be armed at a FUTURE height only.** Heights
-/// 64,852–64,864 carry 6-payee blocks produced under the legacy rule; arming this at or
-/// below them would make the node reject its own chain on restart — the class of failure
-/// recorded in CLAUDE.md §12. Choosing the height is an operator decision.
-pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = None;
+/// **ARMED at 64,940** (operator decision, 2026-07-31): tip was 64,920 and stopped, so this
+/// is 20 blocks ahead and cannot be reached until mining resumes. Safely ABOVE 64,852–64,864,
+/// which carry 6-payee blocks under the legacy rule — arming at or below those would make a
+/// node reject its own chain on restart (CLAUDE.md §12).
+///
+/// ⚠️ BOTH hosts must run a binary carrying this constant BEFORE the chain reaches 64,940.
+/// The old rule splits VERIFY/SUPPORT across every admitted candidate; the new rule pays the
+/// four drawn holders. A node on the old binary would reject the other's blocks at the
+/// boundary, which is a fork, not a degradation.
+pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = Some(64_940u64);
 // ══════════════════════════════════════════════════════════════════════════════
 
 /// Activation binary (v1.9.127): mainnet activation height for delegated (mode-1)

@@ -14270,6 +14270,221 @@ mod tests {
         );
     }
 
+    /// CLAUDE.md §12: a mainnet-only branch must be exercised in a network_id=0 context
+    /// BEFORE it is armed. A green devnet suite runs at network_id != 0 and says nothing
+    /// about the branch actually being turned on -- that is precisely how the 2026-07-23
+    /// activation halted the chain (enforce-ON, validate-OFF, all 959 tests green).
+    ///
+    /// Pins the 64,940 boundary in mainnet context: off below, on at and above, the payout
+    /// shape both sides compute, and that the validator ACCEPTS a coinbase built from it.
+    #[test]
+    fn four_role_payout_boundary_at_64940_in_mainnet_context() {
+        let _env = crate::test_env::guard();
+        use crate::chain::{
+            expected_drawn_role_payouts, four_role_payout_active,
+            validate_shared_multi_role_coinbase_for_test,
+        };
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        // MAINNET context: no IRIUM_NETWORK => network_id_byte() == 0.
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::remove_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT");
+        assert_eq!(
+            crate::activation::network_id_byte(),
+            0,
+            "this test is meaningless unless it runs as mainnet"
+        );
+
+        // The boundary itself. 64,940 was chosen 20 blocks above a stopped tip of 64,920 and
+        // must sit ABOVE 64,852-64,864, which carry 6-payee blocks under the legacy rule.
+        assert!(
+            !four_role_payout_active(64_864),
+            "must stay OFF over the 6-payee blocks, or a node rejects its own chain on restart"
+        );
+        assert!(!four_role_payout_active(64_939), "off one block before");
+        assert!(four_role_payout_active(64_940), "on at the activation height");
+        assert!(four_role_payout_active(64_941), "and after");
+
+        // The armed branch, exercised: four drawn holders -> four outputs, 55/22/13/10.
+        let drawn: [([u8; 20], u8); 4] = [
+            ([0xA1u8; 20], 0),
+            ([0xC0u8; 20], crate::poawx::ROLE_COMPUTE_CONTRIBUTOR),
+            ([0x41u8; 20], crate::poawx::ROLE_VERIFY_CONTRIBUTOR),
+            ([0x51u8; 20], crate::poawx::ROLE_SUPPORT_CONTRIBUTOR),
+        ];
+        let reward = crate::chain::block_reward(64_940);
+        let payouts = expected_drawn_role_payouts(&drawn, reward);
+        assert_eq!(payouts.len(), 4, "four outputs at the armed height");
+        assert_eq!(
+            payouts.iter().map(|(_, v)| *v).sum::<u64>(),
+            reward,
+            "conservation at the real mainnet subsidy"
+        );
+        assert_eq!(
+            payouts.iter().map(|(p, _)| *p).collect::<std::collections::HashSet<_>>().len(),
+            4,
+            "four distinct payees"
+        );
+
+        // ENFORCE-ON / VALIDATE-OFF is the trap. Build the exact coinbase the armed rule
+        // requires and confirm the validator ACCEPTS it in mainnet context -- if validation
+        // were hard-off or disagreed, this is where the chain would halt at 64,940.
+        let ext = rev_ext(Vec::new());
+        let outs: Vec<crate::tx::TxOutput> = payouts
+            .iter()
+            .map(|(pkh, v)| crate::tx::TxOutput {
+                value: *v,
+                script_pubkey: crate::tx::p2pkh_script(pkh),
+            })
+            .collect();
+        validate_shared_multi_role_coinbase_for_test(
+            &outs,
+            &drawn[0].0,
+            &ext,
+            reward,
+            64_940,
+            Some(&drawn),
+        )
+        .expect("the armed rule must ACCEPT the coinbase it requires -- else 64,940 halts");
+    }
+
+    /// A gossiped candidate must never carry ANOTHER node's dominance weight into the block.
+    ///
+    /// `RoleCandidate.dominance_weight` is computed against the dominance view of the node the
+    /// worker enrolled into. `phase21d` validates it against the LOCAL view, so folding a
+    /// foreign candidate in verbatim embeds a number this node disagrees with and every block
+    /// is rejected:
+    ///   `phase21d: candidate dominance weight mismatch got 680 expected 956`
+    /// That halted mainnet at 64,923 on 2026-07-31, minutes after bundle gossip began
+    /// delivering eu's candidates to vps.
+    #[test]
+    fn a_foreign_candidates_dominance_weight_never_enters_the_block() {
+        let _env = crate::test_env::guard();
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_collected_poawx_block_with_parent, simulate_role_worker_bundle,
+            CollectedArtifacts,
+        };
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = c3_gate_set();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let seed1 = expected_epoch_seed(1, genesis_hash, None);
+
+        // The ORIGIN node's dominance view: skewed, so its weights differ from ours.
+        let mut origin_view = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        let sk = k256::ecdsa::SigningKey::from_bytes(&[0x71u8; 32].into()).unwrap();
+        let wpkh = hash160(sk.verifying_key().to_encoded_point(true).as_bytes());
+        origin_view.apply_event(
+            wpkh,
+            crate::poawx_dominance::RoleRewardKind::Primary,
+            5_000_000_000,
+            1,
+        );
+        // OUR view: empty, so we compute a different weight for the same worker.
+        let local_view = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        assert_ne!(
+            origin_view.weight(
+                crate::poawx_dominance::DOMINANCE_BASE_WORK_SCORE,
+                &wpkh,
+                1
+            ),
+            local_view.weight(
+                crate::poawx_dominance::DOMINANCE_BASE_WORK_SCORE,
+                &wpkh,
+                1
+            ),
+            "the two views must disagree, or this test proves nothing"
+        );
+
+        let bundle = simulate_role_worker_bundle(
+            &[0x71u8; 32],
+            net,
+            1,
+            crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+            [0x11u8; 32],
+            seed1,
+            genesis_hash,
+            &local_view,
+            crate::poawx_puzzle::default_profile(),
+        )
+        .expect("bundle");
+
+        // What a gossiped candidate WOULD have carried: the origin's weight. The fix stops
+        // this value reaching the candidate set; the bundle fold rebuilds from local view.
+        let foreign = crate::poawx_candidate::RoleCandidate::from_assignment_v2(
+            &bundle.assignment_proof,
+            bundle.ticket_proof.penalty_status,
+            origin_view.weight(
+                crate::poawx_dominance::DOMINANCE_BASE_WORK_SCORE,
+                &wpkh,
+                1,
+            ),
+            [crate::poawx::ROLE_COMPUTE_CONTRIBUTOR; 32],
+        );
+
+        let collected = CollectedArtifacts {
+            compute: Some(bundle.clone()),
+            all: vec![bundle],
+            ..Default::default()
+        };
+        let pc = seed_components_from_block(st.chain.last());
+        let bits = st.target_for_height(1).bits;
+        let proof = build_collected_poawx_block_with_parent(
+            &[0x4Du8; 32],
+            collected,
+            net,
+            1,
+            genesis_hash,
+            None,
+            bits,
+            genesis.header.time + 1,
+            1,
+            pc,
+            Some(&local_view),
+        )
+        .expect("block builds");
+
+        // No candidate in the block may carry the origin's weight.
+        let ext = proof.block.poawx_receipts.as_ref().unwrap()[0]
+            .phase20_ext
+            .as_ref()
+            .unwrap();
+        let cs = ext.candidate_set.as_ref().expect("candidate set");
+        let local_w = local_view.weight(
+            crate::poawx_dominance::DOMINANCE_BASE_WORK_SCORE,
+            &wpkh,
+            1,
+        );
+        for c in cs.candidates.iter().filter(|c| c.solver_pkh == wpkh) {
+            assert_eq!(
+                c.dominance_weight, local_w,
+                "every candidate must carry THIS node's weight, not the origin's"
+            );
+        }
+        assert_ne!(
+            foreign.dominance_weight, local_w,
+            "sanity: the foreign candidate really did carry a different weight"
+        );
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     #[test]
     fn control_old_template_fn_gets_the_many_member_case_wrong() {
         // The function getblocktemplate used to call. Proves the bug was real: for two

@@ -2381,9 +2381,20 @@ impl ChainState {
                         self.dominance
                             .weight(DOMINANCE_BASE_WORK_SCORE, &cand.solver_pkh, height);
                     if cand.dominance_weight != expect {
+                        // Name the INPUTS, not just the two numbers. `got != expected` alone
+                        // cost two mainnet halts (64,923 and 64,941) and three wrong fixes:
+                        // the round trip is faithful and the builder does use the node's
+                        // snapshot, so the divergence is in WHICH pkh/height/state each side
+                        // fed in -- and none of that was printed.
                         return Err(format!(
-                            "phase21d: candidate dominance weight mismatch got {} expected {}",
-                            cand.dominance_weight, expect
+                            "phase21d: candidate dominance weight mismatch got {} expected {}                              (role={} solver={} height={} dom_entries={} dom_digest={})",
+                            cand.dominance_weight,
+                            expect,
+                            cand.role_id,
+                            hex::encode(cand.solver_pkh),
+                            height,
+                            self.dominance.to_bytes().len(),
+                            hex::encode(&sha256d(&self.dominance.to_bytes())[..8]),
                         ));
                     }
                 }
@@ -14483,6 +14494,56 @@ mod tests {
             std::env::remove_var(k);
         }
         std::env::remove_var("IRIUM_NETWORK");
+    }
+
+    /// MEASUREMENT, not inference. The validator computes the weight from the node's own
+    /// `PersistentDominance`; the miner computes it from `to_bytes()` shipped over
+    /// `/rpc/poawx_dominance` and rebuilt with `from_bytes()`. Same object, same pkh, same
+    /// height -- yet mainnet saw a DETERMINISTIC `got 680 expected 956` at 64,923 and 64,941.
+    ///
+    /// If the round trip is not faithful, that is the whole bug.
+    #[test]
+    fn dominance_round_trip_preserves_every_weight() {
+        let _env = crate::test_env::guard();
+        use crate::poawx_dominance::{PersistentDominance, RoleRewardKind, DOMINANCE_BASE_WORK_SCORE};
+
+        let mut d = PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        // Realistic shape: several identities paid across several heights and roles, exactly
+        // what a live chain accumulates once fan-out starts paying distinct participants.
+        let pkhs: Vec<[u8; 20]> = (1..=6u8).map(|n| [n; 20]).collect();
+        for h in 1..=40u64 {
+            for (i, p) in pkhs.iter().enumerate() {
+                let kind = match (h as usize + i) % 4 {
+                    0 => RoleRewardKind::Primary,
+                    1 => RoleRewardKind::Compute,
+                    2 => RoleRewardKind::Verify,
+                    _ => RoleRewardKind::Support,
+                };
+                d.apply_event(*p, kind, 1_100_000_000, h);
+            }
+        }
+
+        let rebuilt = PersistentDominance::from_bytes(&d.to_bytes())
+            .expect("the miner must be able to rebuild what the node serves");
+
+        // Every identity, at several heights -- including the height the block is built for.
+        let mut diffs = Vec::new();
+        for p in &pkhs {
+            for h in [40u64, 41, 42, 64_923, 64_941] {
+                let orig = d.weight(DOMINANCE_BASE_WORK_SCORE, p, h);
+                let rt = rebuilt.weight(DOMINANCE_BASE_WORK_SCORE, p, h);
+                if orig != rt {
+                    diffs.push((hex::encode(p), h, orig, rt));
+                }
+            }
+        }
+        assert!(
+            diffs.is_empty(),
+            "to_bytes/from_bytes does NOT preserve weights -- this is the mismatch: {diffs:?}"
+        );
     }
 
     #[test]

@@ -1703,7 +1703,28 @@ fn build_all_gates_block_with(
     };
 
     // Same dominance view the candidate weights are validated against (phase21d).
-    let dw_pool = |pkh: &[u8; 20]| dom_in.weight(DOMINANCE_BASE_WORK_SCORE, pkh, height);
+    // Print the builder's side of the same computation the validator checks, with the same
+    // identifying inputs, so the two lines can be diffed directly instead of guessed at.
+    if std::env::var("IRIUM_POAWX_LOG_DOMINANCE").map(|v| v.trim() == "1").unwrap_or(false) {
+        eprintln!(
+            "[poawx] builder dominance: height={} dom_entries={} dom_digest={}",
+            height,
+            dom_in.to_bytes().len(),
+            hex::encode(&crate::pow::sha256d(&dom_in.to_bytes())[..8]),
+        );
+    }
+    let dw_pool = |pkh: &[u8; 20]| {
+        let w = dom_in.weight(DOMINANCE_BASE_WORK_SCORE, pkh, height);
+        if std::env::var("IRIUM_POAWX_LOG_DOMINANCE").map(|v| v.trim() == "1").unwrap_or(false) {
+            eprintln!(
+                "[poawx] builder weight: solver={} height={} weight={}",
+                hex::encode(pkh),
+                height,
+                w
+            );
+        }
+        w
+    };
     let mut folded_any = false;
     // Foreign candidates are NOT folded in verbatim. A `RoleCandidate` carries the
     // `dominance_weight` computed against the dominance view of the node it was built on, and

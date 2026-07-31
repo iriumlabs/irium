@@ -48,6 +48,11 @@ mod poawx_committed_admission;
 mod poawx_dominance;
 mod poawx_finality;
 mod poawx_gossip;
+// main.rs re-includes the same mod tree as lib.rs (see the header). This one was missing,
+// so anything under `#[cfg(test)]` in a shared module that referenced
+// `crate::poawx_miner_client` compiled under `cargo test --lib` and failed under
+// `cargo test --all`, which is what CI runs.
+mod poawx_miner_client;
 mod poawx_mining_harness;
 mod poawx_penalty;
 mod poawx_proposer;

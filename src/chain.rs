@@ -13639,6 +13639,152 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
+    /// Regression test for the mainnet deadlock at height 64,811 (2026-07-31).
+    ///
+    /// When more than one role worker enrolls for the SAME role, only one can win it; the
+    /// rest are folded into the candidate set as PAID NON-WINNERS, and consensus then
+    /// demands a PLA1 entry -- VRF assignment proof AND sybil ticket -- for each
+    /// (`validate_pool_member_admission`). The builder folded those candidates in but
+    /// carried neither artifact: `ids.pool_assignment_proofs` was only ever written by the
+    /// gossip path and `ids.pool_tickets` was written by NO path at all. So the section came
+    /// out `None` and every block was rejected with
+    ///   `pool-admission: paid pool member present but no PLA1 section`
+    ///
+    /// It stayed invisible while exactly one bundle per role enrolled -- then each role's
+    /// only candidate IS the winner, no non-winner exists, and the check never fires. The
+    /// second producer's workers were all it took. The deadlock was terminal rather than
+    /// self-clearing because the gossip cache is keyed on target_height, so it could not age
+    /// out while the height was stuck.
+    ///
+    /// Two bundles for one role is therefore the minimum shape that reproduces it, and the
+    /// assertion that matters is that the node ACCEPTS the block -- a built block proves
+    /// nothing here, since the broken builder built happily every time.
+    #[test]
+    fn two_bundles_for_one_role_carry_pla1_for_the_paid_non_winner() {
+        let _env = crate::test_env::guard();
+        use crate::poawx_committed_admission::{expected_epoch_seed, seed_components_from_block};
+        use crate::poawx_mining_harness::{
+            build_collected_poawx_block_with_parent, simulate_role_worker_bundle,
+            CollectedArtifacts,
+        };
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = c3_gate_set();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+        // The gate that was live on mainnet at the halt (>= 62,236 via
+        // MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT). Without it the validator never runs
+        // and this test cannot fail.
+        std::env::set_var("IRIUM_POAWX_POOL_ADMISSION_ACTIVATION_HEIGHT", "1");
+
+        let worker = [0x4Du8; 32];
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let seed1 = expected_epoch_seed(1, genesis_hash, None);
+        let profile = crate::poawx_puzzle::default_profile();
+        let dom = crate::poawx_dominance::PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+
+        // TWO distinct workers enrol for SUPPORT. One wins; the other is a paid non-winner.
+        let mk = |secret: &[u8; 32], role: u8| {
+            simulate_role_worker_bundle(
+                secret,
+                net,
+                1,
+                role,
+                [0x11u8; 32],
+                seed1,
+                genesis_hash,
+                &dom,
+                profile,
+            )
+            .expect("role worker bundle")
+        };
+        let sup_a = mk(&[0x71u8; 32], crate::poawx::ROLE_SUPPORT_CONTRIBUTOR);
+        let sup_b = mk(&[0x72u8; 32], crate::poawx::ROLE_SUPPORT_CONTRIBUTOR);
+        assert_ne!(
+            sup_a.solver_pkh, sup_b.solver_pkh,
+            "the two enrolled support workers must be distinct identities"
+        );
+
+        let collected = CollectedArtifacts {
+            support: Some(sup_a.clone()),
+            all: vec![sup_a.clone(), sup_b.clone()],
+            ..Default::default()
+        };
+
+        let pc = seed_components_from_block(st.chain.last());
+        let bits = st.target_for_height(1).bits;
+        let proof = build_collected_poawx_block_with_parent(
+            &worker,
+            collected,
+            net,
+            1,
+            genesis_hash,
+            None,
+            bits,
+            genesis.header.time + 1,
+            1,
+            pc,
+            Some(&dom),
+        )
+        .expect("block builds with two bundles competing for one role");
+
+        // The paid non-winner must be described by a PLA1 entry carrying BOTH artifacts.
+        let ext = proof.block.poawx_receipts.as_ref().expect("receipts")[0]
+            .phase20_ext
+            .as_ref()
+            .expect("phase20 ext");
+        let winner = ext.role_reward.support_contributor_pkh;
+        let loser = if winner == sup_a.solver_pkh {
+            sup_b.solver_pkh
+        } else {
+            sup_a.solver_pkh
+        };
+        let pa = ext
+            .pool_admission
+            .as_ref()
+            .expect("PLA1 section must be present when a paid non-winner is in the set");
+        assert!(
+            pa.assignment_proofs
+                .iter()
+                .any(|p| p.role_id == crate::poawx::ROLE_SUPPORT_CONTRIBUTOR
+                    && p.solver_pkh == loser),
+            "PLA1 must carry the non-winner's VRF assignment proof"
+        );
+        assert!(
+            pa.tickets
+                .iter()
+                .any(|t| t.role_id == crate::poawx::ROLE_SUPPORT_CONTRIBUTOR
+                    && t.miner_pkh == loser),
+            "PLA1 must carry the non-winner's sybil ticket -- the half no code path ever wrote"
+        );
+
+        // The assertion that actually failed on mainnet: the NODE has to accept it.
+        let cache = crate::poawx_admission::global_admission_cache();
+        cache.clear();
+        cache.set_tip(1);
+        for a in &proof.admissions {
+            let _ = cache.ingest_bytes(a);
+        }
+        let mut st = st;
+        st.connect_block(proof.block)
+            .expect("a block with two bundles for one role must validate, not deadlock");
+        assert_eq!(st.tip_height(), 1);
+
+        std::env::remove_var("IRIUM_POAWX_POOL_ADMISSION_ACTIVATION_HEIGHT");
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     /// The LIVE-path counterpart of the control above, and the regression test for the
     /// mainnet producer halt at height 64,560.
     ///

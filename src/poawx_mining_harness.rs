@@ -1702,6 +1702,21 @@ fn build_all_gates_block_with(
     // the winners and a validator cannot tell who else was in contention, so it can only check
     // the miner against the miner's own shortlist. `sort_canonical` dedups, so re-adding the
     // winners is harmless.
+    //
+    // Folding a candidate is a PROMISE: consensus requires a PLA1 entry -- a VRF assignment
+    // proof AND a sybil ticket -- for every PAID non-winner VERIFY/SUPPORT candidate in the
+    // set (chain.rs, `pool-admission: paid pool member present but no PLA1 section`). The
+    // fold above carried neither, so as soon as a second producer's role workers enrolled
+    // here, every block this builder produced was rejected and the chain DEADLOCKED at
+    // 64,811 on 2026-07-31 -- terminally, because the gossip cache is keyed on target_height
+    // and so could not age out while the height was stuck.
+    //
+    // Each enrolled bundle already carries exactly the two artifacts PLA1 needs, so collect
+    // them alongside the candidate. Promise and proof are now assembled together and cannot
+    // drift apart.
+    let mut pla_proofs: Vec<crate::poawx_candidate::AssignmentProofV2> =
+        ids.pool_assignment_proofs.clone();
+    let mut pla_tickets: Vec<crate::poawx_ticket::TicketProof> = ids.pool_tickets.clone();
     if let Some(col) = collected {
         for b in &col.all {
             let dw = dw_pool(&b.solver_pkh);
@@ -1711,11 +1726,54 @@ fn build_all_gates_block_with(
                 dw,
                 [b.role_id; 32],
             ));
+            pla_proofs.push(b.assignment_proof.clone());
+            pla_tickets.push(b.ticket_proof.clone());
             folded_any = true;
         }
     }
     if folded_any {
         cs.sort_canonical();
+    }
+    // Fail closed on the promise above. A candidate we cannot prove is not admissible, so
+    // drop it rather than emit a block the node is guaranteed to reject: an unpayable
+    // candidate costs a missing name in the contention record, an unprovable one costs
+    // every block. Gossip-only extras are the realistic case -- a `CandidateAdmissionV1`
+    // carries no sybil ticket at all, so a candidate gathered from gossip alone can NEVER
+    // satisfy PLA1 no matter what the builder does.
+    //
+    // Never silent (CLAUDE.md 9): a dropped candidate changes who appears to have been in
+    // contention, and the 64,811 halt was expensive precisely because the builder failed
+    // with nothing to read locally.
+    if crate::chain::pool_admission_enforced(height) {
+        let provable = |c: &crate::poawx_candidate::RoleCandidate| -> bool {
+            pla_proofs
+                .iter()
+                .any(|p| p.role_id == c.role_id && p.solver_pkh == c.solver_pkh)
+                && pla_tickets
+                    .iter()
+                    .any(|t| t.role_id == c.role_id && t.miner_pkh == c.solver_pkh)
+        };
+        let mut dropped: Vec<(u8, [u8; 20])> = Vec::new();
+        cs.candidates.retain(|c| {
+            let needs_pla1 = (c.role_id == ROLE_VERIFY_CONTRIBUTOR
+                && c.solver_pkh != verify_solver)
+                || (c.role_id == ROLE_SUPPORT_CONTRIBUTOR && c.solver_pkh != support_solver);
+            if needs_pla1 && !provable(c) {
+                dropped.push((c.role_id, c.solver_pkh));
+                false
+            } else {
+                true
+            }
+        });
+        for (role, pkh) in &dropped {
+            eprintln!(
+                "[poawx] pool-admission: dropping unprovable non-winner candidate role={} \
+                 solver={} (no VRF proof + sybil ticket available); it stays out of the \
+                 candidate set so the block remains valid",
+                role,
+                hex::encode(pkh)
+            );
+        }
     }
     let dw_in = |pkh: &[u8; 20]| dom_in.weight(DOMINANCE_BASE_WORK_SCORE, pkh, height);
 
@@ -2035,16 +2093,22 @@ fn build_all_gates_block_with(
     // Step 3: carry the non-winner pool members' VRF proofs + sybil tickets when the
     // pool-admission gate is active, so the node can verify every PAID fan-out member is
     // a genuinely VRF-assigned, sybil-ticketed participant. Gate off => None (unchanged).
-    let pool_admission = if crate::chain::pool_admission_enforced(height)
-        && !ids.pool_assignment_proofs.is_empty()
-    {
-        Some(crate::poawx::PoolAdmissionSection {
-            assignment_proofs: ids.pool_assignment_proofs.clone(),
-            tickets: ids.pool_tickets.clone(),
-        })
-    } else {
-        None
-    };
+    //
+    // Sourced from `pla_proofs`/`pla_tickets`, which are gathered at the moment each
+    // candidate is folded into the set -- NOT from `ids` alone. Reading `ids` here was the
+    // 64,811 halt: the enrolled-bundle fold added paid non-winners to the candidate set
+    // while `ids.pool_assignment_proofs` stayed empty (only the gossip path ever wrote it)
+    // and `ids.pool_tickets` was never written by ANY path, so the section came out `None`
+    // and consensus rejected every block.
+    let pool_admission =
+        if crate::chain::pool_admission_enforced(height) && !pla_proofs.is_empty() {
+            Some(crate::poawx::PoolAdmissionSection {
+                assignment_proofs: pla_proofs.clone(),
+                tickets: pla_tickets.clone(),
+            })
+        } else {
+            None
+        };
     let ext = Phase20ReceiptExt {
         role_reward: RoleReward {
             compute_contributor_pkh: compute_solver,

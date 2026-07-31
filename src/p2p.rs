@@ -7053,18 +7053,57 @@ impl P2PNode {
                         // OUR view of the tip. Only a bundle that is genuinely new to this
                         // node is relayed, so the flood terminates.
                         if let Ok(p) = crate::protocol::PoawxRoleBundlePayload::from_message(&msg) {
+                            // EVERY exit here logs. Fixing only the ingest arm was not enough:
+                            // a bundle dropped at the parse or chain-handle step still vanished
+                            // with no trace, and on 2026-07-31 eu logged three
+                            // `recv PoawxRoleBundle` from vps, pooled none, and printed no
+                            // reason -- because the drop happened BEFORE the one exit that had
+                            // been given a message. Four ways to fail silently, one fixed, is
+                            // not a fixed function.
                             let ingested = (|| {
-                                let chain_arc = chain_for_sync.as_ref()?;
+                                let chain_arc = match chain_for_sync.as_ref() {
+                                    Some(c) => c,
+                                    None => {
+                                        eprintln!(
+                                            "[poawx] role bundle from {}: dropped, no chain handle \
+                                             on this connection (cannot derive the tip to validate \
+                                             against)",
+                                            addr.ip()
+                                        );
+                                        return None;
+                                    }
+                                };
                                 let (next_height, parent_hash) = {
                                     let g = chain_arc.lock().unwrap_or_else(|e| e.into_inner());
                                     let tip = g.tip_height();
                                     let ph = g.chain.last().map(|b| b.header.hash_for_height(tip));
                                     (tip.saturating_add(1), ph)
                                 };
-                                let json_s = std::str::from_utf8(&p.bundle_bytes).ok()?;
+                                let json_s = match std::str::from_utf8(&p.bundle_bytes) {
+                                    Ok(v) => v,
+                                    Err(e) => {
+                                        eprintln!(
+                                            "[poawx] role bundle from {}: dropped, payload is not \
+                                             UTF-8: {e}",
+                                            addr.ip()
+                                        );
+                                        return None;
+                                    }
+                                };
                                 let bundle =
-                                    crate::poawx_role_bundle::RoleBundleV1::from_json(json_s)
-                                        .ok()?;
+                                    match crate::poawx_role_bundle::RoleBundleV1::from_json(json_s)
+                                    {
+                                        Ok(b) => b,
+                                        Err(e) => {
+                                            eprintln!(
+                                                "[poawx] role bundle from {} at height {}: dropped, \
+                                                 cannot parse: {e}",
+                                                addr.ip(),
+                                                next_height
+                                            );
+                                            return None;
+                                        }
+                                    };
                                 let net = crate::activation::network_id_byte();
                                 match crate::poawx_role_bundle::global_role_bundle_pool()
                                     .ingest_tiered(

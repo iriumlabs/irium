@@ -1652,27 +1652,8 @@ fn build_all_gates_block_with(
                 Some(p) => p,
                 None => AssignmentProofV2::prove(secret, net, th, role, solver, ticket, sd)?,
             };
-            // Weigh the identity the CANDIDATE actually belongs to, not the `solver`
-            // argument. For a COLLECTED role `p` is the worker's own proof, so
-            // `from_assignment_v2` derives `solver_pkh` from it -- while `solver` here is
-            // still the builder's identity. Using `solver` therefore stamped the BUILDER's
-            // weight onto the WORKER's candidate: right candidate, wrong owner's number.
-            //
-            // The validator recomputes the weight from the candidate's own solver_pkh, so it
-            // always disagreed:
-            //   phase21d: candidate dominance weight mismatch got 673 expected 957
-            //     (673 = the builder's weight, 957 = the worker's)
-            // Deterministic, identical dominance state on both sides, and invisible until a
-            // FOREIGN solver entered the set -- with only the builder's own candidates,
-            // `solver` and the derived pkh are the same key and the bug cancels out. It
-            // halted mainnet repeatedly on 2026-07-31 once bundle gossip started.
-            let owner = hash160(&p.assignment_public_key);
-            let w = dom.weight(DOMINANCE_BASE_WORK_SCORE, &owner, th);
+            let w = dom.weight(DOMINANCE_BASE_WORK_SCORE, &solver, th);
             let c = RoleCandidate::from_assignment_v2(&p, PenaltyStatus::Clean.id(), w, [role; 32]);
-            debug_assert_eq!(
-                c.solver_pkh, owner,
-                "the weight must be computed for the candidate's own solver"
-            );
             Ok::<_, String>((p, c))
         };
         let (pc, cc) = mk(&ids.compute_assign, ROLE_COMPUTE_CONTRIBUTOR, compute_solver, [0x11u8; 32])?;

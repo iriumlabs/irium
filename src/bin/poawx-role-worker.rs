@@ -24,6 +24,7 @@
 //!      IRIUM_NETWORK, IRIUM_POAWX_ROLE_WORKER_SUBMIT (=0 to print instead of submit),
 //!      IRIUM_POAWX_ROLE_WORKER_LOOP, IRIUM_POAWX_ROLE_WORKER_POLL_SECS.
 //!      Arg 1: role = compute|verify|support.
+use irium_node_rs::poawx::ProposerRegistrationV1;
 use irium_node_rs::poawx::{
     role_claim_digest, role_precommit_commitment, PoawxRoleClaim, ROLE_COMPUTE_CONTRIBUTOR,
     ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
@@ -279,41 +280,69 @@ fn enroll_once(
         body.trim()
     );
 
-    // Register this address in the node's ELIGIBLE MINER SET, so the chain can draw it for a
-    // role. Enrolling a bundle and being eligible are different things: a worker could enrol
-    // every block, be paid by the fan-out, and still be invisible to the draw. On 2026-08-01
-    // the three workers actually earning (332efdaa, bcac819d, 32263c0f) were absent from an
-    // eligible set of TWO, so the draw wrapped two producer keys across four roles -- arming
-    // the four-role gate then would have COLLAPSED distribution to two addresses.
+    // Register this address ON CHAIN so the chain can draw it for a role.
     //
-    // The sybil work is the ticket we already ground for the bundle, so registering costs
-    // nothing extra and is bound to the same (network, prev_hash, pkh, epoch). Best-effort:
-    // a failure here must never stop enrollment, but it is logged -- a silently unregistered
-    // miner is one the chain can never select.
-    let reg = serde_json::json!({
-        "address": hex::encode(payout_pkh),
-        "sybil_nonce": hex::encode(ticket.sybil_work_nonce),
-        "assignment_public_key": hex::encode(ticket.assignment_public_key),
-        "epoch": ticket.epoch,
-    });
-    match client
-        .post(format!("{base}/poawx/miner"))
-        .bearer_auth(token)
-        .json(&reg)
-        .send()
-    {
-        Ok(r) if r.status().is_success() => {
-            println!(
-                "[role-worker] REGISTERED pkh={} in the eligible miner set",
-                hex::encode(payout_pkh)
-            );
+    // Enrolling a bundle and being eligible for the draw are different things: a worker can
+    // enrol every block, be paid by the fan-out, and still be invisible to the draw. But the
+    // eligible set consensus uses is CHAIN-DERIVED (`ChainState::consensus_eligible_pkhs`) --
+    // it is deliberately NOT the node-local `/poawx/miner` announce map, because unioning that
+    // in made two honest nodes derive different role holders (vps 5 vs eu 2, measured
+    // 2026-08-01) and would fork the fleet the moment the four-role gate armed.
+    //
+    // PRG1 is the convergent path: signed, sybil-worked, gossiped over P2P, and applied in
+    // connect_block from the same bytes on every node. `build_signed` grinds the registration
+    // sybil work itself, bound to (network, anchor block, pkh, pubkey) -- so it cannot be
+    // replayed onto another chain or another identity.
+    //
+    // The anchor is the PARENT block: the node recomputes the digest via `anchor_hash_at()`
+    // and fails closed if it does not know that height, so anchoring to a block we just read
+    // the hash of is what it can actually verify.
+    //
+    // Best-effort: registration failing must never stop enrollment. But it is never silent --
+    // an unregistered miner is one the chain can never select, and that is invisible from the
+    // outside (it looks exactly like losing the draw).
+    match ProposerRegistrationV1::build_signed(
+        secret,
+        net,
+        height.saturating_sub(1),
+        &prev_hash,
+        irium_node_rs::poawx_ticket::effective_sybil_bits(),
+    ) {
+        Ok(reg) => {
+            // Hard check, not a debug_assert: release builds are what run, and registering an
+            // identity other than the one we are paid at is silently useless -- from outside it
+            // is indistinguishable from losing the draw. Both sides are
+            // Ripemd160(Sha256(compressed pubkey)) over the same secret, so this should never
+            // fire; if it ever does, the registration is worthless and must not be sent.
+            if reg.pkh() != payout_pkh {
+                eprintln!(
+                    "[role-worker] REFUSING to register: identity {} != payout identity {}",
+                    hex::encode(reg.pkh()),
+                    hex::encode(payout_pkh)
+                );
+                return Ok(Some((height, prev_hash)));
+            }
+            match client
+                .post(format!("{base}/poawx/registration"))
+                .bearer_auth(token)
+                .body(reg.serialize())
+                .send()
+            {
+                Ok(r) if r.status().is_success() => println!(
+                    "[role-worker] REGISTERED ON CHAIN pkh={} anchor={} -> {}",
+                    hex::encode(payout_pkh),
+                    height.saturating_sub(1),
+                    r.text().unwrap_or_default().trim()
+                ),
+                Ok(r) => eprintln!(
+                    "[role-worker] on-chain registration refused: {} {}",
+                    r.status(),
+                    r.text().unwrap_or_default().trim()
+                ),
+                Err(e) => eprintln!("[role-worker] on-chain registration failed: {e}"),
+            }
         }
-        Ok(r) => eprintln!(
-            "[role-worker] miner registration refused: {} {}",
-            r.status(),
-            r.text().unwrap_or_default().trim()
-        ),
-        Err(e) => eprintln!("[role-worker] miner registration failed: {e}"),
+        Err(e) => eprintln!("[role-worker] could not build registration: {e}"),
     }
     Ok(Some((height, prev_hash)))
 }

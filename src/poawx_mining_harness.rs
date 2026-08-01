@@ -1466,6 +1466,18 @@ fn build_all_gates_block_with(
                             h.update(cand.serialize());
                             h.finalize().into()
                         };
+                        if std::env::var("IRIUM_POAWX_LOG_CHALLENGE")
+                            .map(|v| v.trim() == "1")
+                            .unwrap_or(false)
+                        {
+                            eprintln!(
+                                "[poawx] CHALLENGE/filter role={} solver={} cand={} cdg={}",
+                                b.role_id,
+                                hex::encode(cand.solver_pkh),
+                                hex::encode(cand.serialize()),
+                                hex::encode(cdg)
+                            );
+                        }
                         let challenge = PuzzleChallengeV1::build(
                             net,
                             height,
@@ -1696,11 +1708,52 @@ fn build_all_gates_block_with(
             let c = RoleCandidate::from_assignment_v2(&p, penalty, w, [role; 32]);
             Ok::<_, String>((p, c))
         };
-        let (pc, cc) = mk(&ids.compute_assign, ROLE_COMPUTE_CONTRIBUTOR, compute_solver, [0x11u8; 32])?;
-        let (pv, cv) = mk(&ids.verify_assign, ROLE_VERIFY_CONTRIBUTOR, verify_solver, [0x12u8; 32])?;
-        let (ps, csup) = mk(&ids.support_assign, ROLE_SUPPORT_CONTRIBUTOR, support_solver, [0x13u8; 32])?;
+        // The assignment ticket placeholder MUST match what poawx-role-worker uses, or a
+        // self-proved role and a collected role disagree about the same field.
+        //
+        //   role-worker (bin/poawx-role-worker.rs:157):  [(0x11 + role); 32]
+        //   here, previously:                            0x11 / 0x12 / 0x13  (i.e. 0x10 + role)
+        //
+        // Off by one, across two programs. `from_assignment_v2` copies `ticket_digest`
+        // straight out of the proof, so a candidate built from a WORKER's bundle carried
+        // 0x11+role while `mk`'s self-proved candidate for the same role carried 0x10+role.
+        // `phase22d` compares `pr.ticket_digest != cand.ticket_digest` and rejected every
+        // block once both kinds were in one set:
+        //   phase22d: v2 proof wrong ticket digest (role=2 cand.ticket=1313… proof.ticket=1212…)
+        // Same solver, same payee -- only this constant differed. It cost repeated mainnet
+        // halts on 2026-07-31 and survived six fixes aimed at dominance, penalty status and
+        // candidate identity, because none of them looked at the constant itself.
+        //
+        // Derive it the same way the worker does, so the two cannot drift again.
+        let a_ticket = |role: u8| -> [u8; 32] { [(0x11u8 + role); 32] };
+        let (pc, cc) = mk(
+            &ids.compute_assign,
+            ROLE_COMPUTE_CONTRIBUTOR,
+            compute_solver,
+            a_ticket(ROLE_COMPUTE_CONTRIBUTOR),
+        )?;
+        let (pv, cv) = mk(
+            &ids.verify_assign,
+            ROLE_VERIFY_CONTRIBUTOR,
+            verify_solver,
+            a_ticket(ROLE_VERIFY_CONTRIBUTOR),
+        )?;
+        let (ps, csup) = mk(
+            &ids.support_assign,
+            ROLE_SUPPORT_CONTRIBUTOR,
+            support_solver,
+            a_ticket(ROLE_SUPPORT_CONTRIBUTOR),
+        )?;
         let mut cs = CandidateSet::new(net, th, sd);
         for c in [cc.clone(), cv.clone(), csup.clone()] {
+            if std::env::var("IRIUM_POAWX_LOG_CHALLENGE").map(|v| v.trim() == "1").unwrap_or(false) {
+                eprintln!(
+                    "[poawx] CAND/mk        role={} solver={} ticket={}",
+                    c.role_id,
+                    hex::encode(c.solver_pkh),
+                    hex::encode(c.ticket_digest)
+                );
+            }
             cs.push(c);
         }
         cs.sort_canonical();
@@ -1813,6 +1866,20 @@ fn build_all_gates_block_with(
     if let Some(col) = collected {
         for b in &col.all {
             let dw = dw_pool(&b.solver_pkh);
+            let _fold_cand = crate::poawx_candidate::RoleCandidate::from_assignment_v2(
+                &b.assignment_proof,
+                b.ticket_proof.penalty_status,
+                dw,
+                [b.role_id; 32],
+            );
+            if std::env::var("IRIUM_POAWX_LOG_CHALLENGE").map(|v| v.trim() == "1").unwrap_or(false) {
+                eprintln!(
+                    "[poawx] CAND/bundle    role={} solver={} ticket={}",
+                    _fold_cand.role_id,
+                    hex::encode(_fold_cand.solver_pkh),
+                    hex::encode(_fold_cand.ticket_digest)
+                );
+            }
             cs.push(crate::poawx_candidate::RoleCandidate::from_assignment_v2(
                 &b.assignment_proof,
                 b.ticket_proof.penalty_status,
@@ -1936,6 +2003,18 @@ fn build_all_gates_block_with(
             h.update(cand.serialize());
             h.finalize().into()
         };
+        if std::env::var("IRIUM_POAWX_LOG_CHALLENGE")
+            .map(|v| v.trim() == "1")
+            .unwrap_or(false)
+        {
+            eprintln!(
+                "[poawx] CHALLENGE/fatal  role={} solver={} cand={} cdg={}",
+                role,
+                hex::encode(cand.solver_pkh),
+                hex::encode(cand.serialize()),
+                hex::encode(cdg)
+            );
+        }
         let challenge = PuzzleChallengeV1::build(
             net,
             height,

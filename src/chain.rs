@@ -14307,13 +14307,22 @@ mod tests {
 
         // The boundary itself. 64,940 was chosen 20 blocks above a stopped tip of 64,920 and
         // must sit ABOVE 64,852-64,864, which carry 6-payee blocks under the legacy rule.
+        // The const ships DISARMED. Pinning a specific armed height here was wrong: the test
+        // failed the moment the const was correctly disarmed, and would have gone green again
+        // only by re-arming -- a test pushing the tree toward the unsafe state.
+        assert!(
+            crate::activation::MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT.is_none(),
+            "the four-role payout must ship DISARMED; arm it deliberately, above the live tip"
+        );
         assert!(
             !four_role_payout_active(64_864),
-            "must stay OFF over the 6-payee blocks, or a node rejects its own chain on restart"
+            "OFF over the 6-payee blocks at 64,852-64,864, or a node rejects its own chain"
         );
-        assert!(!four_role_payout_active(64_939), "off one block before");
-        assert!(four_role_payout_active(64_940), "on at the activation height");
-        assert!(four_role_payout_active(64_941), "and after");
+        assert!(!four_role_payout_active(70_000), "OFF everywhere while disarmed");
+        // The gate LOGIC, independent of the const: any Some(h) is on at/after h, off before.
+        assert!(!crate::poawx_ticket::pool_ticket_gate(Some(64_940), 64_939));
+        assert!(crate::poawx_ticket::pool_ticket_gate(Some(64_940), 64_940));
+        assert!(crate::poawx_ticket::pool_ticket_gate(Some(64_940), 64_941));
 
         // The armed branch, exercised: four drawn holders -> four outputs, 55/22/13/10.
         let drawn: [([u8; 20], u8); 4] = [
@@ -14347,6 +14356,12 @@ mod tests {
                 script_pubkey: crate::tx::p2pkh_script(pkh),
             })
             .collect();
+        // Enforce-on / validate-off is the trap that halted mainnet on 2026-07-23. Force the
+        // gate on via the devnet override and confirm the validator ACCEPTS the coinbase the
+        // armed rule requires, without needing the mainnet const to be armed.
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        std::env::set_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT", "1");
+        assert!(four_role_payout_active(64_940), "gate forced on for the check");
         validate_shared_multi_role_coinbase_for_test(
             &outs,
             &drawn[0].0,
@@ -14355,7 +14370,9 @@ mod tests {
             64_940,
             Some(&drawn),
         )
-        .expect("the armed rule must ACCEPT the coinbase it requires -- else 64,940 halts");
+        .expect("the armed rule must ACCEPT the coinbase it requires -- else activation halts");
+        std::env::remove_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
     }
 
     /// A gossiped candidate must never carry ANOTHER node's dominance weight into the block.

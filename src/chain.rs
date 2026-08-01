@@ -2303,7 +2303,21 @@ impl ChainState {
                     );
                 }
                 if pr.ticket_digest != cand.ticket_digest {
-                    return Err("phase22d: v2 proof wrong ticket digest".to_string());
+                    // Print all THREE legs of the invariant. `selected_for_role` returns the
+                    // BEST-SCORING candidate for the role, which is chosen independently of
+                    // the proof the builder emitted and of the role_reward payee -- so any
+                    // two can agree while the third diverges. Naming only the mismatched
+                    // field sent five fixes at the wrong leg.
+                    return Err(format!(
+                        "phase22d: v2 proof wrong ticket digest (role={}                          selected_cand.solver={} cand.ticket={} | proof.solver={}                          proof.ticket={} | role_reward.payee={} | candidates_for_role={})",
+                        role,
+                        hex::encode(cand.solver_pkh),
+                        hex::encode(cand.ticket_digest),
+                        hex::encode(pr.solver_pkh),
+                        hex::encode(pr.ticket_digest),
+                        hex::encode(sel),
+                        cs.candidates.iter().filter(|c| c.role_id == role).count(),
+                    ));
                 }
                 if pr.assignment_public_key != cand.assignment_public_key {
                     return Err("phase22d: v2 proof wrong assignment key".to_string());

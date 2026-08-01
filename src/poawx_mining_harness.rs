@@ -1668,16 +1668,32 @@ fn build_all_gates_block_with(
             let bundle = collected
                 .and_then(|c| c.for_role(role))
                 .filter(|b| b.solver_pkh == solver);
-            let (p, owner) = match bundle {
-                Some(b) => (b.assignment_proof.clone(), b.solver_pkh),
+            let (p, owner, penalty) = match bundle {
+                // The bundle's REAL penalty status, not a hardcoded Clean. The v1.9.159
+                // filter builds its candidate with `b.ticket_proof.penalty_status`; this site
+                // used `PenaltyStatus::Clean`. Penalty status is part of the candidate, so the
+                // two produced DIFFERENT candidates for the same bundle -- different digest,
+                // different puzzle challenge. The worker's solution therefore verified in the
+                // filter (so the bundle was kept) and failed here (so the build aborted):
+                //   harness: collected puzzle solution for role 2 from solver bcac819d…
+                //   does not verify against its challenge
+                // 57 consecutive aborts, chain stopped at 65,030 while the node itself
+                // rejected nothing. Two checks disagreeing about one bundle is the bug; the
+                // candidate must be built the same way in both places.
+                Some(b) => (
+                    b.assignment_proof.clone(),
+                    b.solver_pkh,
+                    b.ticket_proof.penalty_status,
+                ),
                 None => (
                     AssignmentProofV2::prove(secret, net, th, role, solver, ticket, sd)?,
                     solver,
+                    PenaltyStatus::Clean.id(),
                 ),
             };
             debug_assert_eq!(owner, solver, "proof owner and role slot must be one identity");
             let w = dom.weight(DOMINANCE_BASE_WORK_SCORE, &owner, th);
-            let c = RoleCandidate::from_assignment_v2(&p, PenaltyStatus::Clean.id(), w, [role; 32]);
+            let c = RoleCandidate::from_assignment_v2(&p, penalty, w, [role; 32]);
             Ok::<_, String>((p, c))
         };
         let (pc, cc) = mk(&ids.compute_assign, ROLE_COMPUTE_CONTRIBUTOR, compute_solver, [0x11u8; 32])?;

@@ -370,6 +370,10 @@ pub struct AllGatesIdentities {
     /// exactly whom the chain chose. `None` keeps the legacy bundle-derived behaviour, so
     /// every existing test and the pre-activation chain are unaffected.
     pub drawn_role_holders: Option<[([u8; 20], u8); 4]>,
+    /// The chain-derived eligible set (from the node template). `derived_draw` filters its
+    /// reveals through this so producer and validator select the SAME four. Empty => no
+    /// filtering, which is correct only for harnesses/tests with no registry.
+    pub consensus_eligible_pkhs: Vec<[u8; 20]>,
     /// C3: pre-made PUBLIC artifacts collected from foreign role-workers, per role.
     /// When present for a role, the builder uses that worker's own assignment proof,
     /// claim reveal material and puzzle solution instead of deriving them from a
@@ -415,6 +419,22 @@ pub struct AllGatesIdentities {
     pub pool_tickets: Vec<crate::poawx_ticket::TicketProof>,
 }
 
+/// Process-local plumbing for the chain-derived eligible set the node advertises in its
+/// template. NOT consensus state -- it is a copy of what `connect_block` will filter through,
+/// carried into the builder so producer and validator select the SAME four holders. Kept here
+/// rather than threaded through two public builder signatures and every call site.
+static CONSENSUS_ELIGIBLE: std::sync::Mutex<Vec<[u8; 20]>> = std::sync::Mutex::new(Vec::new());
+
+/// Set from the node template each build. Empty => no filtering (harness/tests).
+pub fn set_consensus_eligible_pkhs(pkhs: Vec<[u8; 20]>) {
+    let mut g = CONSENSUS_ELIGIBLE.lock().unwrap_or_else(|e| e.into_inner());
+    *g = pkhs;
+}
+
+pub fn consensus_eligible_pkhs_snapshot() -> Vec<[u8; 20]> {
+    CONSENSUS_ELIGIBLE.lock().unwrap_or_else(|e| e.into_inner()).clone()
+}
+
 impl AllGatesIdentities {
     /// Fixed devnet identities (matches the original harness exactly; the SUPPORT
     /// solver MUST be hash160(finality member pubkey) so the committee vote validates).
@@ -436,6 +456,7 @@ impl AllGatesIdentities {
             claim_seed: [0x2Au8; 32],
             extra_transactions: Vec::new(),
             drawn_role_holders: None,
+            consensus_eligible_pkhs: Vec::new(),
             collected: None,
             worker_pkh_override: None,
             delegation: None,
@@ -482,6 +503,7 @@ impl AllGatesIdentities {
             claim_seed: derive(b"claim"),
             extra_transactions: Vec::new(),
             drawn_role_holders: None,
+            consensus_eligible_pkhs: Vec::new(),
             collected: None,
             worker_pkh_override: None,
             delegation: None,
@@ -556,6 +578,7 @@ impl AllGatesIdentities {
             claim_seed: derive(b"claim"),
             extra_transactions: Vec::new(),
             drawn_role_holders: None,
+            consensus_eligible_pkhs: Vec::new(),
             collected: None,
             worker_pkh_override: None,
             delegation: None,
@@ -614,6 +637,7 @@ impl AllGatesIdentities {
             claim_seed: derive(b"claim"),
             extra_transactions: Vec::new(),
             drawn_role_holders: None,
+            consensus_eligible_pkhs: Vec::new(),
             collected: None,
             worker_pkh_override: Some(delegation.miner_pkh()),
             delegation: Some(delegation),
@@ -1963,6 +1987,25 @@ fn build_all_gates_block_with(
             if !revealed.iter().any(|(p, r, _)| *p == ppkh && *r == 0) {
                 revealed.push((ppkh, 0, pr));
             }
+        }
+        // THE SAME FILTER connect_block applies (chain.rs, `revealed.retain(...)`). Without it
+        // the producer draws from every candidate while the validator draws only from the
+        // chain-derived eligible set -- so the moment a block carries an ineligible candidate
+        // the two select different holders, the coinbase pays the builder's four, and the node
+        // rejects its own producer's block. Under the armed gate that is a halt at the
+        // activation height, which is why arming was aborted at tip 65,301.
+        //
+        // Empty list => no filtering (harness/test with no registry), matching the previous
+        // behaviour byte-for-byte for those callers.
+        let mut elig = if ids.consensus_eligible_pkhs.is_empty() {
+            consensus_eligible_pkhs_snapshot()
+        } else {
+            ids.consensus_eligible_pkhs.clone()
+        };
+        if !elig.is_empty() {
+            elig.sort_unstable();
+            elig.dedup();
+            revealed.retain(|(pkh, _, _)| elig.binary_search(pkh).is_ok());
         }
         crate::poawx_proposer::select_role_holders_from_revealed(&revealed)
     } else {

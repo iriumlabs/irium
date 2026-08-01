@@ -3952,6 +3952,26 @@ fn run_poawx_solo() -> Result<(), String> {
             );
         }
         let build_result = if collected.is_some() {
+            // Carry the node's chain-derived eligible set into the builder so `derived_draw`
+            // filters exactly as connect_block does. Without it the producer draws from every
+            // candidate, the validator from the eligible ones only, and under the armed
+            // four-role gate the node rejects its own producer's block.
+            irium_node_rs::poawx_mining_harness::set_consensus_eligible_pkhs(
+                tmpl.poawx_consensus_eligible_pkhs
+                    .as_ref()
+                    .map(|v| {
+                        v.iter()
+                            .filter_map(|h| hex::decode(h).ok())
+                            .filter(|b| b.len() == 20)
+                            .map(|b| {
+                                let mut o = [0u8; 20];
+                                o.copy_from_slice(&b);
+                                o
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+            );
             // Pay distinct participants for the contributor roles from the collected bundles.
             irium_node_rs::poawx_mining_harness::build_solo_poawx_block_with_proposer_and_solver_and_collected_and_txs(
                 &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,

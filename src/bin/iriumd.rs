@@ -1700,6 +1700,12 @@ struct BlockTemplateResponse {
     poawx_reg_activations: Vec<String>,
     #[serde(default)]
     poawx_reg_announces: Vec<String>,
+    /// The CHAIN-DERIVED eligible pkh set consensus filters the four-role draw through
+    /// (`ChainState::consensus_eligible_pkhs`). Served so a builder can apply the IDENTICAL
+    /// filter: the validator retains only reveals from this set, and a builder that skips it
+    /// draws a different four, pays them, and has its own block rejected.
+    #[serde(default)]
+    poawx_consensus_eligible_pkhs: Vec<String>,
     /// C2: contributor role-worker bundles collected for THIS height, as
     /// "role_id:solver_pkh:score". A builder uses these to pay the collected workers
     /// their own attributed addresses instead of fusing every role onto its own
@@ -13792,6 +13798,7 @@ async fn get_block_template(
         reg_required_sybil_bits,
         reg_activations,
         reg_announces,
+        consensus_eligible_hex,
     ) = {
         let guard = state.chain.lock().unwrap_or_else(|e| e.into_inner());
         let tip = guard.chain.last();
@@ -13861,6 +13868,14 @@ async fn get_block_template(
         // MUST force-drain, pool announce candidates, anchor + required sybil bits),
         // computed under the same chain lock.
         let reg_active = irium_node_rs::poawx_proposer::proposer_registration_active(height);
+        // Serve the chain-derived eligible set so a builder can filter its four-role draw
+        // exactly as connect_block does. Computed under the same chain lock as everything else
+        // in this template, so it is consistent with the height it is advertised for.
+        let consensus_eligible_hex: Vec<String> = guard
+            .consensus_eligible_pkhs(height)
+            .iter()
+            .map(hex::encode)
+            .collect();
         let (
             reg_anchor_height,
             reg_anchor_hash,
@@ -13921,6 +13936,7 @@ async fn get_block_template(
             reg_required_sybil_bits,
             reg_activations,
             reg_announces,
+            consensus_eligible_hex,
         )
     };
 
@@ -14419,6 +14435,7 @@ async fn get_block_template(
         poawx_reg_required_sybil_bits: reg_required_sybil_bits,
         poawx_reg_activations: reg_activations,
         poawx_reg_announces: reg_announces,
+        poawx_consensus_eligible_pkhs: consensus_eligible_hex,
         poawx_role_bundles: {
             let c = irium_node_rs::poawx_role_bundle::collect_roles_for_height(height);
             [&c.compute, &c.verify, &c.support]

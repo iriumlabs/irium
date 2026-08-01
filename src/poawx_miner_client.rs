@@ -81,6 +81,10 @@ pub struct BlockTemplate {
     pub poawx_reg_activations: Option<Vec<String>>,
     #[serde(default)]
     pub poawx_reg_announces: Option<Vec<String>>,
+    /// Chain-derived eligible pkh set for the four-role draw (hex pkhs). The builder MUST
+    /// filter its reveals through this, exactly as connect_block does.
+    #[serde(default)]
+    pub poawx_consensus_eligible_pkhs: Option<Vec<String>>,
 }
 
 pub type PoawxParentInfo = (Option<[u8; 32]>, ([u8; 32], [u8; 32]));

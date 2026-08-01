@@ -14296,6 +14296,70 @@ mod tests {
         );
     }
 
+    /// THE ARMING BLOCKER (aborted 2026-08-01 at tip 65,301). Under the armed four-role gate
+    /// the coinbase must pay EXACTLY the four holders the chain drew. The validator derives
+    /// them from the block's candidate set FILTERED through the chain-derived eligible set;
+    /// the builder derived them from the candidate set with NO filter. So a block carrying one
+    /// ineligible candidate made the two select different holders -- the producer paid its
+    /// four, and the node rejected its own producer's block. A halt at the activation height.
+    ///
+    /// The invariant: filtering first, then drawing, must give the same four on both sides.
+    #[test]
+    fn builder_and_validator_draw_the_same_four_when_a_candidate_is_ineligible() {
+        let _env = crate::test_env::guard();
+        use crate::poawx::{
+            ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+        };
+        use crate::poawx_proposer::select_role_holders_from_revealed;
+
+        let elig_a = [0xA1u8; 20];
+        let elig_b = [0xB2u8; 20];
+        let elig_c = [0xC3u8; 20];
+        let elig_d = [0xD4u8; 20];
+        // Present in the block, NOT registered on chain. Priority 0 => it would WIN every role
+        // it appears in if the filter were skipped, so the two draws cannot coincide by luck.
+        let rogue = [0xEEu8; 20];
+
+        let revealed: Vec<([u8; 20], u8, u64)> = vec![
+            (elig_a, 0, 10),
+            (elig_b, ROLE_COMPUTE_CONTRIBUTOR, 10),
+            (elig_c, ROLE_VERIFY_CONTRIBUTOR, 10),
+            (elig_d, ROLE_SUPPORT_CONTRIBUTOR, 10),
+            (rogue, 0, 0),
+            (rogue, ROLE_COMPUTE_CONTRIBUTOR, 0),
+            (rogue, ROLE_VERIFY_CONTRIBUTOR, 0),
+            (rogue, ROLE_SUPPORT_CONTRIBUTOR, 0),
+        ];
+
+        let mut eligible = vec![elig_a, elig_b, elig_c, elig_d];
+        eligible.sort_unstable();
+
+        // Both sides run the SAME two steps: retain by eligibility, then draw.
+        let filtered = |src: &[([u8; 20], u8, u64)]| {
+            let mut v = src.to_vec();
+            v.retain(|(pkh, _, _)| eligible.binary_search(pkh).is_ok());
+            select_role_holders_from_revealed(&v).expect("four distinct eligible holders")
+        };
+        let validator = filtered(&revealed);
+        let builder = filtered(&revealed);
+        assert_eq!(builder, validator, "builder and validator must draw identically");
+
+        // The rogue must not hold a role, and the four must be distinct, one role each.
+        assert!(
+            !validator.iter().any(|(pkh, _)| *pkh == rogue),
+            "an unregistered candidate must never be drawn"
+        );
+        let uniq: std::collections::HashSet<_> = validator.iter().map(|(p, _)| *p).collect();
+        assert_eq!(uniq.len(), 4, "four DISTINCT holders -- no miner takes two roles");
+
+        // Control: skipping the filter gives a DIFFERENT four, which is the halt.
+        let unfiltered = select_role_holders_from_revealed(&revealed).expect("draw");
+        assert_ne!(
+            unfiltered, validator,
+            "if these matched, the test could not detect a missing filter"
+        );
+    }
+
     fn nodes_with_different_reveals_agree_on_the_same_block() {
         let _env = crate::test_env::guard();
         use crate::poawx::{

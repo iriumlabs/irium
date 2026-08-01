@@ -1645,14 +1645,38 @@ fn build_all_gates_block_with(
             // C3: for a COLLECTED role use the worker's own proof verbatim. The builder
             // holds no secret for that worker and must not fabricate a proof on its
             // behalf -- the proof IS the worker's attributable work.
-            let collected_proof = collected
+            // ONE atomic choice: either a COLLECTED worker fills this role, or it self-fills
+            // to the builder. Proof, solver and weight then all describe the SAME identity.
+            //
+            // Previously the proof and the solver were chosen independently: the collected
+            // bundle's proof was adopted even when the role had self-filled back to the
+            // builder (its bundle dropped, or none payable). The candidate's `solver_pkh` is
+            // derived from the PROOF, while the weight came from the `solver` slot -- so a
+            // block could carry one worker's proof, another's slot, and a third combination
+            // of weight. The validator recomputes both from the candidate itself and rejected
+            // on whichever it reached first:
+            //   phase21d: candidate dominance weight mismatch  (weight of the wrong owner)
+            //   phase22d: v2 proof wrong solver                (proof of the wrong owner)
+            // Both are the same inconsistency seen from two angles, which is why fixing one
+            // only moved the symptom to the other. They halted mainnet repeatedly on
+            // 2026-07-31 once bundle gossip put foreign workers in the set.
+            //
+            // Filtering the bundle on `solver_pkh == solver` makes the two cases mutually
+            // exclusive: adopt the worker's proof ONLY when the role is genuinely theirs.
+            // `owner == solver` then holds by construction, so the weight is unchanged for
+            // self-fill and correct for a collected worker.
+            let bundle = collected
                 .and_then(|c| c.for_role(role))
-                .map(|b| b.assignment_proof.clone());
-            let p = match collected_proof {
-                Some(p) => p,
-                None => AssignmentProofV2::prove(secret, net, th, role, solver, ticket, sd)?,
+                .filter(|b| b.solver_pkh == solver);
+            let (p, owner) = match bundle {
+                Some(b) => (b.assignment_proof.clone(), b.solver_pkh),
+                None => (
+                    AssignmentProofV2::prove(secret, net, th, role, solver, ticket, sd)?,
+                    solver,
+                ),
             };
-            let w = dom.weight(DOMINANCE_BASE_WORK_SCORE, &solver, th);
+            debug_assert_eq!(owner, solver, "proof owner and role slot must be one identity");
+            let w = dom.weight(DOMINANCE_BASE_WORK_SCORE, &owner, th);
             let c = RoleCandidate::from_assignment_v2(&p, PenaltyStatus::Clean.id(), w, [role; 32]);
             Ok::<_, String>((p, c))
         };

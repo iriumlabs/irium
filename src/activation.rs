@@ -314,7 +314,7 @@ pub const MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT: Option<u64> = Some(62236u
 /// The old rule splits VERIFY/SUPPORT across every admitted candidate; the new rule pays the
 /// four drawn holders. A node on the old binary would reject the other's blocks at the
 /// boundary, which is a fork, not a degradation.
-pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = None;
+pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = Some(65_419);
 // ══════════════════════════════════════════════════════════════════════════════
 
 /// Activation binary (v1.9.127): mainnet activation height for delegated (mode-1)

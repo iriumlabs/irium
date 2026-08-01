@@ -612,6 +612,90 @@ mod tests {
 
     /// Build a genuinely valid bundle for `secret` in `role`, in the exact JSON shape
     /// `poawx-role-worker` emits, so the fixture exercises the real parser.
+    /// THE 65,117 STALL. A role worker runs with a FIXED role, so its bundle is enrolled for
+    /// exactly one role. Once miner registration raised the eligible set, the chain's draw
+    /// assigned that same key to a DIFFERENT role -- and the builder honoured the draw without
+    /// checking it held artifacts for that role. Feeding a compute puzzle solution into a
+    /// verify challenge fails `Invalid("wrong mode")` on every attempt: 238 build failures,
+    /// 0 accepted, mainnet frozen at 65,117 until fan-out was disabled.
+    ///
+    /// `payable` is the predicate the builder's draw guard turns on. It must be role-EXACT:
+    /// holding a solver's compute bundle must NOT make that solver payable for verify.
+    /// The whole suite was green through that stall because nothing asserted this.
+    #[test]
+    fn a_solvers_bundle_for_one_role_does_not_make_it_payable_for_another() {
+        let _env = crate::test_env::guard();
+        let compute = RoleBundleV1::from_json(&bundle_json(0x21, ROLE_COMPUTE_CONTRIBUTOR))
+            .expect("parse");
+        let solver = compute.solver_pkh;
+        let col = crate::poawx_mining_harness::CollectedArtifacts {
+            all: vec![compute],
+            ..Default::default()
+        };
+
+        assert!(
+            col.payable(ROLE_COMPUTE_CONTRIBUTOR, &solver),
+            "the role it actually enrolled for IS payable"
+        );
+        assert!(
+            !col.payable(ROLE_VERIFY_CONTRIBUTOR, &solver),
+            "same solver, different role: NOT payable -- honouring this stalled 65,117"
+        );
+        assert!(
+            !col.payable(ROLE_SUPPORT_CONTRIBUTOR, &solver),
+            "same solver, different role: NOT payable"
+        );
+        assert!(
+            !col.payable(ROLE_COMPUTE_CONTRIBUTOR, &[0xABu8; 20]),
+            "a solver we hold nothing for is never payable"
+        );
+    }
+
+    /// THE 65,160 STALL. Two participants enrol for the SAME role. `for_role` exposes only
+    /// one of them, so a builder that looked bundles up that way could not serve the other --
+    /// while `payable` (which searched the full set) said it could. The draw guard admitted a
+    /// holder the builder then failed to find, fell through to self-proving with the ROLE
+    /// secret, and emitted a proof whose key does not hash to the payee: C4,
+    /// `assignment v2: contributor solver pkh not derived from vrf key`, every submit rejected.
+    ///
+    /// The invariant that makes that unrepresentable: **whatever `payable` admits, `bundle_for`
+    /// must return** -- for every enrolled participant, not just the selected one.
+    #[test]
+    fn every_payable_solver_has_a_bundle_the_builder_can_find() {
+        let _env = crate::test_env::guard();
+        let a = RoleBundleV1::from_json(&bundle_json(0x21, ROLE_COMPUTE_CONTRIBUTOR)).expect("a");
+        let b = RoleBundleV1::from_json(&bundle_json(0x22, ROLE_COMPUTE_CONTRIBUTOR)).expect("b");
+        assert_ne!(a.solver_pkh, b.solver_pkh, "two distinct participants");
+        let (pa, pb) = (a.solver_pkh, b.solver_pkh);
+        let col = crate::poawx_mining_harness::CollectedArtifacts {
+            all: vec![a.clone(), b],
+            compute: Some(a), // `for_role` selects only the first
+            ..Default::default()
+        };
+
+        // The second enrollee is the one the old code lost.
+        assert!(col.payable(ROLE_COMPUTE_CONTRIBUTOR, &pb), "b is payable");
+        let found = col
+            .bundle_for(ROLE_COMPUTE_CONTRIBUTOR, &pb)
+            .expect("payable implies findable -- this is what broke at 65,160");
+        assert_eq!(found.solver_pkh, pb, "and it is B's bundle, not A's");
+
+        // The invariant, stated directly over both participants and all three roles.
+        for solver in [pa, pb] {
+            for role in [
+                ROLE_COMPUTE_CONTRIBUTOR,
+                ROLE_VERIFY_CONTRIBUTOR,
+                ROLE_SUPPORT_CONTRIBUTOR,
+            ] {
+                assert_eq!(
+                    col.payable(role, &solver),
+                    col.bundle_for(role, &solver).is_some(),
+                    "payable and bundle_for must never disagree (role={role})"
+                );
+            }
+        }
+    }
+
     pub(super) fn bundle_json(secret_byte: u8, role: u8) -> String {
         bundle_json_at(secret_byte, role, H)
     }

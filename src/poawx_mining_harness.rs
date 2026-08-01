@@ -292,13 +292,30 @@ impl CollectedArtifacts {
     /// Checks the full enrolled set, falling back to the three selected ones when `all` is
     /// empty (legacy callers).
     pub fn payable(&self, role: u8, solver_pkh: &[u8; 20]) -> bool {
+        // Defined in terms of `bundle_for` ON PURPOSE. When these were two parallel
+        // implementations they disagreed: `payable` searched `all` while the builder looked
+        // up `for_role`, so the draw guard admitted a holder the builder could not serve. It
+        // then self-proved with the ROLE secret and emitted a proof whose key does not hash to
+        // the payee -- C4, `contributor solver pkh not derived from vrf key`, mainnet stalled
+        // at 65,160 on submit. One function means they cannot drift apart again.
+        self.bundle_for(role, solver_pkh).is_some()
+    }
+
+    /// The bundle the builder must use to pay `solver_pkh` for `role`, or `None` if we do not
+    /// hold one. Searches the FULL enrolled set; `for_role` only ever exposes the one bundle
+    /// selected per role, which is not enough once several participants enrol for a role.
+    pub fn bundle_for(
+        &self,
+        role: u8,
+        solver_pkh: &[u8; 20],
+    ) -> Option<&crate::poawx_role_bundle::RoleBundleV1> {
         if !self.all.is_empty() {
             return self
                 .all
                 .iter()
-                .any(|b| b.role_id == role && &b.solver_pkh == solver_pkh);
+                .find(|b| b.role_id == role && &b.solver_pkh == solver_pkh);
         }
-        self.for_role(role).map(|b| &b.solver_pkh == solver_pkh).unwrap_or(false)
+        self.for_role(role).filter(|b| &b.solver_pkh == solver_pkh)
     }
 
     pub fn for_role(&self, role: u8) -> Option<&crate::poawx_role_bundle::RoleBundleV1> {
@@ -1677,9 +1694,17 @@ fn build_all_gates_block_with(
             // exclusive: adopt the worker's proof ONLY when the role is genuinely theirs.
             // `owner == solver` then holds by construction, so the weight is unchanged for
             // self-fill and correct for a collected worker.
-            let bundle = collected
-                .and_then(|c| c.for_role(role))
-                .filter(|b| b.solver_pkh == solver);
+            // Look this (role, solver) up in the FULL enrolled set, not just the one bundle
+            // `for_role` happens to have selected. `payable()` -- the predicate the draw guard
+            // turns on -- searches `all`, so consulting only `for_role` here makes the guard
+            // and the builder disagree: the guard admits a drawn holder whose bundle exists in
+            // `all`, `mk` fails to find it, falls through to self-proving with the ROLE secret,
+            // and emits a proof whose key does not hash to the payee. The node rejects every
+            // such block with `assignment v2: contributor solver pkh not derived from vrf key`
+            // (C4) -- which stalled mainnet at 65,160 on submit rather than on build.
+            //
+            // Falls back to `for_role` so legacy callers with an empty `all` are unchanged.
+            let bundle = collected.and_then(|c| c.bundle_for(role, &solver));
             let (p, owner, penalty) = match bundle {
                 // The bundle's REAL penalty status, not a hardcoded Clean. The v1.9.159
                 // filter builds its candidate with `b.ticket_proof.penalty_status`; this site
@@ -1943,9 +1968,48 @@ fn build_all_gates_block_with(
     } else {
         None
     };
+    // A drawn holder is only PAYABLE for a role if we actually hold that participant's
+    // artifacts FOR THAT ROLE. Honouring the draw blindly stalled mainnet at 65,117: role
+    // workers run with FIXED roles, so 332efdaa builds a *compute* bundle; once miner
+    // registration raised eligible_count 2 -> 5 the draw assigned that same key to *verify*,
+    // and feeding a compute puzzle solution into a verify challenge fails
+    // `Invalid("wrong mode")` on every attempt -- 238 build failures, 0 accepted, tip frozen.
+    //
+    // The builder itself is always honourable: it self-fills any role, deriving a matching
+    // assignment proof and its own puzzle solution (see `mk` / `assign_for`).
+    //
+    // Falling back costs one name in the distribution for one block; honouring blindly costs
+    // every block. A holder we cannot serve must degrade distribution, never halt production.
+    let honour = |role: u8, drawn: [u8; 20], cur: [u8; 20]| -> [u8; 20] {
+        if drawn == worker_pkh {
+            return drawn;
+        }
+        match collected {
+            Some(col) if col.payable(role, &drawn) => drawn,
+            _ => {
+                // Never silent (CLAUDE.md 9): a fallback changes who gets paid, and the
+                // 65,117 stall was expensive precisely because the mismatch was only
+                // visible as a downstream puzzle error naming neither the role nor the draw.
+                eprintln!(
+                    "[poawx] draw not payable: role={role} drawn={} has no bundle for this role                      at height={height}; falling back to {}",
+                    hex::encode(drawn),
+                    hex::encode(cur)
+                );
+                cur
+            }
+        }
+    };
     let (compute_solver, verify_solver, support_solver) = match (drawn_solvers, derived_draw) {
-        (Some((c, v, sp)), _) => (c, v, sp),
-        (None, Some(d)) => (d[1].0, d[2].0, d[3].0),
+        (Some((c, v, sp)), _) => (
+            honour(ROLE_COMPUTE_CONTRIBUTOR, c, compute_solver),
+            honour(ROLE_VERIFY_CONTRIBUTOR, v, verify_solver),
+            honour(ROLE_SUPPORT_CONTRIBUTOR, sp, support_solver),
+        ),
+        (None, Some(d)) => (
+            honour(ROLE_COMPUTE_CONTRIBUTOR, d[1].0, compute_solver),
+            honour(ROLE_VERIFY_CONTRIBUTOR, d[2].0, verify_solver),
+            honour(ROLE_SUPPORT_CONTRIBUTOR, d[3].0, support_solver),
+        ),
         (None, None) => (compute_solver, verify_solver, support_solver),
     };
     // Fail closed on the promise above. A candidate we cannot prove is not admissible, so

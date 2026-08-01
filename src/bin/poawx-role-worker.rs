@@ -278,6 +278,43 @@ fn enroll_once(
         hex::encode(payout_pkh),
         body.trim()
     );
+
+    // Register this address in the node's ELIGIBLE MINER SET, so the chain can draw it for a
+    // role. Enrolling a bundle and being eligible are different things: a worker could enrol
+    // every block, be paid by the fan-out, and still be invisible to the draw. On 2026-08-01
+    // the three workers actually earning (332efdaa, bcac819d, 32263c0f) were absent from an
+    // eligible set of TWO, so the draw wrapped two producer keys across four roles -- arming
+    // the four-role gate then would have COLLAPSED distribution to two addresses.
+    //
+    // The sybil work is the ticket we already ground for the bundle, so registering costs
+    // nothing extra and is bound to the same (network, prev_hash, pkh, epoch). Best-effort:
+    // a failure here must never stop enrollment, but it is logged -- a silently unregistered
+    // miner is one the chain can never select.
+    let reg = serde_json::json!({
+        "address": hex::encode(payout_pkh),
+        "sybil_nonce": hex::encode(ticket.sybil_work_nonce),
+        "assignment_public_key": hex::encode(ticket.assignment_public_key),
+        "epoch": ticket.epoch,
+    });
+    match client
+        .post(format!("{base}/poawx/miner"))
+        .bearer_auth(token)
+        .json(&reg)
+        .send()
+    {
+        Ok(r) if r.status().is_success() => {
+            println!(
+                "[role-worker] REGISTERED pkh={} in the eligible miner set",
+                hex::encode(payout_pkh)
+            );
+        }
+        Ok(r) => eprintln!(
+            "[role-worker] miner registration refused: {} {}",
+            r.status(),
+            r.text().unwrap_or_default().trim()
+        ),
+        Err(e) => eprintln!("[role-worker] miner registration failed: {e}"),
+    }
     Ok(Some((height, prev_hash)))
 }
 

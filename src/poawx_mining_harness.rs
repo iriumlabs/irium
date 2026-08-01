@@ -1726,20 +1726,39 @@ fn build_all_gates_block_with(
         //
         // Derive it the same way the worker does, so the two cannot drift again.
         let a_ticket = |role: u8| -> [u8; 32] { [(0x11u8 + role); 32] };
+        // C4 binding: solver_pkh must equal hash160(assignment_public_key). Each identity
+        // constructor is internally consistent (compute_solver = pkh_of(compute_secret),
+        // compute_assign = compute_secret), but the DROP FALLBACK breaks that pairing: when a
+        // role's bundle is dropped, `after_drop` swaps the solver to the builder's payout
+        // identity while the assign secret stays the ROLE secret. Solver and key then belong
+        // to different identities and the validator rejects:
+        //   assignment v2: contributor solver pkh not derived from vrf key
+        // Swap the secret alongside the solver, so a self-filled role proves with the very
+        // key its solver is derived from.
+        let self_pkh =
+            hash160(ids.worker_sk.verifying_key().to_encoded_point(true).as_bytes());
+        let worker_bytes: [u8; 32] = ids.worker_sk.to_bytes().into();
+        let assign_for = |solver: [u8; 20], role_secret: &[u8; 32]| -> [u8; 32] {
+            if solver == self_pkh {
+                worker_bytes
+            } else {
+                *role_secret
+            }
+        };
         let (pc, cc) = mk(
-            &ids.compute_assign,
+            &assign_for(compute_solver, &ids.compute_assign),
             ROLE_COMPUTE_CONTRIBUTOR,
             compute_solver,
             a_ticket(ROLE_COMPUTE_CONTRIBUTOR),
         )?;
         let (pv, cv) = mk(
-            &ids.verify_assign,
+            &assign_for(verify_solver, &ids.verify_assign),
             ROLE_VERIFY_CONTRIBUTOR,
             verify_solver,
             a_ticket(ROLE_VERIFY_CONTRIBUTOR),
         )?;
         let (ps, csup) = mk(
-            &ids.support_assign,
+            &assign_for(support_solver, &ids.support_assign),
             ROLE_SUPPORT_CONTRIBUTOR,
             support_solver,
             a_ticket(ROLE_SUPPORT_CONTRIBUTOR),

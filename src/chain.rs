@@ -467,6 +467,22 @@ impl ChainState {
     /// binds to; the registration gossip pool uses it to RECOMPUTE the digest at ingest
     /// (A4) instead of trusting the peer-supplied `sybil_digest` field, and connect_block
     /// resolves the same value for its authoritative check.
+    /// The eligible set consensus uses for the four-role draw. CHAIN-DERIVED ONLY.
+    ///
+    /// Deliberately a named function so it has one definition and one test. It must NOT union
+    /// `global_miner_registry()` -- that map is fed by `/poawx/miner` POSTs and is node-local,
+    /// so unioning it makes validation a function of local state. Measured live 2026-08-01,
+    /// same instant, gate inert: vps eligible_count=5 and eu=2 derived DIFFERENT role holders.
+    /// Arming on top of that forks the fleet at the activation height. Miners join by
+    /// registering ON CHAIN (`/poawx/registration`, PRG1), which every node applies from the
+    /// same bytes.
+    pub fn consensus_eligible_pkhs(&self, target_height: u64) -> Vec<[u8; 20]> {
+        let mut eligible = self.proposer_registry.eligible_pkhs(target_height);
+        eligible.sort_unstable();
+        eligible.dedup();
+        eligible
+    }
+
     pub fn anchor_hash_at(&self, height: u64) -> Option<[u8; 32]> {
         self.chain
             .get(height as usize)
@@ -1071,12 +1087,24 @@ impl ChainState {
         // seed. Nothing in the submitted block feeds this, so a miner cannot influence what
         // its coinbase is checked against.
         let drawn = if four_role_payout_active(expected_height) {
-            let mut eligible = self.proposer_registry.eligible_pkhs(expected_height);
-            eligible.extend(
-                crate::poawx_proposer::global_miner_registry().eligible(expected_height),
-            );
-            eligible.sort_unstable();
-            eligible.dedup();
+            // CHAIN-DERIVED ONLY. `proposer_registry` is fed from blocks
+            // (`apply_block_proposer_registry`), so every node computes it from the same bytes
+            // and agrees. `global_miner_registry()` is fed by `/poawx/miner` POSTs and is
+            // NODE-LOCAL -- it was unioned in here, which silently made validation a function
+            // of local state and broke the convergence the comment below is at pains to
+            // preserve.
+            //
+            // Measured 2026-08-01, same instant, gate still inert:
+            //   vps eligible_count=5 -> proposer 332efdaa | compute c2fc869e | verify bcac819d
+            //   eu  eligible_count=2 -> proposer c2fc869e | compute 222a0b48 | verify c2fc869e
+            // Two honest nodes, different holders. Arming the four-role gate on top of that
+            // would have forked the fleet at the activation height -- each node rejecting the
+            // other's blocks -- which is strictly worse than the stalls it was meant to fix.
+            //
+            // Miners enter the eligible set by REGISTERING ON CHAIN (`/poawx/registration`,
+            // PRG1: signed, sybil-worked, gossiped, applied in connect_block). That path is
+            // already convergent by construction; the local announce map never was.
+            let eligible = self.consensus_eligible_pkhs(expected_height);
             // PRIVATE SORTITION selects from what miners REVEALED, not from a public draw
             // over the eligible set. A public draw is knowable the instant the parent lands,
             // which exposes the four addresses the next block needs; a miner's priority comes
@@ -14226,6 +14254,48 @@ mod tests {
     /// So validation is a pure function of the block. This pins both halves: the union
     /// diverges, and the block-only rule agrees.
     #[test]
+    /// THE FLEET-FORK BLOCKER. The four-role draw filters reveals through an `eligible` set.
+    /// That set used to union the NODE-LOCAL `global_miner_registry()` (fed by `/poawx/miner`
+    /// POSTs) on top of the chain-derived proposer registry, which quietly made validation a
+    /// function of local state. Measured live 2026-08-01 at the same instant, gate inert:
+    ///
+    ///   vps eligible_count=5 -> proposer 332efdaa | compute c2fc869e | verify bcac819d
+    ///   eu  eligible_count=2 -> proposer c2fc869e | compute 222a0b48 | verify c2fc869e
+    ///
+    /// Two honest nodes deriving different holders. Arming on top of that forks the fleet at
+    /// the activation height, each node rejecting the other's blocks -- worse than any stall.
+    ///
+    /// The invariant: announcing to ONE node must not change what that node considers eligible
+    /// for consensus. Miners join the eligible set by registering ON CHAIN (PRG1), which every
+    /// node applies from the same bytes.
+    #[test]
+    fn a_local_miner_announce_cannot_change_what_this_node_considers_eligible() {
+        let _env = crate::test_env::guard();
+        let height = 70_000u64;
+        let only_local = [0x5Au8; 20];
+
+        // Simulate the vps/eu asymmetry: this node has heard a local announce that its peer
+        // has not. Nothing about consensus may move because of it.
+        crate::poawx_proposer::global_miner_registry().announce(only_local, height);
+        assert!(
+            crate::poawx_proposer::global_miner_registry()
+                .eligible(height)
+                .contains(&only_local),
+            "precondition: the announce IS in this node's local map"
+        );
+
+        // Exercise the SAME function connect_block calls, not a re-implementation of it --
+        // otherwise this test passes no matter what consensus does.
+        let chain = base_chain(None);
+        let eligible = chain.consensus_eligible_pkhs(height);
+
+        assert!(
+            !eligible.contains(&only_local),
+            "a locally-announced pkh must NEVER reach the consensus eligible set -- \
+             unioning the node-local registry here is what would fork vps from eu"
+        );
+    }
+
     fn nodes_with_different_reveals_agree_on_the_same_block() {
         let _env = crate::test_env::guard();
         use crate::poawx::{

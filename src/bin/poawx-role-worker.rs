@@ -49,6 +49,23 @@ fn hash160(b: &[u8]) -> [u8; 20] {
     o.copy_from_slice(&Ripemd160::digest(Sha256::digest(b)));
     o
 }
+/// Parse the role argument. `auto` (or no argument) means the chain decides, and is carried
+/// as a PLACEHOLDER role that the assignment lookup replaces before any work is done.
+/// Returns an error rather than panicking on a typo, so a mistyped role is a clean message
+/// instead of a stack trace.
+fn parse_role_arg(name: &str) -> Result<u8, String> {
+    match name {
+        "auto" => Ok(ROLE_COMPUTE_CONTRIBUTOR),
+        "compute" => Ok(ROLE_COMPUTE_CONTRIBUTOR),
+        "verify" => Ok(ROLE_VERIFY_CONTRIBUTOR),
+        "support" => Ok(ROLE_SUPPORT_CONTRIBUTOR),
+        other => Err(format!(
+            "role must be auto|compute|verify|support (got {other:?}); \
+             `auto` lets the chain assign it"
+        )),
+    }
+}
+
 fn role_id(name: &str) -> u8 {
     match name {
         "compute" => ROLE_COMPUTE_CONTRIBUTOR,
@@ -494,6 +511,55 @@ impl StratumClient {
     }
 }
 
+/// Register this identity on chain, independently of whether it was drawn.
+///
+/// THE BOOTSTRAP DEADLOCK this closes: registration used to live only at the end of the
+/// enrollment path, and `auto` mode skips that path entirely when the chain did not draw this
+/// miner. But the chain draws from the CHAIN-DERIVED eligible set, which a miner only enters
+/// by registering -- so an unregistered worker was never drawn, therefore never registered,
+/// therefore never drawn. Self-perpetuating, and from the outside indistinguishable from
+/// simply losing the draw every time. It is the same shape as the n==1 proposer lockout.
+///
+/// Cheap enough to attempt every idle poll: one GET plus a ~2^20 sybil grind, and the node
+/// rejects a duplicate registration harmlessly.
+fn ensure_registered(
+    transport: &mut Transport,
+    net: u8,
+    secret: &[u8; 32],
+    payout_pkh: [u8; 20],
+) -> Result<(), String> {
+    let t = transport.role_work()?;
+    let height = t["height"].as_u64().ok_or("role-work: no height")?;
+    let prev_hash = h32(t["prev_hash"].as_str().ok_or("role-work: no prev_hash")?);
+    let reg = ProposerRegistrationV1::build_signed(
+        secret,
+        net,
+        height.saturating_sub(1),
+        &prev_hash,
+        irium_node_rs::poawx_ticket::effective_sybil_bits(),
+    )
+    .map_err(|e| format!("could not build registration: {e}"))?;
+    if reg.pkh() != payout_pkh {
+        return Err(format!(
+            "REFUSING to register: identity {} != payout identity {}",
+            hex::encode(reg.pkh()),
+            hex::encode(payout_pkh)
+        ));
+    }
+    match transport.submit_registration(reg.serialize()) {
+        Ok(body) => println!(
+            "[role-worker] REGISTERED ON CHAIN pkh={} anchor={} -> {}",
+            hex::encode(payout_pkh),
+            height.saturating_sub(1),
+            body.trim()
+        ),
+        // Not fatal and never silent: a duplicate is expected once eligible, but a real
+        // refusal means this miner can never be drawn and must be visible.
+        Err(e) => eprintln!("[role-worker] on-chain registration refused: {e}"),
+    }
+    Ok(())
+}
+
 /// Ask the chain which role THIS identity holds for the next block.
 ///
 /// `Ok(Some((role_id, name)))` => drawn, work that role. `Ok(None)` => NOT DRAWN, do nothing.
@@ -520,8 +586,15 @@ fn assigned_role_from_response(v: &serde_json::Value) -> Option<(u8, String)> {
 }
 
 fn main() -> Result<(), String> {
-    let role_name = std::env::args().nth(1).unwrap_or_else(|| "compute".into());
-    let role = role_id(&role_name);
+    // Default AUTO: with no argument the CHAIN assigns the role, which is the model --
+    // selection first, work after. An explicit compute|verify|support still overrides, so
+    // every existing harness and negative control is unaffected.
+    let role_name = std::env::args().nth(1).unwrap_or_else(|| "auto".into());
+    // `role_id` PANICS on an unknown name, so it must not be called on "auto". It was, and
+    // that made auto mode dead on arrival: every worker aborted at startup with
+    // `role must be compute|verify|support` before reaching the auto branch below. No unit
+    // test caught it because none of them ran `main` -- it took an end-to-end devnet run.
+    let role = parse_role_arg(&role_name)?;
     let net = irium_node_rs::activation::network_id_byte();
     let secret = {
         let hx = std::env::var("IRIUM_POAWX_ROLE_SECRET_HEX")
@@ -675,9 +748,14 @@ fn main() -> Result<(), String> {
                     consecutive_errors = 0;
                 }
                 Ok(None) => {
-                    // NOT DRAWN this height. Do nothing and wait -- this is the normal case
-                    // once more miners are registered than there are roles, and it is what
-                    // makes "only the four selected do the work" true rather than aspirational.
+                    // NOT DRAWN this height. Do no ROLE WORK -- that is what makes "only the
+                    // four selected do the work" true rather than aspirational. But DO keep
+                    // the on-chain registration current, or an unregistered miner can never
+                    // enter the eligible set the draw reads, and so can never be drawn: a
+                    // self-perpetuating lockout that looks exactly like bad luck.
+                    if let Err(e) = ensure_registered(&mut transport, net, &secret, payout_pkh) {
+                        eprintln!("[role-worker] registration while idle: {e}");
+                    }
                     consecutive_errors = 0;
                     std::thread::sleep(std::time::Duration::from_secs(poll_secs));
                     continue;
@@ -778,6 +856,30 @@ mod tests {
         }
     }
 
+
+
+    /// `auto` MUST parse. It did not: `role_id` panics on any name outside
+    /// compute|verify|support and was called on argv[1] BEFORE the auto branch, so every
+    /// worker started with `auto` aborted instantly with `role must be
+    /// compute|verify|support`. Auto mode -- the whole selection-first model on the miner
+    /// side -- was dead on arrival.
+    ///
+    /// Nothing caught it, and the reason is worth keeping: the unit tests exercised the
+    /// response parser and the source structure, but never `main`'s argument handling, so
+    /// they all passed against a binary that could not start. It took an end-to-end devnet
+    /// run to surface it, which is exactly why the boundary harness exists.
+    #[test]
+    fn auto_is_a_valid_role_argument_and_a_typo_is_not_a_panic() {
+        use super::parse_role_arg;
+        // The regression: this call is what aborted every auto worker.
+        assert_eq!(parse_role_arg("auto").unwrap(), ROLE_COMPUTE_CONTRIBUTOR);
+        assert_eq!(parse_role_arg("compute").unwrap(), ROLE_COMPUTE_CONTRIBUTOR);
+        assert_eq!(parse_role_arg("verify").unwrap(), ROLE_VERIFY_CONTRIBUTOR);
+        assert_eq!(parse_role_arg("support").unwrap(), ROLE_SUPPORT_CONTRIBUTOR);
+        // A typo is a message, not a stack trace.
+        let e = parse_role_arg("verfiy").unwrap_err();
+        assert!(e.contains("verfiy") && e.contains("auto"), "unhelpful error: {e}");
+    }
 
     /// A pool-only miner has NO node, so every call it must make has to be relayed. If any one
     /// of the four is missing the miner is stranded in a way that looks like bad luck rather

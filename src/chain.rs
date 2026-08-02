@@ -4631,13 +4631,39 @@ fn validate_multi_role_coinbase_outputs(
 /// verify, support. Amounts come from `multi_role_amounts`, so the remainder lands on the
 /// proposer exactly as in every other payout path and the outputs always sum to the reward.
 pub fn expected_drawn_role_payouts(
+    primary_pkh: &[u8; 20],
     drawn: &[([u8; 20], u8); 4],
     total_reward: u64,
 ) -> Vec<([u8; 20], u64)> {
     let amts = crate::poawx::multi_role_amounts(total_reward);
-    // Positional by construction: `select_block_role_holders` returns proposer, compute,
-    // verify, support in that order, which is the canonical coinbase order.
-    (0..4).map(|i| (drawn[i].0, amts[i])).collect()
+    // PRIMARY IS NOT DRAWN. It is the block-PRODUCING identity, i.e. the receipt's
+    // `worker_pkh` -- `docs/poaw-x-phase20-design-gap-multi-role-reward-split.md:10`
+    // ("the miner/block-producing identity = receipt worker_pkh") and :18 ("the primary pkh
+    // is NOT stored here ... so it can never be replaced by a pool key").
+    //
+    // Paying `drawn[0]` here instead HALTED a two-node devnet at the activation height, and
+    // would have halted mainnet identically. The chain draws role 0 from the eligible set,
+    // but which miner actually PRODUCES a block is decided separately, by proposer VRF
+    // sortition. Once more than one key is eligible those two disagree most of the time, so
+    // the coinbase paid four addresses that did not include the producer -- and the
+    // independent reward-split rule then rejected the block:
+    //   reject: reward split: worker e9516e8a... payout 0 < required 500000000
+    // Producer paid 0 => every block invalid => chain stops at activation-1. Found by
+    // `mn-harness/run_fourrole_boundary.sh`; invisible to the whole unit suite, which never
+    // drives a real block through connect_block with a producer that is not the drawn
+    // proposer.
+    //
+    // The three CONTRIBUTOR roles still come from the chain's draw, which is the property
+    // that matters: compute/verify/support are selected from every registered miner, so a
+    // CLI, Irium Core app or pool miner is picked on identical terms.
+    //
+    // `drawn[0]` is deliberately unused. It is still DRAWN -- the draw is a pure function of
+    // chain state and must not vary by caller -- it simply does not decide who is paid the
+    // primary share.
+    let mut out = Vec::with_capacity(4);
+    out.push((*primary_pkh, amts[0]));
+    out.extend((1..4).map(|i| (drawn[i].0, amts[i])));
+    out
 }
 
 /// The EXACT shared-reward coinbase payout list, in canonical order.
@@ -4666,7 +4692,7 @@ pub fn expected_shared_multi_role_payouts(
         // ENFORCEMENT: the coinbase must pay exactly the four addresses the chain drew, in
         // role order. Without this the draw is convention -- a modified miner could publish a
         // block paying any four it liked and every node would accept it.
-        return Ok(expected_drawn_role_payouts(drawn, total_reward));
+        return Ok(expected_drawn_role_payouts(primary_pkh, drawn, total_reward));
     }
     if four_role_payout_active(height) {
         // BLUEPRINT: four outputs, one distinct participant per role. `role_reward` already
@@ -14190,7 +14216,7 @@ mod tests {
         );
 
         // The payout pays those four and only those four.
-        let payouts = expected_drawn_role_payouts(&drawn, reward);
+        let payouts = expected_drawn_role_payouts(&drawn[0].0, &drawn, reward);
         assert_eq!(payouts.len(), 4, "four outputs — no extra miners are paid");
         assert_eq!(
             payouts.iter().map(|(p, _)| *p).collect::<HashSet<_>>(),
@@ -14281,7 +14307,7 @@ mod tests {
         let primary = drawn[0].0;
 
         // Honest block: pays exactly the drawn four.
-        let honest = expected_drawn_role_payouts(&drawn, reward);
+        let honest = expected_drawn_role_payouts(&drawn[0].0, &drawn, reward);
         validate_shared_multi_role_coinbase_for_test(
             &outs(&honest), &primary, &ext, reward, height, Some(&drawn),
         )
@@ -14544,7 +14570,7 @@ mod tests {
             ([0x51u8; 20], crate::poawx::ROLE_SUPPORT_CONTRIBUTOR),
         ];
         let reward = crate::chain::block_reward(70_000);
-        let pay = expected_drawn_role_payouts(&drawn, reward);
+        let pay = expected_drawn_role_payouts(&drawn[0].0, &drawn, reward);
 
         assert_eq!(pay.len(), 4, "exactly four outputs -- 7 was the halt");
         assert_eq!(
@@ -14630,7 +14656,7 @@ mod tests {
 
         // WHAT THE BUILDER EMITS NOW: exactly the drawn four, via the same function the
         // validator derives its expectation from.
-        let fixed = expected_drawn_role_payouts(&drawn, reward);
+        let fixed = expected_drawn_role_payouts(&drawn[0].0, &drawn, reward);
         assert_eq!(fixed.len(), 4, "four outputs");
         validate_shared_multi_role_coinbase_for_test(
             &outs(&fixed), &primary, &ext, reward, height, Some(&drawn),
@@ -14785,7 +14811,7 @@ mod tests {
             ([0x51u8; 20], crate::poawx::ROLE_SUPPORT_CONTRIBUTOR),
         ];
         let reward = crate::chain::block_reward(64_940);
-        let payouts = expected_drawn_role_payouts(&drawn, reward);
+        let payouts = expected_drawn_role_payouts(&drawn[0].0, &drawn, reward);
         assert_eq!(payouts.len(), 4, "four outputs at the armed height");
         assert_eq!(
             payouts.iter().map(|(_, v)| *v).sum::<u64>(),

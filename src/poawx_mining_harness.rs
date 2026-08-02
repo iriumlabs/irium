@@ -2604,7 +2604,7 @@ fn build_all_gates_block_with(
             value: 0,
             script_pubkey: irx1_script,
         }];
-        for (pkh, amt) in crate::chain::expected_drawn_role_payouts(&d, total) {
+        for (pkh, amt) in crate::chain::expected_drawn_role_payouts(&worker_pkh, &d, total) {
             outs.push(TxOutput {
                 value: amt,
                 script_pubkey: p2pkh_script(&pkh),
@@ -3472,7 +3472,7 @@ mod tests {
             .map(|o| (o.script_pubkey.clone(), o.value))
             .collect();
         let expected: Vec<(Vec<u8>, u64)> =
-            crate::chain::expected_drawn_role_payouts(&draw, reward)
+            crate::chain::expected_drawn_role_payouts(&worker_pkh, &draw, reward)
                 .into_iter()
                 .map(|(pkh, amt)| (p2pkh_script(&pkh), amt))
                 .collect();

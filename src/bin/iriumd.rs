@@ -14290,7 +14290,7 @@ async fn get_block_template(
             let g = state.chain.lock().unwrap_or_else(|e| e.into_inner());
             g.role_draw_for_height(height, g.chain.last())
             .map(|drawn| {
-                irium_node_rs::chain::expected_drawn_role_payouts(&drawn, coinbase_value)
+                irium_node_rs::chain::expected_drawn_role_payouts(&drawn[0].0, &drawn, coinbase_value)
                     .into_iter()
                     .map(|(pkh, value)| TemplateCoinbasePayout {
                         pkh: hex::encode(pkh),

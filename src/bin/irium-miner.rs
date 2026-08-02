@@ -3890,11 +3890,52 @@ fn run_poawx_solo() -> Result<(), String> {
                         None => 3000,
                     },
                 };
+                // Under the ARMED four-role gate, "3 distinct participants" is the wrong
+                // finish line. The coinbase owes the DRAWN holders specifically, and the
+                // builder now refuses the height if it cannot serve one of them -- so waiting
+                // for any three bundles, then building, means refusing over and over while
+                // the chain sits at activation-1. That is the halt-by-refusal the two-node
+                // boundary harness hit: both producers declined 51 times each.
+                //
+                // Wait for THE DRAWN THREE instead. `None` (gate off, or no draw served)
+                // keeps the previous "any three" behaviour byte-for-byte.
+                let drawn_contributors: Option<Vec<([u8; 20], u8)>> =
+                    tmpl.poawx_role_draw.as_ref().and_then(|v| {
+                        if v.len() != 4 {
+                            return None;
+                        }
+                        let mut out = Vec::with_capacity(3);
+                        for ent in v.iter().skip(1) {
+                            let (r, h) = ent.split_once(':')?;
+                            let role = r.trim().parse::<u8>().ok()?;
+                            let b = hex::decode(h.trim()).ok()?;
+                            if b.len() != 20 {
+                                return None;
+                            }
+                            let mut pkh = [0u8; 20];
+                            pkh.copy_from_slice(&b);
+                            out.push((pkh, role));
+                        }
+                        Some(out)
+                    });
+                let have_drawn =
+                    |c: &Option<irium_node_rs::poawx_mining_harness::CollectedArtifacts>| -> bool {
+                        match (&drawn_contributors, c.as_ref()) {
+                            (Some(d), Some(col)) => {
+                                d.iter().all(|(pkh, role)| col.payable(*role, pkh))
+                            }
+                            _ => false,
+                        }
+                    };
                 let start = std::time::Instant::now();
                 let mut best = read_bundles();
                 let mut best_n = role_n(&best);
                 let mut last_gain = std::time::Instant::now();
-                while best_n < 3 && (start.elapsed().as_millis() as u64) < wait_ms {
+                let gated = drawn_contributors.is_some()
+                    && irium_node_rs::chain::four_role_payout_active(height);
+                while !(if gated { have_drawn(&best) } else { best_n >= 3 })
+                    && (start.elapsed().as_millis() as u64) < wait_ms
+                {
                     std::thread::sleep(std::time::Duration::from_millis(200));
                     let c = read_bundles();
                     if role_n(&c) > best_n {
@@ -3904,7 +3945,10 @@ fn run_poawx_solo() -> Result<(), String> {
                     }
                     // Early-exit once we have SOME roles and none new for a while (stable set),
                     // so a partial-worker set doesn't always burn the full window.
-                    if best_n > 0 && (last_gain.elapsed().as_millis() as u64) >= 900 {
+                    // Never early-exit while a DRAWN holder is still missing: building then
+                    // is a guaranteed refusal, so the "stable set" heuristic would just make
+                    // the producer give up faster.
+                    if !gated && best_n > 0 && (last_gain.elapsed().as_millis() as u64) >= 900 {
                         break;
                     }
                 }

@@ -189,7 +189,23 @@ pub fn anti_domination_enforced(height: u64) -> bool {
 
 /// Window length (blocks) for dominance accounting. Configurable only behind the
 /// testnet/devnet gate; clamped to >= 1. Default `DEFAULT_ANTI_DOMINATION_WINDOW`.
+///
+/// MAINNET IS CONST-FORCED. This value is a CONSENSUS parameter: it feeds
+/// `fairness_weight` -> each candidate's `dominance_weight`, which `connect_block`
+/// re-derives and rejects on mismatch (`phase21d: candidate dominance weight mismatch`).
+/// While it was env-readable, two honest mainnet nodes started from different unit
+/// files would compute different weights and permanently reject each other's blocks --
+/// and one operator could change block validity from a systemd drop-in. The doc line
+/// above claimed a testnet/devnet gate; no such gate existed.
+///
+/// Verified behaviour-preserving before forcing: on 2026-08-02 neither live mainnet
+/// node had this set (checked in `/proc/<pid>/environ`, not just `systemctl show
+/// -p Environment`, which does not report EnvironmentFile), so both were already
+/// running the default this pins.
 pub fn anti_domination_window() -> u64 {
+    if network_id_byte() == 0 {
+        return DEFAULT_ANTI_DOMINATION_WINDOW;
+    }
     std::env::var("IRIUM_POAWX_ANTI_DOMINATION_WINDOW")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
@@ -199,7 +215,13 @@ pub fn anti_domination_window() -> u64 {
 
 /// Number of recent windows (including the current) that count as "recent".
 /// Clamped to >= 1. Default `DEFAULT_ANTI_DOMINATION_LOOKBACK`.
+///
+/// MAINNET IS CONST-FORCED, for the same reason as [`anti_domination_window`]: it
+/// feeds the same consensus-checked `dominance_weight`.
 pub fn anti_domination_lookback() -> u64 {
+    if network_id_byte() == 0 {
+        return DEFAULT_ANTI_DOMINATION_LOOKBACK;
+    }
     std::env::var("IRIUM_POAWX_ANTI_DOMINATION_LOOKBACK")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())

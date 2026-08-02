@@ -509,7 +509,19 @@ pub fn finality_threshold_values(num: Option<u16>, den: Option<u16>) -> (u16, u1
 /// Threshold (num, den), default **2/3** (supermajority of the present committee).
 /// Tunable only behind the testnet/devnet gate via
 /// `IRIUM_POAWX_FINALITY_THRESHOLD_{NUM,DEN}`.
+///
+/// MAINNET IS CONST-FORCED to 2/3. `required_votes` derives from this and
+/// `connect_block` rejects a finality proof carrying fewer votes, so an env-tunable
+/// threshold let one operator lower the bar for finalizing blocks on mainnet -- and
+/// let two honest nodes disagree about whether the same block is final. The doc line
+/// above claimed a testnet/devnet gate; no such gate existed.
+///
+/// Verified behaviour-preserving before forcing: on 2026-08-02 neither live mainnet
+/// node had NUM or DEN set (checked in `/proc/<pid>/environ`), so both already ran 2/3.
 pub fn finality_threshold() -> (u16, u16) {
+    if network_id_byte() == 0 {
+        return (2, 3);
+    }
     let num = std::env::var("IRIUM_POAWX_FINALITY_THRESHOLD_NUM")
         .ok()
         .and_then(|v| v.trim().parse::<u16>().ok());

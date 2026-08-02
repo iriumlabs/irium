@@ -53,7 +53,17 @@ const ADMISSION_PRUNE_KEEP: u64 = 64;
 /// Default admission window (heights ahead of tip a candidate may be admitted for).
 pub const DEFAULT_CANDIDATE_ADMISSION_WINDOW: u64 = 64;
 
+/// MAINNET IS CONST-FORCED. The window bounds which heights a candidate may be
+/// admitted for, and admitted candidates are what a block's candidate set must match,
+/// so two nodes with different windows admit different sets and reject each other's
+/// blocks.
+///
+/// Verified behaviour-preserving before forcing: on 2026-08-02 neither live mainnet
+/// node had this set (checked in `/proc/<pid>/environ`).
 pub fn candidate_admission_window() -> u64 {
+    if network_id_byte() == 0 {
+        return DEFAULT_CANDIDATE_ADMISSION_WINDOW;
+    }
     std::env::var("IRIUM_POAWX_CANDIDATE_ADMISSION_WINDOW")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())

@@ -317,6 +317,42 @@ pub const MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT: Option<u64> = Some(62236u
 pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = None;
 // ══════════════════════════════════════════════════════════════════════════════
 
+/// Mainnet activation for the fork-choice TOTAL ORDER fix.
+///
+/// `fork_choice_prefers_candidate` was antisymmetric but NOT transitive, and a relation can be
+/// antisymmetric on every pair while still cycling on a triple. Confirmed counterexample, with
+/// mainnet settings (floor active, hardening active, K=20):
+///
+///   A = [r]   B = [r, 1]   C = [r, 9]     tip_C < tip_A < tip_B
+///   A vs B  prefix ties  -> tip hash -> A       B vs C  ranks differ -> B       C vs A -> C
+///   => A > B > C > A
+///
+/// Cause: the shared-prefix tie jumped straight to the tip hash and ignored length, while two
+/// longer branches were decided by ranks the short branch does not have. The fix makes the tie
+/// plain lexicographic — length first, tip hash only on a full tie — which is byte-identical to
+/// the LEGACY (hardening-off) rule. Pinned by
+/// `fork_choice_prefers_candidate_is_transitive_on_triples`; the old test asserted only pairs.
+///
+/// A cycle means the surviving tip depends on ARRIVAL ORDER, so two honest nodes that saw the
+/// same branches in a different order keep different chains permanently. Equal ranks across
+/// distinct blocks are ordinary: `chain.rs` maps any block with no proposer assignment to the
+/// `(u32::MAX, u64::MAX)` sentinel, which N1 (live since 59,900) permits.
+///
+/// **DISARMED (`None`) DELIBERATELY — it must be armed at a height ABOVE the tip at the moment
+/// of deployment.** Arming at or below the current tip makes a freshly-built node re-evaluate
+/// history under the new rule and reject its own chain on restart; that has already happened
+/// twice on this chain (the 64,940 debug binary at tip 64,951, and the 65,419 four-role halt).
+/// Allow >= 50 blocks of margin: two node restarts are ~12 min each and the suite ~15 min, so
+/// 20 blocks is not enough.
+///
+/// ⚠️ COORDINATED CHANGE. Below the activation both rules agree byte-for-byte, so the change
+/// arrives INERT and a node that has it is indistinguishable from one that does not. At and
+/// above it, nodes on the old binary can pick a different branch in the tied-prefix/unequal-
+/// length case. Both hosts — and ideally the external peers, of which at least three were
+/// tracking the tip on 2026-08-02 — should be on the activation binary before the height.
+pub const MAINNET_FORKCHOICE_TOTAL_ORDER_ACTIVATION_HEIGHT: Option<u64> = None;
+// ══════════════════════════════════════════════════════════════════════════════
+
 /// Activation binary (v1.9.127): mainnet activation height for delegated (mode-1)
 /// PoAW-X receipts -- the pool paying each miner directly on-chain. `None` => off
 /// (pre-activation); `Some(H)` => active at height >= H. COORDINATED HARD FORK: every

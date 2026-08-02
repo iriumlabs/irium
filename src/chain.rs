@@ -12522,6 +12522,93 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
+    /// Builds a REAL block through the harness at an ARMED height and validates the coinbase it
+    /// actually emits. Genuinely end-to-end (builder -> validator), which nothing else was.
+    ///
+    /// ⚠️ NOT the missing test, and PROVEN so: disabling the builder's four-role branch
+    /// (`if four_role_payout_active(..) && effective_draw.is_some()` -> `if false`) leaves this
+    /// test GREEN. Solo identities give one candidate per role, so the shared-reward fan-out and
+    /// the canonical 4-output shape coincide — the builder emits 4 outputs either way and the
+    /// 65,419 divergence cannot appear.
+    ///
+    /// To actually reproduce the halt the case needs MULTIPLE candidates per role, so the
+    /// fan-out shape emits >4 outputs while the armed validator demands 4. That case is now
+    /// written and break-checked:
+    /// `poawx_mining_harness::tests::armed_builder_pays_the_drawn_four_when_a_role_has_several_candidates`.
+    ///
+    /// This one is kept for the OTHER half it covers, which that test does not: the armed
+    /// FALLBACK path (gate on, fewer than four distinct reveals, so no draw) still produces a
+    /// coinbase the validator accepts. That is the path block 65,419 took when it paid one
+    /// address all four shares.
+    ///
+    /// Every earlier check compared draws or pinned the validator's contract; none drove the
+    /// BUILDER. That is exactly the gap that halted mainnet at 65,419: the builder emitted the
+    /// legacy fan-out while the armed validator demanded the drawn four, and every submit was
+    /// rejected for ~10 minutes. Nothing in the suite touched the builder's output shape.
+    ///
+    /// Scope: solo identities, so fewer than four distinct participants reveal and the draw is
+    /// empty — this covers the FALLBACK path under the armed gate, which is the path that paid
+    /// one address all four shares at 65,419. The multi-participant drawn path still needs its
+    /// own end-to-end case.
+    #[test]
+    fn armed_gate_builder_block_is_accepted_by_the_validator() {
+        let _env = crate::test_env::guard();
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        for (k, v) in [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "4"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "4"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            // THE GATE UNDER TEST, armed at the height we build.
+            ("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT", "1"),
+        ] {
+            std::env::set_var(k, v);
+        }
+        let locked = load_locked_genesis().expect("locked genesis");
+        let genesis = block_from_locked(&locked).expect("genesis block");
+        let genesis_hash = genesis.header.hash_for_height(0);
+        let mut st = base_chain(None);
+        let net = crate::activation::network_id_byte();
+        let height = 1u64;
+        assert!(four_role_payout_active(height), "precondition: gate ARMED at the build height");
+        let bits = st.target_for_height(height).bits;
+        let time = genesis.header.time + 1;
+
+        let proof = crate::poawx_mining_harness::build_solo_poawx_block(
+            &[0x42u8; 32], net, height, genesis_hash, None, bits, time, 4,
+        )
+        .expect("the builder must produce a block at an ARMED height");
+
+        // The coinbase the BUILDER actually emitted — not one we constructed.
+        let cb = &proof.block.transactions[0];
+        let r0 = &proof.block.poawx_receipts.as_ref().unwrap()[0];
+        let ext = r0.phase20_ext.as_ref().unwrap();
+        let reward = crate::chain::block_reward(height);
+
+        // Solo => no four distinct reveals => empty draw => the armed FALLBACK shape.
+        validate_shared_multi_role_coinbase_for_test(
+            &cb.outputs, &r0.worker_pkh, ext, reward, height, None,
+        )
+        .expect("the builder's own coinbase MUST validate at the activation height");
+
+        // And it must be the 4-output shape, conserving the subsidy — 7 outputs was the halt.
+        let paid: Vec<u64> = cb.outputs.iter().filter(|o| o.value > 0).map(|o| o.value).collect();
+        assert_eq!(paid.len(), 4, "armed gate => exactly four paying outputs");
+        assert_eq!(paid.iter().sum::<u64>(), reward, "conserves the subsidy");
+
+        let _ = &mut st;
+        for k in [
+            "IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT",
+            "IRIUM_POAWX_ACTIVATION_HEIGHT",
+            "IRIUM_POAWX_MODE",
+            "IRIUM_NETWORK",
+        ] {
+            std::env::remove_var(k);
+        }
+    }
+
     #[test]
     fn gap12_solo_poawx_builder_connect_block() {
         let _env = crate::test_env::guard();
@@ -14243,17 +14330,6 @@ mod tests {
         );
     }
 
-    /// CONVERGENCE: honest nodes holding different reveals must accept the SAME block.
-    ///
-    /// Selection over "the block's candidates UNION this node's own pool" stops a producer
-    /// hiding a better candidate — but it cannot converge. A node that happens to hold one
-    /// extra reveal picks a different winner and rejects an otherwise-valid block, so honest
-    /// nodes split on pool contents alone. That is the 2026-07-28 fork class, and a fork is
-    /// fatal where a stolen role is economic.
-    ///
-    /// So validation is a pure function of the block. This pins both halves: the union
-    /// diverges, and the block-only rule agrees.
-    #[test]
     /// THE FLEET-FORK BLOCKER. The four-role draw filters reveals through an `eligible` set.
     /// That set used to union the NODE-LOCAL `global_miner_registry()` (fed by `/poawx/miner`
     /// POSTs) on top of the chain-derived proposer registry, which quietly made validation a
@@ -14480,6 +14556,25 @@ mod tests {
         std::env::remove_var("IRIUM_NETWORK");
     }
 
+    /// CONVERGENCE: honest nodes holding different reveals must accept the SAME block.
+    ///
+    /// Selection over "the block's candidates UNION this node's own pool" stops a producer
+    /// hiding a better candidate — but it cannot converge. A node that happens to hold one
+    /// extra reveal picks a different winner and rejects an otherwise-valid block, so honest
+    /// nodes split on pool contents alone. That is the 2026-07-28 fork class, and a fork is
+    /// fatal where a stolen role is economic.
+    ///
+    /// So validation is a pure function of the block. This pins both halves: the union
+    /// diverges, and the block-only rule agrees.
+    ///
+    /// ⚠️ This doc comment and its `#[test]` were separated from this function by an
+    /// insertion and spent their life attached to
+    /// `a_local_miner_announce_cannot_change_what_this_node_considers_eligible` instead --
+    /// giving that test two `#[test]` attributes (the only visible symptom, a
+    /// `duplicated attribute` warning) and leaving THIS body with none, so it never ran.
+    /// Reattached 2026-08-02. A test that is not registered is indistinguishable from one
+    /// that passes; the compiler said so once, in a warning, and nothing else did.
+    #[test]
     fn nodes_with_different_reveals_agree_on_the_same_block() {
         let _env = crate::test_env::guard();
         use crate::poawx::{

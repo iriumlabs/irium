@@ -562,6 +562,42 @@ impl ChainState {
         )
     }
 
+
+    /// The ranked draw for `height`: per role, the top-k identities the chain chose.
+    /// Same inputs and same ordering as [`Self::role_draw_for_height`], so the head of each
+    /// list is exactly that function's winner.
+    pub fn role_draw_ranked_for_height(
+        &self,
+        height: u64,
+        parent: Option<&Block>,
+    ) -> Option<[Vec<[u8; 20]>; 4]> {
+        let mut eligible = self.proposer_registry.eligible_pkhs_with(
+            height,
+            crate::poawx_proposer::proposer_freeze_depth(),
+            crate::poawx_proposer::role_liveness_window(),
+        );
+        eligible.sort_unstable();
+        eligible.dedup();
+        let prev_hash = parent
+            .map(|b| b.header.hash_for_height(height.saturating_sub(1)))
+            .unwrap_or([0u8; 32]);
+        let (fd, pd) = crate::poawx_committed_admission::seed_components_from_block(parent);
+        let seed = crate::poawx_proposer::role_draw_seed(
+            height,
+            prev_hash,
+            parent.map(|b| b.header.prev_hash),
+            fd,
+            pd,
+        );
+        crate::poawx_proposer::select_role_holders_ranked(
+            crate::activation::network_id_byte(),
+            height,
+            &seed,
+            &eligible,
+            crate::poawx_proposer::role_draw_depth(),
+        )
+    }
+
     pub fn anchor_hash_at(&self, height: u64) -> Option<[u8; 32]> {
         self.chain
             .get(height as usize)
@@ -4756,6 +4792,58 @@ pub fn expected_shared_multi_role_payouts(
         expected.push((*pkh, a));
     }
     Ok(expected)
+}
+
+
+/// The four payees under the ranked draw: PRIMARY is the producer; each contributor role is
+/// the FIRST identity in its drawn list that this block shows actually contributed.
+///
+/// Both sides compute this from the SAME bytes -- the validator from the block it is checking,
+/// the builder from the block it is assembling -- so they converge without either consulting
+/// local state. The rule a validator enforces is exactly two things: the payee is a member of
+/// the drawn list for its role, and no EARLIER member of that list appears in this block's
+/// candidate set.
+///
+/// A producer can still omit a higher-ranked candidate to pay a lower one. That is the
+/// pre-existing, documented omission vector (`chain.rs`, the `revealed` comment) and not a new
+/// one -- crucially it cannot pay an identity the chain did not draw. If NONE of the k
+/// delivered, the share goes to the PRIMARY, which is deterministic and leaves the producer no
+/// choice at all; with k=8 that requires all eight to be absent.
+pub fn expected_ranked_role_payouts(
+    primary_pkh: &[u8; 20],
+    ranked: &[Vec<[u8; 20]>; 4],
+    ext: &crate::poawx::Phase20ReceiptExt,
+    total_reward: u64,
+) -> Vec<([u8; 20], u64)> {
+    let amts = crate::poawx::multi_role_amounts(total_reward);
+    let contributed = |pkh: &[u8; 20], role: u8| -> bool {
+        ext.candidate_set
+            .as_ref()
+            .map(|cs| {
+                cs.candidates
+                    .iter()
+                    .any(|c| c.role_id == role && c.solver_pkh == *pkh)
+            })
+            .unwrap_or(false)
+    };
+    const ROLES: [u8; 3] = [
+        crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+        crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
+        crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+    ];
+    let mut taken: Vec<[u8; 20]> = vec![*primary_pkh];
+    let mut out = Vec::with_capacity(4);
+    out.push((*primary_pkh, amts[0]));
+    for (i, role) in ROLES.iter().enumerate() {
+        let payee = ranked[i + 1]
+            .iter()
+            .find(|p| !taken.contains(p) && contributed(p, *role))
+            .copied()
+            .unwrap_or(*primary_pkh);
+        taken.push(payee);
+        out.push((payee, amts[i + 1]));
+    }
+    out
 }
 
 /// Test-visible alias so the enforcement test can drive the real validator.

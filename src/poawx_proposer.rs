@@ -190,6 +190,80 @@ pub fn select_block_role_holders(
     Some(out)
 }
 
+
+/// The chain's draw as an ORDERED SET per role: the top `k` identities under the same VRF
+/// ordering `select_block_role_holders` uses, instead of a single mandated name.
+///
+/// WHY ORDERED RATHER THAN SINGULAR. A draw that names exactly one identity per role is a
+/// MANDATE: if that identity does not deliver, no producer can substitute (the draw is
+/// canonical), so nobody can fill the height. Chain liveness becomes an AND over three
+/// independently-chosen miners -- ~p^3, so 73% at p=0.9 -- and every drawn miner is a single
+/// point of failure for the whole network. That is what halted the two-node boundary harness
+/// once the draw named a producer key that runs no role worker.
+///
+/// It cannot be patched from inside the mandate model, because ABSENCE IS UNOBSERVABLE to
+/// consensus: a validator cannot tell "the miner was offline" from "the producer omitted it".
+/// Any fallback keyed on absence is abusable; any rule without one halts.
+///
+/// An ordered set dissolves it. The role is fillable if ANY of the k drew-and-delivered
+/// (1-(1-p)^k, ~0.99999996 at p=0.9, k=8), while the payee is still chosen BY THE CHAIN --
+/// what changes is that the chain supplies a deterministic succession rather than one name.
+pub fn select_role_holders_ranked(
+    network_id: u8,
+    height: u64,
+    seed: &[u8; 32],
+    eligible: &[[u8; 20]],
+    k: usize,
+) -> Option<[Vec<[u8; 20]>; 4]> {
+    use sha2::{Digest, Sha256};
+    if eligible.is_empty() || k == 0 {
+        return None;
+    }
+    let mut pool: Vec<[u8; 20]> = eligible.to_vec();
+    pool.sort_unstable();
+    pool.dedup();
+    const ROLES: [u8; 4] = [
+        0,
+        crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+        crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
+        crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+    ];
+    // Byte-identical to `select_block_role_holders`'s priority, so the top of each ranked
+    // list IS that function's winner and the two cannot drift.
+    let priority = |role: u8, pkh: &[u8; 20]| -> [u8; 32] {
+        let mut h = Sha256::new();
+        h.update(b"IRIUM_POAWX_BLOCK_ROLE_DRAW_V1");
+        h.update([network_id]);
+        h.update(height.to_le_bytes());
+        h.update(seed);
+        h.update([role]);
+        h.update(pkh);
+        h.finalize().into()
+    };
+    let mut out: [Vec<[u8; 20]>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    for (slot, role) in ROLES.iter().enumerate() {
+        let mut ranked: Vec<([u8; 32], [u8; 20])> =
+            pool.iter().map(|p| (priority(*role, p), *p)).collect();
+        ranked.sort_unstable(); // (priority, pkh) -- total order, ties broken by pkh
+        out[slot] = ranked.into_iter().take(k).map(|(_, p)| p).collect();
+    }
+    Some(out)
+}
+
+/// How deep the per-role ranked draw goes. `k` identities per role means a role is fillable
+/// unless ALL k are absent, so this is the network's liveness margin. Mainnet is const-forced;
+/// devnet may tune it to exercise the shallow case.
+pub fn role_draw_depth() -> usize {
+    if network_id_byte() == 0 {
+        return 8;
+    }
+    std::env::var("IRIUM_POAWX_ROLE_DRAW_DEPTH")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|k| *k >= 1)
+        .unwrap_or(8)
+}
+
 /// Target pool/committee size K for a contributor role (env-overridable on devnet;
 /// fixed default per role). SUPPORT is the finality committee; VERIFY the "other
 /// workers" pool. `>= 1`.

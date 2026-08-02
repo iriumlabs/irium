@@ -13909,7 +13909,31 @@ async fn get_block_template(
             let anns: Vec<String> = irium_node_rs::poawx_proposer::global_proposer_reg_pool()
                 .announce_candidates(64, &exclude, height)
                 .into_iter()
-                .filter(|r| !guard.proposer_registry.is_registered(&r.vrf_pubkey))
+                // Re-announce an ALREADY-REGISTERED key when its on-chain record has gone
+                // stale, so a live miner can REFRESH its registration.
+                //
+                // This used to drop every registered key unconditionally, which made refresh
+                // impossible: the pool kept the freshest anchor locally, the node answered
+                // `{"status":"duplicate"}`, and the on-chain record's height never advanced.
+                // Harmless while eligibility lasted 2016 blocks; fatal once the role draw
+                // filters on a SHORT liveness window, because every key ages out and the
+                // drawable set collapses to whoever registered by producing a block. Measured
+                // on the boundary harness: five workers refreshing every height, all discarded,
+                // eligible_count stuck at 2.
+                //
+                // A refresh must still cost something and must not re-amplify: the anchor has
+                // to have advanced by at least the same delta the gossip pool uses before a
+                // refresh counts as new, and `build_signed` binds fresh sybil PoW to that
+                // anchor, so a refresh cannot be precomputed or replayed.
+                .filter(|r| {
+                    match guard.proposer_registry.latest_height(&r.vrf_pubkey) {
+                        None => true,
+                        Some(prev) => {
+                            r.anchor_height.saturating_sub(prev)
+                                >= irium_node_rs::poawx_proposer::PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA
+                        }
+                    }
+                })
                 .take(irium_node_rs::poawx_proposer::PROPOSER_ANNOUNCE_CAP)
                 .map(|r| hex::encode(r.serialize()))
                 .collect();

@@ -2570,6 +2570,100 @@ async fn handle_message(
                 }
             }
         }
+        // THE POOL SUBMISSION CHANNEL. A pool-connected miner that was DRAWN for a role
+        // submits the role bundle it built locally, over the Stratum connection it already
+        // has, and the pool forwards it to its node.
+        //
+        // This is what puts a pool miner on the same terms as a CLI or Irium Core app miner:
+        // all three register one key on chain, the chain draws four holders out of everyone
+        // registered, and each drawn miner does its role and is paid at its OWN address.
+        // Before this there was no channel at all -- bundles reached the producer only over
+        // loopback from the pool operator's own workers, so a pool miner could be drawn and
+        // then had no way to serve the role, and the operator collected it by default.
+        //
+        // The pool is a DUMB RELAY and must stay one. It does not parse, validate or even
+        // deserialize the bundle: it links a possibly-stale copy of the node crate, so a
+        // consensus structure it understood today could be one it misreads tomorrow. It
+        // forwards the opaque JSON and returns the NODE's verdict verbatim, which keeps the
+        // node the single authority over what is a valid enrollment.
+        //
+        // The node applies the real controls: per-source (the pool must be declared in
+        // IRIUM_POAWX_BUNDLE_RELAY_SOURCES to get the relay budget), full cryptographic
+        // validation, then per-identity limiting on solver_pkh -- so relaying cannot lift any
+        // one miner above its own allowance, and a miner cannot be paid for an identity it
+        // does not hold the key to.
+        "poawx.submit_role_bundle" => {
+            // Authorize first: an unauthenticated socket must not be able to push work
+            // through the pool into its node.
+            if session.pkh.is_none() {
+                let resp = json!({
+                    "id": id, "result": null,
+                    "error": [24, "unauthorized: authorize before submitting role work", null]
+                });
+                write_json(wr, &resp).await?;
+                return Ok(());
+            }
+            // params[0] is the bundle as the role worker emits it: a JSON object, or the same
+            // object already serialized to a string. Accept both and forward the bytes; the
+            // pool never inspects the contents.
+            let body = match params.first() {
+                Some(Value::String(s)) => s.clone(),
+                Some(v) => v.to_string(),
+                None => {
+                    let resp = json!({
+                        "id": id, "result": null,
+                        "error": [20, "missing role bundle parameter", null]
+                    });
+                    write_json(wr, &resp).await?;
+                    return Ok(());
+                }
+            };
+            let url = format!("{}/poawx/role-bundle", config.rpc_base.trim_end_matches('/'));
+            let client = reqwest::Client::builder().build()?;
+            let mut req = client
+                .post(&url)
+                .header("content-type", "application/json")
+                .body(body);
+            if !config.rpc_token.is_empty() {
+                req = req.bearer_auth(&config.rpc_token);
+            }
+            let resp = match req.send().await {
+                Ok(r) => {
+                    let status = r.status();
+                    let text = r.text().await.unwrap_or_default();
+                    if status.is_success() {
+                        info!(
+                            "[poawx] relayed role bundle for worker={} -> node {}",
+                            session.worker.as_deref().unwrap_or("?"),
+                            status
+                        );
+                        json!({"id": id, "result": {"accepted": true, "node": text}, "error": null})
+                    } else {
+                        // Never silent: a miner whose enrollment was refused must be told why,
+                        // or it looks identical to simply not being drawn and it will keep
+                        // burning CPU on work nobody will pay for.
+                        warn!(
+                            "[poawx] node REFUSED relayed role bundle worker={} status={} body={}",
+                            session.worker.as_deref().unwrap_or("?"),
+                            status,
+                            text
+                        );
+                        json!({
+                            "id": id, "result": null,
+                            "error": [20, format!("node refused role bundle: {status} {text}"), null]
+                        })
+                    }
+                }
+                Err(e) => {
+                    warn!("[poawx] role-bundle relay to node failed: {e}");
+                    json!({
+                        "id": id, "result": null,
+                        "error": [20, format!("role bundle relay failed: {e}"), null]
+                    })
+                }
+            };
+            write_json(wr, &resp).await?;
+        }
         _ => {
             let resp = json!({"id": id, "result": null, "error": [20, "unsupported method", null]});
             write_json(wr, &resp).await?;

@@ -366,7 +366,14 @@ impl NodeRoleBundlePool {
     ) -> Result<BundleOutcome, String> {
         // TIER 1 -- per source. Cheap, and it runs BEFORE validation so that the cost of
         // validating is itself protected.
-        if !crate::poawx_admission::admission_rate_allowed(src) {
+        // A declared bundle RELAY (a Stratum pool forwarding its miners' enrollments) gets its
+        // own budget here. Without that, N pool miners enrolling through one address exhaust
+        // the ordinary per-source allowance in a single height-change burst, and the escalating
+        // flood cooldown then locks that address out for five minutes -- which would make the
+        // pool submission channel unusable for more than a handful of miners, and would take
+        // any single workers on the same address down with it. Tier 3 below is untouched, so a
+        // relay carries MORE miners, never a bigger allowance for any one of them.
+        if !crate::poawx_admission::bundle_ingest_rate_allowed(src) {
             return Err("role bundle: source rate limited".to_string());
         }
         // TIER 2 -- validation. Counted so a test can prove tier 1 short-circuits it.

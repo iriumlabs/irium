@@ -556,6 +556,63 @@ pub enum RateClass {
     /// HTTP enrollment surface — role-work, role bundles, the candidate-admission bridge.
     /// Low volume: roughly one request per worker per height.
     Enrollment,
+    /// A DECLARED BUNDLE RELAY forwarding role bundles on behalf of many distinct miners —
+    /// a Stratum pool being the only real case. One IP carries N miners' enrollments, so its
+    /// honest volume scales with its miner count and bursts at every height change, while an
+    /// ordinary enrollment source is one worker sending roughly one request per height.
+    ///
+    /// Budgeted separately for exactly the reason `Gossip` and `Enrollment` were split: a
+    /// relay sharing the enrollment budget would exhaust it in one burst, and the escalating
+    /// flood cooldown would then lock out the honest single workers on that same address for
+    /// five minutes. Being declared a relay does NOT buy an identity anything — tier 3
+    /// (`identity_rate_allowed`, per solver_pkh) is untouched, so a relay cannot lift one
+    /// miner above its own allowance, only carry more distinct miners.
+    Relay,
+}
+
+/// Source addresses permitted to use the [`RateClass::Relay`] budget, from
+/// `IRIUM_POAWX_BUNDLE_RELAY_SOURCES` (comma-separated IPs). Empty by default, so this ships
+/// INERT and no address gets the larger budget until an operator names one.
+///
+/// Runtime config, deliberately: a compiled-in relay list would hardcode somebody's pool into
+/// every node. Any operator can declare their own relay; nobody inherits one.
+pub fn bundle_relay_sources() -> Vec<IpAddr> {
+    std::env::var("IRIUM_POAWX_BUNDLE_RELAY_SOURCES")
+        .unwrap_or_default()
+        .split(',')
+        .filter_map(|s| s.trim().parse::<IpAddr>().ok())
+        .collect()
+}
+
+/// Is `src` an operator-declared bundle relay?
+pub fn is_declared_bundle_relay(src: IpAddr) -> bool {
+    bundle_relay_sources().iter().any(|a| *a == src)
+}
+
+/// Per-window budget for a declared relay. Higher than the enrollment budget because one relay
+/// legitimately carries many miners, but still FINITE: a relay that floods is throttled like
+/// anything else, it simply has room for its miner count first.
+pub fn relay_rate_max() -> u32 {
+    std::env::var("IRIUM_POAWX_RELAY_RATE_MAX")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(600)
+        .clamp(4, 1_000_000)
+}
+
+/// True if a declared relay `src` may forward one more bundle now; false => 429.
+pub fn relay_rate_allowed(src: IpAddr) -> bool {
+    admission_rate_allowed_class(RateClass::Relay, src)
+}
+
+/// The rate check for the role-bundle surface: the relay budget for a declared relay, the
+/// ordinary enrollment budget for everyone else. One function so the two cannot drift.
+pub fn bundle_ingest_rate_allowed(src: IpAddr) -> bool {
+    if is_declared_bundle_relay(src) {
+        relay_rate_allowed(src)
+    } else {
+        admission_rate_allowed(src)
+    }
 }
 
 fn admission_rate_map() -> &'static Mutex<HashMap<(RateClass, IpAddr), AdmissionRate>> {
@@ -581,7 +638,12 @@ pub fn admission_rate_allowed(src: IpAddr) -> bool {
 pub fn admission_rate_allowed_class(class: RateClass, src: IpAddr) -> bool {
     let now = Instant::now();
     let window = Duration::from_secs(admission_rate_window_secs());
-    let max = admission_rate_max();
+    // A declared relay carries many miners on one address, so it gets its own (larger, still
+    // finite) per-window budget. Every other class keeps the ordinary one.
+    let max = match class {
+        RateClass::Relay => relay_rate_max(),
+        _ => admission_rate_max(),
+    };
     let cooldown = Duration::from_secs(admission_flood_cooldown_secs());
     let mut map = admission_rate_map().lock().unwrap_or_else(|e| e.into_inner());
     if map.len() > 8192 {
@@ -1148,6 +1210,72 @@ pub fn global_admission_cache() -> &'static NodeCandidateAdmissionCache {
 
 #[cfg(test)]
 mod tests {
+
+    /// The pool submission channel only works if a declared RELAY gets its own per-source
+    /// budget. N pool miners enrolling through one address is one IP's worth of traffic under
+    /// the ordinary enrollment budget, so a height-change burst exhausts it and the escalating
+    /// flood cooldown then locks that address out for five minutes -- taking any single workers
+    /// on the same address down with it. That coupling already starved the enrollment surface
+    /// once, on 2026-07-29, which is why `Gossip` and `Enrollment` were split.
+    ///
+    /// The relay budget must ALSO be inert until an operator declares a relay, and must not be
+    /// a bypass: it is a bigger allowance for carrying more distinct miners, never a licence
+    /// for one identity, which tier 3 (`identity_rate_allowed`) still bounds.
+    #[test]
+    fn a_declared_relay_gets_its_own_budget_and_nobody_else_does() {
+        let _env = crate::test_env::guard();
+        let relay: IpAddr = "203.0.113.7".parse().unwrap();
+        let plain: IpAddr = "203.0.113.8".parse().unwrap();
+
+        // INERT by default: with nothing declared, a relay address is an ordinary source.
+        std::env::remove_var("IRIUM_POAWX_BUNDLE_RELAY_SOURCES");
+        assert!(!is_declared_bundle_relay(relay), "no relay is declared by default");
+        assert!(bundle_relay_sources().is_empty());
+
+        // Declaring one names THAT address only -- a node never inherits somebody's pool.
+        std::env::set_var("IRIUM_POAWX_BUNDLE_RELAY_SOURCES", "203.0.113.7");
+        assert!(is_declared_bundle_relay(relay));
+        assert!(!is_declared_bundle_relay(plain), "an undeclared address stays ordinary");
+
+        // Budgets: small for the ordinary surface, larger for the relay, both FINITE.
+        std::env::set_var("IRIUM_POAWX_ADMISSION_RATE_MAX", "4");
+        std::env::set_var("IRIUM_POAWX_RELAY_RATE_MAX", "40");
+        std::env::set_var("IRIUM_POAWX_ADMISSION_RATE_WINDOW_SECS", "3600");
+        std::env::set_var("IRIUM_POAWX_ADMISSION_COOLDOWN_SECS", "0");
+
+        // The ordinary address runs out quickly...
+        let plain_ok = (0..40).filter(|_| bundle_ingest_rate_allowed(plain)).count();
+        assert!(
+            plain_ok < 40,
+            "an ordinary source must still be bounded by the enrollment budget (got {plain_ok})"
+        );
+        // ...while the declared relay has room for many miners in the same window.
+        let relay_ok = (0..40).filter(|_| bundle_ingest_rate_allowed(relay)).count();
+        assert!(
+            relay_ok > plain_ok,
+            "a declared relay must get a LARGER budget than an ordinary source \
+             (relay={relay_ok}, plain={plain_ok}) -- otherwise one pool burst locks out \
+             every miner behind it"
+        );
+
+        // ...and it is a budget, not a bypass: keep pushing and the relay is throttled too.
+        let relay_more = (0..1000).filter(|_| bundle_ingest_rate_allowed(relay)).count();
+        assert!(
+            relay_more < 1000,
+            "the relay budget must be FINITE -- a relay that floods is throttled like anything \
+             else (allowed {relay_more} of 1000)"
+        );
+
+        for k in [
+            "IRIUM_POAWX_BUNDLE_RELAY_SOURCES",
+            "IRIUM_POAWX_ADMISSION_RATE_MAX",
+            "IRIUM_POAWX_RELAY_RATE_MAX",
+            "IRIUM_POAWX_ADMISSION_RATE_WINDOW_SECS",
+            "IRIUM_POAWX_ADMISSION_COOLDOWN_SECS",
+        ] {
+            std::env::remove_var(k);
+        }
+    }
     use super::*;
 
     #[test]

@@ -14401,6 +14401,85 @@ mod tests {
         std::env::remove_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT");
     }
 
+    /// The validator-side contract for the armed coinbase, pinned.
+    ///
+    /// ⚠️ HONEST SCOPE: this constructs both candidate shapes and runs the real validator over
+    /// them. It does NOT drive `poawx_mining_harness::build_*`, so it would NOT by itself have
+    /// caught the 65,419 halt -- the defect was the BUILDER choosing the wrong shape, and this
+    /// pins only what the validator accepts. It makes the contract unambiguous and fails if the
+    /// armed rule ever loosens. Driving the real builder end-to-end at an armed height is still
+    /// the missing test; do not treat this as that test.
+    ///
+    /// Every previous check compared the two sides' *draws* and passed throughout the outage.
+    /// Agreeing on WHO is drawn says nothing about what the builder actually PAYS. This builds
+    /// both candidate coinbases at an ARMED height and runs the real validator over them:
+    /// the legacy fan-out shape must be REJECTED, and the drawn-four shape ACCEPTED.
+    ///
+    /// Runs at network_id != 0 because `four_role_payout_active` reads the hardcoded const on
+    /// mainnet and ignores the env override -- so the armed BRANCH is only reachable off-mainnet
+    /// while the const ships `None`. The mainnet-context companion
+    /// (`four_role_payout_boundary_at_64940_in_mainnet_context`) asserts it ships disarmed. The
+    /// consensus logic exercised here is shared by both networks; only the gate lookup differs.
+    #[test]
+    fn the_builders_coinbase_at_an_armed_height_is_validated_not_just_drawn() {
+        let _env = crate::test_env::guard();
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let height = 70_000u64;
+        std::env::set_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT", &height.to_string());
+        assert!(four_role_payout_active(height), "precondition: the gate is ARMED here");
+
+        let drawn: [([u8; 20], u8); 4] = [
+            ([0xA1u8; 20], 0),
+            ([0xC0u8; 20], crate::poawx::ROLE_COMPUTE_CONTRIBUTOR),
+            ([0x41u8; 20], crate::poawx::ROLE_VERIFY_CONTRIBUTOR),
+            ([0x51u8; 20], crate::poawx::ROLE_SUPPORT_CONTRIBUTOR),
+        ];
+        let reward = crate::chain::block_reward(height);
+        let primary = drawn[0].0;
+        let ext = rev_ext(Vec::new());
+        let outs = |pay: &[([u8; 20], u64)]| -> Vec<crate::tx::TxOutput> {
+            pay.iter()
+                .map(|(pkh, v)| crate::tx::TxOutput {
+                    value: *v,
+                    script_pubkey: crate::tx::p2pkh_script(pkh),
+                })
+                .collect()
+        };
+
+        // WHAT THE BUILDER EMITTED AT 65,419: the legacy fan-out, extra payees sharing the
+        // verify/support shares. Seven outputs where the armed rule demands four.
+        let a = crate::poawx::multi_role_amounts(reward);
+        let legacy: Vec<([u8; 20], u64)> = vec![
+            (drawn[0].0, a[0]),
+            (drawn[1].0, a[1]),
+            (drawn[2].0, a[2] / 2),
+            ([0xE1u8; 20], a[2] - a[2] / 2),
+            (drawn[3].0, a[3] / 2),
+            ([0xE2u8; 20], a[3] - a[3] / 2),
+        ];
+        let err = validate_shared_multi_role_coinbase_for_test(
+            &outs(&legacy), &primary, &ext, reward, height, Some(&drawn),
+        )
+        .expect_err("the legacy fan-out shape MUST be rejected at an armed height");
+        assert!(
+            err.contains("role output") || err.contains("shared-reward"),
+            "expected a role-output shape rejection, got: {err}"
+        );
+
+        // WHAT THE BUILDER EMITS NOW: exactly the drawn four, via the same function the
+        // validator derives its expectation from.
+        let fixed = expected_drawn_role_payouts(&drawn, reward);
+        assert_eq!(fixed.len(), 4, "four outputs");
+        validate_shared_multi_role_coinbase_for_test(
+            &outs(&fixed), &primary, &ext, reward, height, Some(&drawn),
+        )
+        .expect("the drawn-four coinbase MUST validate at the activation height");
+
+        std::env::remove_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     fn nodes_with_different_reveals_agree_on_the_same_block() {
         let _env = crate::test_env::guard();
         use crate::poawx::{

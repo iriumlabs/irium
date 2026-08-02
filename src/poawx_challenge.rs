@@ -313,6 +313,35 @@ pub fn fraud_proof_enforced_gate(
 /// This single gate governs validation, slashing apply, and reorg revert so that
 /// connect/disconnect are exact inverses and no unvalidated slash is ever applied.
 /// Mainnet hard-off.
+/// Is the fraud-proof VALIDATOR mainnet-hard-off? Reported rather than inferred, so the
+/// enforce-on/validate-off invariant can be checked against the real branch instead of a
+/// comment about it. Pairs with `fraud_proof_enforced`; see CLAUDE.md §12.
+pub fn verify_fraud_proof_is_mainnet_hard_off() -> bool {
+    // Probe the actual early return rather than restating the condition: a future change that
+    // un-hard-offs the validator must be visible here without anyone remembering to edit this.
+    let sk = match k256::ecdsa::SigningKey::from_bytes((&[7u8; 32]).into()) {
+        Ok(k) => k,
+        Err(_) => return true,
+    };
+    let vote = |h: [u8; 32]| {
+        crate::poawx_finality::FinalityVoteV1::signed(
+            &sk, 0, 1, h, [0u8; 32], 0, [0u8; 32],
+            crate::poawx_finality::FinalityVoteType::Commit,
+        )
+    };
+    let probe = FraudProofV1 {
+        version: FRAUD_PROOF_VERSION,
+        kind: 0,
+        network_id: 0,
+        target_height: 1,
+        offender_pkh: [0u8; 20],
+        reporter_pkh: [0u8; 20],
+        vote_a: vote([1u8; 32]),
+        vote_b: vote([2u8; 32]),
+    };
+    matches!(verify_fraud_proof(&probe, 0, 0), Err(e) if e.contains("hard-off"))
+}
+
 pub fn fraud_proof_enforced(height: u64) -> bool {
     if network_id_byte() == 0 {
         // HALT-TRAP DISARM (2026-07-24, mirrors `tickets_enforced`). On mainnet the fraud-proof

@@ -12617,6 +12617,83 @@ mod tests {
         }
     }
 
+
+    /// CLAUDE.md §12, as an executable check: on MAINNET (network_id == 0), no consensus gate
+    /// may be ENFORCE-ON while its VALIDATOR is hard-off.
+    ///
+    /// That combination halted this chain on 2026-07-23. `tickets_enforced` was armed at the
+    /// activation height while `TicketProof::validate` still early-returned
+    /// `Err("ticket proof: mainnet hard-off")` for network_id == 0, so every block was rejected
+    /// -- enforce-ON + validate-OFF is unconditional rejection. All 959 tests were green,
+    /// because the whole suite runs at network_id != 0 and never reaches those branches.
+    ///
+    /// This runs in MAINNET CONTEXT deliberately, which is the only context where the trap is
+    /// reachable. It is a unit test rather than a booted net-0 node on purpose: a node carrying
+    /// the mainnet byte dials `static_peers.txt`, i.e. production addresses, even with an empty
+    /// seed list.
+    #[test]
+    fn no_mainnet_gate_is_enforced_while_its_validator_is_hard_off() {
+        let _env = crate::test_env::guard();
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        assert_eq!(crate::activation::network_id_byte(), 0, "mainnet context");
+        // Above every live activation, so each gate reports its armed-at-tip answer.
+        let h = 70_000u64;
+
+        // ── TICKETS: enforced on mainnet (>= 62,236). The validator must NOT be hard-off. ──
+        assert!(
+            crate::poawx_ticket::tickets_enforced(h),
+            "precondition: tickets are enforced on mainnet at {h}; if this flips, the pairing \
+             below stops being load-bearing and this test must be re-read, not deleted"
+        );
+        let solver = [0x11u8; 20];
+        let prev = [0x22u8; 32];
+        let ticket = crate::poawx_ticket::TicketProof::new(
+            0, h, prev, crate::poawx::ROLE_COMPUTE_CONTRIBUTOR, solver, h, h + 1_000,
+            [0x03u8; 33], [0x44u8; 32], crate::poawx_penalty::PenaltyStatus::Clean.id(),
+        );
+        // It is fine -- expected, even -- for this hand-made ticket to FAIL validation. What
+        // must never happen is failing because the validator refuses to run on mainnet at all.
+        if let Err(e) = ticket.validate(
+            0, h, &prev, crate::poawx::ROLE_COMPUTE_CONTRIBUTOR, &solver, 20, false,
+        ) {
+            assert!(
+                !e.contains("hard-off"),
+                "TICKETS are ENFORCED on mainnet but the ticket validator is hard-off ({e}) -- \
+                 every block carrying a ticket would be rejected. This is the 2026-07-23 halt."
+            );
+        }
+
+        // ── POOL ADMISSION: armed with fair-distribution (>= 62,236), same validator. ──
+        assert!(
+            pool_admission_enforced(h),
+            "precondition: pool-member admission is enforced on mainnet at {h}"
+        );
+
+        // ── FRAUD PROOFS: the pair that is deliberately DISARMED, and must stay consistent. ──
+        // The validator IS hard-off here, so enforcement must be OFF. Asserting both halves
+        // means this fails loudly if either side is armed alone -- which is the whole trap.
+        let validator_hard_off = crate::poawx_challenge::verify_fraud_proof_is_mainnet_hard_off();
+        if validator_hard_off {
+            assert!(
+                !crate::poawx_challenge::fraud_proof_enforced(h),
+                "FRAUD PROOFS are enforced on mainnet while their validator is hard-off -- the \
+                 first block carrying a fraud-proof section would be rejected and the chain \
+                 would halt. Un-hard-off the validator BEFORE arming enforcement."
+            );
+        }
+
+        // ── MANDATORY INCLUSION: disarmed, and documented as jointly unsatisfiable. ──
+        assert!(
+            !crate::poawx_admission::mandatory_inclusion_enforce_active(h),
+            "mandatory inclusion is armed on mainnet; it is documented as unsatisfiable \
+             together with best_for_role (include => becomes best => unpayable => rejected; \
+             omit => rejected), so arming it halts the chain"
+        );
+
+        std::env::remove_var("IRIUM_NETWORK");
+    }
+
     #[test]
     fn gap12_solo_poawx_builder_connect_block() {
         let _env = crate::test_env::guard();

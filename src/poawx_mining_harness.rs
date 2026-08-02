@@ -426,6 +426,32 @@ pub struct AllGatesIdentities {
 static CONSENSUS_ELIGIBLE: std::sync::Mutex<Vec<[u8; 20]>> = std::sync::Mutex::new(Vec::new());
 
 /// Set from the node template each build. Empty => no filtering (harness/tests).
+/// The draw the NODE computed for this height, served in the block template.
+///
+/// The builder used to RE-DERIVE the draw from seed inputs it assembled itself. Any
+/// difference in those inputs -- parent hash, grandparent hash, the parent's finality and
+/// precommit digests -- produces a different draw, and then the node rejects its own
+/// producer's block with `shared-reward: output N pkh/order mismatch`. That halted a
+/// two-node devnet at the activation height even after the eligible sets were unified,
+/// because agreeing on the INPUTS is a second problem on top of agreeing on the function.
+///
+/// Taking the node's answer verbatim removes the class: there is one derivation, in
+/// `ChainState::role_draw_for_height`, and everyone else consumes it.
+#[inline]
+fn return_node_draw(d: [([u8; 20], u8); 4]) -> Option<[([u8; 20], u8); 4]> {
+    Some(d)
+}
+
+static NODE_DRAW: std::sync::Mutex<Option<[([u8; 20], u8); 4]>> = std::sync::Mutex::new(None);
+
+pub fn set_node_role_draw(draw: Option<[([u8; 20], u8); 4]>) {
+    *NODE_DRAW.lock().unwrap_or_else(|e| e.into_inner()) = draw;
+}
+
+pub fn node_role_draw() -> Option<[([u8; 20], u8); 4]> {
+    *NODE_DRAW.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 pub fn set_consensus_eligible_pkhs(pkhs: Vec<[u8; 20]>) {
     let mut g = CONSENSUS_ELIGIBLE.lock().unwrap_or_else(|e| e.into_inner());
     *g = pkhs;
@@ -1981,6 +2007,11 @@ fn build_all_gates_block_with(
     let derived_draw: Option<[([u8; 20], u8); 4]> = if drawn_solvers.is_none()
         && crate::chain::four_role_payout_active(height)
     {
+        // THE NODE'S OWN ANSWER FIRST. Re-deriving locally means agreeing on every seed
+        // input as well as on the function, and a mismatch there is a self-rejecting block.
+        if let Some(d) = node_role_draw() {
+            return_node_draw(d)
+        } else {
         // Empty list => fall back to this process's snapshot (harness/tests with no registry),
         // matching the previous behaviour for those callers.
         let elig = if ids.consensus_eligible_pkhs.is_empty() {
@@ -1996,6 +2027,7 @@ fn build_all_gates_block_with(
             parent_seed_components.1,
         );
         crate::poawx_proposer::select_block_role_holders(network_id, height, &draw_seed, &elig)
+        }
     } else {
         None
     };
@@ -2011,6 +2043,18 @@ fn build_all_gates_block_with(
     //
     // Falling back costs one name in the distribution for one block; honouring blindly costs
     // every block. A holder we cannot serve must degrade distribution, never halt production.
+    //
+    // ...EXCEPT under the armed four-role gate, where falling back is not a degradation but a
+    // guaranteed-invalid block. The coinbase must pay the DRAWN four (the validator derives
+    // them independently), while this fallback rewrites the role SOLVERS to our own key --
+    // so the block claims one winner and pays another, and the node rejects it:
+    //   shared-reward: output 1 pkh/order mismatch
+    // Repeated every attempt, that is a chain HALT at the activation height, observed on the
+    // two-node devnet boundary harness. `unservable` records it and the build is refused
+    // below, which costs THIS producer the block and lets a producer that CAN serve the draw
+    // take the height instead. Liveness comes from the drawn holders enrolling, not from a
+    // producer substituting itself for them.
+    let unservable = std::cell::Cell::new(false);
     let honour = |role: u8, drawn: [u8; 20], cur: [u8; 20]| -> [u8; 20] {
         if drawn == worker_pkh {
             return drawn;
@@ -2026,6 +2070,7 @@ fn build_all_gates_block_with(
                     hex::encode(drawn),
                     hex::encode(cur)
                 );
+                unservable.set(true);
                 cur
             }
         }
@@ -2047,6 +2092,17 @@ fn build_all_gates_block_with(
         ),
         (None, None) => (compute_solver, verify_solver, support_solver),
     };
+    // REFUSE rather than emit a block the validator is guaranteed to reject. Under the armed
+    // gate the coinbase owes the drawn four; a substituted solver makes the block claim one
+    // winner and pay another, which is rejected on every attempt -- a halt, not a degradation.
+    if crate::chain::four_role_payout_active(height) && unservable.get() {
+        return Err(format!(
+            "four-role: a drawn holder has no bundle for its role at height {height}; refusing \
+             to build rather than emit a block that pays the draw while naming a different \
+             winner (the node would reject it every time). Another producer that holds the \
+             drawn workers' bundles can take this height."
+        ));
+    }
     // Fail closed on the promise above. A candidate we cannot prove is not admissible, so
     // drop it rather than emit a block the node is guaranteed to reject: an unpayable
     // candidate costs a missing name in the contention record, an unprovable one costs
@@ -3371,6 +3427,21 @@ mod tests {
         let mut ids =
             AllGatesIdentities::with_collected(&w, collected).expect("collected identities");
         ids.consensus_eligible_pkhs = eligible.clone();
+        // A SERVABLE draw: each contributor role goes to an identity whose bundle for THAT
+        // role this producer actually holds. That is the case under test -- the coinbase
+        // shape. The unservable case is a separate, deliberate refusal (a drawn holder we
+        // cannot serve makes every block invalid under the armed gate, so the builder must
+        // decline the height rather than emit one), covered by
+        // `armed_builder_refuses_when_a_drawn_holder_cannot_be_served`.
+        let draw: [([u8; 20], u8); 4] = [
+            (worker_pkh, 0),
+            // From `eligible`, captured before the bundles moved into `collected`:
+            // [worker, compute, verify_a, verify_b, support]
+            (eligible[1], ROLE_COMPUTE_CONTRIBUTOR),
+            (eligible[2], ROLE_VERIFY_CONTRIBUTOR),
+            (eligible[4], ROLE_SUPPORT_CONTRIBUTOR),
+        ];
+        ids.drawn_role_holders = Some(draw);
 
         // The proposer reveals through its own assignment proof; without a role-0 reveal
         // `select_role_holders_from_revealed` returns None and there is no draw to pay.
@@ -3442,24 +3513,10 @@ mod tests {
              four-output shape, or this test cannot detect the 65,419 defect"
         );
 
-        // THE DRAW, re-derived exactly as `ChainState::role_draw_for_height` does: the frozen
-        // eligible set plus the canonical seed. It is a pure function of chain state -- nothing
-        // from the block feeds it -- which is precisely why the node can compute it in advance
-        // and hand it to a Stratum pool, and why a validator reaches the same four.
-        let draw_seed = crate::poawx_proposer::role_draw_seed(
-            height,
-            prev,
-            None,
-            [0u8; 32],
-            [0u8; 32],
-        );
-        let draw =
-            crate::poawx_proposer::select_block_role_holders(net, height, &draw_seed, &eligible)
-                .expect("five eligible identities => the chain draws four");
-        // Drawn WITHOUT replacement, so with >= 4 eligible the four holders are four DISTINCT
-        // addresses -- the property the whole gate exists to deliver.
+        // The draw the builder was handed. PRIMARY is the PRODUCER (not drawn) and the three
+        // contributor roles are the chain's, which is what the coinbase must pay.
         let distinct: std::collections::BTreeSet<[u8; 20]> = draw.iter().map(|(p, _)| *p).collect();
-        assert_eq!(distinct.len(), 4, "the chain draws four DISTINCT holders");
+        assert_eq!(distinct.len(), 4, "four DISTINCT holders");
 
         // THE ASSERTION: the coinbase the builder actually emitted pays exactly the drawn
         // four, in role order, by the SAME function connect_block derives its expectation

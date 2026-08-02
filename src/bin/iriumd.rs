@@ -1706,6 +1706,12 @@ struct BlockTemplateResponse {
     /// draws a different four, pays them, and has its own block rejected.
     #[serde(default)]
     poawx_consensus_eligible_pkhs: Vec<String>,
+    /// The chain's role draw for this height as `role_id:pkh_hex`, in canonical order
+    /// (proposer, compute, verify, support). SERVED so a builder consumes the node's
+    /// derivation instead of repeating it: agreeing on the seed inputs is a separate
+    /// problem from agreeing on the function, and a mismatch there is a self-rejecting
+    /// block (`shared-reward: output N pkh/order mismatch`).
+    poawx_role_draw: Vec<String>,
     /// C2: contributor role-worker bundles collected for THIS height, as
     /// "role_id:solver_pkh:score". A builder uses these to pay the collected workers
     /// their own attributed addresses instead of fusing every role onto its own
@@ -14405,6 +14411,12 @@ async fn get_block_template(
         poawx_reg_activations: reg_activations,
         poawx_reg_announces: reg_announces,
         poawx_consensus_eligible_pkhs: consensus_eligible_hex,
+        poawx_role_draw: {
+            let g = state.chain.lock().unwrap_or_else(|e| e.into_inner());
+            g.role_draw_for_height(height, g.chain.last())
+                .map(|d| d.iter().map(|(pkh, r)| format!("{r}:{}", hex::encode(pkh))).collect())
+                .unwrap_or_default()
+        },
         poawx_role_bundles: {
             let c = irium_node_rs::poawx_role_bundle::collect_roles_for_height(height);
             [&c.compute, &c.verify, &c.support]

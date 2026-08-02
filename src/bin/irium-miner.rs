@@ -3956,6 +3956,30 @@ fn run_poawx_solo() -> Result<(), String> {
             // filters exactly as connect_block does. Without it the producer draws from every
             // candidate, the validator from the eligible ones only, and under the armed
             // four-role gate the node rejects its own producer's block.
+            // Take the NODE'S draw verbatim rather than re-deriving it. Re-deriving means
+            // agreeing on every seed input as well as on the function; a difference in any
+            // of them yields a different draw and the node rejects its own producer's block
+            // with `shared-reward: output N pkh/order mismatch`.
+            irium_node_rs::poawx_mining_harness::set_node_role_draw(
+                tmpl.poawx_role_draw.as_ref().and_then(|v| {
+                    let mut out = [([0u8; 20], 0u8); 4];
+                    if v.len() != 4 {
+                        return None;
+                    }
+                    for (i, ent) in v.iter().enumerate() {
+                        let (r, h) = ent.split_once(':')?;
+                        let role = r.trim().parse::<u8>().ok()?;
+                        let b = hex::decode(h.trim()).ok()?;
+                        if b.len() != 20 {
+                            return None;
+                        }
+                        let mut pkh = [0u8; 20];
+                        pkh.copy_from_slice(&b);
+                        out[i] = (pkh, role);
+                    }
+                    Some(out)
+                }),
+            );
             irium_node_rs::poawx_mining_harness::set_consensus_eligible_pkhs(
                 tmpl.poawx_consensus_eligible_pkhs
                     .as_ref()

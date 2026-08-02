@@ -85,6 +85,11 @@ pub struct BlockTemplate {
     /// filter its reveals through this, exactly as connect_block does.
     #[serde(default)]
     pub poawx_consensus_eligible_pkhs: Option<Vec<String>>,
+    /// The chain's role draw for this height, `role_id:pkh_hex`, canonical order. Consumed
+    /// verbatim by the builder so it does not repeat the node's derivation -- agreeing on
+    /// the seed inputs is a separate problem from agreeing on the function.
+    #[serde(default)]
+    pub poawx_role_draw: Option<Vec<String>>,
 }
 
 pub type PoawxParentInfo = (Option<[u8; 32]>, ([u8; 32], [u8; 32]));

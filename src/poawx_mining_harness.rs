@@ -3224,4 +3224,291 @@ mod tests {
             "with multisource active a real parent's components change the seed"
         );
     }
+
+    // ── The four-role payout gate: does the BUILDER pay the four the chain DREW? ─────
+
+    /// PoAW-X gates for the four-role builder test: active on devnet at height 1 with the
+    /// four-role payout gate ARMED at the height built. Mirrors `c3_gate_set` in chain.rs
+    /// (the collected-artifact fixture this reuses); the last entry is the knob under test.
+    fn four_role_builder_gates() -> [(&'static str, &'static str); 23] {
+        [
+            ("IRIUM_POAWX_ACTIVATION_HEIGHT", "1"),
+            // LOAD-BEARING, not scenery. This is what puts the §6 fan-out branch -- the one
+            // that emitted the wrong shape at 65,419 -- in the builder's path at all. It is
+            // live on mainnet (MAINNET_COMBINED_ACTIVATION_HEIGHT, 61,414), so a test of the
+            // four-role gate without it is not testing the mainnet configuration. Omitting it
+            // makes this test VACUOUS: the builder falls through to the canonical 4-output
+            // coinbase, which pays the honoured solvers -- the drawn four -- and so agrees
+            // with the fixed branch whether or not the fix is present. That is exactly what
+            // the first break-check of this test caught.
+            ("IRIUM_POAWX_SHARED_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_MODE", "active"),
+            ("IRIUM_POAWX_PUZZLE_DIFFICULTY_BITS", "1"),
+            ("IRIUM_POAWX_PUZZLE_BITS", "1"),
+            ("IRIUM_POAWX_MULTI_ROLE_REWARD_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ANTI_DOMINATION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_SET_REQUIRED", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_ASSIGNMENT_PROOF_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_REQUIRED", "1"),
+            ("IRIUM_POAWX_CANDIDATE_ADMISSION_WINDOW", "64"),
+            ("IRIUM_POAWX_PUZZLE_WORK_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PUZZLE_WORK_REQUIRED", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_FINALITY_COMMITTEE_REQUIRED", "1"),
+            ("IRIUM_POAWX_CONTRIBUTOR_ROLE_BINDING_ACTIVATION_HEIGHT", "1"),
+            ("IRIUM_POAWX_PROPOSER_VRF_ACTIVATION_HEIGHT", "999999"),
+            // THE GATE UNDER TEST, armed at the height built below.
+            ("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT", "1"),
+        ]
+    }
+
+    /// THE case the four-role gate was missing: with SEVERAL participants enrolled for one
+    /// role, does the BUILDER pay the four the chain drew?
+    ///
+    /// This reproduces the mainnet halt at 65,419. The builder's coinbase consulted only
+    /// `shared_reward_active`, so at the activation height it kept emitting the fan-out
+    /// shape (PRIMARY, COMPUTE, then EVERY admitted VERIFY and SUPPORT candidate) while the
+    /// armed validator demanded exactly the drawn four -- `expected 4 role outputs, found 7`
+    /// on every submit, for ~10 minutes.
+    ///
+    /// Three earlier tests all stayed GREEN throughout that outage, and each for the same
+    /// reason: none of them drove the BUILDER with more than one candidate in a role.
+    ///   * draw-symmetry agrees on who is DRAWN, and says nothing about who is PAID;
+    ///   * the validator-contract test pins what the validator accepts, never building;
+    ///   * the solo end-to-end build gives ONE candidate per role, so the fan-out shape and
+    ///     the four-output shape COINCIDE -- the builder emits 4 either way. Its break-check
+    ///     proved it: disabling the fix left it green.
+    ///
+    /// So the second VERIFY enrollee below is not incidental, it is the entire test. It is
+    /// what makes the two shapes differ, and the two explicit PRECONDITION asserts are there
+    /// to fail loudly if some future change ever makes them coincide again -- a silently
+    /// vacuous test is exactly what let this reach mainnet.
+    ///
+    /// Break-checked (mandatory, CLAUDE.md): with the builder's four-role branch
+    /// (`if four_role_payout_active(height) && effective_draw.is_some()`) forced to `false`,
+    /// this test FAILS on the payout assertion -- 5 fan-out payees against the drawn 4.
+    ///
+    /// Devnet, because mainnet ignores the env override and reads the const, which ships
+    /// disarmed -- the armed branch is unreachable in a mainnet-context test while it does.
+    #[test]
+    fn armed_builder_pays_the_drawn_four_when_a_role_has_several_candidates() {
+        let _env = crate::test_env::guard();
+        let _g = crate::poawx::poawx_test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        let gates = four_role_builder_gates();
+        for (k, v) in gates {
+            std::env::set_var(k, v);
+        }
+
+        let net = crate::activation::network_id_byte();
+        let height = 1u64;
+        let prev = [0x44u8; 32];
+        let bits = 0x207fffff;
+        let time = 1u32;
+        assert!(
+            crate::chain::four_role_payout_active(height),
+            "precondition: the gate is ARMED at the height under test"
+        );
+
+        // FIVE distinct identities: the builder (PRIMARY + proposer) and FOUR enrolled role
+        // workers -- two of them for VERIFY. The builder holds no contributor secret; every
+        // role arrives as public artifacts, exactly as collection delivers them on mainnet.
+        let w = [0x4Du8; 32];
+        let k_compute = [0x61u8; 32];
+        let k_verify_a = [0x62u8; 32];
+        let k_verify_b = [0x64u8; 32];
+        let k_support = [0x63u8; 32];
+
+        let dom = PersistentDominance::from_env();
+        // The seed the builder resolves for this (height, prev, no parent), derived through
+        // the same two functions so the workers' proofs bind to the builder's epoch.
+        let epoch_seed = crate::poawx_committed_admission::resolve_epoch_seed_parts_with(
+            crate::poawx_committed_admission::multisource_seed_active(height),
+            height,
+            admission_epoch_seed(None, prev),
+            [0u8; 32],
+            [0u8; 32],
+        );
+        let profile = crate::poawx_puzzle::default_profile();
+        // `[(0x11 + role); 32]` is the assignment-ticket placeholder `a_ticket` uses, and
+        // poawx-role-worker with it; a self-proved and a collected candidate for one role
+        // must carry the same value or `phase22d` rejects the block.
+        let mk_bundle = |sec: &[u8; 32], role: u8| {
+            simulate_role_worker_bundle(
+                sec,
+                net,
+                height,
+                role,
+                [(0x11u8 + role); 32],
+                epoch_seed,
+                prev,
+                &dom,
+                profile,
+            )
+            .unwrap_or_else(|e| panic!("worker bundle for role {role}: {e}"))
+        };
+        let b_compute = mk_bundle(&k_compute, ROLE_COMPUTE_CONTRIBUTOR);
+        let b_verify_a = mk_bundle(&k_verify_a, ROLE_VERIFY_CONTRIBUTOR);
+        let b_verify_b = mk_bundle(&k_verify_b, ROLE_VERIFY_CONTRIBUTOR);
+        let b_support = mk_bundle(&k_support, ROLE_SUPPORT_CONTRIBUTOR);
+        let collected = CollectedArtifacts {
+            compute: Some(b_compute.clone()),
+            verify: Some(b_verify_a.clone()),
+            support: Some(b_support.clone()),
+            // `all` is what the block's candidate set is folded from -- the FULL enrolled
+            // pool, including the VERIFY enrollee that was not selected.
+            all: vec![b_compute, b_verify_a, b_verify_b, b_support],
+        };
+        let ids = AllGatesIdentities::with_collected(&w, collected).expect("collected identities");
+
+        // The proposer reveals through its own assignment proof; without a role-0 reveal
+        // `select_role_holders_from_revealed` returns None and there is no draw to pay.
+        let p_proof = AssignmentProofV2::prove_self_solver(
+            &w,
+            net,
+            height,
+            crate::poawx_proposer::ROLE_PROPOSER,
+            [0u8; 32],
+            epoch_seed,
+        )
+        .expect("proposer assignment proof");
+        let ctx = ProposerCtx {
+            assignment: crate::poawx::ProposerAssignmentV1 {
+                round: 0,
+                proof: p_proof,
+            },
+        };
+
+        let built = build_all_gates_block_with(
+            &ids,
+            net,
+            height,
+            prev,
+            None,
+            bits,
+            time,
+            1,
+            ([0u8; 32], [0u8; 32]),
+            Some(&dom),
+            None,
+            Some(&ctx),
+            None,
+            &default_cpu_nonce_solver,
+        )
+        .expect("the builder must produce a block at an ARMED height");
+
+        let r0 = &built.block.poawx_receipts.as_ref().expect("receipts")[0];
+        let ext = r0.phase20_ext.as_ref().expect("phase20 ext");
+        let cs = ext.candidate_set.as_ref().expect("candidate set");
+        let reward = block_reward(height);
+        let role_pkhs = |role: u8| -> Vec<[u8; 20]> {
+            cs.candidates
+                .iter()
+                .filter(|c| c.role_id == role)
+                .map(|c| c.solver_pkh)
+                .collect()
+        };
+        let verify_cands = role_pkhs(ROLE_VERIFY_CONTRIBUTOR);
+        let support_cands = role_pkhs(ROLE_SUPPORT_CONTRIBUTOR);
+
+        // PRECONDITION 1 -- both VERIFY enrollees reached the block's candidate set. If the
+        // second one is dropped the pool has one candidate per role again and the test is
+        // back to the solo case that proved nothing.
+        assert!(
+            verify_cands.len() >= 2,
+            "PRECONDITION: several participants must be in contention for one role \
+             (VERIFY candidates in the set: {})",
+            verify_cands.len()
+        );
+        // PRECONDITION 2 -- and therefore the two coinbase SHAPES genuinely differ. The
+        // fan-out branch pays PRIMARY + COMPUTE + every VERIFY + every SUPPORT candidate;
+        // the four-role branch pays 4. Equal counts here would make the assertion below pass
+        // for the wrong reason, which is precisely how the solo attempt fooled itself.
+        let fanout_payees = 2 + verify_cands.len() + support_cands.len();
+        assert_ne!(
+            fanout_payees, 4,
+            "PRECONDITION: the fan-out shape ({fanout_payees} payees) must differ from the \
+             four-output shape, or this test cannot detect the 65,419 defect"
+        );
+
+        // The draw, re-derived from the BLOCK exactly as connect_block does (chain.rs:1117):
+        // every candidate reveals through its assignment-proof digest, the proposer through
+        // its VRF output. No eligibility filter here -- the harness carries no registry, so
+        // connect_block's `revealed.retain(..)` is a no-op over this set.
+        let mut revealed: Vec<([u8; 20], u8, u64)> = Vec::new();
+        let mut push = |pkh: [u8; 20], role: u8, vrf_output: [u8; 32]| {
+            let pr = crate::poawx_proposer::role_priority(&vrf_output, role);
+            if !revealed.iter().any(|(p, r, _)| *p == pkh && *r == role) {
+                revealed.push((pkh, role, pr));
+            }
+        };
+        for c in &cs.candidates {
+            push(c.solver_pkh, c.role_id, c.assignment_proof_digest);
+        }
+        let pa = ext
+            .proposer_assignment
+            .as_ref()
+            .expect("the receipt carries the proposer assignment");
+        push(
+            hash160(&pa.proof.assignment_public_key),
+            0,
+            pa.proof.vrf_output,
+        );
+        let draw = crate::poawx_proposer::select_role_holders_from_revealed(&revealed)
+            .expect("four distinct holders are revealed by this block");
+
+        // THE ASSERTION: the coinbase the builder actually emitted pays exactly the drawn
+        // four, in role order, by the SAME function connect_block derives its expectation
+        // from. Under the pre-fix builder this is the fan-out list instead.
+        let cb = &built.block.transactions[0];
+        let actual: Vec<(Vec<u8>, u64)> = cb
+            .outputs
+            .iter()
+            .filter(|o| o.value > 0)
+            .map(|o| (o.script_pubkey.clone(), o.value))
+            .collect();
+        let expected: Vec<(Vec<u8>, u64)> =
+            crate::chain::expected_drawn_role_payouts(&draw, reward)
+                .into_iter()
+                .map(|(pkh, amt)| (p2pkh_script(&pkh), amt))
+                .collect();
+        assert_eq!(
+            actual, expected,
+            "the armed builder must pay the DRAWN four, not its fan-out set"
+        );
+
+        // Four DISTINCT participants, and the subsidy conserved -- 65,419 paid one address
+        // all four shares, which is the outcome the rule exists to prevent.
+        let payees: std::collections::BTreeSet<Vec<u8>> =
+            actual.iter().map(|(s, _)| s.clone()).collect();
+        assert_eq!(payees.len(), 4, "four DISTINCT payees");
+        assert_eq!(
+            actual.iter().map(|(_, v)| *v).sum::<u64>(),
+            reward,
+            "the coinbase conserves the subsidy"
+        );
+
+        // And the real validator accepts it, driven with the draw a node re-derives.
+        crate::chain::validate_shared_multi_role_coinbase_for_test(
+            &cb.outputs,
+            &r0.worker_pkh,
+            ext,
+            reward,
+            height,
+            Some(&draw),
+        )
+        .expect("the builder's own coinbase must validate against the drawn four");
+
+        for (k, _) in gates {
+            std::env::remove_var(k);
+        }
+        std::env::remove_var("IRIUM_NETWORK");
+    }
 }

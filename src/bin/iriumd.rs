@@ -14275,64 +14275,20 @@ async fn get_block_template(
     // byte-for-byte so existing history stays valid.
     let drawn_payouts: Option<Vec<TemplateCoinbasePayout>> =
         if irium_node_rs::chain::four_role_payout_active(height) {
-            // THE SAME FUNCTION the validator uses -- not a second implementation of it.
+            // THE SAME function connect_block validates against. Previously this rebuilt the
+            // draw here from `global_role_bundle_pool().revealed_at(height)` -- and could never
+            // succeed: `select_role_holders_from_revealed` requires a winner for EVERY role
+            // including role 0 (the proposer), role bundles only ever carry roles 1/2/3, so the
+            // draw was unconditionally None and no pool ever received a payout list. Under the
+            // armed gate that means the pool builds the legacy coinbase while the validator
+            // demands the drawn four: every pool-found block rejected, which is the 65,419
+            // failure made permanent for the whole Stratum path.
             //
-            // This used to union `global_miner_registry().eligible(height)`, a node-LOCAL
-            // `Mutex<HashMap>` fed by `/poawx/miner` POSTs, never persisted and never gossiped.
-            // `connect_block` was fixed to draw from chain-derived state alone (chain.rs,
-            // `consensus_eligible_pkhs`); this builder was not. So the producer selected role
-            // holders from a set its own validator did not recognise, and two hosts holding
-            // different announce maps selected DIFFERENT holders from the same chain --
-            // measured on 2026-08-01 at one instant, vps eligible_count=5 against eu's 2, with
-            // different holders. Arming the four-role gate on top of that forks the fleet at the
-            // activation height, each node rejecting the other's blocks, which is strictly worse
-            // than the stalls it was meant to fix.
-            //
-            // Calling `consensus_eligible_pkhs` rather than re-deriving it is the point: a
-            // builder and a validator that compute the same predicate in two places will drift,
-            // and this one already did. It returns sorted + deduped, which the binary_search
-            // below requires.
-            let eligible = {
-                let g = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-                g.consensus_eligible_pkhs(height)
-            };
-            // Same seed derivation the assignment endpoint publishes, so the pool builds the
-            // coinbase for the draw miners were told about.
-            // Same canonical, ungrindable seed the assignment endpoint publishes, so the
-            // pool builds the coinbase for exactly the draw miners were told about.
-            let (tip_arr, parent_prev, parts) = {
-                let g = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-                let tb = g.chain.last();
-                let mut a = [0u8; 32];
-                if let Some(b) = tb {
-                    a = b.header.hash_for_height(g.tip_height());
-                }
-                (
-                    a,
-                    tb.map(|b| b.header.prev_hash),
-                    irium_node_rs::poawx_committed_admission::seed_components_from_block(tb),
-                )
-            };
-            let seed = irium_node_rs::poawx_proposer::role_draw_seed(
-                height, tip_arr, parent_prev, parts.0, parts.1,
-            );
-            // Same private-sortition selection connect_block will apply: over the reveals
-            // this node holds, not a public draw. The pool builds the coinbase for exactly
-            // the holders the node will accept.
-            let mut revealed: Vec<([u8; 20], u8, u64)> = Vec::new();
-            for (pkh, role, out) in
-                irium_node_rs::poawx_role_bundle::global_role_bundle_pool().revealed_at(height)
-            {
-                if eligible.binary_search(&pkh).is_ok() {
-                    revealed.push((
-                        pkh,
-                        role,
-                        irium_node_rs::poawx_proposer::role_priority(&out, role),
-                    ));
-                }
-            }
-            let _ = &seed; // seed still reported for consumers; selection is reveal-driven
-            irium_node_rs::poawx_proposer::select_role_holders_from_revealed(&revealed)
+            // The chain draw needs no reveal and no secret, so the node CAN compute it -- which
+            // is what puts a pool miner on the same terms as a CLI or Irium Core app miner:
+            // one eligible set, the chain picks four, and the client is not an input.
+            let g = state.chain.lock().unwrap_or_else(|e| e.into_inner());
+            g.role_draw_for_height(height, g.chain.last())
             .map(|drawn| {
                 irium_node_rs::chain::expected_drawn_role_payouts(&drawn, coinbase_value)
                     .into_iter()
@@ -34018,18 +33974,35 @@ mod builder_validator_eligible_set_tests {
         );
 
         // And the two call sites still delegate to the validator's own function.
-        // Three legitimate callers, all of which must stay on the shared function:
+        // Two direct callers remain:
         //   1. the template's `consensus_eligible_hex`, SERVED to external builders so they can
-        //      filter their own draw exactly as connect_block does;
-        //   2. the template's four-role `drawn_payouts`, which the Stratum pool copies verbatim
-        //      into its coinbase and cannot re-derive;
-        //   3. `/poawx/assignment`, which tells a miner which role it holds.
+        //      derive the same draw this node will validate against;
+        //   2. `/poawx/assignment`, which tells a miner which role it holds.
+        // The template's four-role `drawn_payouts` no longer appears here because it now goes
+        // through `ChainState::role_draw_for_height`, which reaches the eligible set itself --
+        // that is the single source of truth `connect_block` also uses.
+        //
         // A change to this count means a caller was added or removed; the new one has to be
-        // checked for the same node-local divergence before the number is updated.
+        // checked for the same node-local divergence before the number is updated. This test
+        // already earned that: it caught the drop from 3 to 2 the moment the template was
+        // re-pointed.
         assert_eq!(
             src.matches(shared_fn).count(),
-            3,
-            "expected exactly the three known callers of the validator's eligible-set function"
+            2,
+            "expected exactly the two known direct callers of the validator's eligible-set \
+             function; the four-role draw reaches it via role_draw_for_height"
+        );
+
+        // KNOWN REMAINING DUPLICATION, pinned so it cannot grow: `/poawx/assignment` still
+        // derives the draw inline rather than calling `role_draw_for_height`. Its inputs are
+        // the same (same seed function, same eligible set), so it agrees today -- but it is a
+        // second implementation of a consensus-visible predicate, which is exactly the shape
+        // that drifted twice on this chain. Unify it, do not add a third.
+        assert_eq!(
+            src.matches(concat!("select_block_role_", "holders(")).count(),
+            1,
+            "only /poawx/assignment may derive the draw inline; every other site must call \
+             role_draw_for_height"
         );
     }
 }

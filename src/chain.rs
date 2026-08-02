@@ -483,6 +483,74 @@ impl ChainState {
         eligible
     }
 
+    /// THE CHAIN'S ROLE DRAW for `height`: the four addresses this block pays, one role each,
+    /// in canonical order PRIMARY, COMPUTE, VERIFY, SUPPORT.
+    ///
+    /// This is the single source of truth for the draw. `connect_block` validates against it,
+    /// `/rpc/getblocktemplate` advertises it so the Stratum pool can build a coinbase it cannot
+    /// re-derive, and `/poawx/assignment` publishes it so a miner learns which role it holds.
+    /// All three call THIS function rather than deriving it themselves, because a predicate
+    /// implemented in more than one place drifts -- twice already on this chain: the builder's
+    /// eligible set against the validator's (measured 5 vs 2 across the two hosts on
+    /// 2026-08-01), and `payable()` against the builder's bundle lookup (the 65,117 and 65,160
+    /// stalls).
+    ///
+    /// It is a PURE function of chain state -- the frozen eligible set and the canonical seed --
+    /// so every node computes the same four from the same blocks, with nothing supplied by the
+    /// submitter. That is what lets a CLI miner, an Irium Core app miner and a Stratum pool
+    /// miner sit in ONE eligible set and be drawn on identical terms: the chain picks four out
+    /// of everyone registered, and the client software they happen to run is not an input.
+    ///
+    /// It deliberately does NOT use the private-sortition draw
+    /// (`select_role_holders_from_revealed`). That one derives a role holder's priority from an
+    /// ECVRF output, which requires the miner's SECRET key, so it can only pick from miners who
+    /// have already revealed -- and a node cannot compute it in advance at all. Under it the
+    /// block template could never advertise a draw (it has no role-0 reveal and cannot obtain
+    /// one), so every pool-found block would carry the legacy coinbase while the validator
+    /// demanded the drawn four: the 65,419 rejection, permanently, for the entire Stratum path.
+    /// Private sortition also inverts the order of operations -- it selects from miners who
+    /// already did the work, where the intended model selects first and the chosen four do the
+    /// work afterwards.
+    ///
+    /// ⚠️ The trade this makes, stated plainly: the four addresses become computable by anyone
+    /// the moment the parent lands, roughly one block interval of advance notice, which exposes
+    /// them to targeted disruption. Private sortition existed to avoid exactly that. What is NOT
+    /// exposed is a way to *become* one of the four after the fact: the seed depends on the
+    /// parent, and eligibility is frozen at `H - FREEZE_DEPTH`, so a key registered after the
+    /// seed is known cannot be drawn for that height.
+    ///
+    /// Fewer than four eligible identities => `select_block_role_holders` refills the pool and
+    /// one identity legitimately takes several roles. That is the deliberate liveness fallback:
+    /// the chain must not stall because the network is small.
+    pub fn role_draw_for_height(
+        &self,
+        height: u64,
+        parent: Option<&Block>,
+    ) -> Option<[([u8; 20], u8); 4]> {
+        let eligible = self.consensus_eligible_pkhs(height);
+        let prev_hash = parent
+            .map(|b| b.header.hash_for_height(height.saturating_sub(1)))
+            .unwrap_or([0u8; 32]);
+        let parent_prev = parent.map(|b| b.header.prev_hash);
+        let (finality_digest, precommit_digest) =
+            crate::poawx_committed_admission::seed_components_from_block(parent);
+        // Grandparent hash + the parent's finality/precommit digests: none of which the
+        // parent's own producer controls, so the draw cannot be ground by whoever mined it.
+        let seed = crate::poawx_proposer::role_draw_seed(
+            height,
+            prev_hash,
+            parent_prev,
+            finality_digest,
+            precommit_digest,
+        );
+        crate::poawx_proposer::select_block_role_holders(
+            crate::activation::network_id_byte(),
+            height,
+            &seed,
+            &eligible,
+        )
+    }
+
     pub fn anchor_hash_at(&self, height: u64) -> Option<[u8; 32]> {
         self.chain
             .get(height as usize)
@@ -1082,83 +1150,22 @@ impl ChainState {
         let previous = self.chain.last();
         self.validate_block_header(&block, expected_height, previous)?;
         validate_poawx_coinbase(&block, expected_height)?;
-        // THE CHAIN'S DRAW, computed here from OUR OWN state: the eligible miner set (every
-        // announced address plus registered proposer keys) and the canonical ungrindable
-        // seed. Nothing in the submitted block feeds this, so a miner cannot influence what
-        // its coinbase is checked against.
+        // THE CHAIN'S DRAW for this height: the four addresses paid, one role each. A PURE
+        // function of chain state (the frozen eligible set + the canonical seed), so nothing in
+        // the submitted block feeds it and a miner cannot influence what its coinbase is checked
+        // against. Derived through `role_draw_for_height`, the SAME function the block template
+        // and /poawx/assignment call, so validator, builder and the list handed to the Stratum
+        // pool cannot disagree.
+        //
+        // This replaced the PRIVATE SORTITION draw (`select_role_holders_from_revealed`), which
+        // picked from miners who had already revealed an ECVRF proof. That could not be computed
+        // in advance by anyone, including this node -- so the template had no draw to advertise
+        // (it has no role-0 reveal and cannot obtain one, the proposer's vrf_output being
+        // secret), and every pool-found block would have carried the legacy coinbase while the
+        // validator demanded the drawn four. See `role_draw_for_height` for the trade-off this
+        // makes and why the freeze depth still prevents registering into a known draw.
         let drawn = if four_role_payout_active(expected_height) {
-            // CHAIN-DERIVED ONLY. `proposer_registry` is fed from blocks
-            // (`apply_block_proposer_registry`), so every node computes it from the same bytes
-            // and agrees. `global_miner_registry()` is fed by `/poawx/miner` POSTs and is
-            // NODE-LOCAL -- it was unioned in here, which silently made validation a function
-            // of local state and broke the convergence the comment below is at pains to
-            // preserve.
-            //
-            // Measured 2026-08-01, same instant, gate still inert:
-            //   vps eligible_count=5 -> proposer 332efdaa | compute c2fc869e | verify bcac819d
-            //   eu  eligible_count=2 -> proposer c2fc869e | compute 222a0b48 | verify c2fc869e
-            // Two honest nodes, different holders. Arming the four-role gate on top of that
-            // would have forked the fleet at the activation height -- each node rejecting the
-            // other's blocks -- which is strictly worse than the stalls it was meant to fix.
-            //
-            // Miners enter the eligible set by REGISTERING ON CHAIN (`/poawx/registration`,
-            // PRG1: signed, sybil-worked, gossiped, applied in connect_block). That path is
-            // already convergent by construction; the local announce map never was.
-            let eligible = self.consensus_eligible_pkhs(expected_height);
-            // PRIVATE SORTITION selects from what miners REVEALED, not from a public draw
-            // over the eligible set. A public draw is knowable the instant the parent lands,
-            // which exposes the four addresses the next block needs; a miner's priority comes
-            // from its ECVRF output, so only it knows its standing until it submits work.
-            //
-            // Reveals are taken from BOTH the block's candidate set and this node's own
-            // bundle pool. Using the block alone would let a producer omit anyone with a
-            // better priority and hand itself the role; unioning our own record means a
-            // candidate we already saw cannot be hidden from us.
-            let mut revealed: Vec<([u8; 20], u8, u64)> = Vec::new();
-            let mut push = |pkh: [u8; 20], role: u8, vrf_output: [u8; 32]| {
-                let pr = crate::poawx_proposer::role_priority(&vrf_output, role);
-                if !revealed
-                    .iter()
-                    .any(|(p, r, _)| *p == pkh && *r == role)
-                {
-                    revealed.push((pkh, role, pr));
-                }
-            };
-            if let Some(ext) = block
-                .poawx_receipts
-                .as_ref()
-                .and_then(|rs| rs.first())
-                .and_then(|r| r.phase20_ext.as_ref())
-            {
-                if let Some(cs) = ext.candidate_set.as_ref() {
-                    for c in &cs.candidates {
-                        push(c.solver_pkh, c.role_id, c.assignment_proof_digest);
-                    }
-                }
-                // The proposer reveals through its own assignment proof.
-                if let Some(pa) = ext.proposer_assignment.as_ref() {
-                    push(hash160(&pa.proof.assignment_public_key), 0, pa.proof.vrf_output);
-                }
-            }
-            // DELIBERATELY NOT unioned with this node's own bundle pool.
-            //
-            // Unioning looked safer -- it stops a producer hiding a better candidate -- but it
-            // CANNOT CONVERGE. Two nodes hold different reveals: a node that happens to know
-            // one extra candidate selects a different winner and rejects an otherwise-valid
-            // block, so honest nodes split on pool contents alone. That is the 2026-07-28
-            // fork class, and a fork is fatal where a stolen role is merely economic.
-            //
-            // Validation is therefore a pure function of the BLOCK: every node re-derives the
-            // same holders from the same bytes and agrees. The omission vector is real and is
-            // addressed outside consensus -- bundle gossip (MessageType 31) converges what
-            // producers see, so a candidate that propagated is one a producer cannot plausibly
-            // claim not to have had. Closing it INSIDE consensus needs a proof that the
-            // producer saw a candidate, which a validator cannot construct locally.
-            //
-            // Only miners in the eligible set count: revealing without having paid the sybil
-            // cost to be eligible must not buy a role.
-            revealed.retain(|(pkh, _, _)| eligible.binary_search(pkh).is_ok());
-            crate::poawx_proposer::select_role_holders_from_revealed(&revealed)
+            self.role_draw_for_height(expected_height, previous)
         } else {
             None
         };

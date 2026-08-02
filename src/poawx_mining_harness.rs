@@ -1968,46 +1968,34 @@ fn build_all_gates_block_with(
     // inputs `connect_block` re-derives from, through the same function. Producer and
     // validator therefore agree by construction, with no RPC round-trip and nothing for the
     // producer to choose: it cannot pay a set of holders its own block does not justify.
+    // THE CHAIN'S DRAW, derived exactly as `ChainState::role_draw_for_height` does: the frozen
+    // eligible set plus the canonical seed, both of which the node serves in the block template
+    // (`poawx_consensus_eligible_pkhs`, and the same seed inputs used above). Producer and
+    // validator therefore agree by construction, with nothing for the producer to choose.
+    //
+    // This replaced a local re-derivation from THIS block's candidate set via
+    // `select_role_holders_from_revealed`. That drew only from miners who had already revealed,
+    // so the producer's own candidate set decided the draw -- a producer that included only its
+    // own candidates won every role by construction, and the node could not compute the same
+    // answer in advance to advertise it to a pool.
     let derived_draw: Option<[([u8; 20], u8); 4]> = if drawn_solvers.is_none()
         && crate::chain::four_role_payout_active(height)
     {
-        let mut revealed: Vec<([u8; 20], u8, u64)> = Vec::new();
-        for c in &cs.candidates {
-            let pr = crate::poawx_proposer::role_priority(&c.assignment_proof_digest, c.role_id);
-            if !revealed
-                .iter()
-                .any(|(p, r, _)| *p == c.solver_pkh && *r == c.role_id)
-            {
-                revealed.push((c.solver_pkh, c.role_id, pr));
-            }
-        }
-        if let Some(pc) = proposer_ctx {
-            let ppkh = hash160(&pc.assignment.proof.assignment_public_key);
-            let pr = crate::poawx_proposer::role_priority(&pc.assignment.proof.vrf_output, 0);
-            if !revealed.iter().any(|(p, r, _)| *p == ppkh && *r == 0) {
-                revealed.push((ppkh, 0, pr));
-            }
-        }
-        // THE SAME FILTER connect_block applies (chain.rs, `revealed.retain(...)`). Without it
-        // the producer draws from every candidate while the validator draws only from the
-        // chain-derived eligible set -- so the moment a block carries an ineligible candidate
-        // the two select different holders, the coinbase pays the builder's four, and the node
-        // rejects its own producer's block. Under the armed gate that is a halt at the
-        // activation height, which is why arming was aborted at tip 65,301.
-        //
-        // Empty list => no filtering (harness/test with no registry), matching the previous
-        // behaviour byte-for-byte for those callers.
-        let mut elig = if ids.consensus_eligible_pkhs.is_empty() {
+        // Empty list => fall back to this process's snapshot (harness/tests with no registry),
+        // matching the previous behaviour for those callers.
+        let elig = if ids.consensus_eligible_pkhs.is_empty() {
             consensus_eligible_pkhs_snapshot()
         } else {
             ids.consensus_eligible_pkhs.clone()
         };
-        if !elig.is_empty() {
-            elig.sort_unstable();
-            elig.dedup();
-            revealed.retain(|(pkh, _, _)| elig.binary_search(pkh).is_ok());
-        }
-        crate::poawx_proposer::select_role_holders_from_revealed(&revealed)
+        let draw_seed = crate::poawx_proposer::role_draw_seed(
+            height,
+            prev_hash,
+            parent_prev_hash,
+            parent_seed_components.0,
+            parent_seed_components.1,
+        );
+        crate::poawx_proposer::select_block_role_holders(network_id, height, &draw_seed, &elig)
     } else {
         None
     };
@@ -3358,15 +3346,31 @@ mod tests {
         let b_verify_a = mk_bundle(&k_verify_a, ROLE_VERIFY_CONTRIBUTOR);
         let b_verify_b = mk_bundle(&k_verify_b, ROLE_VERIFY_CONTRIBUTOR);
         let b_support = mk_bundle(&k_support, ROLE_SUPPORT_CONTRIBUTOR);
+        // THE ELIGIBLE SET -- the five registered identities the chain draws from. Under the
+        // chain draw this is the whole input: the four holders are picked from everyone
+        // REGISTERED, not from whoever happened to reveal, so a miner that enrolled through a
+        // pool, a CLI or the Core app is drawn on identical terms. An empty set means no draw
+        // at all, which is what a solo network looks like.
+        let worker_pkh = {
+            let sk = SigningKey::from_bytes((&w).into()).expect("worker key");
+            hash160(sk.verifying_key().to_encoded_point(true).as_bytes())
+        };
+        let eligible = vec![
+            worker_pkh,
+            b_compute.solver_pkh,
+            b_verify_a.solver_pkh,
+            b_verify_b.solver_pkh,
+            b_support.solver_pkh,
+        ];
         let collected = CollectedArtifacts {
             compute: Some(b_compute.clone()),
             verify: Some(b_verify_a.clone()),
             support: Some(b_support.clone()),
-            // `all` is what the block's candidate set is folded from -- the FULL enrolled
-            // pool, including the VERIFY enrollee that was not selected.
             all: vec![b_compute, b_verify_a, b_verify_b, b_support],
         };
-        let ids = AllGatesIdentities::with_collected(&w, collected).expect("collected identities");
+        let mut ids =
+            AllGatesIdentities::with_collected(&w, collected).expect("collected identities");
+        ids.consensus_eligible_pkhs = eligible.clone();
 
         // The proposer reveals through its own assignment proof; without a role-0 reveal
         // `select_role_holders_from_revealed` returns None and there is no draw to pay.
@@ -3438,31 +3442,24 @@ mod tests {
              four-output shape, or this test cannot detect the 65,419 defect"
         );
 
-        // The draw, re-derived from the BLOCK exactly as connect_block does (chain.rs:1117):
-        // every candidate reveals through its assignment-proof digest, the proposer through
-        // its VRF output. No eligibility filter here -- the harness carries no registry, so
-        // connect_block's `revealed.retain(..)` is a no-op over this set.
-        let mut revealed: Vec<([u8; 20], u8, u64)> = Vec::new();
-        let mut push = |pkh: [u8; 20], role: u8, vrf_output: [u8; 32]| {
-            let pr = crate::poawx_proposer::role_priority(&vrf_output, role);
-            if !revealed.iter().any(|(p, r, _)| *p == pkh && *r == role) {
-                revealed.push((pkh, role, pr));
-            }
-        };
-        for c in &cs.candidates {
-            push(c.solver_pkh, c.role_id, c.assignment_proof_digest);
-        }
-        let pa = ext
-            .proposer_assignment
-            .as_ref()
-            .expect("the receipt carries the proposer assignment");
-        push(
-            hash160(&pa.proof.assignment_public_key),
-            0,
-            pa.proof.vrf_output,
+        // THE DRAW, re-derived exactly as `ChainState::role_draw_for_height` does: the frozen
+        // eligible set plus the canonical seed. It is a pure function of chain state -- nothing
+        // from the block feeds it -- which is precisely why the node can compute it in advance
+        // and hand it to a Stratum pool, and why a validator reaches the same four.
+        let draw_seed = crate::poawx_proposer::role_draw_seed(
+            height,
+            prev,
+            None,
+            [0u8; 32],
+            [0u8; 32],
         );
-        let draw = crate::poawx_proposer::select_role_holders_from_revealed(&revealed)
-            .expect("four distinct holders are revealed by this block");
+        let draw =
+            crate::poawx_proposer::select_block_role_holders(net, height, &draw_seed, &eligible)
+                .expect("five eligible identities => the chain draws four");
+        // Drawn WITHOUT replacement, so with >= 4 eligible the four holders are four DISTINCT
+        // addresses -- the property the whole gate exists to deliver.
+        let distinct: std::collections::BTreeSet<[u8; 20]> = draw.iter().map(|(p, _)| *p).collect();
+        assert_eq!(distinct.len(), 4, "the chain draws four DISTINCT holders");
 
         // THE ASSERTION: the coinbase the builder actually emitted pays exactly the drawn
         // four, in role order, by the SAME function connect_block derives its expectation

@@ -63,9 +63,7 @@ fn role_id(name: &str) -> u8 {
 /// parent are unchanged from `last_slot` (nothing to do this poll).
 #[allow(clippy::too_many_arguments)]
 fn enroll_once(
-    client: &reqwest::blocking::Client,
-    base: &str,
-    token: &str,
+    transport: &mut Transport,
     role: u8,
     role_name: &str,
     net: u8,
@@ -82,22 +80,9 @@ fn enroll_once(
     // "role-work json: error decoding response body", which reads like malformed data
     // from a healthy node. That one misleading string cost real time here — the actual
     // condition was a 429, and nothing in the log said so.
-    let resp = client
-        .get(format!("{base}/poawx/role-work"))
-        .bearer_auth(token)
-        .send()
-        .map_err(|e| format!("role-work fetch: {e}"))?;
-    let status = resp.status();
-    if !status.is_success() {
-        let body = resp.text().unwrap_or_default();
-        return Err(format!(
-            "role-work rejected by node: {status} {}",
-            body.trim()
-        ));
-    }
-    let t: serde_json::Value = resp
-        .json()
-        .map_err(|e| format!("role-work json: {e}"))?;
+    // Over HTTP this is a node GET; over Stratum the pool relays the same GET. Identical
+    // JSON either way, so everything below is transport-agnostic.
+    let t: serde_json::Value = transport.role_work()?;
     let height = t["height"].as_u64().ok_or("role-work: no height")?;
     let prev_hash = h32(t["prev_hash"].as_str().ok_or("role-work: no prev_hash")?);
     // In loop mode, enroll once per (height, PARENT) -- not once per height.
@@ -260,22 +245,14 @@ fn enroll_once(
         println!("{}", serde_json::to_string_pretty(&bundle).unwrap());
         return Ok(Some((height, prev_hash)));
     }
-    let resp = client
-        .post(format!("{base}/poawx/role-bundle"))
-        .bearer_auth(token)
-        .json(&bundle)
-        .send()
-        .map_err(|e| format!("role-bundle submit: {e}"))?;
-    let status = resp.status();
-    let body = resp.text().unwrap_or_default();
-    if !status.is_success() {
-        return Err(format!(
-            "role-bundle submit rejected by node: {status} {}",
-            body.trim()
-        ));
-    }
+    // The NODE validates this either way. Over Stratum the pool forwards the bytes opaquely
+    // and returns the node's verdict, so a pool miner is enrolled on exactly the same terms as
+    // a miner with its own node -- and the payout address is `solver_pkh` inside the bundle,
+    // derived from this worker's own key, which the relay cannot alter without breaking the
+    // ECVRF binding.
+    let body = transport.submit_bundle(&bundle)?;
     println!(
-        "[role-worker] ENROLLED role={role_name} height={height} pkh={} -> {status} {}",
+        "[role-worker] ENROLLED role={role_name} height={height} pkh={} -> {}",
         hex::encode(payout_pkh),
         body.trim()
     );
@@ -322,29 +299,199 @@ fn enroll_once(
                 );
                 return Ok(Some((height, prev_hash)));
             }
-            match client
-                .post(format!("{base}/poawx/registration"))
-                .bearer_auth(token)
-                .body(reg.serialize())
-                .send()
-            {
-                Ok(r) if r.status().is_success() => println!(
+            match transport.submit_registration(reg.serialize()) {
+                Ok(body) => println!(
                     "[role-worker] REGISTERED ON CHAIN pkh={} anchor={} -> {}",
                     hex::encode(payout_pkh),
                     height.saturating_sub(1),
-                    r.text().unwrap_or_default().trim()
+                    body.trim()
                 ),
-                Ok(r) => eprintln!(
-                    "[role-worker] on-chain registration refused: {} {}",
-                    r.status(),
-                    r.text().unwrap_or_default().trim()
-                ),
-                Err(e) => eprintln!("[role-worker] on-chain registration failed: {e}"),
+                Err(e) => eprintln!("[role-worker] on-chain registration refused: {e}"),
             }
         }
         Err(e) => eprintln!("[role-worker] could not build registration: {e}"),
     }
     Ok(Some((height, prev_hash)))
+}
+
+
+/// How this worker reaches the chain.
+///
+/// A miner with its own node (or one whose pool/Core node opted into remote enrollment) talks
+/// HTTP directly. A POOL-ONLY miner has no node at all: it holds a Stratum connection and
+/// nothing else, so its three calls -- role-work parameters, "was I drawn and for what", and
+/// the bundle submit -- are relayed by the pool over that same connection.
+///
+/// The bundle is submitted as opaque JSON either way, and the NODE validates it either way.
+/// The pool is a relay, so choosing this transport does not put the pool between a miner and
+/// its money: the payout address is `solver_pkh`, derived from the miner's own key inside the
+/// bundle, and the pool cannot alter it without invalidating the ECVRF binding.
+enum Transport {
+    Http {
+        client: reqwest::blocking::Client,
+        base: String,
+        token: String,
+    },
+    Stratum(StratumClient),
+}
+
+impl Transport {
+    fn role_work(&mut self) -> Result<serde_json::Value, String> {
+        match self {
+            Transport::Http { client, base, token } => {
+                let resp = client
+                    .get(format!("{base}/poawx/role-work"))
+                    .bearer_auth(token)
+                    .send()
+                    .map_err(|e| format!("role-work fetch: {e}"))?;
+                let status = resp.status();
+                if !status.is_success() {
+                    let body = resp.text().unwrap_or_default();
+                    return Err(format!("role-work fetch: HTTP {status}: {body}"));
+                }
+                resp.json().map_err(|e| format!("role-work decode: {e}"))
+            }
+            Transport::Stratum(c) => c.call("poawx.get_role_work", serde_json::json!([])),
+        }
+    }
+
+    fn assignment(&mut self, payout_pkh: [u8; 20]) -> Result<serde_json::Value, String> {
+        let pkh = hex::encode(payout_pkh);
+        match self {
+            Transport::Http { client, base, token } => {
+                let url = format!("{}/poawx/assignment?pkh={}", base.trim_end_matches('/'), pkh);
+                let mut req = client.get(&url);
+                if !token.is_empty() {
+                    req = req.bearer_auth(token.clone());
+                }
+                req.send()
+                    .map_err(|e| format!("role assignment request failed: {e}"))?
+                    .json()
+                    .map_err(|e| format!("role assignment decode failed: {e}"))
+            }
+            Transport::Stratum(c) => {
+                c.call("poawx.get_assignment", serde_json::json!([pkh]))
+            }
+        }
+    }
+
+    /// PRG1 on-chain registration. A pool-only miner needs this as much as anyone: enrolling
+    /// a bundle and being ELIGIBLE FOR THE DRAW are different things, and the eligible set is
+    /// chain-derived, so an unregistered miner is never drawn no matter how much it enrols.
+    /// The wire is 169 raw bytes; over Stratum they travel hex-encoded and the pool decodes
+    /// them straight back to bytes without interpreting them.
+    fn submit_registration(&mut self, wire: Vec<u8>) -> Result<String, String> {
+        match self {
+            Transport::Http { client, base, token } => {
+                let r = client
+                    .post(format!("{base}/poawx/registration"))
+                    .bearer_auth(token)
+                    .body(wire)
+                    .send()
+                    .map_err(|e| format!("registration submit: {e}"))?;
+                let status = r.status();
+                let body = r.text().unwrap_or_default();
+                if status.is_success() {
+                    Ok(body)
+                } else {
+                    Err(format!("{status} {}", body.trim()))
+                }
+            }
+            Transport::Stratum(c) => c
+                .call("poawx.submit_registration", serde_json::json!([hex::encode(wire)]))
+                .map(|v| v.to_string()),
+        }
+    }
+
+    fn submit_bundle(&mut self, bundle: &serde_json::Value) -> Result<String, String> {
+        match self {
+            Transport::Http { client, base, token } => {
+                let resp = client
+                    .post(format!("{base}/poawx/role-bundle"))
+                    .bearer_auth(token)
+                    .json(bundle)
+                    .send()
+                    .map_err(|e| format!("role-bundle submit: {e}"))?;
+                let status = resp.status();
+                let body = resp.text().unwrap_or_default();
+                if status.is_success() {
+                    Ok(body)
+                } else {
+                    Err(format!("role-bundle submit: HTTP {status}: {body}"))
+                }
+            }
+            Transport::Stratum(c) => c
+                .call("poawx.submit_role_bundle", serde_json::json!([bundle.to_string()]))
+                .map(|v| v.to_string()),
+        }
+    }
+}
+
+/// A minimal Stratum client: line-delimited JSON-RPC over TCP, which is all the pool channel
+/// needs. It subscribes and authorizes exactly as a mining client does, because the pool
+/// refuses PoAW-X methods on an unauthorized session -- an anonymous socket must not be able
+/// to push work through the pool into its node.
+struct StratumClient {
+    reader: std::io::BufReader<std::net::TcpStream>,
+    writer: std::net::TcpStream,
+    next_id: u64,
+}
+
+impl StratumClient {
+    fn connect(addr: &str, worker: &str) -> Result<Self, String> {
+        let stream = std::net::TcpStream::connect(addr)
+            .map_err(|e| format!("stratum connect {addr}: {e}"))?;
+        // Bounded, so a silent pool cannot wedge the worker forever; the caller retries.
+        let to = std::time::Duration::from_secs(30);
+        stream.set_read_timeout(Some(to)).ok();
+        stream.set_write_timeout(Some(to)).ok();
+        let mut c = StratumClient {
+            reader: std::io::BufReader::new(
+                stream.try_clone().map_err(|e| format!("stratum clone: {e}"))?,
+            ),
+            writer: stream,
+            next_id: 1,
+        };
+        c.call("mining.subscribe", serde_json::json!(["irium-role-worker"]))?;
+        c.call("mining.authorize", serde_json::json!([worker, "x"]))?;
+        Ok(c)
+    }
+
+    /// One request/response. Notifications the pool pushes unsolicited (`mining.notify`,
+    /// `mining.set_difficulty`) arrive interleaved on this socket and are SKIPPED rather than
+    /// mistaken for our answer -- matching on the request id is what makes that safe.
+    fn call(&mut self, method: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
+        use std::io::{BufRead, Write};
+        let id = self.next_id;
+        self.next_id += 1;
+        let req = serde_json::json!({"id": id, "method": method, "params": params});
+        writeln!(self.writer, "{req}").map_err(|e| format!("stratum write {method}: {e}"))?;
+        self.writer.flush().map_err(|e| format!("stratum flush: {e}"))?;
+        for _ in 0..64 {
+            let mut line = String::new();
+            let n = self
+                .reader
+                .read_line(&mut line)
+                .map_err(|e| format!("stratum read {method}: {e}"))?;
+            if n == 0 {
+                return Err(format!("stratum: pool closed the connection during {method}"));
+            }
+            let v: serde_json::Value = match serde_json::from_str(line.trim()) {
+                Ok(v) => v,
+                Err(_) => continue,
+            };
+            if v.get("id").and_then(|x| x.as_u64()) != Some(id) {
+                continue; // a push notification, not our reply
+            }
+            if let Some(err) = v.get("error") {
+                if !err.is_null() {
+                    return Err(format!("stratum {method} rejected: {err}"));
+                }
+            }
+            return Ok(v.get("result").cloned().unwrap_or(serde_json::Value::Null));
+        }
+        Err(format!("stratum: no reply to {method} within 64 messages"))
+    }
 }
 
 /// Ask the chain which role THIS identity holds for the next block.
@@ -356,25 +503,10 @@ fn enroll_once(
 /// The answer changes EVERY HEIGHT, because the draw does. It is deterministic, bound to this
 /// identity, and unpredictable before the parent lands, so a role cannot be shopped for.
 fn resolve_assigned_role(
-    client: &reqwest::blocking::Client,
-    base: &str,
-    token: &str,
+    transport: &mut Transport,
     payout_pkh: [u8; 20],
 ) -> Result<Option<(u8, String)>, String> {
-    let url = format!(
-        "{}/poawx/assignment?pkh={}",
-        base.trim_end_matches('/'),
-        hex::encode(payout_pkh)
-    );
-    let mut req = client.get(&url);
-    if !token.is_empty() {
-        req = req.bearer_auth(token);
-    }
-    let v: serde_json::Value = req
-        .send()
-        .map_err(|e| format!("role assignment request failed: {e}"))?
-        .json()
-        .map_err(|e| format!("role assignment decode failed: {e}"))?;
+    let v = transport.assignment(payout_pkh)?;
     Ok(assigned_role_from_response(&v))
 }
 
@@ -406,7 +538,26 @@ fn main() -> Result<(), String> {
 
     let base = std::env::var("IRIUM_NODE_RPC").unwrap_or_else(|_| "http://127.0.0.1:38500".into());
     let token = std::env::var("IRIUM_RPC_TOKEN").unwrap_or_default();
-    let client = reqwest::blocking::Client::new();
+
+    // POOL-ONLY MINERS: set IRIUM_POAWX_POOL_STRATUM=host:port and every call -- role-work,
+    // assignment, registration, bundle submit -- is relayed by the pool over one Stratum
+    // connection, so a miner with no node of its own participates on identical terms. Unset
+    // (the default) keeps the direct HTTP path byte-for-byte as before.
+    let mut transport = match std::env::var("IRIUM_POAWX_POOL_STRATUM").ok().filter(|v| !v.trim().is_empty()) {
+        Some(addr) => {
+            println!(
+                "[role-worker] pool transport: stratum {} (payout {})",
+                addr.trim(),
+                hex::encode(payout_pkh)
+            );
+            Transport::Stratum(StratumClient::connect(addr.trim(), &hex::encode(payout_pkh))?)
+        }
+        None => Transport::Http {
+            client: reqwest::blocking::Client::new(),
+            base: base.clone(),
+            token: token.clone(),
+        },
+    };
 
     // ASK THE CHAIN which role to work, per docs/POAWX.md: "The miner requests the current
     // role assignment from your node, performs the role work, and submits role receipts."
@@ -433,7 +584,7 @@ fn main() -> Result<(), String> {
     // role slots at once. Run ONE worker in `auto` mode per node instead.
     let auto = role_name == "auto";
     let (role, role_name) = if auto {
-        match resolve_assigned_role(&client, &base, &token, payout_pkh)? {
+        match resolve_assigned_role(&mut transport, payout_pkh)? {
             Some((r, name)) => {
                 println!(
                     "[role-worker] chain drew role={name} for pkh={}",
@@ -469,7 +620,7 @@ fn main() -> Result<(), String> {
     // One-shot: run once and propagate errors (nonzero exit) exactly as before.
     if !loop_mode {
         return enroll_once(
-            &client, &base, &token, role, &role_name, net, &secret, &sk, payout_pubkey, payout_pkh,
+            &mut transport, role, &role_name, net, &secret, &sk, payout_pubkey, payout_pkh,
             None,
         )
         .map(|_| ());
@@ -511,7 +662,7 @@ fn main() -> Result<(), String> {
     let mut role_name = role_name;
     loop {
         if auto {
-            match resolve_assigned_role(&client, &base, &token, payout_pkh) {
+            match resolve_assigned_role(&mut transport, payout_pkh) {
                 Ok(Some((r, name))) => {
                     if r != role {
                         println!(
@@ -543,7 +694,7 @@ fn main() -> Result<(), String> {
             }
         }
         match enroll_once(
-            &client, &base, &token, role, &role_name, net, &secret, &sk, payout_pubkey, payout_pkh,
+            &mut transport, role, &role_name, net, &secret, &sk, payout_pubkey, payout_pkh,
             last_slot,
         ) {
             Ok(Some(slot)) => {
@@ -625,6 +776,60 @@ mod tests {
             let v = serde_json::json!({ "role": name });
             assert_eq!(assigned_role_from_response(&v).unwrap().0, id, "{name} maps to its id");
         }
+    }
+
+
+    /// A pool-only miner has NO node, so every call it must make has to be relayed. If any one
+    /// of the four is missing the miner is stranded in a way that looks like bad luck rather
+    /// than a broken client:
+    ///   * role-work    -> nothing to build a bundle from;
+    ///   * assignment   -> never learns it was drawn, so it never works its role;
+    ///   * registration -> never enters the chain-derived eligible set, so it is never DRAWN
+    ///                     at all, however much it enrols;
+    ///   * bundle       -> does the work and cannot deliver it.
+    /// The pool must answer all four, and the method names on both sides must agree exactly.
+    #[test]
+    fn the_pool_transport_covers_every_call_a_nodeless_miner_makes() {
+        let worker = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/bin/poawx-role-worker.rs"
+        ))
+        .expect("read own source");
+        let pool = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/pool/irium-stratum/src/stratum.rs"
+        ))
+        .expect("read pool source");
+
+        for m in [
+            "poawx.get_role_work",
+            "poawx.get_assignment",
+            "poawx.submit_registration",
+            "poawx.submit_role_bundle",
+        ] {
+            // Match the QUOTED literal, not the bare substring: a first attempt at this
+            // test asserted `contains(m)` and stayed green when the pool arm was renamed to
+            // "poawx.submit_registration_DISABLED", which still contains the name. Quoting
+            // pins the exact method string on both sides.
+            let quoted = format!("\"{m}\"");
+            assert!(
+                worker.contains(&quoted),
+                "the worker must call {m} over the Stratum transport"
+            );
+            assert!(
+                pool.contains(&quoted),
+                "the pool must answer {m}; a method the worker calls and the pool does not \
+                 serve strands every pool miner"
+            );
+        }
+
+        // And the pool must refuse all of them on an unauthorized session: an anonymous socket
+        // must not be able to push work through the pool into its node.
+        let guarded = pool.matches("unauthorized").count();
+        assert!(
+            guarded >= 3,
+            "every PoAW-X relay arm must check authorization first (found {guarded})"
+        );
     }
 
     /// THE BUG THIS FIXES: the role was resolved ONCE before the loop, so a worker in

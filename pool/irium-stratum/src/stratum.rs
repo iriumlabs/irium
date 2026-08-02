@@ -2592,6 +2592,123 @@ async fn handle_message(
         // validation, then per-identity limiting on solver_pkh -- so relaying cannot lift any
         // one miner above its own allowance, and a miner cannot be paid for an identity it
         // does not hold the key to.
+        // The READ half of the pool channel. A pool-only miner has no node of its own, so it
+        // cannot fetch the two things it needs before it can work a role: the per-height
+        // role-work parameters, and whether the chain drew IT this height and for which role.
+        // Without these the submit method is unusable -- a miner would have nothing to submit.
+        //
+        // Both are plain relays of unauthenticated node GETs, returning the node's JSON
+        // untouched. The pool adds nothing and interprets nothing.
+        "poawx.get_role_work" | "poawx.get_assignment" => {
+            if session.pkh.is_none() {
+                let resp = json!({
+                    "id": id, "result": null,
+                    "error": [24, "unauthorized: authorize first", null]
+                });
+                write_json(wr, &resp).await?;
+                return Ok(());
+            }
+            let path = if method == "poawx.get_role_work" {
+                "poawx/role-work".to_string()
+            } else {
+                // params[0] = the miner's own payout pkh (40 hex). The node answers with the
+                // drawn role for THAT identity, or omits `role` when it was not drawn.
+                match params.first().and_then(|v| v.as_str()) {
+                    Some(pkh) if pkh.len() == 40 && pkh.chars().all(|c| c.is_ascii_hexdigit()) => {
+                        format!("poawx/assignment?pkh={pkh}")
+                    }
+                    _ => {
+                        let resp = json!({
+                            "id": id, "result": null,
+                            "error": [20, "expected params[0] = 40-hex payout pkh", null]
+                        });
+                        write_json(wr, &resp).await?;
+                        return Ok(());
+                    }
+                }
+            };
+            let url = format!("{}/{}", config.rpc_base.trim_end_matches('/'), path);
+            let client = reqwest::Client::builder().build()?;
+            let mut req = client.get(&url);
+            if !config.rpc_token.is_empty() {
+                req = req.bearer_auth(&config.rpc_token);
+            }
+            let resp = match req.send().await {
+                Ok(r) => {
+                    let status = r.status();
+                    let text = r.text().await.unwrap_or_default();
+                    if status.is_success() {
+                        match serde_json::from_str::<Value>(&text) {
+                            Ok(v) => json!({"id": id, "result": v, "error": null}),
+                            Err(e) => json!({
+                                "id": id, "result": null,
+                                "error": [20, format!("node returned non-JSON: {e}"), null]
+                            }),
+                        }
+                    } else {
+                        json!({
+                            "id": id, "result": null,
+                            "error": [20, format!("node refused: {status} {text}"), null]
+                        })
+                    }
+                }
+                Err(e) => json!({
+                    "id": id, "result": null,
+                    "error": [20, format!("relay to node failed: {e}"), null]
+                }),
+            };
+            write_json(wr, &resp).await?;
+        }
+        // PRG1 on-chain registration, relayed. Without this a pool miner can enrol bundles
+        // forever and never be DRAWN: the eligible set consensus draws from is chain-derived,
+        // so an unregistered address is invisible to it. The wire is 169 raw bytes carried as
+        // hex; the pool decodes the hex and forwards the bytes without interpreting them.
+        "poawx.submit_registration" => {
+            if session.pkh.is_none() {
+                let resp = json!({
+                    "id": id, "result": null,
+                    "error": [24, "unauthorized: authorize first", null]
+                });
+                write_json(wr, &resp).await?;
+                return Ok(());
+            }
+            let raw = match params.first().and_then(|v| v.as_str()).map(hex::decode) {
+                Some(Ok(b)) => b,
+                _ => {
+                    let resp = json!({
+                        "id": id, "result": null,
+                        "error": [20, "expected params[0] = hex registration wire", null]
+                    });
+                    write_json(wr, &resp).await?;
+                    return Ok(());
+                }
+            };
+            let url = format!("{}/poawx/registration", config.rpc_base.trim_end_matches('/'));
+            let client = reqwest::Client::builder().build()?;
+            let mut req = client.post(&url).body(raw);
+            if !config.rpc_token.is_empty() {
+                req = req.bearer_auth(&config.rpc_token);
+            }
+            let resp = match req.send().await {
+                Ok(r) => {
+                    let status = r.status();
+                    let text = r.text().await.unwrap_or_default();
+                    if status.is_success() {
+                        json!({"id": id, "result": text, "error": null})
+                    } else {
+                        json!({
+                            "id": id, "result": null,
+                            "error": [20, format!("node refused registration: {status} {text}"), null]
+                        })
+                    }
+                }
+                Err(e) => json!({
+                    "id": id, "result": null,
+                    "error": [20, format!("registration relay failed: {e}"), null]
+                }),
+            };
+            write_json(wr, &resp).await?;
+        }
         "poawx.submit_role_bundle" => {
             // Authorize first: an unauthenticated socket must not be able to push work
             // through the pool into its node.

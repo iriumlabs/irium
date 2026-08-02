@@ -14275,13 +14275,26 @@ async fn get_block_template(
     // byte-for-byte so existing history stays valid.
     let drawn_payouts: Option<Vec<TemplateCoinbasePayout>> =
         if irium_node_rs::chain::four_role_payout_active(height) {
+            // THE SAME FUNCTION the validator uses -- not a second implementation of it.
+            //
+            // This used to union `global_miner_registry().eligible(height)`, a node-LOCAL
+            // `Mutex<HashMap>` fed by `/poawx/miner` POSTs, never persisted and never gossiped.
+            // `connect_block` was fixed to draw from chain-derived state alone (chain.rs,
+            // `consensus_eligible_pkhs`); this builder was not. So the producer selected role
+            // holders from a set its own validator did not recognise, and two hosts holding
+            // different announce maps selected DIFFERENT holders from the same chain --
+            // measured on 2026-08-01 at one instant, vps eligible_count=5 against eu's 2, with
+            // different holders. Arming the four-role gate on top of that forks the fleet at the
+            // activation height, each node rejecting the other's blocks, which is strictly worse
+            // than the stalls it was meant to fix.
+            //
+            // Calling `consensus_eligible_pkhs` rather than re-deriving it is the point: a
+            // builder and a validator that compute the same predicate in two places will drift,
+            // and this one already did. It returns sorted + deduped, which the binary_search
+            // below requires.
             let eligible = {
                 let g = state.chain.lock().unwrap_or_else(|e| e.into_inner());
-                let mut e = g.proposer_registry.eligible_pkhs(height);
-                e.extend(irium_node_rs::poawx_proposer::global_miner_registry().eligible(height));
-                e.sort_unstable();
-                e.dedup();
-                e
+                g.consensus_eligible_pkhs(height)
             };
             // Same seed derivation the assignment endpoint publishes, so the pool builds the
             // coinbase for the draw miners were told about.
@@ -15621,15 +15634,12 @@ async fn poawx_get_assignment(
         let parent_prev = tip_block.map(|b| b.header.prev_hash);
         let seed_parts =
             irium_node_rs::poawx_committed_admission::seed_components_from_block(tip_block);
-        let mut eligible = guard
-            .proposer_registry
-            .eligible_pkhs(tip_h.saturating_add(1));
-        eligible.extend(
-            irium_node_rs::poawx_proposer::global_miner_registry()
-                .eligible(tip_h.saturating_add(1)),
-        );
-        eligible.sort_unstable();
-        eligible.dedup();
+        // THE SAME FUNCTION the validator uses. This endpoint TELLS miners which role they
+        // hold, so serving a set the chain does not recognise tells a miner it was drawn for
+        // work it will never be paid for. It carried the same node-local `global_miner_registry`
+        // union as the block template did; see the note there for the measured 5-vs-2 divergence
+        // between the two hosts.
+        let eligible = guard.consensus_eligible_pkhs(tip_h.saturating_add(1));
         // Phase 24F: serve the assignment at the genesis tip (tip_h == 0) on test
         // networks too, so a fresh devnet/testnet can produce its first PoAW-X block.
         // Mainnet + inactive are already rejected above; the seed derives from the
@@ -33958,6 +33968,70 @@ async fn reresolve_agreement(
         new_primary_resolver: new_primary,
         new_fallback_resolver: new_fallback,
     }))
+}
+
+#[cfg(test)]
+mod builder_validator_eligible_set_tests {
+    /// The BUILDER's eligible set must be the chain-derived one the VALIDATOR uses, never a
+    /// union with the node-local `global_miner_registry()` (a process-local map fed by
+    /// `/poawx/miner` POSTs, never persisted, never gossiped).
+    ///
+    /// Two call sites -- the block template and `/poawx/assignment` -- unioned it while
+    /// `connect_block` did not. That made role selection a function of LOCAL state: on
+    /// 2026-08-01, at one instant, vps derived eligible_count=5 and eu 2, selecting different
+    /// holders from the same chain. Arming the four-role gate on top of that forks the fleet.
+    ///
+    /// This is a SOURCE-level guard, deliberately, and it is the honest tool for the job: the
+    /// two call sites live inside axum handlers whose logic cannot be reached from a unit test,
+    /// so the only way to pin "the union has not come back" is to look at the source. The
+    /// behavioural half is already covered on the shared function --
+    /// `chain::tests::a_local_miner_announce_cannot_change_what_this_node_considers_eligible`
+    /// proves `consensus_eligible_pkhs` ignores the local map -- so what remains to protect is
+    /// that these callers keep USING it. Renaming either symbol will fail this test; that is
+    /// intended, and the fix is to re-read the call sites rather than to delete the check.
+    #[test]
+    fn no_consensus_path_unions_the_node_local_miner_registry() {
+        let src = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/bin/iriumd.rs"))
+            .expect("read own source");
+
+        // Needles are split so this test does not match its OWN source and report itself as the
+        // offender -- which is exactly what it did on the first run.
+        let registry = concat!("global_miner_", "registry()");
+        let read_eligible = concat!(".eligi", "ble(");
+        let shared_fn = concat!("consensus_eligible_", "pkhs(");
+
+        // `announce`/`announce_with_work` on that registry is the /poawx/miner INGEST path and
+        // is legitimate -- the map has to be written somewhere. Only READING eligibility off it
+        // leaks node-local state into a consensus decision.
+        let offenders: Vec<(usize, &str)> = src
+            .lines()
+            .enumerate()
+            .filter(|(_, l)| !l.trim_start().starts_with("//"))
+            .filter(|(_, l)| l.contains(registry) && l.contains(read_eligible))
+            .map(|(i, l)| (i + 1, l.trim()))
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "a consensus-input path reads the NODE-LOCAL miner registry: {offenders:?} -- \
+             builder and validator would derive different eligible sets, which is a fleet fork \
+             at the four-role activation height, not a degradation"
+        );
+
+        // And the two call sites still delegate to the validator's own function.
+        // Three legitimate callers, all of which must stay on the shared function:
+        //   1. the template's `consensus_eligible_hex`, SERVED to external builders so they can
+        //      filter their own draw exactly as connect_block does;
+        //   2. the template's four-role `drawn_payouts`, which the Stratum pool copies verbatim
+        //      into its coinbase and cannot re-derive;
+        //   3. `/poawx/assignment`, which tells a miner which role it holds.
+        // A change to this count means a caller was added or removed; the new one has to be
+        // checked for the same node-local divergence before the number is updated.
+        assert_eq!(
+            src.matches(shared_fn).count(),
+            3,
+            "expected exactly the three known callers of the validator's eligible-set function"
+        );
+    }
 }
 
 #[cfg(test)]

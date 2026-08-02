@@ -14499,17 +14499,16 @@ mod tests {
         // The const ships DISARMED. Pinning a specific armed height here was wrong: the test
         // failed the moment the const was correctly disarmed, and would have gone green again
         // only by re-arming -- a test pushing the tree toward the unsafe state.
-        // ARMED 2026-08-01 at 65,419, above a live tip of 65,319 -- ~100 blocks of margin so
-        // BOTH hosts are deployed well before the activation. An unarmed node rejects an armed
-        // producer's 4-output block, so the height must never arrive mid-deploy.
-        let armed = crate::activation::MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT
-            .expect("four-role payout is armed");
+        // DISARMED again 2026-08-02 after the 65,419 halt: armed at 65,419, the builder emitted
+        // the legacy fan-out while the validator required the drawn four, and the fallback paid
+        // ONE address all four shares. Re-arm only once a test BUILDS a block at the activation
+        // height and VALIDATES it -- comparing draws was one step short and did not catch it.
         assert!(
-            armed > 64_864,
-            "must sit ABOVE the 6-payee blocks at 64,852-64,864, or a node rejects its own chain"
+            crate::activation::MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT.is_none(),
+            "must ship DISARMED; arm it deliberately, above the live tip, on BOTH hosts first"
         );
-        assert!(!four_role_payout_active(armed - 1), "OFF at activation-1");
-        assert!(four_role_payout_active(armed), "ON at the activation height");
+        assert!(!four_role_payout_active(64_864), "OFF over the 6-payee blocks");
+        assert!(!four_role_payout_active(70_000), "OFF everywhere while disarmed");
         assert!(
             !four_role_payout_active(64_864),
             "OFF over the 6-payee blocks at 64,852-64,864, or a node rejects its own chain"

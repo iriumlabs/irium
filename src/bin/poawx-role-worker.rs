@@ -725,6 +725,12 @@ fn main() -> Result<(), String> {
         "[role-worker] loop mode: role={role_name} poll={poll_secs}s backoff_max={backoff_cap_secs}s node={base}"
     );
     let mut last_slot: Option<(u64, [u8; 32])> = None;
+    // Refresh the on-chain registration at most ONCE PER HEIGHT. It used to fire on every
+    // idle poll (default 2s), so a handful of workers alone exceeded the 8-registrations-
+    // per-block cap; the queue backed up and registrations expired before they activated,
+    // which collapsed the drawable set instead of growing it. Measured on the boundary
+    // harness: five workers, eligible_count stuck at 2.
+    let mut registered_for: Option<u64> = None;
     let mut consecutive_errors: u32 = 0;
     // The role the chain drew LAST iteration. In `auto` mode it is re-asked every pass,
     // because the draw is per height: latching onto the role resolved at startup made a worker
@@ -753,8 +759,15 @@ fn main() -> Result<(), String> {
                     // the on-chain registration current, or an unregistered miner can never
                     // enter the eligible set the draw reads, and so can never be drawn: a
                     // self-perpetuating lockout that looks exactly like bad luck.
-                    if let Err(e) = ensure_registered(&mut transport, net, &secret, payout_pkh) {
-                        eprintln!("[role-worker] registration while idle: {e}");
+                    let h_now = transport
+                        .role_work()
+                        .ok()
+                        .and_then(|t| t["height"].as_u64());
+                    if h_now.is_some() && h_now != registered_for {
+                        match ensure_registered(&mut transport, net, &secret, payout_pkh) {
+                            Ok(()) => registered_for = h_now,
+                            Err(e) => eprintln!("[role-worker] registration while idle: {e}"),
+                        }
                     }
                     consecutive_errors = 0;
                     std::thread::sleep(std::time::Duration::from_secs(poll_secs));

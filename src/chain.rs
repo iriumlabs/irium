@@ -527,7 +527,18 @@ impl ChainState {
         height: u64,
         parent: Option<&Block>,
     ) -> Option<[([u8; 20], u8); 4]> {
-        let eligible = self.consensus_eligible_pkhs(height);
+        // DRAWABLE = demonstrably live. Filtered on the short role-liveness window rather than
+        // the long proposer window: a drawn holder that is not there cannot be served by ANY
+        // producer (the draw is canonical), so it halts the height for everyone. Newcomers are
+        // unaffected -- registration never required being drawn, so a new peer registers, waits
+        // the freeze depth, and becomes drawable like anyone else.
+        let mut eligible = self.proposer_registry.eligible_pkhs_with(
+            height,
+            crate::poawx_proposer::proposer_freeze_depth(),
+            crate::poawx_proposer::role_liveness_window(),
+        );
+        eligible.sort_unstable();
+        eligible.dedup();
         let prev_hash = parent
             .map(|b| b.header.hash_for_height(height.saturating_sub(1)))
             .unwrap_or([0u8; 32]);

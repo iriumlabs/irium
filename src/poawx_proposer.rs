@@ -1327,6 +1327,37 @@ pub fn fork_choice_hardening_active(height: u64) -> bool {
     )
 }
 
+/// How recently an identity must have registered to be DRAWABLE for a contributor role.
+///
+/// Being drawable and being allowed to PROPOSE are different questions and need different
+/// windows. Proposer eligibility keeps the long window (2016) -- a producer that has not
+/// re-registered lately can still extend the chain, which is pure liveness. But the role draw
+/// names who must DO WORK, and naming an identity that is not there is fatal: the draw is
+/// canonical, so the same absent holder is drawn at that height for EVERY producer, nobody can
+/// fill the role, and the chain halts. That is not hypothetical -- it is what the two-node
+/// boundary harness sat in at activation-1, because the draw kept naming producer keys, which
+/// run no role worker and so never enrol.
+///
+/// A short window turns "registered" into "demonstrably live": an identity stays drawable only
+/// while it keeps refreshing, and refreshing is exactly the cheap, permissionless, force-drained
+/// PRG1 path a new miner already uses to join. So this does NOT create a lockout for newcomers,
+/// which is the trap this class of rule usually falls into -- registration never required being
+/// drawn, so a new peer registers, waits the freeze depth, and is drawable like anyone else.
+///
+/// COST: ~2^20 hashes per refresh (well under a second), and registrations are capped at 8 per
+/// block, so with a window of W blocks the network supports ~8*W drawable identities before the
+/// queue is the constraint. At W=100 that is ~800.
+pub fn role_liveness_window() -> u64 {
+    if network_id_byte() == 0 {
+        return 100;
+    }
+    std::env::var("IRIUM_POAWX_ROLE_LIVENESS_WINDOW")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|w| *w >= 1)
+        .unwrap_or(100)
+}
+
 /// Gate for the fork-choice TOTAL ORDER fix (transitivity). See
 /// `activation::MAINNET_FORKCHOICE_TOTAL_ORDER_ACTIVATION_HEIGHT` for the counterexample and
 /// the arming rules.

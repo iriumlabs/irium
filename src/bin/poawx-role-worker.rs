@@ -347,6 +347,46 @@ fn enroll_once(
     Ok(Some((height, prev_hash)))
 }
 
+/// Ask the chain which role THIS identity holds for the next block.
+///
+/// `Ok(Some((role_id, name)))` => drawn, work that role. `Ok(None)` => NOT DRAWN, do nothing.
+/// An error is propagated rather than swallowed: a miner that cannot learn its assignment must
+/// not fall back to a self-chosen role, which is the behaviour this whole path removes.
+///
+/// The answer changes EVERY HEIGHT, because the draw does. It is deterministic, bound to this
+/// identity, and unpredictable before the parent lands, so a role cannot be shopped for.
+fn resolve_assigned_role(
+    client: &reqwest::blocking::Client,
+    base: &str,
+    token: &str,
+    payout_pkh: [u8; 20],
+) -> Result<Option<(u8, String)>, String> {
+    let url = format!(
+        "{}/poawx/assignment?pkh={}",
+        base.trim_end_matches('/'),
+        hex::encode(payout_pkh)
+    );
+    let mut req = client.get(&url);
+    if !token.is_empty() {
+        req = req.bearer_auth(token);
+    }
+    let v: serde_json::Value = req
+        .send()
+        .map_err(|e| format!("role assignment request failed: {e}"))?
+        .json()
+        .map_err(|e| format!("role assignment decode failed: {e}"))?;
+    Ok(assigned_role_from_response(&v))
+}
+
+/// The pure half of [`resolve_assigned_role`]: read this identity's role out of the node's
+/// answer. `None` means the `role` field is ABSENT, which the endpoint documents as NOT DRAWN
+/// -- it must never be read as "pick something".
+fn assigned_role_from_response(v: &serde_json::Value) -> Option<(u8, String)> {
+    v.get("role")
+        .and_then(|x| x.as_str())
+        .map(|name| (role_id(name), name.to_string()))
+}
+
 fn main() -> Result<(), String> {
     let role_name = std::env::args().nth(1).unwrap_or_else(|| "compute".into());
     let role = role_id(&role_name);
@@ -382,43 +422,40 @@ fn main() -> Result<(), String> {
     // key per role, sha256("IRIUM_POAWX_WORKER_v1|<role>|<secret>") -- put three addresses on
     // the chain for a single machine and let one operator occupy several role slots at once.
     // Run ONE worker in `auto` mode per node instead.
-    let (role, role_name) = if role_name == "auto" {
-        let url = format!(
-            "{}/poawx/assignment?pkh={}",
-            base.trim_end_matches('/'),
-            hex::encode(payout_pkh)
-        );
-        let mut req = client.get(&url);
-        if !token.is_empty() {
-            req = req.bearer_auth(&token);
-        }
-        // Fail loudly rather than silently falling back to a self-chosen role: a miner working
-        // a role the chain did not assign is exactly the behaviour being removed, and a silent
-        // fallback would make it invisible again.
-        let v: serde_json::Value = req
-            .send()
-            .map_err(|e| format!("role assignment request failed: {e}"))?
-            .json()
-            .map_err(|e| format!("role assignment decode failed: {e}"))?;
-        // No `role` means this address was NOT DRAWN for this block. That is the normal case
-        // once more miners are registered than there are roles, and it must mean DO NOTHING --
-        // falling back to a self-chosen role is precisely the behaviour being removed.
-        match v.get("role").and_then(|x| x.as_str()) {
-            Some(name) => {
+    // `auto` (the default for a miner that does not pass a role) asks the CHAIN which role it
+    // holds. An explicit role argument still overrides, which keeps every harness and negative
+    // control working unchanged.
+    //
+    // ONE NODE, ONE MINING ADDRESS. `IRIUM_POAWX_ROLE_SECRET_HEX` is this node's single mining
+    // identity and the chain draws at most one role for it per block. Running several
+    // identities from one node -- as `poawx-role-workers-only.sh` did, deriving a key per role
+    // -- put three addresses on the chain for one machine and let one operator occupy several
+    // role slots at once. Run ONE worker in `auto` mode per node instead.
+    let auto = role_name == "auto";
+    let (role, role_name) = if auto {
+        match resolve_assigned_role(&client, &base, &token, payout_pkh)? {
+            Some((r, name)) => {
                 println!(
-                    "[role-worker] chain drew role={name} for pkh={} (holders={})",
-                    hex::encode(payout_pkh),
-                    v.get("role_holders").map(|h| h.to_string()).unwrap_or_default()
+                    "[role-worker] chain drew role={name} for pkh={}",
+                    hex::encode(payout_pkh)
                 );
-                (role_id(name), name.to_string())
+                (r, name)
             }
             None => {
                 println!(
-                    "[role-worker] not drawn for this block (pkh={}); idling until the next \
-                     height -- a miner may NOT pick its own role",
+                    "[role-worker] not drawn for this block (pkh={}); a miner may NOT pick its \
+                     own role",
                     hex::encode(payout_pkh)
                 );
-                return Ok(());
+                // One-shot: nothing to do. Loop mode re-asks every height below, so an
+                // undrawn identity idles now and works the moment the chain draws it.
+                if !std::env::var("IRIUM_POAWX_ROLE_WORKER_LOOP")
+                    .map(|v| v.trim() == "1")
+                    .unwrap_or(false)
+                {
+                    return Ok(());
+                }
+                (ROLE_COMPUTE_CONTRIBUTOR, "unassigned".to_string())
             }
         }
     } else {
@@ -465,7 +502,46 @@ fn main() -> Result<(), String> {
     );
     let mut last_slot: Option<(u64, [u8; 32])> = None;
     let mut consecutive_errors: u32 = 0;
+    // The role the chain drew LAST iteration. In `auto` mode it is re-asked every pass,
+    // because the draw is per height: latching onto the role resolved at startup made a worker
+    // keep performing it for the life of the process, including heights where the chain drew it
+    // for a DIFFERENT role or did not draw it at all. Building compute work for a verify
+    // assignment is the 65,117 stall exactly -- `Invalid("wrong mode")` on every attempt.
+    let mut role = role;
+    let mut role_name = role_name;
     loop {
+        if auto {
+            match resolve_assigned_role(&client, &base, &token, payout_pkh) {
+                Ok(Some((r, name))) => {
+                    if r != role {
+                        println!(
+                            "[role-worker] chain drew role={name} (was {role_name}) for pkh={}",
+                            hex::encode(payout_pkh)
+                        );
+                    }
+                    role = r;
+                    role_name = name;
+                    consecutive_errors = 0;
+                }
+                Ok(None) => {
+                    // NOT DRAWN this height. Do nothing and wait -- this is the normal case
+                    // once more miners are registered than there are roles, and it is what
+                    // makes "only the four selected do the work" true rather than aspirational.
+                    consecutive_errors = 0;
+                    std::thread::sleep(std::time::Duration::from_secs(poll_secs));
+                    continue;
+                }
+                Err(e) => {
+                    consecutive_errors = consecutive_errors.saturating_add(1);
+                    let wait = backoff_secs(poll_secs, consecutive_errors, backoff_cap_secs);
+                    eprintln!(
+                        "[role-worker] assignment error #{consecutive_errors} (retry in {wait}s): {e}"
+                    );
+                    std::thread::sleep(std::time::Duration::from_secs(wait));
+                    continue;
+                }
+            }
+        }
         match enroll_once(
             &client, &base, &token, role, &role_name, net, &secret, &sk, payout_pubkey, payout_pkh,
             last_slot,
@@ -516,6 +592,71 @@ fn backoff_secs(poll_secs: u64, consecutive_errors: u32, cap_secs: u64) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::backoff_secs;
+    use irium_node_rs::poawx::{
+        ROLE_COMPUTE_CONTRIBUTOR, ROLE_SUPPORT_CONTRIBUTOR, ROLE_VERIFY_CONTRIBUTOR,
+    };
+
+
+    /// The node answers with `role` only when THIS identity was drawn. Absent means not drawn,
+    /// and the worker must idle -- a self-chosen role is the behaviour the chain draw removes.
+    #[test]
+    fn an_absent_role_field_means_not_drawn_not_free_choice() {
+        use super::assigned_role_from_response;
+        let drawn = serde_json::json!({"role": "verify", "role_id": 2, "eligible_count": 30});
+        assert_eq!(
+            assigned_role_from_response(&drawn).map(|(r, n)| (r, n)),
+            Some((ROLE_VERIFY_CONTRIBUTOR, "verify".to_string()))
+        );
+        // Drawn for some OTHER identity: holders are listed, but no `role` for us.
+        let not_drawn = serde_json::json!({
+            "eligible_count": 30,
+            "role_holders": [{"role": "compute", "pkh": "aa".repeat(20)}]
+        });
+        assert!(
+            assigned_role_from_response(&not_drawn).is_none(),
+            "role_holders naming somebody else must NOT be read as our assignment"
+        );
+        assert!(assigned_role_from_response(&serde_json::json!({})).is_none());
+        for (name, id) in [
+            ("compute", ROLE_COMPUTE_CONTRIBUTOR),
+            ("verify", ROLE_VERIFY_CONTRIBUTOR),
+            ("support", ROLE_SUPPORT_CONTRIBUTOR),
+        ] {
+            let v = serde_json::json!({ "role": name });
+            assert_eq!(assigned_role_from_response(&v).unwrap().0, id, "{name} maps to its id");
+        }
+    }
+
+    /// THE BUG THIS FIXES: the role was resolved ONCE before the loop, so a worker in
+    /// auto+loop mode kept performing its first assignment for the life of the process --
+    /// including heights where the chain drew it for a DIFFERENT role, or not at all. Feeding
+    /// compute work into a verify challenge fails `Invalid("wrong mode")` on every attempt,
+    /// which is the 65,117 stall exactly.
+    ///
+    /// Source-level because the loop is an unbounded network poll that a unit test cannot
+    /// drive. What it pins is the one structural property that was wrong: the assignment is
+    /// re-asked INSIDE the loop, not only before it.
+    #[test]
+    fn the_assignment_is_re_asked_every_height_not_latched_at_startup() {
+        let src = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/src/bin/poawx-role-worker.rs"
+        ))
+        .expect("read own source");
+        let needle = concat!("resolve_assigned_", "role(");
+        let loop_at = src.find("\n    loop {").expect("the poll loop exists");
+        let calls_in_loop = src[loop_at..].matches(needle).count();
+        assert!(
+            calls_in_loop >= 1,
+            "the role assignment must be re-resolved INSIDE the poll loop; the draw changes \
+             every height, so resolving once at startup latches the worker to a stale role"
+        );
+        // And still resolved before the loop, so one-shot mode keeps working.
+        assert!(
+            src[..loop_at].matches(needle).count() >= 1,
+            "one-shot mode still resolves the assignment before the loop"
+        );
+    }
 
     #[test]
     fn backoff_grows_then_caps_and_never_stalls_a_healthy_worker() {

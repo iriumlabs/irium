@@ -14360,6 +14360,47 @@ mod tests {
         );
     }
 
+    /// THE 65,419 HALT. The builder's coinbase branch consulted only `shared_reward_active`,
+    /// so at the activation height it emitted the legacy fan-out (7 outputs) while the armed
+    /// validator required the drawn four -- `shared-reward: expected 4 role outputs, found 7`,
+    /// every submit rejected, mainnet stopped until fan-out was disabled.
+    ///
+    /// Both sides must resolve the armed coinbase through ONE function. This pins the validator
+    /// half; the builder now calls `expected_drawn_role_payouts` directly, so the shapes cannot
+    /// drift. The earlier draw-symmetry test passed throughout the halt because agreeing on WHO
+    /// is drawn says nothing about whether the builder PAYS them -- one step short, again.
+    #[test]
+    fn the_armed_coinbase_is_four_distinct_payees_at_55_22_13_10() {
+        let _env = crate::test_env::guard();
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        std::env::remove_var("IRIUM_NETWORK");
+        std::env::set_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT", "1");
+
+        let drawn: [([u8; 20], u8); 4] = [
+            ([0xA1u8; 20], 0),
+            ([0xC0u8; 20], crate::poawx::ROLE_COMPUTE_CONTRIBUTOR),
+            ([0x41u8; 20], crate::poawx::ROLE_VERIFY_CONTRIBUTOR),
+            ([0x51u8; 20], crate::poawx::ROLE_SUPPORT_CONTRIBUTOR),
+        ];
+        let reward = crate::chain::block_reward(70_000);
+        let pay = expected_drawn_role_payouts(&drawn, reward);
+
+        assert_eq!(pay.len(), 4, "exactly four outputs -- 7 was the halt");
+        assert_eq!(
+            pay.iter().map(|(p, _)| *p).collect::<std::collections::HashSet<_>>().len(),
+            4,
+            "four DISTINCT payees -- 65,419 paid ONE address all four shares"
+        );
+        assert_eq!(pay.iter().map(|(_, v)| *v).sum::<u64>(), reward, "conserves the subsidy");
+        // 55 / 22 / 13 / 10, positional: proposer, compute, verify, support.
+        let amts = crate::poawx::multi_role_amounts(reward);
+        for (i, (pkh, v)) in pay.iter().enumerate() {
+            assert_eq!(*pkh, drawn[i].0, "payee {i} is the drawn holder for that role");
+            assert_eq!(*v, amts[i], "share {i} follows 55/22/13/10");
+        }
+        std::env::remove_var("IRIUM_POAWX_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT");
+    }
+
     fn nodes_with_different_reveals_agree_on_the_same_block() {
         let _env = crate::test_env::guard();
         use crate::poawx::{

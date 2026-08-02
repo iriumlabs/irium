@@ -2042,6 +2042,10 @@ fn build_all_gates_block_with(
             }
         }
     };
+    // ONE effective draw for the whole build: whatever the node handed us, else what we
+    // derived from this block's own candidate set. The coinbase below pays exactly this, via
+    // the SAME function the validator re-derives with.
+    let effective_draw: Option<[([u8; 20], u8); 4]> = ids.drawn_role_holders.or(derived_draw);
     let (compute_solver, verify_solver, support_solver) = match (drawn_solvers, derived_draw) {
         (Some((c, v, sp)), _) => (
             honour(ROLE_COMPUTE_CONTRIBUTOR, c, compute_solver),
@@ -2584,7 +2588,42 @@ fn build_all_gates_block_with(
     // in the candidate set; SUPPORT (10%, "finality committee") across EVERY support
     // candidate. Payee order = candidate-set canonical order (`cs` is already sorted), the
     // SAME order the validator uses. Gate off => the canonical 4-output coinbase, byte-identical.
-    let outputs = if crate::chain::shared_reward_active(height) {
+    // THE MISSING WIRE (mainnet halt at 65,419: "expected 4 role outputs, found 7").
+    // This chain of branches consulted only `shared_reward_active`, so at the activation height
+    // the builder kept emitting the legacy fan-out shape while the validator required the drawn
+    // four -- every submit rejected. `derived_draw` was computed correctly 600 lines above and
+    // then never used to pay anyone.
+    //
+    // Built from `expected_drawn_role_payouts`, the SAME function `connect_block` derives its
+    // expectation from, so the two shapes cannot drift apart again.
+    // Never silent (CLAUDE.md 9). With the gate ARMED and no draw, the fallback pays the
+    // `role_reward` winners, which self-fill to ONE key -- block 65,419 paid a single address
+    // all four role shares (27.5/11.0/6.5/5.0), the exact outcome the four-role rule exists to
+    // prevent. The validator accepts it, so nothing downstream complains; the only way an
+    // operator learns is if the builder says so. Distinctness is guaranteed by
+    // `select_role_holders_from_revealed` on the DRAWN path only.
+    if crate::chain::four_role_payout_active(height) && effective_draw.is_none() {
+        eprintln!(
+            "[poawx] WARNING height={height}: four-role gate ACTIVE but no draw \
+             (fewer than four distinct eligible candidates revealed) -- falling back to the \
+             role_reward winners, which may pay ONE identity every role. Distribution is NOT \
+             what the gate promises for this block."
+        );
+    }
+    let outputs = if crate::chain::four_role_payout_active(height) && effective_draw.is_some() {
+        let d = effective_draw.expect("checked");
+        let mut outs = vec![TxOutput {
+            value: 0,
+            script_pubkey: irx1_script,
+        }];
+        for (pkh, amt) in crate::chain::expected_drawn_role_payouts(&d, total) {
+            outs.push(TxOutput {
+                value: amt,
+                script_pubkey: p2pkh_script(&pkh),
+            });
+        }
+        outs
+    } else if crate::chain::shared_reward_active(height) {
         let role_pkhs = |role: u8| -> Vec<[u8; 20]> {
             cs.candidates
                 .iter()

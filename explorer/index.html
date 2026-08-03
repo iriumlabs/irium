@@ -890,11 +890,25 @@ GitHub</a>
         // Group payees by address (roles that land on the same key are summed) so a
         // self-filled block still reads as one miner, while a distributed block shows
         // every worker that was actually paid.
-        var _order = [], _sum = {};
+        // PoAW-X role slots, derived from each payout's share of the subsidy rather than
+        // its position: Proposer 55%, Compute 22%, Verify 13%, Support 10%. Verify and
+        // Support are each paid as two halves (6.5% / 5%), so a share alone identifies the
+        // role whether the slot was filled whole or split.
+        var roleOfShare = function (pct) {
+          if (pct >= 50) return 'Proposer';
+          if (pct >= 20) return 'Compute';
+          if (pct >= 12) return 'Verify';
+          if (pct >= 9)  return 'Support';
+          if (pct >= 6)  return 'Verify';
+          return 'Support';
+        };
+        var _order = [], _sum = {}, _roles = {};
         (b.coinbase_payees || []).forEach(function (p) {
           var a = p.address; if (!a) return;
-          if (!(a in _sum)) { _order.push(a); _sum[a] = 0; }
+          if (!(a in _sum)) { _order.push(a); _sum[a] = 0; _roles[a] = []; }
           _sum[a] += (typeof p.amount_irm === 'number' ? p.amount_irm : 0);
+          var r = roleOfShare(typeof p.share_pct === 'number' ? p.share_pct : 0);
+          if (_roles[a].indexOf(r) === -1) _roles[a].push(r);
         });
         var adrLink = function (a) {
           return '<span class="xp-adr" style="cursor:pointer" onclick="event.stopPropagation();showAddr(\'' + a + '\')">' + a + '</span>';
@@ -903,7 +917,7 @@ GitHub</a>
         if (_order.length > 1) {
           minerCell = _order.map(function (a, i) {
             return '<div style="display:flex;align-items:center;gap:6px">' + adrLink(a) +
-              '<span style="font-size:9px;color:rgba(255,255,255,0.35)">' + (i === 0 ? 'proposer' : 'worker') + '</span></div>';
+              '<span style="font-size:9px;color:rgba(255,255,255,0.35)">' + ((_roles[a] || []).join(' + ') || 'role') + '</span></div>';
           }).join('');
           rewardCell = _order.map(function (a, i) {
             return '<div style="color:' + (i === 0 ? '#34d399' : '#6ec6ff') + '">' + _sum[a].toFixed(2) + ' IRM</div>';

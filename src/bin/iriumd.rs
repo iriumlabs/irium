@@ -13888,7 +13888,29 @@ async fn get_block_template(
             let anns: Vec<String> = irium_node_rs::poawx_proposer::global_proposer_reg_pool()
                 .announce_candidates(64, &exclude, height)
                 .into_iter()
-                .filter(|r| !guard.proposer_registry.is_registered(&r.vrf_pubkey))
+                // Re-announce an ALREADY-REGISTERED key once its on-chain record has gone
+                // stale, so a live miner can REFRESH its registration.
+                //
+                // This used to drop every registered key unconditionally (`!is_registered`), and
+                // `is_registered` is `keys.contains_key` -- permanently true once a key is known.
+                // So a key could never be re-announced, never got a fresh PRG1, never got a new
+                // registry height, and silently aged out of the ~2016-block frozen eligibility
+                // window with no recovery path. Producing a block masked it for the sole producer
+                // (every block re-registers its own proposer), so only idle keys were affected.
+                //
+                // A refresh must still cost something and must not re-amplify, so it is gated on
+                // the SAME staleness threshold the gossip pool uses before it will rebroadcast.
+                .filter(|r| {
+                    match guard.proposer_registry.latest_height(&r.vrf_pubkey) {
+                        // Never registered on chain -- this is a first announcement.
+                        None => true,
+                        // Registered: re-announce only once the record is meaningfully stale.
+                        Some(prev) => {
+                            r.anchor_height.saturating_sub(prev)
+                                >= irium_node_rs::poawx_proposer::PROPOSER_REG_REFRESH_MIN_ANCHOR_DELTA
+                        }
+                    }
+                })
                 .take(irium_node_rs::poawx_proposer::PROPOSER_ANNOUNCE_CAP)
                 .map(|r| hex::encode(r.serialize()))
                 .collect();

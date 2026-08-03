@@ -245,7 +245,13 @@ jobs:
           fail_on_unmatched_files: true
           generate_release_notes: false
           update_only_unreleased: false
-          body_path: .github/RELEASE_NOTES.md
+          # No `body`/`body_path` here, deliberately: this step uploads artifacts only.
+          # The release note is written afterwards, once the deploy has been verified:
+          #     gh release edit <tag> --notes-file <file>
+          # Do NOT reintroduce `body_path: .github/RELEASE_NOTES.md`. That file is frozen at
+          # the v1.9.119 activation note, and with `update_only_unreleased: false` the action
+          # force-published it over every release body, including one set before the run
+          # (see v1.9.189, which briefly shipped "upgrade to v1.9.119 before block 50,000").
 
   docker:
     name: Publish Docker images

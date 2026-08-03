@@ -86,7 +86,7 @@ only a full node can build and validate.
 
 What changes for miners at block 50,000:
 
-- **Run a full node.** Install and run `iriumd` v1.9.119 or later.
+- **Run a full node.** Install and run `iriumd` v1.9.189 or later.
 - **Mine against your node.** Run the bundled miner with the PoAW-X flag:
 
   ```

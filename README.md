@@ -30,7 +30,7 @@ The desktop app's auto-update prompt will surface the same warning. Server / poo
 
 At **block height 50,000**, Irium mainnet activates **PoAW-X**, its block-proposer consensus layer
 (VRF-selected proposers, a multi-role reward split, and anti-domination). Blocks before 50,000 are
-unaffected. **All node operators and miners must upgrade to iriumd v1.9.119 (or later) before block
+unaffected. **All node operators and miners must upgrade to iriumd v1.9.189 (or later) before block
 50,000**, or they will reject post-activation blocks and fall off the canonical chain. From block
 50,000, **mining requires a full iriumd node**, not just a pool/stratum connection. Full guide:
 [docs/POAWX.md](docs/POAWX.md).
@@ -63,14 +63,14 @@ SHA-256d consensus. No premine. No admin keys. 100,000,000 IRM total supply (96.
 
 | Parameter | Value |
 |-----------|-------|
-| Current node version | `v1.9.49` (latest tag; v1.9.28 introduced settlement Groups C-H, FIX #128 P2P reputation hygiene, and FIX 2a hard-fork code; v1.9.29-v1.9.32 added GPU-miner and pool-Stratum fixes; later releases added BTC atomic swap activation, LWMA v2 rollout, V2 block-time fork, and the periodic mempool/offer rebroadcast timers) |
+| Current node version | `v1.9.189` (latest release). Mainnet nodes run `v1.9.190-e87337ae`. |
 | Desktop app version | [`v1.0.77`](https://github.com/iriumlabs/irium-core/releases/latest) (bundles the latest v1.9.x sidecar binaries) |
 | Consensus algorithm | SHA-256d proof of work |
 | Block target interval | 120 s (2 min) — V2 block time, active since block 24,250 (V1 600 s target before the fork) |
 | Difficulty adjustment | LWMA v2 (30-block window) — active since block 19,740 |
 | Block reward | 50 IRM during the Early Miner Era; halves every 1,050,000 blocks |
-| AuxPoW merged mining | Activates at block 26,500 (still pending; current tip ≈ 22,500) |
-| Fix 2a hard fork (Bitcoin-standard header serialization) | Activates at block 23,500 — **all nodes must upgrade to v1.9.28 before this height** |
+| AuxPoW merged mining | Activation height 26,500 — **status not re-verified** (chain is now past block 66,000) |
+| Fix 2a hard fork (Bitcoin-standard header serialization) | Activated at block 23,500 (long past) |
 | Total supply cap | 100,000,000 IRM (96.5M mineable + 3.5M genesis CLTV vest) |
 | Address prefix | Single-sig P2PKH uses version byte `0x39`; base58check encoding produces both `Q…` and `P…` leading characters depending on the underlying pubkey-hash — **both prefixes are the same single-sig address format**. A separate multisig version byte `0x28` is used for 2-of-N wallets. |
 | Default P2P port | 38291 |
@@ -83,6 +83,60 @@ SHA-256d consensus. No premine. No admin keys. 100,000,000 IRM total supply (96.
 | Public pool stats proxy | `http://pool.irium.org:3337/stats` |
 
 ---
+
+
+## PoAW-X status — what is live today
+
+Verified against the running chain on 2026-08-03 (tip 66,237). Activation heights below are
+mainnet constants; anything not listed with a height is **not deployed**.
+
+**Everything in this section is deployed and enforcing on mainnet today.** Whenever mining is
+active, the chain produces and validates blocks, selects proposers by VRF, enforces the
+anti-domination and sortition caps, and pays the four role shares automatically. Everything below
+this line is roadmap — designed, partly proven, or deliberately deferred — and none of it is
+required for the network to operate as described above.
+
+### Live and enforcing on mainnet
+
+| Capability | Live since block |
+|---|---|
+| Receipt / `irx1` commitment | 50,000 |
+| VRF proposer selection, registration, structural validation | 50,000 |
+| Candidate admission (committed-root binding) | 50,000 |
+| Non-exclusive proposer eligibility (N1) | 59,900 |
+| PoW demotion / hardware-neutral CPU mining | 61,414 |
+| VRF sortition cap on the role pool (closes A1/A2) | 61,414 |
+| Four-role 55/22/13/10 coinbase fan-out | 62,236 |
+| Pool admission (PLA1: VRF proof + sybil ticket per paid non-winner) | 62,236 |
+| Fork-choice total-order comparator | 66,179 |
+
+**Caveat on the fork-choice comparator:** deployed and armed, but **not behaviourally proven**. It
+engages only when competing branches of unequal length exist; none have occurred since activation,
+so the corrected path has not yet executed in production.
+
+### Proven, with an honest bound
+
+**Third-party onboarding works.** An independent key with no operator setup, no allow-list and no
+manual step registered on chain, became eligible on both nodes, and was **paid in mainnet block
+65,351**. Bound: that key ran on operator hardware against a local node, so this proves the
+mechanism has no gatekeeping — not that a miner across the internet has joined. **Two real
+operators are active today.**
+
+### Designed, not deployed — do not read as working
+
+| Item | State |
+|---|---|
+| Mandatory inclusion | Designed; not deployed |
+| Delayed-settlement reward sharing | Harness-proven, then **removed as dead code**; to be redesigned fresh if pursued |
+| Genuine multi-operator role diversity | Fan-out is live, but one host presents three derived keys; real distinct operators = 2 |
+| Dominance-validation (receiver-side) | Direction **decided**, not implemented |
+| Registration-renewal fix (`da166f0c`) | Written, **not deployed**; does not apply cleanly to the current tree |
+| Unified single-miner process | **Not built.** Production runs separate producer and role-worker services with a `Conflicts=` guard — a deliberate safety mechanism, not an artifact |
+
+**One gap affects users today:** a registered key that stops producing for ~2,016 blocks cannot
+currently renew its eligibility (`da166f0c`, written but not deployed). Keys that produce
+continuously are unaffected, since producing a block refreshes registration automatically.
+
 
 ## Current State
 

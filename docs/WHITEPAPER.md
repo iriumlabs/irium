@@ -15,7 +15,7 @@ before block 23,500 is mined to avoid forking off the canonical chain.
 
 ---
 
-## What's new in v1.9.119 (mainnet block 50,000)
+## What's new in v1.9.189 (mainnet block 50,000)
 
 **PoAW-X proposer consensus** activates at mainnet block height 50,000: VRF-selected block proposers,
 a 55/22/13/10 multi-role reward split, anti-domination over a rolling 2016-block window, and 2/3

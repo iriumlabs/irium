@@ -2885,6 +2885,7 @@ impl ChainState {
             &candidate_tip,
             &self.tip_hash(),
             crate::poawx_proposer::fork_choice_hardening_active(self.tip_height()),
+            crate::poawx_proposer::forkchoice_total_order_active(self.tip_height()),
         ))
     }
 

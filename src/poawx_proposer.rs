@@ -609,6 +609,7 @@ pub fn fork_choice_prefers_candidate(
     candidate_tip: &[u8; 32],
     current_tip: &[u8; 32],
     hardening_active: bool,
+    total_order_active: bool,
 ) -> bool {
     let (cl, ml) = (candidate_ranks.len(), current_ranks.len());
     // Beyond K (node-independent: max of the two lengths), LENGTH decides — symmetric.
@@ -622,20 +623,49 @@ pub fn fork_choice_prefers_candidate(
             return candidate_ranks[i] < current_ranks[i];
         }
     }
-    // Tie over the shared prefix: deterministic lowest-tip-hash (hardening) removes length as a
-    // lever; legacy path keeps longest-branch (byte-identical when hardening is off).
+    // Tie over the SHARED prefix.
+    //
+    // GATED (`total_order_active`): order by length first, tip hash only on a full tie. That is
+    // plain lexicographic order -- a proper prefix ranks below the longer sequence extending it
+    // -- and it is byte-identical to the LEGACY (hardening-off) rule below.
+    //
+    // It has to be, because the pre-activation rule is NOT TRANSITIVE. With hardening on, the
+    // tie jumped straight to the tip hash and ignored length, while two longer branches were
+    // decided by ranks the short branch does not have -- three comparisons answering different
+    // questions. Confirmed counterexample (floor on, hardening on, K=20):
+    //
+    //   A = [r]   B = [r, 1]   C = [r, 9]     tip_C < tip_A < tip_B
+    //   A vs B  prefix ties  -> tip hash -> A            (length ignored)
+    //   B vs C  ranks differ -> 1 < 9    -> B            (decided by ranks A does not have)
+    //   C vs A  prefix ties  -> tip hash -> C            => A > B > C > A
+    //
+    // A cycle means the surviving tip depends on ARRIVAL ORDER, so two honest nodes that saw the
+    // same three branches in different orders keep different chains permanently -- the precise
+    // failure fork choice exists to prevent, and a blocker for running more than one producer.
+    // Equal ranks across distinct blocks are ordinary: `chain.rs` maps any block with no
+    // proposer assignment to the `(u32::MAX, u64::MAX)` sentinel, which N1 permits, so every
+    // such block ties with every other. Antisymmetry does not catch this and the pre-existing
+    // test only ever checked pairs; both states are pinned by
+    // `fork_choice_prefers_candidate_is_transitive_on_triples`.
+    //
+    // Length is not a usable "lever" here: extending a branch requires actually winning heights,
+    // and beyond K length already decides.
+    if total_order_active {
+        if cl != ml {
+            return cl > ml;
+        }
+        return candidate_tip < current_tip;
+    }
+    // PRE-ACTIVATION: byte-identical to the currently deployed rule, cycle included, so the
+    // change arrives INERT and a node carrying it agrees with one that does not.
     if hardening_active {
         candidate_tip < current_tip
     } else if cl != ml {
         cl > ml
     } else {
         // Equal length + identical rank prefix with hardening OFF: the legacy longest-branch
-        // rule (cl > ml) is false in BOTH directions => not a total order (a latent permanent
-        // fork for equal-length identical-rank siblings). Unreachable on mainnet (wherever the
-        // floor is active hardening is too), but reachable in an off-mainnet floor-on/
-        // hardening-off config, so fall through to the deterministic tip-hash to keep this a
-        // total order there. Byte-identical to legacy for the (overwhelmingly common) unequal-
-        // length case above.
+        // rule (cl > ml) is false in BOTH directions => not a total order. Fall through to the
+        // deterministic tip-hash so this stays decidable off-mainnet.
         candidate_tip < current_tip
     }
 }
@@ -680,7 +710,33 @@ mod rank_rewind_tests {
         assert!(blk(true, 3, 5, 0), "K=0 == pre-fix: shorter always blocked (deadlock)");
     }
 
-    use super::fork_choice_prefers_candidate as prefers;
+    use super::fork_choice_prefers_candidate;
+
+    /// Test shim pinning these cases to the POST-activation (total-order) rule. Every case in
+    /// this module predates the gate and was verified green under the fixed rule, so none of
+    /// them depends on the non-transitive pre-activation tie-break. The gate's two states are
+    /// covered explicitly by `fork_choice_prefers_candidate_is_transitive_on_triples`.
+    #[allow(clippy::too_many_arguments)]
+    fn prefers(
+        floor_active: bool,
+        rewind_window: u64,
+        candidate_ranks: &[(u32, u64)],
+        current_ranks: &[(u32, u64)],
+        candidate_tip: &[u8; 32],
+        current_tip: &[u8; 32],
+        hardening_active: bool,
+    ) -> bool {
+        fork_choice_prefers_candidate(
+            floor_active,
+            rewind_window,
+            candidate_ranks,
+            current_ranks,
+            candidate_tip,
+            current_tip,
+            hardening_active,
+            true,
+        )
+    }
 
     #[test]
     fn fork_choice_converges_the_beyond_k_permanent_fork() {
@@ -709,6 +765,116 @@ mod rank_rewind_tests {
         assert!(!a_node_prefers_b, "node on A keeps A");
         assert!(b_node_prefers_a, "node on B ADOPTS A (short node adopts the longer beyond K)");
         // => both nodes end on A. Converged.
+    }
+
+    /// TRANSITIVITY, which antisymmetry does not imply and no existing test covered.
+    ///
+    /// `fork_choice_prefers_candidate_is_antisymmetric_total_order` says "total order" in its
+    /// name and asserts only `prefers(X,Y) != prefers(Y,X)` over seven hand-picked PAIRS. A
+    /// relation can be antisymmetric on every pair and still cycle on a triple, and a cycle
+    /// means the surviving tip depends on ARRIVAL ORDER — which is exactly the property fork
+    /// choice exists to remove. Two independent producers are what generate the equal-rank
+    /// ties that expose it, so this blocks multi-producer operation.
+    ///
+    /// The cycle needs no exotic input: one SHORT branch whose rank prefix matches two LONGER
+    /// branches that differ from each other only after that prefix. The prefix-tie is resolved
+    /// by tip hash while ignoring length, but the two long branches are resolved by the ranks
+    /// the short branch does not have — so the three comparisons answer different questions.
+    ///
+    ///   A = [r]        B = [r, 1]        C = [r, 9]
+    ///   tips ordered   tip_C < tip_A < tip_B
+    ///
+    ///   A vs B  prefix ties  -> tip hash -> A beats B
+    ///   B vs C  ranks differ -> 1 < 9    -> B beats C
+    ///   C vs A  prefix ties  -> tip hash -> C beats A      => A > B > C > A
+    ///
+    /// All three lengths are <= K, so the beyond-K length rule never fires. Equal ranks across
+    /// distinct blocks are ordinary on mainnet — `chain.rs:2837` maps any block with no
+    /// proposer assignment to the sentinel `(u32::MAX, u64::MAX)`, which N1 (live since 59,900)
+    /// explicitly permits, so every such block ties with every other.
+    #[test]
+    fn fork_choice_prefers_candidate_is_transitive_on_triples() {
+        let _env = crate::test_env::guard();
+        let k = 20u64;
+        let (r, lo, hi) = ((0u32, 500u64), (0u32, 1u64), (0u32, 9u64));
+        // tip_c < tip_a < tip_b
+        let (tip_a, tip_b, tip_c) = ([0x02u8; 32], [0x03u8; 32], [0x01u8; 32]);
+        let a = vec![r];
+        let b = vec![r, lo];
+        let c = vec![r, hi];
+
+        let verdicts = |on: bool| -> (bool, bool, bool) {
+            let p = |x: &Vec<(u32, u64)>, xt: &[u8; 32], y: &Vec<(u32, u64)>, yt: &[u8; 32]| {
+                crate::poawx_proposer::fork_choice_prefers_candidate(
+                    true, k, x, y, xt, yt, true, on,
+                )
+            };
+            // Antisymmetry holds in BOTH states -- assert it here so a transitivity failure
+            // below can never be mistaken for the weaker defect.
+            assert_ne!(
+                p(&a, &tip_a, &b, &tip_b),
+                p(&b, &tip_b, &a, &tip_a),
+                "A/B antisymmetric (gate={on})"
+            );
+            assert_ne!(
+                p(&b, &tip_b, &c, &tip_c),
+                p(&c, &tip_c, &b, &tip_b),
+                "B/C antisymmetric (gate={on})"
+            );
+            assert_ne!(
+                p(&c, &tip_c, &a, &tip_a),
+                p(&a, &tip_a, &c, &tip_c),
+                "C/A antisymmetric (gate={on})"
+            );
+            (
+                p(&a, &tip_a, &b, &tip_b),
+                p(&b, &tip_b, &c, &tip_c),
+                p(&c, &tip_c, &a, &tip_a),
+            )
+        };
+        // A strict total order has exactly one maximum among three distinct branches, so the
+        // win counts must be a strict 0/1/2 ranking. A cycle gives every branch exactly one.
+        let tally = |(ab, bc, ca): (bool, bool, bool)| -> [usize; 3] {
+            let mut t = [
+                usize::from(ab) + usize::from(!ca),
+                usize::from(!ab) + usize::from(bc),
+                usize::from(!bc) + usize::from(ca),
+            ];
+            t.sort_unstable();
+            t
+        };
+
+        // ── GATE ON: a genuine total order ──────────────────────────────────────────
+        let (ab, bc, ca) = verdicts(true);
+        assert!(
+            !(ab && bc && ca) && !(!ab && !bc && !ca),
+            "fork choice CYCLES with the gate ON (A>B={ab}, B>C={bc}, C>A={ca}) -- the winning \
+             tip would depend on arrival order, so two honest nodes that saw these three \
+             branches in different orders would keep different chains"
+        );
+        assert_eq!(
+            tally((ab, bc, ca)),
+            [0, 1, 2],
+            "gate ON: win counts must be a strict ranking 0/1/2, not a cycle"
+        );
+
+        // ── GATE OFF: the deployed rule, cycle included ─────────────────────────────
+        // This half is what proves the gate is load-bearing rather than decorative, and it
+        // pins pre-activation behaviour as byte-identical to what is running on mainnet now.
+        // If this ever stops cycling, the pre-activation path has drifted and the change no
+        // longer arrives inert -- which is the property that makes it deployable at all.
+        let (ab0, bc0, ca0) = verdicts(false);
+        assert!(
+            ab0 && bc0 && ca0,
+            "gate OFF must reproduce the DEPLOYED cycle A>B>C>A (got A>B={ab0}, B>C={bc0}, \
+             C>A={ca0}) -- otherwise pre-activation behaviour has changed and the fix no \
+             longer arrives inert"
+        );
+        assert_eq!(
+            tally((ab0, bc0, ca0)),
+            [1, 1, 1],
+            "gate OFF: a cycle gives every branch exactly one win"
+        );
     }
 
     #[test]
@@ -1140,6 +1306,31 @@ pub fn fork_choice_hardening_active(height: u64) -> bool {
         fork_choice_hardening_activation_height(),
         height,
     )
+}
+
+/// Gate for the fork-choice TOTAL ORDER fix (transitivity). See
+/// `activation::MAINNET_FORKCHOICE_TOTAL_ORDER_ACTIVATION_HEIGHT` for the counterexample and
+/// the arming rules.
+///
+/// Deliberately NOT routed through `poawx_effective_activation`: that substitutes
+/// `MAINNET_POAWX_ACTIVATION_HEIGHT = Some(50_000)` on mainnet, which would arm this at a
+/// height the chain passed long ago and make a fresh node re-judge ~15,000 blocks of history
+/// under a rule its peers did not use. This carries its own constant, and mainnet ignores the
+/// env override exactly as `four_role_payout_active` does.
+pub fn forkchoice_total_order_active(height: u64) -> bool {
+    if network_id_byte() == 0 {
+        return matches!(
+            crate::activation::MAINNET_FORKCHOICE_TOTAL_ORDER_ACTIVATION_HEIGHT,
+            Some(h) if height >= h
+        );
+    }
+    match std::env::var("IRIUM_POAWX_FORKCHOICE_TOTAL_ORDER_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+    {
+        Some(h) => height >= h,
+        None => false,
+    }
 }
 
 // ââ audit hardening (pre-mainnet audit fixes): deterministic receipts root, finality
@@ -2081,6 +2272,7 @@ mod tests {
         assert_eq!(reg.len(), 0); // exact inverse => fully removed
         assert!(!reg.is_eligible_with(&k, 24, fd, ew));
     }
+
 }
 
 #[cfg(test)]

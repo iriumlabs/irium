@@ -7227,8 +7227,27 @@ impl P2PNode {
                                 // A1: rate-limit registration ingest per source IP, exactly as the
                                 // candidate-admission arm above already does. Registration gossip is
                                 // remotely reachable and was the only unlimited gossip ingest path.
-                                if crate::poawx_admission::admission_gossip_rate_allowed(addr.ip())
-                                    && crate::poawx_proposer::global_proposer_reg_pool()
+                                //
+                                // NEVER SILENT (CLAUDE.md 9). This arm used to read only
+                                // `.should_rebroadcast()` and discard the outcome, so a registration
+                                // that arrived and was refused looked exactly like one that never
+                                // arrived. That cost real time on 2026-08-05: a first-time miner's
+                                // registrations were logged as `recv PoawxProposerRegistration`,
+                                // never reached the announce queue, and the node could not say
+                                // whether the anchor was unresolvable, the refresh delta too small,
+                                // or the per-source budget spent. Log every outcome, including the
+                                // rate-limited drop, which otherwise leaves no trace at all.
+                                let rate_ok =
+                                    crate::poawx_admission::admission_gossip_rate_allowed(addr.ip());
+                                if !rate_ok {
+                                    eprintln!(
+                                        "[poawx] proposer registration from {}: DROPPED, gossip \
+                                         source rate limited",
+                                        addr.ip()
+                                    );
+                                }
+                                let outcome = if rate_ok {
+                                    Some(crate::poawx_proposer::global_proposer_reg_pool()
                                         .ingest_bytes(&p.reg_bytes, |h| {
                                             // A4: recompute the sybil digest against the
                                             // real anchor block; None (we lack that height)
@@ -7238,9 +7257,36 @@ impl P2PNode {
                                                     .unwrap_or_else(|e| e.into_inner())
                                                     .anchor_hash_at(h)
                                             })
-                                        })
-                                        .should_rebroadcast()
-                                {
+                                        }))
+                                } else {
+                                    None
+                                };
+                                match &outcome {
+                                    Some(crate::poawx_gossip::GossipOutcome::AcceptedNew) => {
+                                        eprintln!(
+                                            "[poawx] proposer registration from {}: AcceptedNew \
+                                             (pooled, will announce)",
+                                            addr.ip()
+                                        );
+                                    }
+                                    Some(crate::poawx_gossip::GossipOutcome::Duplicate) => {
+                                        eprintln!(
+                                            "[poawx] proposer registration from {}: Duplicate \
+                                             (already pooled at an equal-or-fresher anchor, or \
+                                             refresh delta below the rebroadcast threshold)",
+                                            addr.ip()
+                                        );
+                                    }
+                                    Some(crate::poawx_gossip::GossipOutcome::Rejected(why)) => {
+                                        eprintln!(
+                                            "[poawx] proposer registration from {}: REJECTED: {}",
+                                            addr.ip(),
+                                            why
+                                        );
+                                    }
+                                    None => {}
+                                }
+                                if outcome.as_ref().is_some_and(|o| o.should_rebroadcast()) {
                                     let bytes = crate::protocol::PoawxProposerRegistrationPayload {
                                         reg_bytes: p.reg_bytes,
                                     }

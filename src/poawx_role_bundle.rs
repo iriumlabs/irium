@@ -519,6 +519,21 @@ impl NodeRoleBundlePool {
 const IDENTITY_RATE_WINDOW_SECS: u64 = 60;
 const IDENTITY_RATE_MAX: u32 = 8;
 
+/// Onboarding grace: an identity's FIRST admissions get a raised per-window
+/// ceiling, so a genuinely new registrant competing through its first heights
+/// (including parent-flip churn, where re-enrollment per (height, parent) is
+/// legitimate fresh work) is never throttled by conservative steady-state
+/// tuning, regardless of how polished its client is. Grace is charged per
+/// ADMISSION like everything else -- duplicates never consume it -- and it is
+/// NOT a spam amplifier: during grace an identity still occupies at most one
+/// pool slot per role (3 total), still pays a real ECVRF validation per
+/// submission, still passes tier-1 per-source limits, and mass-registering
+/// fresh keys buys an attacker nothing here that the pool cap + sortition
+/// threshold don't already bound. After `IDENTITY_GRACE_ADMISSIONS` lifetime
+/// admissions (as seen by this node), the standard ceiling applies.
+const IDENTITY_GRACE_ADMISSIONS: u64 = 24; // ~8 heights x 3 roles of onboarding
+const IDENTITY_GRACE_RATE_MAX: u32 = 24; // per window, while grace lasts
+
 /// Per-identity role-bundle submission limit. MAINNET (network_id==0) is FIXED at the consts —
 /// env-ignored, so the anti-DoS bound cannot be relaxed in production. Devnet/testnet may raise it
 /// via `IRIUM_POAWX_IDENTITY_RATE_{MAX,WINDOW_SECS}` for many-contributor / fast-block harnesses where
@@ -546,6 +561,9 @@ pub fn identity_rate_max() -> u32 {
 struct IdentityRate {
     window_start: std::time::Instant,
     count: u32,
+    /// Total admissions ever charged for this identity by this node process --
+    /// drives the onboarding grace window. Never reset by window rollover.
+    lifetime: u64,
 }
 
 fn identity_rate_map() -> &'static Mutex<BTreeMap<[u8; 20], IdentityRate>> {
@@ -566,13 +584,41 @@ pub fn identity_rate_allowed(solver_pkh: &[u8; 20]) -> bool {
     let e = m.entry(*solver_pkh).or_insert(IdentityRate {
         window_start: now,
         count: 0,
+        lifetime: 0,
     });
     if now.duration_since(e.window_start) >= window {
         e.window_start = now;
         e.count = 0;
     }
     e.count = e.count.saturating_add(1);
-    e.count <= identity_rate_max()
+    e.lifetime = e.lifetime.saturating_add(1);
+    let max = if e.lifetime <= identity_grace_admissions() {
+        identity_grace_rate_max()
+    } else {
+        identity_rate_max()
+    };
+    e.count <= max
+}
+
+/// Grace envelope (see `IDENTITY_GRACE_ADMISSIONS`). Mainnet-fixed at the
+/// consts; devnet/testnet may tune via env for harness runs.
+pub fn identity_grace_admissions() -> u64 {
+    if crate::activation::network_id_byte() == 0 {
+        return IDENTITY_GRACE_ADMISSIONS;
+    }
+    std::env::var("IRIUM_POAWX_IDENTITY_GRACE_ADMISSIONS")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .unwrap_or(IDENTITY_GRACE_ADMISSIONS)
+}
+pub fn identity_grace_rate_max() -> u32 {
+    if crate::activation::network_id_byte() == 0 {
+        return IDENTITY_GRACE_RATE_MAX;
+    }
+    std::env::var("IRIUM_POAWX_IDENTITY_GRACE_RATE_MAX")
+        .ok()
+        .and_then(|v| v.trim().parse::<u32>().ok())
+        .unwrap_or(IDENTITY_GRACE_RATE_MAX)
 }
 
 /// Test observability: how many times a bundle actually reached VALIDATION. Lets a test
@@ -968,36 +1014,94 @@ mod r1_r2_r3_tests {
     fn identity_limit_engages_independently_of_source_limit() {
         let _env = crate::test_env::guard();
         // One identity can admit at most 3 distinct bundles per height (one per
-        // role), so exceed IDENTITY_RATE_MAX=8 with real ADMISSIONS by spanning
-        // heights: 3 roles x 3 heights = 9 admissions inside one rate window --
-        // each from a DIFFERENT source, so only the identity budget can bite.
+        // role), so exceed the ONBOARDING GRACE (24 lifetime admissions) with real
+        // ADMISSIONS by spanning heights: 3 roles x 9 heights = 27 attempts inside
+        // one rate window -- each from a DIFFERENT source, so only the identity
+        // budget can bite. Admission #25 exits grace and must hit the standard cap.
         let pool = NodeRoleBundlePool::default();
         let roles = [
             crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
             crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
             crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
         ];
-        let mut identity_limited = false;
-        let mut i = 0u8;
-        'outer: for dh in 0..3u64 {
+        let mut limited_at = None;
+        let mut n = 0u32;
+        'outer: for dh in 0..9u64 {
             for role in roles.iter() {
                 let b = RoleBundleV1::from_json(&super::tests::bundle_json_at(0x22, *role, H + dh))
                     .unwrap();
-                let r = pool.ingest_tiered(ip(100 + i), b, NET, H + dh, Some(SEED), None);
-                i += 1;
+                let r = pool.ingest_tiered(ip(100 + n as u8), b, NET, H + dh, Some(SEED), None);
+                n += 1;
                 if let Err(e) = r {
                     if e.contains("identity rate limited") {
-                        identity_limited = true;
+                        limited_at = Some(n);
                         break 'outer;
                     }
                 }
             }
         }
-        assert!(
-            identity_limited,
-            "identity limiting never engaged across distinct sources -- one identity can \
-             monopolise pool slots by rotating addresses"
+        assert_eq!(
+            limited_at,
+            Some(IDENTITY_GRACE_ADMISSIONS as u32 + 1),
+            "identity limiting must engage exactly when grace ends, across rotating \
+             sources -- otherwise one identity can monopolise pool churn forever"
         );
+    }
+
+    /// ONBOARDING GRACE -- a genuinely new identity's first heights of real work
+    /// (including churn-driven re-enrollment) must never be throttled by the
+    /// steady-state cap. 12 real admissions (4 heights x 3 roles) inside one
+    /// window, all from different sources: every one must be admitted.
+    /// Break-checked: without the grace envelope, admission #9 fails.
+    #[test]
+    fn new_identity_grace_admits_early_burst() {
+        let _env = crate::test_env::guard();
+        let pool = NodeRoleBundlePool::default();
+        let roles = [
+            crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+            crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
+            crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+        ];
+        let mut n = 0u8;
+        for dh in 0..4u64 {
+            for role in roles.iter() {
+                let b = RoleBundleV1::from_json(&super::tests::bundle_json_at(0x41, *role, H + dh))
+                    .unwrap();
+                let r = pool.ingest_tiered(ip(30 + n), b, NET, H + dh, Some(SEED), None);
+                n += 1;
+                assert!(
+                    matches!(r, Ok(BundleOutcome::AcceptedNew)),
+                    "admission #{n} of a NEW identity's onboarding burst was refused: {r:?}"
+                );
+            }
+        }
+    }
+
+    /// GRACE IS NOT A SPAM AMPLIFIER -- even mid-grace, an identity occupies at
+    /// most one pool slot per role. The slots, not the rate budget, are what a
+    /// sybil would want; grace must not mint any.
+    #[test]
+    fn grace_never_multiplies_pool_slots() {
+        let _env = crate::test_env::guard();
+        let pool = NodeRoleBundlePool::default();
+        let roles = [
+            crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+            crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
+            crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+        ];
+        for (i, role) in roles.iter().enumerate() {
+            let b = RoleBundleV1::from_json(&super::tests::bundle_json(0x42, *role)).unwrap();
+            // Admit once, then hammer duplicates -- slot count must not move.
+            assert!(matches!(
+                pool.ingest_tiered(ip(40 + i as u8), b.clone(), NET, H, Some(SEED), None),
+                Ok(BundleOutcome::AcceptedNew)
+            ));
+            for j in 0..6u8 {
+                let r = pool.ingest_tiered(ip(50 + j), b.clone(), NET, H, Some(SEED), None);
+                assert!(matches!(r, Ok(BundleOutcome::Duplicate)), "got: {r:?}");
+            }
+        }
+        assert_eq!(pool.len(), 3, "one identity must hold at most one slot per role");
     }
 
     /// THE LOCKOUT BUG -- observed live on mainnet (heights 66,239-66,247): gossip

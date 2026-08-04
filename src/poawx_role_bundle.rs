@@ -372,12 +372,39 @@ impl NodeRoleBundlePool {
         // TIER 2 -- validation. Counted so a test can prove tier 1 short-circuits it.
         VALIDATIONS_PERFORMED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         bundle.validate(expected_network, expected_height, expected_seed, expected_parent)?;
-        // TIER 3 -- per identity, only ever reached by an identity that already cost a
-        // real ECVRF prove.
+        // A duplicate can never take or improve a pool slot, so it must not spend
+        // identity budget. Honest bundles fan in over gossip as MANY identical copies
+        // (one per peer path); charging deliveries instead of admissions let that
+        // fan-in exhaust a brand-new identity's budget and then reject its genuinely
+        // fresh bundles -- observed live at mainnet heights 66,239-66,247: a
+        // first-time contributor was pinned at "identity rate limited" by its own
+        // relayed duplicates while established direct-path identities flowed freely.
+        // Delivery volume is tier 1's job (per source, already passed above).
+        if self.would_be_duplicate(&bundle, expected_height) {
+            return Ok(BundleOutcome::Duplicate);
+        }
+        // TIER 3 -- per identity, charged only for submissions that can actually
+        // occupy or improve a pool slot, and only ever reached by an identity that
+        // already cost a real ECVRF prove. (A concurrent burst of identical copies
+        // can charge more than once between the probe above and ingest below; that
+        // over-charge is bounded and benign -- sequential gossip fan-in, the case
+        // that locked out real contributors, is fully covered.)
         if !identity_rate_allowed(&bundle.solver_pkh) {
             return Err("role bundle: identity rate limited".to_string());
         }
         self.ingest(bundle, expected_network, expected_height, expected_seed, expected_parent)
+    }
+
+    /// Read-only probe: would `ingest` classify this bundle as a `Duplicate` --
+    /// same pool height, an entry already present for `(role_id, solver_pkh)`, and
+    /// no score improvement? Used by `ingest_tiered` so duplicates never spend
+    /// identity-rate budget. Never mutates the pool.
+    fn would_be_duplicate(&self, bundle: &RoleBundleV1, expected_height: u64) -> bool {
+        let g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        expected_height == g.height
+            && g.best
+                .get(&(bundle.role_id, bundle.solver_pkh))
+                .is_some_and(|existing| existing.score() >= bundle.score())
     }
 
     pub fn ingest_json(
@@ -684,7 +711,7 @@ mod tests {
         for solver in [pa, pb] {
             for role in [
                 ROLE_COMPUTE_CONTRIBUTOR,
-                ROLE_VERIFY_CONTRIBUTOR,
+                crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
                 ROLE_SUPPORT_CONTRIBUTOR,
             ] {
                 assert_eq!(
@@ -700,7 +727,7 @@ mod tests {
         bundle_json_at(secret_byte, role, H)
     }
 
-    fn bundle_json_at(secret_byte: u8, role: u8, height: u64) -> String {
+    pub(super) fn bundle_json_at(secret_byte: u8, role: u8, height: u64) -> String {
         let secret = [secret_byte; 32];
         let proof = AssignmentProofV2::prove_self_solver(&secret, NET, height, role, [0u8; 32], SEED)
             .expect("prove");
@@ -932,20 +959,37 @@ mod r1_r2_r3_tests {
 
     /// R1 INDEPENDENCE -- the identity limiter must bite even when every request comes
     /// from a FRESH source, which is exactly the aggregator case: one pool relaying for
-    /// many workers, or one worker spread across many addresses.
+    /// many workers, or one worker spread across many addresses. Budget is charged per
+    /// ADMISSION (a bundle that takes a pool slot), never per delivery -- valid bundles
+    /// are deterministic per (key, height, role), so one identity's only distinct
+    /// admissions in a height are its per-role bundles, and re-deliveries are free
+    /// duplicates (see `duplicate_fanin_never_locks_out_fresh_bundles`).
     #[test]
     fn identity_limit_engages_independently_of_source_limit() {
         let _env = crate::test_env::guard();
+        // One identity can admit at most 3 distinct bundles per height (one per
+        // role), so exceed IDENTITY_RATE_MAX=8 with real ADMISSIONS by spanning
+        // heights: 3 roles x 3 heights = 9 admissions inside one rate window --
+        // each from a DIFFERENT source, so only the identity budget can bite.
         let pool = NodeRoleBundlePool::default();
-        let b = valid_bundle(0x22);
+        let roles = [
+            crate::poawx::ROLE_COMPUTE_CONTRIBUTOR,
+            crate::poawx::ROLE_VERIFY_CONTRIBUTOR,
+            crate::poawx::ROLE_SUPPORT_CONTRIBUTOR,
+        ];
         let mut identity_limited = false;
-        // A different source every time, so tier 1 is always fresh.
-        for i in 0..(IDENTITY_RATE_MAX + 4) {
-            let r = pool.ingest_tiered(ip(100 + i as u8), b.clone(), NET, H, Some(SEED), None);
-            if let Err(e) = r {
-                if e.contains("identity rate limited") {
-                    identity_limited = true;
-                    break;
+        let mut i = 0u8;
+        'outer: for dh in 0..3u64 {
+            for role in roles.iter() {
+                let b = RoleBundleV1::from_json(&super::tests::bundle_json_at(0x22, *role, H + dh))
+                    .unwrap();
+                let r = pool.ingest_tiered(ip(100 + i), b, NET, H + dh, Some(SEED), None);
+                i += 1;
+                if let Err(e) = r {
+                    if e.contains("identity rate limited") {
+                        identity_limited = true;
+                        break 'outer;
+                    }
                 }
             }
         }
@@ -953,6 +997,45 @@ mod r1_r2_r3_tests {
             identity_limited,
             "identity limiting never engaged across distinct sources -- one identity can \
              monopolise pool slots by rotating addresses"
+        );
+    }
+
+    /// THE LOCKOUT BUG -- observed live on mainnet (heights 66,239-66,247): gossip
+    /// fan-in delivers the SAME bundle many times (one copy per peer path), and
+    /// charging identity budget per delivery let those free-to-drop duplicates
+    /// exhaust a first-time contributor's budget, locking its genuinely fresh
+    /// bundles out of the pool. Duplicates must never spend identity budget.
+    /// Break-checked: with tier 3 charged before the duplicate probe, this fails.
+    #[test]
+    fn duplicate_fanin_never_locks_out_fresh_bundles() {
+        let _env = crate::test_env::guard();
+        let pool = NodeRoleBundlePool::default();
+        let compute =
+            RoleBundleV1::from_json(&super::tests::bundle_json(0x31, crate::poawx::ROLE_COMPUTE_CONTRIBUTOR))
+                .unwrap();
+        // First delivery is a real admission.
+        assert!(matches!(
+            pool.ingest_tiered(ip(60), compute.clone(), NET, H, Some(SEED), None),
+            Ok(BundleOutcome::AcceptedNew)
+        ));
+        // Gossip fan-in: far more re-deliveries than the whole identity budget,
+        // each from a different peer path.
+        for i in 0..(IDENTITY_RATE_MAX + 8) {
+            let r = pool.ingest_tiered(ip(61 + i as u8), compute.clone(), NET, H, Some(SEED), None);
+            assert!(
+                matches!(r, Ok(BundleOutcome::Duplicate)),
+                "a duplicate delivery must stay a free duplicate, got: {r:?}"
+            );
+        }
+        // The same identity's OTHER role bundle is fresh work and must still be
+        // admitted -- this is exactly the submission the live lockout rejected.
+        let verify =
+            RoleBundleV1::from_json(&super::tests::bundle_json(0x31, crate::poawx::ROLE_VERIFY_CONTRIBUTOR))
+                .unwrap();
+        let r = pool.ingest_tiered(ip(90), verify, NET, H, Some(SEED), None);
+        assert!(
+            matches!(r, Ok(BundleOutcome::AcceptedNew)),
+            "fresh bundle from a duplicate-flooded identity must be admitted, got: {r:?}"
         );
     }
 

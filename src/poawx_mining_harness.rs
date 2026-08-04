@@ -2541,7 +2541,23 @@ fn build_all_gates_block_with(
     // in the candidate set; SUPPORT (10%, "finality committee") across EVERY support
     // candidate. Payee order = candidate-set canonical order (`cs` is already sorted), the
     // SAME order the validator uses. Gate off => the canonical 4-output coinbase, byte-identical.
-    let outputs = if crate::chain::shared_reward_active(height) {
+    // SINGLE-PAYEE MODEL: the full subsidy to the one VRF-selected proposer, and nothing
+    // derived from the role manifest. Built here rather than at the call sites so the
+    // BUILDER and the VALIDATOR (`validate_single_payee_coinbase`) are decided by the SAME
+    // predicate — a builder that emitted the legacy split at/after activation would have
+    // every block rejected, which is the enforce-on/build-off shape of the 2026-07-23 halt.
+    let outputs = if crate::chain::single_payee_reward_active(height) {
+        vec![
+            TxOutput {
+                value: 0,
+                script_pubkey: irx1_script,
+            },
+            TxOutput {
+                value: total,
+                script_pubkey: crate::tx::p2pkh_script(&worker_pkh),
+            },
+        ]
+    } else if crate::chain::shared_reward_active(height) {
         let role_pkhs = |role: u8| -> Vec<[u8; 20]> {
             cs.candidates
                 .iter()

@@ -1267,6 +1267,18 @@ impl ProposerEligibilityRegistry {
         self.keys.contains_key(vrf_pubkey)
     }
 
+    /// Newest ON-CHAIN registration height for a key, if any.
+    ///
+    /// A record holds a SET of heights, so refreshing an existing key is already supported by the
+    /// data model -- `register` just adds a height. What was missing is a way to ask how STALE a
+    /// record is, which is what decides whether re-announcing it is worth a block slot.
+    /// `heights` is a `BTreeSet`, so `next_back` is the maximum.
+    pub fn latest_height(&self, vrf_pubkey: &[u8; 33]) -> Option<u64> {
+        self.keys
+            .get(vrf_pubkey)
+            .and_then(|r| r.heights.iter().next_back().copied())
+    }
+
     pub fn len(&self) -> usize {
         self.keys.len()
     }

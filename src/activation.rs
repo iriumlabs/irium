@@ -338,19 +338,32 @@ pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = None;
 /// distinct blocks are ordinary: `chain.rs` maps any block with no proposer assignment to the
 /// `(u32::MAX, u64::MAX)` sentinel, which N1 (live since 59,900) permits.
 ///
-/// **DISARMED (`None`) DELIBERATELY — it must be armed at a height ABOVE the tip at the moment
-/// of deployment.** Arming at or below the current tip makes a freshly-built node re-evaluate
-/// history under the new rule and reject its own chain on restart; that has already happened
-/// twice on this chain (the 64,940 debug binary at tip 64,951, and the 65,419 four-role halt).
-/// Allow >= 50 blocks of margin: two node restarts are ~12 min each and the suite ~15 min, so
-/// 20 blocks is not enough.
+/// **ARMED at 66,179 on 2026-08-03, anchored to tip 66,129 at 08:40 IST** — a margin of 50
+/// blocks (~2.2 h at the observed ~160 s cadence), exactly the documented minimum. It must be armed
+/// at a height ABOVE the tip at the moment of deployment: arming at or below the current tip makes
+/// a freshly-built node re-evaluate history under the new rule and reject its own chain on
+/// restart; that has already happened twice on this chain (the 64,940 debug binary at tip 64,951,
+/// and the 65,419 four-role halt). Allow >= 50 blocks of margin: two node restarts are ~12 min
+/// each and the suite ~15 min, so 20 blocks is not enough.
+///
+/// The margin covers what actually matters: BOTH hosts restarted before the tip crosses it, since
+/// a restart re-runs startup fork choice. Measured mechanics are ~54 min (suite 20, build 15,
+/// stage 3, two restart->bind 5 each, two verifies 3 each) = ~20 blocks, so 50 leaves ~79 min of
+/// slack. Missing it costs a rebuild, not a halt: if the tip passes 66,179 before BOTH hosts are
+/// on this binary, do NOT ship it — re-arm at a fresh height above the then-current tip.
+///
+/// Arming this does NOT make a second producer safe. Fork choice only ranks branches that are
+/// both VALID; the open two-producer risk is candidate-set/PLA1 admission (phase22a binds the set
+/// to the parent's committed root, frozen one block ahead, and pool_admission_enforced has been
+/// live since 62,236), which makes rival blocks mutually INVALID so the comparator never runs.
+/// Starting a second producer is a separate decision with a separate risk.
 ///
 /// ⚠️ COORDINATED CHANGE. Below the activation both rules agree byte-for-byte, so the change
 /// arrives INERT and a node that has it is indistinguishable from one that does not. At and
 /// above it, nodes on the old binary can pick a different branch in the tied-prefix/unequal-
 /// length case. Both hosts — and ideally the external peers, of which at least three were
 /// tracking the tip on 2026-08-02 — should be on the activation binary before the height.
-pub const MAINNET_FORKCHOICE_TOTAL_ORDER_ACTIVATION_HEIGHT: Option<u64> = None;
+pub const MAINNET_FORKCHOICE_TOTAL_ORDER_ACTIVATION_HEIGHT: Option<u64> = Some(66_179);
 // ══════════════════════════════════════════════════════════════════════════════
 
 /// Activation binary (v1.9.127): mainnet activation height for delegated (mode-1)

@@ -333,7 +333,7 @@ pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = None;
 ///
 /// Ships `None` — inert. Selection (proposer VRF/eligibility/freeze), PoW demotion, fork-choice
 /// total order, registration renewal and dominance validation are all unaffected by this gate.
-pub const MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT: Option<u64> = None;
+pub const MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT: Option<u64> = Some(66_400);
 // ══════════════════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════════════════
 

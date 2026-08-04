@@ -4382,6 +4382,27 @@ pub fn four_role_payout_active(height: u64) -> bool {
     }
 }
 
+/// Is the SINGLE-PAYEE reward model in force at `height`?
+///
+/// At/after activation the coinbase pays the full subsidy to exactly one payee — the block's
+/// VRF-selected proposer — and role-manifest validation is skipped entirely. Mainnet is
+/// const-controlled (env is never honoured there, like every other mainnet gate); other
+/// networks use `IRIUM_POAWX_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT` so the harness can arm it.
+///
+/// Ships inert (`None` on mainnet) — see the constant for the hard-fork warning.
+pub fn single_payee_reward_active(height: u64) -> bool {
+    if crate::activation::network_id_byte() == 0 {
+        return matches!(
+            crate::activation::MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT,
+            Some(h) if height >= h
+        );
+    }
+    match crate::activation::poawx_single_payee_reward_activation_height() {
+        Some(h) => height >= h,
+        None => false,
+    }
+}
+
 pub fn shared_reward_active(height: u64) -> bool {
     if crate::activation::network_id_byte() == 0 {
         // mainnet: the combined deploy knob only (env is never honored on mainnet).
@@ -4715,6 +4736,55 @@ pub fn expected_shared_multi_role_payouts(
 }
 
 /// Test-visible alias so the enforcement test can drive the real validator.
+/// THE SINGLE-PAYEE COINBASE RULE.
+///
+/// Exactly one value-bearing output: a P2PKH paying `primary_pkh` (the receipt's `worker_pkh`,
+/// i.e. the VRF-selected proposer) the FULL `total_reward`. Zero-value non-p2pkh outputs (the
+/// irx1 OP_RETURN commitment) are ignored, exactly as the legacy validators do; any
+/// value-bearing non-p2pkh output is a hidden fee and rejects.
+///
+/// Deliberately reads NOTHING from the role manifest: not `RoleReward`, not the role claims,
+/// not the candidate set. Who gets paid is fully determined by who the chain selected, so
+/// there is nothing left for a builder to influence by choosing what it enrols or relays.
+pub fn validate_single_payee_coinbase(
+    outputs: &[crate::tx::TxOutput],
+    primary_pkh: &[u8; 20],
+    total_reward: u64,
+) -> Result<(), String> {
+    let mut p2pkh: Vec<([u8; 20], u64)> = Vec::new();
+    for out in outputs {
+        match parse_p2pkh_pkh(&out.script_pubkey) {
+            Some(pkh) => p2pkh.push((pkh, out.value)),
+            None => {
+                if out.value != 0 {
+                    return Err(
+                        "single-payee coinbase: value-bearing non-p2pkh output (hidden fee?)"
+                            .to_string(),
+                    );
+                }
+            }
+        }
+    }
+    if p2pkh.len() != 1 {
+        return Err(format!(
+            "single-payee coinbase: expected exactly 1 payout output, found {}",
+            p2pkh.len()
+        ));
+    }
+    if &p2pkh[0].0 != primary_pkh {
+        return Err(
+            "single-payee coinbase: payout pkh is not the selected proposer".to_string(),
+        );
+    }
+    if p2pkh[0].1 != total_reward {
+        return Err(format!(
+            "single-payee coinbase: payout {} != full reward {}",
+            p2pkh[0].1, total_reward
+        ));
+    }
+    Ok(())
+}
+
 pub fn validate_shared_multi_role_coinbase_for_test(
     outputs: &[crate::tx::TxOutput],
     primary_pkh: &[u8; 20],
@@ -5120,7 +5190,23 @@ fn validate_phase20_production_block(
                 ));
             }
         }
-        if shared_reward_active(height) {
+        if single_payee_reward_active(height) {
+            // SINGLE-PAYEE MODEL: the full subsidy goes to the VRF-selected proposer and the
+            // role manifest is not consulted at all. Role claims, RoleReward binding and the
+            // §6 fan-out are deliberately NOT validated here — they no longer determine any
+            // payment, so validating them would be dead weight that could only reject
+            // otherwise-valid blocks. Fee terms are still checked: a fee is a payout, and
+            // leaving it unchecked would reopen the hidden-fee hole the single-output rule
+            // closes.
+            crate::poawx::validate_fee_terms(ext.fee_bps, &ext.fee_pkh, third_party_mode)?;
+            if ext.fee_bps != 0 {
+                return Err(
+                    "single-payee: third-party fee not supported by the single-payee coinbase"
+                        .to_string(),
+                );
+            }
+            validate_single_payee_coinbase(&coinbase.outputs, &r.worker_pkh, total_reward)?;
+        } else if shared_reward_active(height) {
             // Step 2 (§6 shared distribution): same role-claim + RoleReward binding as
             // the canonical path, then the multi-payee fan-out coinbase. Fees are not
             // supported in shared mode (devnet build-out): official (fee_bps==0) only.
@@ -14070,6 +14156,104 @@ mod tests {
             from_cli > 100 && from_core > 100 && from_pool > 100,
             "CLI/Core/pool addresses must all be drawn — got {from_cli}/{from_core}/{from_pool}"
         );
+    }
+
+    /// SINGLE-PAYEE MODEL — the positive case. A block paying the FULL subsidy to the one
+    /// VRF-selected proposer validates, and nothing about roles is consulted to do it.
+    #[test]
+    fn single_payee_block_pays_the_selected_proposer_in_full() {
+        let _env = crate::test_env::guard();
+        use crate::chain::validate_single_payee_coinbase;
+        let reward = crate::chain::block_reward(1);
+        let proposer = [0x11u8; 20];
+        let outs = vec![
+            // The irx1 commitment rides along at zero value and must be ignored.
+            crate::tx::TxOutput { value: 0, script_pubkey: vec![0x6a, 0x24] },
+            crate::tx::TxOutput { value: reward, script_pubkey: crate::tx::p2pkh_script(&proposer) },
+        ];
+        validate_single_payee_coinbase(&outs, &proposer, reward)
+            .expect("full subsidy to the selected proposer must be accepted");
+    }
+
+    /// THE OLD 4-ROLE FORMAT MUST NO LONGER BE ACCEPTED once the model is single-payee.
+    /// If the legacy split still validated, the fork would be silent: two nodes could
+    /// disagree about which shape is legal and both think they were right.
+    /// Break-check: delete the `p2pkh.len() != 1` arm and this test fails.
+    #[test]
+    fn single_payee_rejects_the_legacy_four_role_split() {
+        let _env = crate::test_env::guard();
+        use crate::chain::validate_single_payee_coinbase;
+        let reward = crate::chain::block_reward(1);
+        let proposer = [0x11u8; 20];
+        let amts = crate::poawx::multi_role_amounts(reward);
+        let legacy: Vec<crate::tx::TxOutput> = [
+            (proposer, amts[0]), ([0x22u8; 20], amts[1]),
+            ([0x33u8; 20], amts[2]), ([0x44u8; 20], amts[3]),
+        ]
+        .iter()
+        .map(|(pkh, v)| crate::tx::TxOutput { value: *v, script_pubkey: crate::tx::p2pkh_script(pkh) })
+        .collect();
+        let err = validate_single_payee_coinbase(&legacy, &proposer, reward)
+            .expect_err("the legacy 55/22/13/10 split must be REJECTED under single-payee");
+        assert!(err.contains("expected exactly 1 payout output"), "got: {err}");
+    }
+
+    /// The three ways a single-payee coinbase can lie, each rejected with its OWN reason:
+    /// wrong payee, short-paying the proposer, and a hidden fee smuggled into a
+    /// value-bearing non-p2pkh output.
+    #[test]
+    fn single_payee_rejects_wrong_payee_short_pay_and_hidden_fee() {
+        let _env = crate::test_env::guard();
+        use crate::chain::validate_single_payee_coinbase;
+        let reward = crate::chain::block_reward(1);
+        let proposer = [0x11u8; 20];
+        let thief = [0x99u8; 20];
+
+        let wrong = vec![crate::tx::TxOutput { value: reward, script_pubkey: crate::tx::p2pkh_script(&thief) }];
+        assert!(validate_single_payee_coinbase(&wrong, &proposer, reward)
+            .expect_err("paying someone other than the selected proposer must be REJECTED")
+            .contains("not the selected proposer"));
+
+        let short = vec![crate::tx::TxOutput { value: reward - 1, script_pubkey: crate::tx::p2pkh_script(&proposer) }];
+        assert!(validate_single_payee_coinbase(&short, &proposer, reward)
+            .expect_err("paying less than the full reward must be REJECTED")
+            .contains("!= full reward"));
+
+        let hidden = vec![
+            crate::tx::TxOutput { value: reward - 100, script_pubkey: crate::tx::p2pkh_script(&proposer) },
+            crate::tx::TxOutput { value: 100, script_pubkey: vec![0x6a, 0x01, 0x00] },
+        ];
+        assert!(validate_single_payee_coinbase(&hidden, &proposer, reward)
+            .expect_err("a value-bearing non-p2pkh output is a hidden fee and must be REJECTED")
+            .contains("hidden fee"));
+    }
+
+    /// THE GATE SHIPS INERT, and arms only where configured. Mainnet is const-controlled and
+    /// the constant is `None`, so no mainnet height may be single-payee no matter what the
+    /// environment says — the same env-ignored discipline every other mainnet gate uses.
+    #[test]
+    fn single_payee_gate_is_inert_on_mainnet_and_env_armable_elsewhere() {
+        let _env = crate::test_env::guard();
+        let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
+        assert!(
+            crate::activation::MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT.is_none(),
+            "the single-payee gate must ship INERT on mainnet"
+        );
+        std::env::set_var("IRIUM_NETWORK", "mainnet");
+        std::env::set_var("IRIUM_POAWX_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT", "1");
+        assert!(
+            !crate::chain::single_payee_reward_active(1_000_000),
+            "mainnet must IGNORE the env override for this gate"
+        );
+        std::env::set_var("IRIUM_NETWORK", "devnet");
+        assert!(!crate::chain::single_payee_reward_active(0), "below activation: legacy rules");
+        assert!(crate::chain::single_payee_reward_active(1), "at/after activation: single-payee");
+        std::env::remove_var("IRIUM_POAWX_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT");
+        assert!(
+            !crate::chain::single_payee_reward_active(1_000_000),
+            "unset env must leave the gate OFF everywhere"
+        );
+        std::env::remove_var("IRIUM_NETWORK");
     }
 
     /// ENFORCEMENT: a block must pay exactly the four addresses the chain drew.

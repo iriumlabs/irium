@@ -315,6 +315,26 @@ pub const MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT: Option<u64> = Some(62236u
 /// four drawn holders. A node on the old binary would reject the other's blocks at the
 /// boundary, which is a fork, not a degradation.
 pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = None;
+
+// ══════════════════════════════════════════════════════════════════════════════
+/// Mainnet activation for the SINGLE-PAYEE reward model.
+///
+/// At and after this height the coinbase pays the FULL block subsidy to exactly ONE payee —
+/// the block's VRF-selected proposer (`worker_pkh`) — and block validity stops consulting the
+/// role manifest entirely: no compute/verify/support claims, no `RoleReward` binding, no
+/// 55/22/13/10 split, no §6 fan-out across candidates.
+///
+/// ⚠️ THIS IS A HARD FORK. Below the height the legacy multi-role rules apply byte-identically,
+/// so persisted history (61,415…H, all multi-payee) still re-validates on restart. At/after it,
+/// a legacy multi-payee coinbase is REJECTED and a single-payee coinbase is REQUIRED — the two
+/// rules are mutually exclusive, so every node must run a binary carrying this constant BEFORE
+/// the chain reaches it, and the height must be in the FUTURE when armed (CLAUDE.md §12; arming
+/// at or below the tip makes a node reject its own chain on restart).
+///
+/// Ships `None` — inert. Selection (proposer VRF/eligibility/freeze), PoW demotion, fork-choice
+/// total order, registration renewal and dominance validation are all unaffected by this gate.
+pub const MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT: Option<u64> = None;
+// ══════════════════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════════════════
 
 /// Mainnet activation for the fork-choice TOTAL ORDER fix.
@@ -502,6 +522,14 @@ pub fn poawx_pool_sortition_activation_height() -> Option<u64> {
 /// mainnet) until an explicit future governance activation.
 pub fn poawx_fairness_matrix_activation_height() -> Option<u64> {
     env::var("IRIUM_POAWX_FAIRNESS_MATRIX_ACTIVATION_HEIGHT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+}
+
+/// Single-payee reward activation for NON-mainnet networks (harness/devnet/testnet). Mainnet
+/// ignores this and uses `MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT`.
+pub fn poawx_single_payee_reward_activation_height() -> Option<u64> {
+    env::var("IRIUM_POAWX_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT")
         .ok()
         .and_then(|v| v.trim().parse::<u64>().ok())
 }

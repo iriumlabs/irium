@@ -892,7 +892,34 @@ impl NodeCandidateAdmissionCache {
 
     /// Ingest one admission (raw wire bytes). Validate → window → dedupe → store.
     /// Returns AcceptedNew (rebroadcast), Duplicate (don't), or Rejected (drop).
+    /// Back-compat entry point: ingest WITHOUT the receiver-side dominance cross-check.
+    /// Retained so existing callers and tests compile unchanged. Production gossip and RPC
+    /// paths must use `ingest_bytes_verified`.
     pub fn ingest_bytes(&self, bytes: &[u8]) -> GossipOutcome {
+        self.ingest_bytes_verified(bytes, |_, _| None, false)
+    }
+
+    /// Reject an admission whose `dominance_weight` disagrees with the weight THIS node
+    /// computes for the same (solver, height).
+    ///
+    /// `dominance_weight` is the only field in an admission that asserts something about the
+    /// SENDER's view of shared rolling state; every other field is self-verifying (signature,
+    /// VRF proof, puzzle, ticket). A sender whose dominance window is skewed produces a weight
+    /// we disagree with. Accepted here it is rebroadcast, served to a miner via
+    /// `/poawx/candidate-admissions`, embedded verbatim in a block, and then every node rejects
+    /// that block at `phase21d: candidate dominance weight mismatch` -- which halted mainnet at
+    /// 64,923 and 64,941. Reject it HERE, attributably, while it is still one message.
+    ///
+    /// `local_weight` returns the receiver's OWN computed weight for (solver_pkh, height). The
+    /// sender's claim is used only as the comparand -- never trusted, never stored, never
+    /// forwarded. No wire-format change: `CandidateAdmissionV1` and its digest are untouched,
+    /// so this is node-local policy and needs no lockstep upgrade.
+    pub fn ingest_bytes_verified(
+        &self,
+        bytes: &[u8],
+        local_weight: impl Fn(&[u8; 20], u64) -> Option<u64>,
+        check_dominance: bool,
+    ) -> GossipOutcome {
         if !candidate_admission_gossip_enabled() {
             return GossipOutcome::Rejected("candidate admission disabled".to_string());
         }
@@ -908,6 +935,36 @@ impl NodeCandidateAdmissionCache {
         }
         if let Err(e) = adm.validate(adm.network_id, adm.target_height) {
             return GossipOutcome::Rejected(e);
+        }
+        // Ordered BEFORE in_window/already_seen deliberately: a bad-weight admission must not be
+        // able to occupy the (height, role, solver) slot and dedup-suppress a good one arriving
+        // later from an honest peer.
+        if check_dominance {
+            match local_weight(&adm.candidate.solver_pkh, adm.target_height) {
+                Some(ours) if ours != adm.candidate.dominance_weight => {
+                    return GossipOutcome::Rejected(format!(
+                        "candidate admission: dominance weight mismatch role={} solver={} \
+                         height={} claimed={} local={}",
+                        adm.candidate.role_id,
+                        hex::encode(adm.candidate.solver_pkh),
+                        adm.target_height,
+                        adm.candidate.dominance_weight,
+                        ours,
+                    ));
+                }
+                // Fail CLOSED: if we cannot compute our own weight we must not fall back to
+                // trusting theirs. Silence here is what made 64,923 expensive to diagnose.
+                None => {
+                    return GossipOutcome::Rejected(format!(
+                        "candidate admission: cannot compute local dominance weight solver={} \
+                         height={}; refusing to trust sender's claimed={}",
+                        hex::encode(adm.candidate.solver_pkh),
+                        adm.target_height,
+                        adm.candidate.dominance_weight,
+                    ));
+                }
+                Some(_) => {}
+            }
         }
         if !self.in_window(adm.target_height) {
             return GossipOutcome::Rejected("out of admission window".to_string());
@@ -1659,5 +1716,181 @@ mod tests {
             assert!(adm.assignment_proof_v2.is_some(), "carries pool VRF proof");
             assert_eq!(adm.serialize(), bytes, "round-trips");
         }
+    }
+}
+
+#[cfg(test)]
+mod dominance_receiver_validation_tests {
+    use super::*;
+    use crate::poawx_candidate::RoleCandidate;
+    use crate::poawx_dominance::{PersistentDominance, RoleRewardKind, DOMINANCE_BASE_WORK_SCORE};
+    use crate::poawx_penalty::PenaltyStatus;
+
+    const SOLVER: [u8; 20] = [0x71u8; 20];
+    const HEIGHT: u64 = 10;
+
+    /// Two dominance views that DISAGREE, exactly as at 64,923: the origin node had applied
+    /// reward events this node has not, so the same (pkh, height) yields a different weight.
+    fn skewed_and_local() -> (PersistentDominance, PersistentDominance) {
+        let mut origin = PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        origin.apply_event(SOLVER, RoleRewardKind::Primary, 5_000_000_000, 1);
+        let local = PersistentDominance::new(
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_WINDOW,
+            crate::poawx_dominance::DEFAULT_ANTI_DOMINATION_LOOKBACK,
+        );
+        (origin, local)
+    }
+
+    fn admission_with_weight(seed: &[u8; 32], weight: u64) -> Vec<u8> {
+        let net = crate::activation::network_id_byte();
+        let c = RoleCandidate::build(
+            net,
+            HEIGHT,
+            seed,
+            1,
+            SOLVER,
+            [0x02u8; 33],
+            [0x11u8; 32],
+            PenaltyStatus::Clean.id(),
+            weight,
+            [0x12u8; 32],
+        );
+        CandidateAdmissionV1::new(net, HEIGHT, *seed, c).serialize()
+    }
+
+    #[test]
+    fn break_check_old_path_admits_a_foreign_weight_silently() {
+        // Lock order MUST match every other test in this crate: test_env::guard() FIRST,
+        // then poawx_test_env_lock(). Taking them the other way round deadlocked the whole
+        // suite -- 8 tests blocked in futex_wait_queue and `cargo test --all` never finished.
+        let _env = crate::test_env::guard();
+        let _g = crate::poawx::poawx_test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1");
+        std::env::remove_var("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_TRUE_VRF_REQUIRED");
+        let seed = [0x22u8; 32];
+        let (origin, local) = skewed_and_local();
+        let foreign = origin.weight(DOMINANCE_BASE_WORK_SCORE, &SOLVER, HEIGHT);
+        let ours = local.weight(DOMINANCE_BASE_WORK_SCORE, &SOLVER, HEIGHT);
+        assert_ne!(foreign, ours, "views must disagree or this proves nothing");
+        println!("BREAK-CHECK  foreign_weight={} local_weight={}", foreign, ours);
+
+        let cache = NodeCandidateAdmissionCache::new();
+        cache.set_tip(HEIGHT);
+        // OLD BEHAVIOUR: check disabled -- exactly what shipped before this fix.
+        let outcome = cache.ingest_bytes_verified(
+            &admission_with_weight(&seed, foreign),
+            |_, _| Some(ours),
+            false,
+        );
+        println!("BREAK-CHECK  OLD ingest outcome = {:?}", outcome);
+        assert!(
+            matches!(outcome, GossipOutcome::AcceptedNew),
+            "OLD path must ADMIT the foreign weight (that is the defect)"
+        );
+        // And the foreign weight is now in the admitted set, ready to reach a block.
+        let admitted = cache.candidates_for(HEIGHT, &seed);
+        assert_eq!(admitted.len(), 1);
+        println!(
+            "BREAK-CHECK  admitted candidate carries dominance_weight={} (local view says {}) \
+             -> this is what phase21d rejects the BLOCK for",
+            admitted[0].dominance_weight, ours
+        );
+        assert_eq!(admitted[0].dominance_weight, foreign);
+    }
+
+    #[test]
+    fn new_path_rejects_foreign_weight_loudly_and_attributably() {
+        // Lock order MUST match every other test in this crate: test_env::guard() FIRST,
+        // then poawx_test_env_lock(). Taking them the other way round deadlocked the whole
+        // suite -- 8 tests blocked in futex_wait_queue and `cargo test --all` never finished.
+        let _env = crate::test_env::guard();
+        let _g = crate::poawx::poawx_test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1");
+        std::env::remove_var("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_TRUE_VRF_REQUIRED");
+        let seed = [0x23u8; 32];
+        let (origin, local) = skewed_and_local();
+        let foreign = origin.weight(DOMINANCE_BASE_WORK_SCORE, &SOLVER, HEIGHT);
+        let ours = local.weight(DOMINANCE_BASE_WORK_SCORE, &SOLVER, HEIGHT);
+
+        let cache = NodeCandidateAdmissionCache::new();
+        cache.set_tip(HEIGHT);
+        let outcome = cache.ingest_bytes_verified(
+            &admission_with_weight(&seed, foreign),
+            |_, _| Some(ours),
+            true,
+        );
+        println!("NEW  ingest outcome = {:?}", outcome);
+        match outcome {
+            GossipOutcome::Rejected(ref why) => {
+                assert!(why.contains("dominance weight mismatch"), "why={why}");
+                assert!(why.contains(&hex::encode(SOLVER)), "must name the solver: {why}");
+                assert!(why.contains(&format!("claimed={foreign}")), "why={why}");
+                assert!(why.contains(&format!("local={ours}")), "why={why}");
+            }
+            other => panic!("NEW path must REJECT, got {other:?}"),
+        }
+        // Nothing entered the admitted set -> nothing can reach a block -> no halt.
+        assert!(
+            cache.candidates_for(HEIGHT, &seed).is_empty(),
+            "rejected admission must not be admitted"
+        );
+        println!("NEW  admitted set is empty -> foreign weight cannot reach a block");
+    }
+
+    #[test]
+    fn false_positive_control_matching_weight_still_admitted() {
+        // Lock order MUST match every other test in this crate: test_env::guard() FIRST,
+        // then poawx_test_env_lock(). Taking them the other way round deadlocked the whole
+        // suite -- 8 tests blocked in futex_wait_queue and `cargo test --all` never finished.
+        let _env = crate::test_env::guard();
+        let _g = crate::poawx::poawx_test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1");
+        std::env::remove_var("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_TRUE_VRF_REQUIRED");
+        let seed = [0x24u8; 32];
+        let (_, local) = skewed_and_local();
+        let ours = local.weight(DOMINANCE_BASE_WORK_SCORE, &SOLVER, HEIGHT);
+        let cache = NodeCandidateAdmissionCache::new();
+        cache.set_tip(HEIGHT);
+        let outcome =
+            cache.ingest_bytes_verified(&admission_with_weight(&seed, ours), |_, _| Some(ours), true);
+        println!("CONTROL  agreeing weight -> {:?}", outcome);
+        assert!(matches!(outcome, GossipOutcome::AcceptedNew), "must not false-positive");
+    }
+
+    #[test]
+    fn fails_closed_when_local_weight_unavailable() {
+        // Lock order MUST match every other test in this crate: test_env::guard() FIRST,
+        // then poawx_test_env_lock(). Taking them the other way round deadlocked the whole
+        // suite -- 8 tests blocked in futex_wait_queue and `cargo test --all` never finished.
+        let _env = crate::test_env::guard();
+        let _g = crate::poawx::poawx_test_env_lock()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        std::env::set_var("IRIUM_NETWORK", "testnet");
+        std::env::set_var("IRIUM_POAWX_CANDIDATE_ADMISSION_ACTIVATION_HEIGHT", "1");
+        std::env::remove_var("IRIUM_POAWX_TRUE_VRF_ACTIVATION_HEIGHT");
+        std::env::remove_var("IRIUM_POAWX_TRUE_VRF_REQUIRED");
+        let seed = [0x25u8; 32];
+        let cache = NodeCandidateAdmissionCache::new();
+        cache.set_tip(HEIGHT);
+        let outcome =
+            cache.ingest_bytes_verified(&admission_with_weight(&seed, 1234), |_, _| None, true);
+        println!("FAIL-CLOSED  resolver None -> {:?}", outcome);
+        assert!(matches!(outcome, GossipOutcome::Rejected(_)), "must fail closed");
     }
 }

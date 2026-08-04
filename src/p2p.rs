@@ -7157,11 +7157,39 @@ impl P2PNode {
                             if let Ok(p) =
                                 crate::protocol::PoawxCandidateAdmissionPayload::from_message(&msg)
                             {
-                                if crate::poawx_admission::admission_gossip_rate_allowed(addr.ip())
-                                    && crate::poawx_admission::global_admission_cache()
-                                        .ingest_bytes(&p.admission_bytes)
-                                        .should_rebroadcast()
-                                {
+                                // Receiver-side dominance validation. The rejection reason was
+                                // previously DISCARDED here -- only `should_rebroadcast()` was
+                                // read -- so a mismatched admission was absorbed in silence.
+                                // Bind the outcome, log it attributably, then decide.
+                                let outcome = if crate::poawx_admission::admission_gossip_rate_allowed(addr.ip()) {
+                                    crate::poawx_admission::global_admission_cache()
+                                        .ingest_bytes_verified(
+                                            &p.admission_bytes,
+                                            |pkh, h| {
+                                                chain_for_sync.as_ref().map(|c| {
+                                                    c.lock()
+                                                        .unwrap_or_else(|e| e.into_inner())
+                                                        .dominance
+                                                        .weight(
+                                                            crate::poawx_dominance::DOMINANCE_BASE_WORK_SCORE,
+                                                            pkh,
+                                                            h,
+                                                        )
+                                                })
+                                            },
+                                            crate::poawx_dominance::anti_domination_active(
+                                                crate::poawx_admission::global_admission_cache().tip(),
+                                            ),
+                                        )
+                                } else {
+                                    crate::poawx_gossip::GossipOutcome::Rejected(
+                                        "admission gossip rate limited".to_string(),
+                                    )
+                                };
+                                if let crate::poawx_gossip::GossipOutcome::Rejected(ref why) = outcome {
+                                    eprintln!("[admission] REJECT from {}: {}", addr.ip(), why);
+                                }
+                                if outcome.should_rebroadcast() {
                                     let bytes = crate::protocol::PoawxCandidateAdmissionPayload {
                                         admission_bytes: p.admission_bytes,
                                     }
@@ -9774,7 +9802,24 @@ async fn handle_incoming_with_sybil(
                         crate::protocol::PoawxCandidateAdmissionPayload::from_message(&msg)
                     {
                         if crate::poawx_admission::global_admission_cache()
-                            .ingest_bytes(&p.admission_bytes)
+                            .ingest_bytes_verified(
+                                &p.admission_bytes,
+                                |pkh, h| {
+                                    chain.as_ref().map(|c| {
+                                        c.lock()
+                                            .unwrap_or_else(|e| e.into_inner())
+                                            .dominance
+                                            .weight(
+                                                crate::poawx_dominance::DOMINANCE_BASE_WORK_SCORE,
+                                                pkh,
+                                                h,
+                                            )
+                                    })
+                                },
+                                crate::poawx_dominance::anti_domination_active(
+                                    crate::poawx_admission::global_admission_cache().tip(),
+                                ),
+                            )
                             .should_rebroadcast()
                         {
                             let bytes = crate::protocol::PoawxCandidateAdmissionPayload {

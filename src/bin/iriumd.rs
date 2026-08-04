@@ -15425,7 +15425,27 @@ async fn poawx_candidate_admission_post(
     }
     let cache = irium_node_rs::poawx_admission::global_admission_cache();
     cache.prune(state.status_height_cache.load(Ordering::Relaxed));
-    match cache.ingest_bytes(body.as_ref()) {
+    // Receiver-side dominance validation on the RPC path too: a co-located miner posting here
+    // is exactly how a foreign weight would otherwise reach the admitted set and, from there,
+    // a block. The weight is recomputed from THIS node's own dominance state; the submitted
+    // value is only ever the comparand.
+    let dom_on = irium_node_rs::poawx_dominance::anti_domination_active(
+        state.status_height_cache.load(Ordering::Relaxed),
+    );
+    let outcome = cache.ingest_bytes_verified(
+        body.as_ref(),
+        |pkh, h| {
+            state.chain.try_lock().ok().map(|g| {
+                g.dominance.weight(
+                    irium_node_rs::poawx_dominance::DOMINANCE_BASE_WORK_SCORE,
+                    pkh,
+                    h,
+                )
+            })
+        },
+        dom_on,
+    );
+    match outcome {
         irium_node_rs::poawx_gossip::GossipOutcome::AcceptedNew => {
             if let Some(ref p2p) = state.p2p {
                 p2p.broadcast_candidate_admission(body.as_ref()).await;
@@ -15435,7 +15455,12 @@ async fn poawx_candidate_admission_post(
         irium_node_rs::poawx_gossip::GossipOutcome::Duplicate => {
             Ok(Json(json!({"status":"duplicate"})))
         }
-        irium_node_rs::poawx_gossip::GossipOutcome::Rejected(_) => Err(StatusCode::BAD_REQUEST),
+        // Was `Rejected(_)` -- the reason was thrown away, which is precisely why a
+        // dominance mismatch could pass through unnoticed. Log it with the source.
+        irium_node_rs::poawx_gossip::GossipOutcome::Rejected(why) => {
+            eprintln!("[admission] REJECT from {}: {}", addr.ip(), why);
+            Err(StatusCode::BAD_REQUEST)
+        }
     }
 }
 

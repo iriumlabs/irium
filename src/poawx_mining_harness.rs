@@ -198,6 +198,88 @@ pub fn default_cpu_nonce_solver(
     mine_pow(header, height, target, poawx_mine_pow_max_iters())
 }
 
+/// Attempts between local-compute-rate samples. 2^17 is ~8 ms of grinding on a
+/// mid-range CPU, so a typical floor-target solve (~2^20 attempts, i.e. ~70 ms)
+/// yields roughly 8 real samples rather than one. The legacy `mine_once` cadence
+/// (LOG_EVERY = 1_000_000) is useless here: a whole solve averages ~1.05M
+/// attempts, so it would emit at most one line per BLOCK.
+const COMPUTE_SAMPLE_ATTEMPTS: u64 = 131_072;
+
+/// `mine_pow` plus real hash-attempt accounting, for the miner binaries.
+///
+/// Counts GENUINE attempts — one per nonce actually hashed — and reports a rate
+/// computed over each window independently (`window_attempts / window_secs`),
+/// never cumulatively, so a slow first window cannot drag the figure down for
+/// the rest of a solve.
+///
+/// Kept separate from `default_cpu_nonce_solver` on purpose: that one is called
+/// from ~20 unit tests and the devnet harness, and must stay silent and
+/// byte-identical. Only the miner binaries opt into reporting.
+///
+/// The number this produces is LOCAL COMPUTE RATE. It says how fast this machine
+/// hashes; it says nothing about the odds of producing a block. Selection is VRF
+/// sortition over registered keys and `proposer_threshold()` takes no hashrate
+/// input, so a faster rate here finishes the same fixed ~2^20 grind sooner and
+/// wins exactly zero extra blocks.
+pub fn mine_pow_reporting(
+    header: &mut BlockHeader,
+    height: u64,
+    target: Target,
+    max_iters: u64,
+) -> Result<u32, String> {
+    let cap = max_iters.min(u32::MAX as u64 + 1);
+    let solve_start = std::time::Instant::now();
+    let mut window_start = solve_start;
+    let mut window_attempts: u64 = 0;
+    let mut total_attempts: u64 = 0;
+
+    for n in 0..cap {
+        header.nonce = n as u32;
+        let hit = meets_target(&header.hash_for_height(height), target);
+        window_attempts += 1;
+        total_attempts += 1;
+
+        if hit {
+            let elapsed = solve_start.elapsed().as_secs_f64();
+            let rate = if elapsed > 0.0 { total_attempts as f64 / elapsed } else { 0.0 };
+            println!(
+                "[poawx] pow solved height={height} nonce={} attempts={total_attempts} elapsed_ms={:.1} rate={rate:.0} H/s",
+                header.nonce,
+                elapsed * 1000.0
+            );
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+            return Ok(header.nonce);
+        }
+
+        if window_attempts >= COMPUTE_SAMPLE_ATTEMPTS {
+            let w = window_start.elapsed().as_secs_f64();
+            if w > 0.0 {
+                println!(
+                    "[poawx] compute rate={:.0} H/s attempts={window_attempts} window_ms={:.1} height={height}",
+                    window_attempts as f64 / w,
+                    w * 1000.0
+                );
+                let _ = std::io::Write::flush(&mut std::io::stdout());
+            }
+            window_attempts = 0;
+            window_start = std::time::Instant::now();
+        }
+    }
+    Err(format!(
+        "poawx mining harness: no nonce satisfied target in {cap} iterations"
+    ))
+}
+
+/// Miner-facing CPU solver: identical grind to [`default_cpu_nonce_solver`], plus
+/// local-compute-rate reporting. Used by the miner binaries only.
+pub fn reporting_cpu_nonce_solver(
+    header: &mut BlockHeader,
+    height: u64,
+    target: Target,
+) -> Result<u32, String> {
+    mine_pow_reporting(header, height, target, poawx_mine_pow_max_iters())
+}
+
 fn hash160(data: &[u8]) -> [u8; 20] {
     let mut o = [0u8; 20];
     o.copy_from_slice(&Ripemd160::digest(Sha256::digest(data)));
@@ -3157,5 +3239,49 @@ mod tests {
             builder_base,
             "with multisource active a real parent's components change the seed"
         );
+    }
+
+    /// Local-compute-rate instrumentation must count GENUINE attempts and emit a
+    /// rate, without changing which nonce is found. Break-check: if the reporting
+    /// path ever diverges from `mine_pow`, the asserted nonce equality fails.
+    #[test]
+    fn mine_pow_reporting_counts_real_attempts_and_matches_plain_mine_pow() {
+        let _env = crate::test_env::guard();
+        let height = 1u64;
+        // ~2^18: big enough to cross COMPUTE_SAMPLE_ATTEMPTS and emit real samples.
+        let target = crate::pow::floor_target(18);
+
+        let mut h_plain = BlockHeader {
+            version: 1,
+            prev_hash: [0u8; 32],
+            merkle_root: [0x11u8; 32],
+            time: 1,
+            bits: 0x1f00ffff,
+            nonce: 0,
+        };
+        let plain = mine_pow(&mut h_plain, height, target, 50_000_000).expect("plain solves");
+
+        let mut h_rep = BlockHeader {
+            version: 1,
+            prev_hash: [0u8; 32],
+            merkle_root: [0x11u8; 32],
+            time: 1,
+            bits: 0x1f00ffff,
+            nonce: 0,
+        };
+        let t0 = std::time::Instant::now();
+        let rep = mine_pow_reporting(&mut h_rep, height, target, 50_000_000).expect("reporting solves");
+        let elapsed = t0.elapsed().as_secs_f64();
+
+        assert_eq!(
+            plain, rep,
+            "reporting solver must find the IDENTICAL nonce as mine_pow -- \
+             instrumentation must not change consensus-relevant behaviour"
+        );
+        assert!(elapsed > 0.0);
+        // The grind really did work: a 18-bit floor needs ~2^18 attempts, so the
+        // solved nonce cannot be trivially small.
+        assert!(rep > 1_000, "expected a real grind, got nonce {rep}");
+        println!("[test] solved nonce={rep} in {:.1} ms -> ~{:.0} H/s", elapsed*1000.0, rep as f64/elapsed);
     }
 }

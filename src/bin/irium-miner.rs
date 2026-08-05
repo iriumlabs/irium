@@ -3957,7 +3957,7 @@ fn run_poawx_solo() -> Result<(), String> {
                 &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,
                 parent_seed_components, &dominance, node_gates.as_ref(), proposer_ctx.as_ref(),
                 registration_section.as_ref(),
-                &irium_node_rs::poawx_mining_harness::default_cpu_nonce_solver,
+                &irium_node_rs::poawx_mining_harness::reporting_cpu_nonce_solver,
                 collected,
                 &block_txs,
             )
@@ -3966,7 +3966,7 @@ fn run_poawx_solo() -> Result<(), String> {
                 &secret, net, height, prev_hash, parent_prev_hash, bits, tmpl.time, diff,
                 parent_seed_components, &dominance, node_gates.as_ref(), proposer_ctx.as_ref(),
                 registration_section.as_ref(),
-                &irium_node_rs::poawx_mining_harness::default_cpu_nonce_solver,
+                &irium_node_rs::poawx_mining_harness::reporting_cpu_nonce_solver,
                 inclusive_fanout.as_ref(),
             )
         };

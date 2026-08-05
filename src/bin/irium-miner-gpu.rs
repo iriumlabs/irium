@@ -1864,10 +1864,32 @@ fn run_poawx_solo_gpu(gpus: &mut [GpuMiner]) -> Result<(), String> {
             let tail = tail_from_header(&ser);
             let target_words = target_to_words(target);
             gpu.update_template(&midstate, &tail, &target_words)?;
+            // Local-compute-rate accounting. Counts GENUINE hashes: every nonce a
+            // dispatched batch actually evaluated. A rate is reported per batch over
+            // that batch's own elapsed time, never cumulatively.
+            //
+            // This measures how fast this GPU hashes. It does NOT indicate better
+            // odds of producing a block: selection is VRF sortition over registered
+            // keys and proposer_threshold() takes no hashrate input, so finishing the
+            // same fixed grind sooner wins zero extra blocks.
+            let solve_start = std::time::Instant::now();
+            let mut total_attempts: u64 = 0;
             let mut nonce_base: u64 = 0;
             while nonce_base <= u32::MAX as u64 {
+                let batch_start = std::time::Instant::now();
+                let batch_size = gpu.batch_size as u64;
                 match gpu.mine_batch(nonce_base as u32)? {
                     Some(nonce) => {
+                        // Attempts in the winning batch: nonces up to and including
+                        // the hit, not the whole batch.
+                        total_attempts += (nonce as u64).saturating_sub(nonce_base).saturating_add(1);
+                        let elapsed = solve_start.elapsed().as_secs_f64();
+                        let rate = if elapsed > 0.0 { total_attempts as f64 / elapsed } else { 0.0 };
+                        println!(
+                            "[poawx] pow solved height={height} nonce={nonce} attempts={total_attempts} elapsed_ms={:.1} rate={rate:.0} H/s",
+                            elapsed * 1000.0
+                        );
+                        let _ = std::io::Write::flush(&mut std::io::stdout());
                         header.nonce = nonce;
                         // Re-verify on CPU with the REAL consensus check before
                         // trusting the kernel result.
@@ -1894,7 +1916,17 @@ fn run_poawx_solo_gpu(gpus: &mut [GpuMiner]) -> Result<(), String> {
                             }
                             continue;
                         }
-                        nonce_base += gpu.batch_size as u64;
+                        total_attempts += batch_size;
+                        let w = batch_start.elapsed().as_secs_f64();
+                        if w > 0.0 {
+                            println!(
+                                "[poawx] compute rate={:.0} H/s attempts={batch_size} window_ms={:.1} height={height}",
+                                batch_size as f64 / w,
+                                w * 1000.0
+                            );
+                            let _ = std::io::Write::flush(&mut std::io::stdout());
+                        }
+                        nonce_base += batch_size;
                     }
                 }
             }

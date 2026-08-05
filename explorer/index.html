@@ -1366,9 +1366,12 @@ GitHub</a>
   window.xpSearch = xpSearch;
 
   /* --- init --- */
-  set('s-poolurl', 'pool.irium.org');
-  set('s-asicport', '3333');
-  set('s-cpuport', '3335');
+  /* Pool retired 2026-08-05: the Stratum endpoints are shut down and refuse
+     connections, and PoAW-X selects producers by VRF sortition, not hashrate.
+     Showing a pool URL and ports here advertised a service that cannot work. */
+  set('s-poolurl', 'retired — mine solo, see docs/JOIN-MINING.md');
+  set('s-asicport', '—');
+  set('s-cpuport', '—');
 
   Promise.all([loadOverview(), loadPoolStats(), loadChainStats()]).then(updateCalc);
 

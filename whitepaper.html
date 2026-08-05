@@ -139,7 +139,7 @@
 <div class="wp-section"><h2>Abstract</h2>
 <p>Irium is a SHA-256d proof-of-work blockchain purpose-built for trustless commerce. Rather than requiring smart contract programming, it implements a deterministic settlement layer as a first-class protocol primitive, enabling buyers and sellers to create binding agreements, submit cryptographic proofs, and release funds without intermediaries. The protocol also maximises network independence through DNS-free bootstrapping, enforces transparent founder vesting via on-chain CLTV timelocks, and prioritises light-client usability from genesis.</p>
 <p>Every settlement outcome is determined by on-chain observable data with no external oracles, governance mechanisms, or privileged actors: <em>agreement + proofs + height → outcome</em>.</p>
-<p><strong>Current Status:</strong> Mainnet live (launched January 5, 2026, node v1.9.49). Settlement layer, reputation system, BTC atomic swaps, marketplace, and all core features operational.</p>
+<p><strong>Current Status:</strong> Mainnet live (launched January 5, 2026, node v1.9.192). Settlement layer, reputation system, BTC atomic swaps, marketplace, and all core features operational.</p>
 </div>
 <div class="wp-section"><h2>1. Introduction</h2>
 <p>Most established proof-of-work networks inherit architectural assumptions from Bitcoin, including DNS-based bootstrapping, addrman-driven peer discovery, and an absence of protocol-level incentives for fast relay. Irium rethinks these components to produce a mainnet that can launch and sustain itself even if all founding infrastructure disappears.</p>
@@ -206,11 +206,11 @@
 </tr>
 <tr>
 <td>Node Version</td>
-<td>v1.9.49</td>
+<td>v1.9.192</td>
 </tr>
 <tr>
 <td>Desktop App</td>
-<td>Irium Core v1.0.77</td>
+<td>Irium Core v1.0.155</td>
 </tr>
 <tr>
 <td>AuxPoW Merged Mining</td>
@@ -267,7 +267,7 @@
 <li><strong>irium-wallet</strong> — Wallet CLI (address creation, balance, BIP32/BIP39, multisig)</li>
 <li><strong>irium-spv</strong> — SPV proof verification tool</li>
 <li><strong>irium-p2p</strong> — P2P-only diagnostic node</li>
-<li><strong>irium-core</strong> — Desktop app (Tauri-based, v1.0.77) bundling node + miner + wallet</li>
+<li><strong>irium-core</strong> — Desktop app (Tauri-based, v1.0.155) bundling node + miner + wallet</li>
 </ul>
 
 </div>
@@ -631,7 +631,7 @@ Nonce (4 bytes)
 <tr><td>Physical Delivery</td><td>Shipping tracking proof</td><td>✅ Live</td></tr>
 </tbody>
 </table>
-<h3>9.3 Settlement Features (v1.9.49)</h3>
+<h3>9.3 Settlement Features (v1.9.192)</h3>
 <ul>
 <li>✅ Auto-release watcher daemon (proof-triggered release)</li>
 <li>✅ Schema validation for five canonical proof types</li>
@@ -739,7 +739,7 @@ Nonce (4 bytes)
 
 </div>
 <div class="wp-section"><h2>11. Roadmap</h2>
-<p><strong>Live (as of v1.9.49):</strong></p>
+<p><strong>Live (as of v1.9.192):</strong></p>
 <ul>
 <li>✅ Core blockchain, SHA-256d PoW, UTXO model</li>
 <li>✅ DNS-free bootstrapping (signed seedlist, anchors)</li>
@@ -750,7 +750,7 @@ Nonce (4 bytes)
 <li>✅ Settlement layer (escrow, proof templates, auto-release, milestone)</li>
 <li>✅ Marketplace and reputation system</li>
 <li>✅ BTC atomic swaps (block 23,850)</li>
-<li>✅ Desktop app: Irium Core v1.0.77 (Windows, macOS, Linux)</li>
+<li>✅ Desktop app: Irium Core v1.0.155 (Windows, macOS, Linux)</li>
 <li>✅ Python SDK + TypeScript SDK</li>
 </ul>
 <p><strong>Upcoming:</strong></p>
@@ -775,22 +775,21 @@ Nonce (4 bytes)
     <article class="wp-pool-card wp-pool-card-primary">
       <h3>Connection Profile</h3>
       <ul>
-        <li><strong>Pool URL:</strong> <code>stratum+tcp://pool.irium.org:3333</code></li>
-        <li><strong>Username:</strong> <code>IRM_ADDRESS.worker1</code></li>
-        <li><strong>Password:</strong> <code>x</code></li>
-        <li><strong>Algorithm:</strong> SHA-256d</li>
-        <li><strong>Mode:</strong> SOLO payout to username wallet address</li>
+        <li><strong>Status:</strong> <strong>RETIRED</strong> — all Stratum endpoints were shut down on 2026-08-05 and refuse connections</li>
+        <li><strong>Why:</strong> since the PoAW-X activation at block 61,414 the block producer is drawn by VRF sortition over registered keys, which takes no hashrate input, so pooling hashrate cannot improve anyone&rsquo;s odds</li>
+        <li><strong>Mine instead:</strong> run your own node and <code>irium-miner --poawx</code> — hardware-neutral, a commodity CPU is enough</li>
+        <li><strong>Guide:</strong> <a href="https://github.com/iriumlabs/irium/blob/main/docs/JOIN-MINING.md">docs/JOIN-MINING.md</a></li>
       </ul>
       <div class="wp-pool-status-row">
-        <span class="wp-pool-status">ONLINE</span>
+        <span class="wp-pool-status">RETIRED</span>
         <span class="wp-pool-updated" id="wp-pool-updated">Updated --:--:--</span>
       </div>
     </article>
 
     <article class="wp-pool-card wp-pool-card-endpoint">
       <h3>Primary Endpoint</h3>
-      <div class="wp-pool-endpoint">stratum+tcp://pool.irium.org:3333</div>
-      <p class="wp-pool-note">Use DNS endpoint for resilience. Raw host IP is intentionally not listed for network security.</p>
+      <div class="wp-pool-endpoint" style="text-decoration:line-through;opacity:.55;">stratum+tcp://pool.irium.org:3333</div>
+      <p class="wp-pool-note"><strong>Retired 2026-08-05.</strong> This endpoint refuses connections. Mining no longer uses a pool: see <a href="https://github.com/iriumlabs/irium/blob/main/docs/JOIN-MINING.md">docs/JOIN-MINING.md</a>.</p>
       <div class="wp-pool-actions">
         <a class="wp-pool-btn" href="/pool/" target="_blank" rel="noopener">Open Pool Portal</a>
         <a class="wp-pool-btn wp-pool-btn-secondary" href="https://api.irium.org/api/pool/stats" target="_blank" rel="noopener">Pool API Stats</a>
@@ -801,9 +800,9 @@ Nonce (4 bytes)
 </div>
 
 <div class="wp-section"><h2>12. Conclusion</h2>
-<p>Irium is a production-ready proof-of-work blockchain built for trustless commerce. The base layer provides SHA-256d PoW security with 2-minute blocks, DNS-free bootstrapping, and NiPoPoW light-client support. The settlement layer adds deterministic escrow, proof-triggered release, on-chain reputation, BTC atomic swaps, and a decentralised marketplace — all live on mainnet as of v1.9.49.</p>
+<p>Irium is a production-ready proof-of-work blockchain built for trustless commerce. The base layer provides SHA-256d PoW security with 2-minute blocks, DNS-free bootstrapping, and NiPoPoW light-client support. The settlement layer adds deterministic escrow, proof-triggered release, on-chain reputation, BTC atomic swaps, and a decentralised marketplace — all live on mainnet as of v1.9.192.</p>
 <p>Every outcome is determined by on-chain data alone. No oracles, no admin keys, no privileged actors.</p>
-<p><strong>Mainnet:</strong> Live since January 5, 2026 &nbsp;|&nbsp; <strong>Node:</strong> v1.9.49 &nbsp;|&nbsp; <strong>App:</strong> Irium Core v1.0.77 &nbsp;|&nbsp; <strong>License:</strong> MIT</p>
+<p><strong>Mainnet:</strong> Live since January 5, 2026 &nbsp;|&nbsp; <strong>Node:</strong> v1.9.192 &nbsp;|&nbsp; <strong>App:</strong> Irium Core v1.0.155 &nbsp;|&nbsp; <strong>License:</strong> MIT</p>
 </div>
 <div class="wp-section"><h2>13. References</h2>
 <ol>

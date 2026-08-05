@@ -14235,15 +14235,21 @@ mod tests {
     fn single_payee_gate_is_inert_on_mainnet_and_env_armable_elsewhere() {
         let _env = crate::test_env::guard();
         let _g = chain_poawx_env_lock().lock().unwrap_or_else(|e| e.into_inner());
-        assert!(
-            crate::activation::MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT.is_none(),
-            "the single-payee gate must ship INERT on mainnet"
-        );
+        // ARMED 2026-08-05 at 66,400 (activated cleanly on mainnet). The property under test
+        // is NOT "inert" any more — it is that mainnet is governed by the CONSTANT alone and
+        // never by the environment, which is what stops a stray env var from moving a
+        // consensus boundary on a live host.
+        let mainnet_h = crate::activation::MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT
+            .expect("mainnet activation height must be set once armed");
         std::env::set_var("IRIUM_NETWORK", "mainnet");
         std::env::set_var("IRIUM_POAWX_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT", "1");
         assert!(
-            !crate::chain::single_payee_reward_active(1_000_000),
-            "mainnet must IGNORE the env override for this gate"
+            !crate::chain::single_payee_reward_active(mainnet_h - 1),
+            "below the constant mainnet must stay on legacy rules even with the env set to 1"
+        );
+        assert!(
+            crate::chain::single_payee_reward_active(mainnet_h),
+            "at the constant mainnet must be single-payee"
         );
         std::env::set_var("IRIUM_NETWORK", "devnet");
         assert!(!crate::chain::single_payee_reward_active(0), "below activation: legacy rules");

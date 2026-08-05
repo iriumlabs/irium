@@ -3000,6 +3000,50 @@ pub struct P2PNode {
     banned_ips: Arc<HashSet<IpAddr>>,
 }
 
+/// Ingest one gossiped proposer registration and LOG the outcome. Used by BOTH message loops.
+///
+/// Each loop carried its own copy of this arm and only one was ever instrumented (2026-08-05),
+/// so a peer served by the other loop had its registrations silently dropped from the operator's
+/// view — outcome computed, then discarded. Same two-loop drift already fixed once for role
+/// bundles (6233b6a8). One function, called from both sites, so they cannot diverge again.
+///
+/// Returns true when the caller should rebroadcast (AcceptedNew only).
+fn ingest_registration_logged(
+    reg_bytes: &[u8],
+    src: std::net::IpAddr,
+    chain: &Option<Arc<StdMutex<ChainState>>>,
+    loop_tag: &str,
+) -> bool {
+    if !crate::poawx_admission::admission_gossip_rate_allowed(src) {
+        eprintln!(
+            "[poawx] proposer registration from {} [{}]: DROPPED, gossip source rate limited",
+            src, loop_tag
+        );
+        return false;
+    }
+    let outcome = crate::poawx_proposer::global_proposer_reg_pool().ingest_bytes(reg_bytes, |h| {
+        chain
+            .as_ref()
+            .and_then(|c| c.lock().unwrap_or_else(|e| e.into_inner()).anchor_hash_at(h))
+    });
+    match &outcome {
+        crate::poawx_gossip::GossipOutcome::AcceptedNew => eprintln!(
+            "[poawx] proposer registration from {} [{}]: AcceptedNew (pooled, will announce)",
+            src, loop_tag
+        ),
+        crate::poawx_gossip::GossipOutcome::Duplicate => eprintln!(
+            "[poawx] proposer registration from {} [{}]: Duplicate (already pooled at an \
+             equal-or-fresher anchor, or refresh delta below the rebroadcast threshold)",
+            src, loop_tag
+        ),
+        crate::poawx_gossip::GossipOutcome::Rejected(why) => eprintln!(
+            "[poawx] proposer registration from {} [{}]: REJECTED: {}",
+            src, loop_tag, why
+        ),
+    }
+    outcome.should_rebroadcast()
+}
+
 impl P2PNode {
     fn ts() -> String {
         Utc::now().format("%H:%M:%S").to_string()
@@ -7237,56 +7281,12 @@ impl P2PNode {
                                 // whether the anchor was unresolvable, the refresh delta too small,
                                 // or the per-source budget spent. Log every outcome, including the
                                 // rate-limited drop, which otherwise leaves no trace at all.
-                                let rate_ok =
-                                    crate::poawx_admission::admission_gossip_rate_allowed(addr.ip());
-                                if !rate_ok {
-                                    eprintln!(
-                                        "[poawx] proposer registration from {}: DROPPED, gossip \
-                                         source rate limited",
-                                        addr.ip()
-                                    );
-                                }
-                                let outcome = if rate_ok {
-                                    Some(crate::poawx_proposer::global_proposer_reg_pool()
-                                        .ingest_bytes(&p.reg_bytes, |h| {
-                                            // A4: recompute the sybil digest against the
-                                            // real anchor block; None (we lack that height)
-                                            // fails the registration closed.
-                                            chain_for_sync.as_ref().and_then(|c| {
-                                                c.lock()
-                                                    .unwrap_or_else(|e| e.into_inner())
-                                                    .anchor_hash_at(h)
-                                            })
-                                        }))
-                                } else {
-                                    None
-                                };
-                                match &outcome {
-                                    Some(crate::poawx_gossip::GossipOutcome::AcceptedNew) => {
-                                        eprintln!(
-                                            "[poawx] proposer registration from {}: AcceptedNew \
-                                             (pooled, will announce)",
-                                            addr.ip()
-                                        );
-                                    }
-                                    Some(crate::poawx_gossip::GossipOutcome::Duplicate) => {
-                                        eprintln!(
-                                            "[poawx] proposer registration from {}: Duplicate \
-                                             (already pooled at an equal-or-fresher anchor, or \
-                                             refresh delta below the rebroadcast threshold)",
-                                            addr.ip()
-                                        );
-                                    }
-                                    Some(crate::poawx_gossip::GossipOutcome::Rejected(why)) => {
-                                        eprintln!(
-                                            "[poawx] proposer registration from {}: REJECTED: {}",
-                                            addr.ip(),
-                                            why
-                                        );
-                                    }
-                                    None => {}
-                                }
-                                if outcome.as_ref().is_some_and(|o| o.should_rebroadcast()) {
+                                if ingest_registration_logged(
+                                    &p.reg_bytes,
+                                    addr.ip(),
+                                    &chain_for_sync,
+                                    "loop-a",
+                                ) {
                                     let bytes = crate::protocol::PoawxProposerRegistrationPayload {
                                         reg_bytes: p.reg_bytes,
                                     }
@@ -9900,20 +9900,7 @@ async fn handle_incoming_with_sybil(
                     if let Ok(p) =
                         crate::protocol::PoawxProposerRegistrationPayload::from_message(&msg)
                     {
-                        // A1: rate-limit registration ingest per source IP (see site above).
-                        if crate::poawx_admission::admission_gossip_rate_allowed(addr.ip())
-                            && crate::poawx_proposer::global_proposer_reg_pool()
-                                .ingest_bytes(&p.reg_bytes, |h| {
-                                    // A4: recompute the sybil digest against the real
-                                    // anchor; without the chain / that height, fail closed.
-                                    chain.as_ref().and_then(|c| {
-                                        c.lock()
-                                            .unwrap_or_else(|e| e.into_inner())
-                                            .anchor_hash_at(h)
-                                    })
-                                })
-                                .should_rebroadcast()
-                        {
+                        if ingest_registration_logged(&p.reg_bytes, addr.ip(), &chain, "loop-b") {
                             let bytes = crate::protocol::PoawxProposerRegistrationPayload {
                                 reg_bytes: p.reg_bytes,
                             }

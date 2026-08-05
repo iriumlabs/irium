@@ -124,9 +124,16 @@ Your key is not eligible the moment it registers. Eligibility is computed from t
 **frozen 16 blocks back** (`DEFAULT_PROPOSER_FREEZE_DEPTH = 16`), so your registration must be at
 least 16 blocks deep before you can be drawn.
 
-At the 120-second block target that is **roughly 30–35 minutes** from your first successful
-registration before you can win anything. Seeing only `not proposer this slot` during that window
-means it is working correctly.
+Count it in **blocks, not minutes**: you need ~16–20 blocks after your first successful
+registration. Blocks arrive every 120s **or** 240s depending on which sortition round resolves, so
+in practice that is **about 35–60 minutes**, not a flat half hour.
+
+Measured on a real cold start (2026-08-05): registration anchored at block 66,564, and the key
+entered the eligible set at block 66,584 — **20 blocks, ~46 minutes**.
+
+Seeing nothing but `not proposer this slot` for the whole of that window is **correct and expected**.
+It is also completely silent — there is no "you are now eligible" message. If you want to watch it
+happen, the `eligible=N` figure in those lines increments when a new key joins the set.
 
 Registrations also age out: the anchor is valid for 64 blocks (`PROPOSER_REG_ANCHOR_WINDOW`), and
 the miner re-registers periodically on its own. Leave it running.

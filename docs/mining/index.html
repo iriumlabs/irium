@@ -499,6 +499,41 @@
         below describing pool connection, ASIC setup or merge mining is <strong>obsolete</strong> and is
         kept only until this page is rewritten.
       </p>
+      <div style="background:rgba(65,240,184,0.07);border:1px solid rgba(65,240,184,0.35);border-radius:14px;padding:20px;margin:22px 0;">
+        <h3 style="margin-top:0;color:#41f0b8;">How to mine Irium now</h3>
+        <p>Mining is <strong>hardware-neutral</strong>: each block's producer is drawn by VRF sortition
+        over registered keys, so an ordinary CPU competes on equal terms and extra hardware buys no
+        advantage. There is no pool, and none is needed.</p>
+        <ol style="line-height:1.75;">
+          <li>Download <a href="https://github.com/iriumlabs/irium/releases/tag/v1.9.192">v1.9.192</a>, then
+              <code>sha256sum -c checksums.txt --ignore-missing</code></li>
+          <li><strong>Export the mnemonic explicitly</strong> — <code>create-wallet</code> does not print it:<br>
+              <code>./irium-wallet create-wallet --bip32</code> then
+              <code>./irium-wallet export-mnemonic --out mnemonic.txt</code></li>
+          <li>Choose an RPC token and start the node with it (<strong>required</strong> — without it the miner
+              loops forever on <code>HTTP 401 Unauthorized</code>):<br>
+              <code>export IRIUM_RPC_TOKEN="$(openssl rand -hex 24)"</code> then <code>./iriumd</code></li>
+          <li>Create a proposer secret: <code>openssl rand -hex 32 &gt; poawx_secret.hex</code></li>
+          <li>Mine, reusing the <em>same</em> token:<br>
+              <code>export IRIUM_NODE_RPC=http://127.0.0.1:38300</code><br>
+              <code>export IRIUM_RPC_TOKEN=&lt;same value as the node&gt;</code><br>
+              <code>export IRIUM_MINER_ADDRESS=&lt;your P... or Q... address&gt;</code><br>
+              <code>export IRIUM_POAWX_MINER_SECRET_HEX="$(cat poawx_secret.hex)"</code><br>
+              <code>./irium-miner --poawx --threads 1</code></li>
+        </ol>
+        <p><strong>Expect silence at first.</strong> Your key must clear a 16-block freeze window before it
+        can be drawn — about <strong>16–20 blocks, roughly 35–60 minutes</strong>. During that time the miner
+        prints only <code>not proposer this slot</code>, which is correct, and there is no "you are now
+        eligible" message. Measured on a real cold start: registered at block 66,564, eligible at 66,584.</p>
+        <p style="color:#ffc766;"><strong>Do not pipe the miner into <code>head</code>, <code>grep</code> or
+        <code>tee</code></strong> — its output is block-buffered and it will look frozen. Let it write to the
+        terminal, or redirect to a file and <code>tail -f</code> that.</p>
+        <p>⚠ Ignore <code>MINING-QUICKSTART.txt</code> and the <code>mine-*.sh</code> / <code>mine-*.bat</code>
+        scripts inside the release archive: they point at the retired pool and do not pass
+        <code>--poawx</code>, so they cannot produce a valid block. They are being corrected in a later release.</p>
+        <p style="margin-bottom:0;">Full guide:
+        <a href="https://github.com/iriumlabs/irium/blob/main/docs/JOIN-MINING.md">docs/JOIN-MINING.md</a></p>
+      </div>
       <p style="margin:0;">
         <strong>Mining still works — run a full node and the CLI miner:</strong>
         <code>iriumd</code> then <code>irium-miner --poawx</code>. It is hardware-neutral: a commodity

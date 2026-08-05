@@ -956,7 +956,7 @@
     <div style="margin-top:10px;"><a href="/settlement/" class="btn btn-primary">Explore Settlement</a></div>
   </div>
 </div>
-<p class="section-subtitle" style="margin-top:16px;">Block Time: 2 min (120 s) • Reward: 50 IRM • Halving: 1.05M blocks • Supply Cap: 100M IRM • Mainnet Launch: Jan 5, 2026 • Node: v1.9.49</p>
+<p class="section-subtitle" style="margin-top:16px;">Block Time: 2 min (120 s) • Reward: 50 IRM • Halving: 1.05M blocks • Supply Cap: 100M IRM • Mainnet Launch: Jan 5, 2026 • Node: v1.9.192</p>
 </div>
 </section>
 
@@ -1003,7 +1003,7 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
 <section id="features" class="section section-dark">
 <div class="container">
 <h2 class="section-title">WHAT IS LIVE TODAY</h2>
-<p class="section-subtitle">Chain, mining, settlement, marketplace, reputation, multisig, BTC atomic swaps, and the desktop wallet are all live on mainnet. v1.9.49 is the current node release; Irium Core v1.0.77 is the current desktop app.</p>
+<p class="section-subtitle">Chain, mining, settlement, marketplace, reputation, multisig, BTC atomic swaps, and the desktop wallet are all live on mainnet. v1.9.192 is the current node release; Irium Core v1.0.155 is the current desktop app.</p>
 
 <div style="margin-top:24px;">
 <h3 style="text-align:center; margin-bottom:18px; letter-spacing:.08em;">CORE CHAIN AND NETWORK FOUNDATIONS</h3>
@@ -1097,7 +1097,7 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
 <div class="feature-card" role="button" tabindex="0" data-title="AuxPoW Merged Mining — Upcoming" data-icon="⛏️" data-detail="AuxPoW merged mining activates at block 26,500.|SHA-256d miners will be able to mine Irium as a secondary chain alongside Bitcoin.|No new hardware required.">
 <div class="feature-icon">⛏️</div>
 <h3>AuxPoW Merged Mining — Block 26,500</h3>
-<p>Auxiliary Proof-of-Work merged mining activates at block 26,500. Existing SHA-256d ASIC operators can mine IRM as a secondary chain alongside Bitcoin at zero extra electricity cost.</p>
+<p>Auxiliary Proof-of-Work merged mining activated at block 26,500. <strong>Superseded:</strong> since the PoAW-X activation at block 61,414 the block producer is chosen by VRF sortition over registered keys, not by hashrate, so SHA-256d ASICs can no longer win Irium blocks. Mining is now hardware-neutral — an ordinary CPU competes on equal terms.</p>
 </div>
 </div>
 </div>
@@ -1111,7 +1111,7 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
 <div class="specs-grid">
 <div class="spec-card">
 <div class="spec-label">LIVE — BASE LAYER</div>
-<div class="spec-value" style="font-size:1rem; line-height:1.45;">SHA-256d mainnet, Rust node (v1.9.49), 2-min blocks (V2), LWMA v2 difficulty, public pool (3333 ASIC / 3335 CPU+GPU / 3336 solo), explorer, DNS-free bootstrap, self-healing peer discovery, multisig, BIP32/BIP39, WebSocket API.</div>
+<div class="spec-value" style="font-size:1rem; line-height:1.45;">SHA-256d mainnet, Rust node (v1.9.192), 2-min blocks (V2), PoAW-X proposer selection by VRF sortition (live since block 61,414; hardware-neutral — hashrate does not affect selection), explorer, DNS-free bootstrap, self-healing peer discovery, multisig, BIP32/BIP39, WebSocket API. The public Stratum pool is retired.</div>
 </div>
 <div class="spec-card">
 <div class="spec-label">LIVE — SETTLEMENT &amp; COMMERCE</div>
@@ -1136,10 +1136,10 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
 <div class="spec-card"><div class="spec-label">BLOCK TIME</div><div class="spec-value">2 min (120 s)</div></div>
 <div class="spec-card"><div class="spec-label">BLOCK REWARD</div><div class="spec-value">50 IRM</div></div>
 <div class="spec-card"><div class="spec-label">HALVING</div><div class="spec-value">1,050,000 blocks</div></div>
-<div class="spec-card"><div class="spec-label">NODE VERSION</div><div class="spec-value">v1.9.49</div></div>
+<div class="spec-card"><div class="spec-label">NODE VERSION</div><div class="spec-value">v1.9.192</div></div>
 <div class="spec-card"><div class="spec-label">IMPLEMENTATION</div><div class="spec-value">Rust, not a fork</div></div>
 <div class="spec-card"><div class="spec-label">BTC ATOMIC SWAPS</div><div class="spec-value">Live (block 23,850+)</div></div>
-<div class="spec-card"><div class="spec-label">AUXPOW</div><div class="spec-value">Activates block 26,500</div></div>
+<div class="spec-card"><div class="spec-label">AUXPOW</div><div class="spec-value">Activated 26,500 — superseded by PoAW-X at 61,414</div></div>
 <div class="spec-card"><div class="spec-label">CONSENSUS</div><div class="spec-value">Objective-only rules</div></div>
 </div>
 </div>
@@ -1162,8 +1162,8 @@ Genesis Hash: <code>0000000028f25d65557e9d8d9e991f516c00d68f5aeae10b750645b398bd
   <div class="spec-card"><div class="spec-label">What are miners securing?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">Miners secure an independent settlement-first chain intended for escrow, agreement anchoring, and proof-based commerce.</div></div>
   <div class="spec-card"><div class="spec-label">What keeps Irium fair?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">No premine, no ICO, no presale, no VC control, public mining access, and transparent founder vesting enforced on-chain.</div></div>
   <div class="spec-card"><div class="spec-label">Does Irium include admin override powers?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">No. There are no admin keys, no freeze or seizure path, and no centralized dispute authority inside consensus.</div></div>
-  <div class="spec-card"><div class="spec-label">Is settlement fully live today?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">Yes. The settlement layer, marketplace, reputation system, proof registry, auto-release watcher, milestone payments, and BTC atomic swaps are all live on mainnet as of v1.9.49. AuxPoW merged mining activates at block 26,500; LTC atomic swaps and mobile wallet are upcoming.</div></div>
-  <div class="spec-card"><div class="spec-label">Where can I start?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">Read the whitepaper, explore the settlement page, inspect the explorer, or start mining through the public guide and pool.</div></div>
+  <div class="spec-card"><div class="spec-label">Is settlement fully live today?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">Yes. The settlement layer, marketplace, reputation system, proof registry, auto-release watcher, milestone payments, and BTC atomic swaps are all live on mainnet as of v1.9.192. AuxPoW merged mining activates at block 26,500; LTC atomic swaps and mobile wallet are upcoming.</div></div>
+  <div class="spec-card"><div class="spec-label">Where can I start?</div><div class="spec-value" style="font-size:1rem; line-height:1.45;">Read the whitepaper, explore the settlement page, inspect the explorer, or or start mining with the CLI guide at docs/JOIN-MINING.md — no pool is involved.</div></div>
 </div>
 </div>
 </section>

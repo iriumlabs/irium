@@ -15,11 +15,19 @@ before block 23,500 is mined to avoid forking off the canonical chain.
 
 ---
 
+## What's new (mainnet block 66,400)
+
+**Single-payee reward model** activates at mainnet block height 66,400: the full block subsidy is
+paid to the block's VRF-selected proposer as a single coinbase output, replacing the 55/22/13/10
+multi-role split. This is a hard fork. Proposer *selection* is unchanged — it remains VRF sortition
+over a hardware-neutral floor. See Section 4.
+
 ## What's new in v1.9.189 (mainnet block 50,000)
 
 **PoAW-X proposer consensus** activates at mainnet block height 50,000: VRF-selected block proposers,
 a 55/22/13/10 multi-role reward split, anti-domination over a rolling 2016-block window, and 2/3
 distributed finality, layered on the existing SHA-256d proof of work. See Section 4.
+(The reward split was superseded by the single-payee model at block 66,400, above.)
 
 ## What's new in v1.9.28 (May 2026)
 
@@ -332,10 +340,12 @@ function and LWMA difficulty were unchanged; PoAW-X added verifiable proposer se
 multi-role reward split, anti-domination, and distributed finality. The activation height is fixed
 in consensus code and is not operator-configurable.
 
-> **Superseded at block 61,414.** The statement that difficulty is unchanged held only between
-> blocks 50,000 and 61,414. PoW demotion and the difficulty freeze described in *Hardware-neutral
-> block production* below have since changed how the header PoW target is applied. Read that
-> subsection before relying on this paragraph.
+> **Superseded twice — read before relying on this paragraph.**
+> - *Block 61,414:* the statement that difficulty is unchanged held only between blocks 50,000 and
+>   61,414. PoW demotion and the difficulty freeze described in *Hardware-neutral block production*
+>   below have since changed how the header PoW target is applied.
+> - *Block 66,400:* the multi-role reward split no longer pays out. The full subsidy goes to the
+>   single VRF-selected proposer — see *Single-payee reward* below.
 
 **Proposer selection.** For each height an eligible proposer is selected by a Verifiable Random
 Function (ECVRF, RFC-9381). The selection proof (`AssignmentProofV2`) is bound to a per-height seed
@@ -347,9 +357,11 @@ parent block.
 sybil-resistant proof of work. Registrations are frozen at a depth below the tip, so the per-height
 seed cannot be used to register a winning key after the fact.
 
-**Multi-role reward split.** Each block reward is divided across four contribution roles — proposer
-55%, compute 22%, verify 13%, support 10% — paid as four P2PKH coinbase outputs plus an `irx1`
-`OP_RETURN` commitment binding the block's role receipts.
+**Multi-role reward split (superseded at block 66,400).** Between blocks 62,236 and 66,399 each
+block reward was divided across four contribution roles — proposer 55%, compute 22%, verify 13%,
+support 10% — paid as four P2PKH coinbase outputs plus an `irx1` `OP_RETURN` commitment binding the
+block's role receipts. This rule still governs validation of blocks below 66,400. For new blocks it
+is replaced by the single-payee model described in *Single-payee reward* below.
 
 **Anti-domination.** Per-identity proposal weighting over a rolling 2016-block window reduces the
 influence of any identity approaching a dominance threshold.
@@ -358,8 +370,9 @@ influence of any identity approaching a dominance threshold.
 agreement finalizes a block and bounds reorg depth.
 
 **Consensus security gates.** Every block at or after activation must satisfy the full PoAW-X gate
-set: proposer VRF proof, hidden role-precommit, sybil tickets, committed admission root, multi-role
-reward split, anti-domination weights, finality (2/3), and audit-hardening checks (deterministic
+set: proposer VRF proof, hidden role-precommit, sybil tickets, committed admission root, the
+reward-payout rule in force at that height (see *Single-payee reward* below for blocks at or after
+66,400), anti-domination weights, finality (2/3), and audit-hardening checks (deterministic
 receipts root, equivocation and parent-hash validation, signature coverage, lane-byte validation).
 These gates were validated in a 2016-block adversarial soak before activation.
 
@@ -370,6 +383,29 @@ header proof of work checked against a **constant anti-spam floor** rather than 
 target. Block production therefore no longer scales with hashrate: a commodity CPU produces blocks
 as readily as any quantity of SHA-256d hardware. This is the mechanism by which Irium makes
 participation hardware-neutral.
+
+### Single-payee reward (block 66,400)
+
+From mainnet block **66,400** the coinbase pays the **entire block subsidy to exactly one payee** —
+the block's VRF-selected proposer — as a single P2PKH output alongside the `irx1` `OP_RETURN`
+commitment. A coinbase that splits the reward across roles, pays a key other than the selected
+proposer, underpays, or conceals value in a value-bearing non-P2PKH output is rejected. Third-party
+fees are not supported in this model.
+
+This is a **hard fork**: the pre- and post-66,400 coinbase rules are mutually exclusive, so a node
+must carry the gate to follow the chain past 66,399. Below the height the legacy rules apply
+byte-identically, so persisted history continues to re-validate on restart.
+
+**Selection is unaffected.** The gate governs only the distribution of the reward once a proposer has
+been chosen. Proposer sortition, registration, the eligibility freeze, the hardware-neutral floor
+described above, anti-domination, fork-choice and finality all behave exactly as before. Every
+eligible key still wins approximately `1/n` of blocks at random, and no class of hardware gains an
+advantage in that draw. The change is distributive, not selective.
+
+**The role machinery is retained, not removed.** Role workers, role receipts and the candidate-set
+admission gates remain part of the protocol implementation and continue to operate; the reward path
+simply stops consulting the role manifest at 66,400, so role claims no longer determine payment.
+Retiring that machinery would be a separate activation-gated change.
 
 The floor applies **only** to a validly-selected proposer. A block without a valid proposer
 assignment must still meet the full network target, so trivial-PoW spam remains rejected.

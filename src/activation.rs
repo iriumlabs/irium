@@ -310,10 +310,11 @@ pub const MAINNET_FAIR_DISTRIBUTION_ACTIVATION_HEIGHT: Option<u64> = Some(62236u
 /// which carry 6-payee blocks under the legacy rule — arming at or below those would make a
 /// node reject its own chain on restart (CLAUDE.md §12).
 ///
-/// ⚠️ BOTH hosts must run a binary carrying this constant BEFORE the chain reaches 64,940.
-/// The old rule splits VERIFY/SUPPORT across every admitted candidate; the new rule pays the
-/// four drawn holders. A node on the old binary would reject the other's blocks at the
-/// boundary, which is a fork, not a degradation.
+/// ⚠️ **SUPERSEDED by the single-payee reward model at block 66,400** (see
+/// `MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT` below). From 66,400 the coinbase pays one payee
+/// and the role manifest is not consulted at all, so a four-output blueprint coinbase can no longer
+/// become the live rule. This constant is retained as `None` for historical validation of blocks
+/// below 66,400; arming it now would fork the chain off the live rule. Do not re-arm.
 pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = None;
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -331,8 +332,12 @@ pub const MAINNET_FOUR_ROLE_PAYOUT_ACTIVATION_HEIGHT: Option<u64> = None;
 /// the chain reaches it, and the height must be in the FUTURE when armed (CLAUDE.md §12; arming
 /// at or below the tip makes a node reject its own chain on restart).
 ///
-/// Ships `None` — inert. Selection (proposer VRF/eligibility/freeze), PoW demotion, fork-choice
-/// total order, registration renewal and dominance validation are all unaffected by this gate.
+/// **ARMED AND LIVE** at 66,400 since 2026-08-05 (both hosts on `iriumd-v1.9.196-d57d22a5`).
+/// Verified on-chain: block 66,399 has four P2PKH role outputs, block 66,400 has one paying the
+/// full 50 IRM. Do NOT lower or unset this — the chain past 66,400 only validates under this rule.
+///
+/// Selection (proposer VRF/eligibility/freeze), PoW demotion, fork-choice total order, registration
+/// renewal and dominance validation are all unaffected by this gate.
 pub const MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT: Option<u64> = Some(66_400);
 // ══════════════════════════════════════════════════════════════════════════════
 // ══════════════════════════════════════════════════════════════════════════════

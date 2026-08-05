@@ -86,7 +86,9 @@ only a full node can build and validate.
 
 What changes for miners at block 50,000:
 
-- **Run a full node.** Install and run `iriumd` v1.9.189 or later.
+- **Run a full node.** Build and run `iriumd` from `main` at commit `d57d22a5` or later. No tagged
+  release yet carries the block-66,400 single-payee gate — v1.9.191 and earlier will freeze at
+  block 66,399.
 - **Mine against your node.** Run the bundled miner with the PoAW-X flag:
 
   ```
@@ -95,8 +97,14 @@ What changes for miners at block 50,000:
 
   The miner requests the current role assignment from your node, performs the role work, and submits
   role receipts; your node assembles and validates the block.
-- **Rewards are split by role** — proposer 55% / compute 22% / verify 13% / support 10%. A solo
-  miner fills all four roles and receives the full reward.
+- **The whole reward goes to one miner** — from block 66,400 the coinbase pays the full 50 IRM to
+  the block's VRF-selected proposer. There is no role split. (Between 62,236 and 66,399 the reward
+  was split proposer 55% / compute 22% / verify 13% / support 10%; a solo miner filled all four
+  roles and received the full reward that way.)
+- **Your odds do not depend on your hardware.** The proposer for each height is drawn by VRF
+  sortition, and since block 61,414 an eligible proposer's block is checked against a constant floor
+  rather than the full network target. A CPU, a GPU and an ASIC therefore have the same chance of
+  being selected — buying more hashrate does not buy more blocks.
 - **Pool operators** must run a full node and move workers to the full-node flow before block 50,000.
 
 Upgrade before block 50,000 — older miners/nodes will reject post-activation blocks. Full guide:

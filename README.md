@@ -26,11 +26,31 @@ The desktop app's auto-update prompt will surface the same warning. Server / poo
 
 ---
 
+## Important — block 66,400 single-payee reward activation (HARD FORK)
+
+At **block height 66,400**, Irium mainnet switched to a **single-payee reward model**: the full
+50 IRM block reward is now paid to one VRF-selected proposer instead of being split 55/22/13/10
+across four roles. This was a **hard fork** — the old and new coinbase rules are mutually exclusive.
+
+**A node without this gate stops following the chain at block 66,399** while still showing itself as
+connected. **No tagged release contains the gate yet** — the latest release, v1.9.191, predates it.
+Build from `main` (commit `d57d22a5` or later) until a release is cut:
+
+```bash
+git pull && cargo build --release --bin iriumd
+strings target/release/iriumd | grep -c IRIUM_POAWX_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT   # must be 1
+```
+
+**Selection is unchanged and remains hardware-neutral:** any device (CPU, GPU or ASIC) still has the
+same random chance of being selected by VRF sortition, and extra hashrate still does not improve
+those odds. Only the distribution of the reward *after* selection changed. Full guide:
+[docs/POAWX.md](docs/POAWX.md).
+
 ## Important — block 50,000 PoAW-X activation
 
 At **block height 50,000**, Irium mainnet activates **PoAW-X**, its block-proposer consensus layer
-(VRF-selected proposers, a multi-role reward split, and anti-domination). Blocks before 50,000 are
-unaffected. **All node operators and miners must upgrade to iriumd v1.9.189 (or later) before block
+(VRF-selected proposers, anti-domination, and — until block 66,400 — a multi-role reward split).
+Blocks before 50,000 are unaffected. **All node operators and miners must upgrade before block
 50,000**, or they will reject post-activation blocks and fall off the canonical chain. From block
 50,000, **mining requires a full iriumd node**, not just a pool/stratum connection. Full guide:
 [docs/POAWX.md](docs/POAWX.md).
@@ -42,8 +62,9 @@ LWMA-144 difficulty are unchanged):
 
 - **VRF proposer selection** — each block's proposer is verifiably chosen by a VRF (ECVRF /
   RFC-9381), not just first-to-find-PoW.
-- **Multi-role reward split** — the block reward is split 55% proposer / 22% compute / 13% verify /
-  10% support, paid as coinbase outputs to each role.
+- **Single-payee reward** — from block 66,400 the full block reward is paid to the VRF-selected
+  proposer as one coinbase output. (Between 62,236 and 66,399 it was split 55% proposer / 22%
+  compute / 13% verify / 10% support across four outputs.)
 - **Anti-domination** — per-identity weighting over a rolling 2016-block window discourages
   single-identity dominance.
 - **Distributed finality** — a registered committee provides 2/3-threshold finality.
@@ -87,14 +108,14 @@ SHA-256d consensus. No premine. No admin keys. 100,000,000 IRM total supply (96.
 
 ## PoAW-X status — what is live today
 
-Verified against the running chain on 2026-08-03 (tip 66,237). Activation heights below are
+Verified against the running chain on 2026-08-05 (tip 66,435). Activation heights below are
 mainnet constants; anything not listed with a height is **not deployed**.
 
 **Everything in this section is deployed and enforcing on mainnet today.** Whenever mining is
 active, the chain produces and validates blocks, selects proposers by VRF, enforces the
-anti-domination and sortition caps, and pays the four role shares automatically. Everything below
-this line is roadmap — designed, partly proven, or deliberately deferred — and none of it is
-required for the network to operate as described above.
+anti-domination and sortition caps, and pays the full block reward to the selected proposer.
+Everything below this line is roadmap — designed, partly proven, or deliberately deferred — and none
+of it is required for the network to operate as described above.
 
 ### Live and enforcing on mainnet
 
@@ -106,9 +127,10 @@ required for the network to operate as described above.
 | Non-exclusive proposer eligibility (N1) | 59,900 |
 | PoW demotion / hardware-neutral CPU mining | 61,414 |
 | VRF sortition cap on the role pool (closes A1/A2) | 61,414 |
-| Four-role 55/22/13/10 coinbase fan-out | 62,236 |
+| Four-role 55/22/13/10 coinbase fan-out | 62,236 — **superseded at 66,400** |
 | Pool admission (PLA1: VRF proof + sybil ticket per paid non-winner) | 62,236 |
 | Fork-choice total-order comparator | 66,179 |
+| Single-payee reward (full subsidy to the VRF-selected proposer) | 66,400 |
 
 **Caveat on the fork-choice comparator:** deployed and armed, but **not behaviourally proven**. It
 engages only when competing branches of unequal length exist; none have occurred since activation,
@@ -273,8 +295,8 @@ producer — and PoAW-X blocks are produced at a CPU-reachable floor difficulty,
 can produce them with **no ASIC or GPU required**. Onboarding is permissionless: you register a
 proposer key, your node gossips it, and by consensus every producer must include it — the
 registration queue is force-drained in first-in-first-out order, so no producer can gatekeep who
-joins. After a 16-block freeze your key is eligible and wins ~1/n of blocks by fair VRF sortition,
-earning its share of the 55/22/13/10 role split.
+joins. After a 16-block freeze your key is eligible and wins ~1/n of blocks by fair VRF sortition.
+From block 66,400 each block you propose pays you the **full 50 IRM reward**.
 
 ```bash
 cargo build --release --bin iriumd --bin irium-miner

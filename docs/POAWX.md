@@ -1,8 +1,13 @@
 # PoAW-X — Irium Proposer Consensus
 
 PoAW-X (Proof-of-Adaptive-Work, eXtended) is Irium's block-proposer consensus layer. It adds
-verifiable, fairly distributed block proposal and multi-role rewards on top of Irium's existing
-SHA-256d proof of work, without changing the underlying PoW or the LWMA-144 difficulty algorithm.
+verifiable, hardware-neutral block proposal on top of Irium's existing SHA-256d proof of work.
+
+> **Reward model changed at block 66,400.** From that height the full block reward is paid to a
+> single VRF-selected proposer, not split across four roles. See
+> [Reward distribution](#reward-distribution-proposer-takes-all-from-block-66400) below. The
+> claim that PoAW-X leaves the underlying PoW and LWMA-144 difficulty untouched held only between
+> blocks 50,000 and 61,414 — see PoW demotion and the difficulty freeze in *Current status*.
 
 ## Activation: mainnet block 50,000
 
@@ -18,7 +23,40 @@ is **not** an operator setting and cannot be enabled or disabled by configuratio
 > **Operators and miners must upgrade to iriumd v1.9.119 (or later) before block 50,000.** A node
 > still running an older binary will reject post-activation blocks and fall off the canonical chain.
 
-## Current status (updated 2026-07-26)
+## Activation: mainnet block 66,400 — single-payee reward (HARD FORK)
+
+At **mainnet block height 66,400** the reward model changed. This was a **hard fork**: the pre- and
+post-66,400 coinbase rules are mutually exclusive, so a node must run a binary carrying the gate in
+order to follow the chain past 66,399.
+
+- **Before block 66,400:** the legacy multi-role coinbase rules apply, byte-identically. Persisted
+  history still re-validates on restart.
+- **At and after block 66,400:** the coinbase must pay the **full block subsidy to exactly one
+  payee** — the block's VRF-selected proposer. A legacy multi-payee coinbase is rejected.
+
+Fixed in consensus code as `MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT = Some(66_400)`; on
+mainnet the environment override is ignored.
+
+> ⚠️ **A node without this gate stops following the chain at block 66,399.** It rejects every block
+> from 66,400 onward with a `shared-reward: expected N role outputs, found 1` error while still
+> reporting itself as connected with peers. The symptom is a frozen height, not an obvious failure.
+>
+> **No tagged release contains this gate yet.** The latest published node release, **v1.9.191**, is
+> commit `99859111` and predates it. Until a release is cut, follow the chain by building from
+> `main` at commit `d57d22a5` or later:
+>
+> ```bash
+> git pull && cargo build --release --bin iriumd
+> ```
+>
+> Verify your build carries the gate before relying on it:
+>
+> ```bash
+> strings target/release/iriumd | grep -c IRIUM_POAWX_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT
+> # 1 = gate present; 0 = your build will freeze at 66,399
+> ```
+
+## Current status (updated 2026-08-05)
 
 The consensus **gates** listed below are active on mainnet from block 50,000 and are enforced by
 every node: proposer selection validation, proposer registration, anti-domination, assigned puzzle
@@ -26,12 +64,15 @@ work, the finality committee, and candidate admission. Blocks that do not satisf
 
 What changed since the previous revision of this section:
 
-- **The 55/22/13/10 split now pays four distinct on-chain recipients.** Earlier revisions said all
-  four outputs resolved to a single participant. That is no longer true: when other role workers are
-  participating, each role share is paid to a separate address, verified on mainnet by decoding
-  coinbase outputs. A block produced with no other participants still self-fills (one identity takes
-  all four shares) — that fallback is deliberate, so a solo miner is never blocked and the chain
-  never stalls.
+- **The 55/22/13/10 split no longer pays out.** From block 66,400 the full 50 IRM subsidy goes to a
+  single VRF-selected proposer. Verified by decoding mainnet coinbases across the boundary: block
+  66,399 carries four P2PKH role outputs (2.75 / 1.10 / 0.65 / 0.50 IRM), block 66,400 carries one
+  (50.00000000 IRM). The four-role split described in earlier revisions is now **historical**.
+  - **The role and candidate-set machinery has *not* been removed.** Role workers still run and
+    still enrol on both mainnet hosts, and the admission gates outside the reward path are
+    unchanged. What stopped is *payment*: the reward path no longer consults the role manifest, so
+    role claims no longer determine who is paid. Retiring the machinery itself is a separate,
+    activation-gated change that has been designed but **not built**.
 - **PoW demotion is active on mainnet** from block 61,414 (`MAINNET_COMBINED_ACTIVATION_HEIGHT`).
   Earlier revisions of this section said it was not active. A proposer that is eligible for the
   current height is validated against a reduced (floor) target; every other block must still meet the
@@ -58,9 +99,11 @@ Limitations that remain, stated plainly:
   demoted floor, which in practice is an enormous disadvantage — so proposal today remains
   concentrated among keys that already hold eligibility. Becoming eligible still depends on an
   existing producer including your registration.
-- **The participants demonstrating the multi-role split are operator-run.** The distribution
-  machinery is proven end to end, but it has not yet been exercised by independent third-party
-  miners. Treat the split as a working mechanism, not as evidence of decentralisation.
+- **Block production is still operator-run.** Both producing keys on mainnet belong to the
+  operator. Under the single-payee model the whole subsidy now follows whichever key the VRF
+  selects, so reward concentration tracks proposal concentration directly — there is no longer a
+  role split to spread it. Treat proposer selection as a working, verifiable mechanism, not as
+  evidence of decentralisation.
 - **Fraud-proof enforcement is deliberately off on mainnet.** Fraud-proof sections are carried but
   not enforced; the validator is disabled rather than half-armed, which is intentional.
 
@@ -71,7 +114,8 @@ behaviour. This section will be updated when that changes.
 
 1. **VRF proposer selection** — each block has a verifiably-selected proposer chosen by a Verifiable
    Random Function, not just whoever finds the proof of work first.
-2. **Multi-role reward split** — the block reward is split across four contribution roles.
+2. **Single-payee reward** — the full block reward goes to the block's VRF-selected proposer.
+   (Before block 66,400 this was a 55/22/13/10 split across four contribution roles.)
 3. **Anti-domination** — per-identity weighting over a rolling 2016-block window discourages any
    single identity from dominating proposal (the weighting is enforced; note that block proposal on
    mainnet is currently concentrated in a single producer, see Current status).
@@ -80,24 +124,49 @@ behaviour. This section will be updated when that changes.
 5. **Consensus security gates** — hidden role-precommit, sybil tickets, committed admission,
    deterministic receipts, equivocation and lane-validation checks.
 
-## Reward distribution (55 / 22 / 13 / 10)
+## Reward distribution: proposer takes all (from block 66,400)
 
-From block 50,000, each block's coinbase does split the reward across four outputs in the
-proportions below. **Note that on mainnet today all four outputs currently pay a single
-participant** — role assignment resolves to one identity, so the split is produced but not yet
-distributed across distinct contributors.
+From block **66,400**, each block's coinbase pays the **entire 50 IRM subsidy to one payee** — the
+block's VRF-selected proposer (`worker_pkh`). There is no role split. The coinbase carries a single
+P2PKH output alongside the `irx1` `OP_RETURN` commitment; a coinbase that splits the reward, pays a
+different key, underpays, or hides value in a non-P2PKH output is rejected. Third-party fees are not
+supported in this model (`fee_bps` must be 0).
 
-| Role | Share |
-|------|-------|
-| Proposer (primary) | 55% |
-| Compute | 22% |
-| Verify | 13% |
-| Support | 10% |
+**What did *not* change — this is the important part.** The single-payee gate changes only *how the
+reward is distributed once a proposer is selected*. It does not touch **how a proposer is selected**:
 
-The split is materialized as four P2PKH coinbase outputs paying each role's address, plus an `irx1`
-`OP_RETURN` commitment binding the block's role receipts. In solo mining, one identity fills all four
-roles and receives the full reward; in collaborative mining the roles are paid to distinct
-participants.
+- **Selection is still hardware-neutral.** Since the PoW-demotion activation at block 61,414, an
+  eligible proposer's block is validated against a constant anti-spam floor rather than the full
+  network target. A commodity CPU, a GPU and an ASIC all clear that floor trivially, so none of them
+  buys a better chance of being selected. Adding hashrate does not raise your odds.
+- **Selection is still fair VRF sortition.** The proposer for each height is drawn by an ECVRF
+  (RFC-9381) proof bound to a per-height seed. Each eligible key wins roughly `1/n` of blocks at
+  random, regardless of what hardware it runs on.
+- Proposer registration, the eligibility freeze, anti-domination, fork-choice and finality are all
+  unaffected by this gate.
+
+So the network is no less hardware-neutral and no less random than before 66,400. What changed is
+that the winner now receives the whole reward instead of 55% of it.
+
+### Historical: the 55/22/13/10 role split (blocks 62,236 – 66,399)
+
+Before block 66,400 the reward was divided across four contribution roles and materialized as four
+P2PKH coinbase outputs:
+
+| Role | Share | Paid on 50 IRM |
+|------|-------|----------------|
+| Proposer (primary) | 55% | 27.5 IRM |
+| Compute | 22% | 11.0 IRM |
+| Verify | 13% | 6.5 IRM |
+| Support | 10% | 5.0 IRM |
+
+This rule still governs the validation of blocks below 66,400, which is why historical chain data
+continues to re-validate on restart. It no longer applies to new blocks.
+
+**The role machinery still exists.** Role workers, role receipts and the candidate-set admission
+gates remain in the codebase and continue to run — they simply no longer determine payment, because
+the reward path stopped consulting the role manifest at 66,400. Nothing has been deleted. Retiring
+that machinery is a separate, activation-gated change that is designed but not built.
 
 ## VRF proposer system
 
@@ -161,8 +230,9 @@ were validated in a 2016-block adversarial soak before activation):
   reveal pre-committed leaves matching the parent's `precommit_root`.
 - **Sybil tickets** — role claims must carry tickets meeting the minimum sybil-work threshold.
 - **Committed admission** — the committed admission root must match.
-- **Multi-role reward split** — the coinbase must pay the 55/22/13/10 split to the correct role
-  addresses.
+- **Reward payout** — from block 66,400 the coinbase must pay the full subsidy to the VRF-selected
+  proposer and nothing to anyone else. Between 62,236 and 66,399 it had to pay the 55/22/13/10 split
+  to the correct role addresses instead.
 - **Anti-domination** — per-identity weighting over the rolling 2016-block window.
 - **Finality committee** — 2/3-threshold finality votes from distinct registered committee keys.
 - **Audit hardening** — deterministic receipts root, equivocation and parent-hash checks, signature

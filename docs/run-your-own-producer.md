@@ -12,7 +12,11 @@ This guide takes you from a clean machine to a live independent producer.
 
 ## What you're joining
 
-- **Reward:** 50 IRM per block, split across four roles — Proposer 55%, Compute 22%, Verify 13%, Support 10%.
+- **Reward:** the full 50 IRM per block, paid to the block's VRF-selected proposer. From block
+  66,400 there is no role split — if you are selected, you receive the entire reward.
+- **Hardware-neutral selection:** the proposer is drawn by VRF sortition and an eligible proposer's
+  block is checked against a constant floor, so a CPU, a GPU and an ASIC all have the same random
+  chance. Extra hashrate does not improve your odds.
 - **Permissionless:** proposer registration requires no allowlist, no account, no approval. A small proof-of-work
   (anti-sybil) is the only cost.
 - **Censorship-resistant by consensus:** the registration queue is *force-drained* in first-in-first-out order as

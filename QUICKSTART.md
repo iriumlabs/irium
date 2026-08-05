@@ -66,11 +66,26 @@ correct chain.
 
 ## Important — block 50,000 PoAW-X activation
 
-At **block 50,000**, Irium mainnet activates **PoAW-X** (VRF-selected block proposers, a
-55/22/13/10 multi-role reward split, and anti-domination). **Upgrade to iriumd v1.9.189 or later
-before block 50,000** — older nodes will reject post-activation blocks. From block 50,000, **mining
-needs a full iriumd node**: run `iriumd`, then run `irium-miner --poawx` against it — a pool
-connection alone is no longer sufficient. Full guide: [docs/POAWX.md](docs/POAWX.md).
+At **block 50,000**, Irium mainnet activates **PoAW-X** (VRF-selected block proposers and
+anti-domination). From block 50,000, **mining needs a full iriumd node**: run `iriumd`, then run
+`irium-miner --poawx` against it — a pool connection alone is no longer sufficient. Full guide:
+[docs/POAWX.md](docs/POAWX.md).
+
+## Important — block 66,400 single-payee reward (HARD FORK)
+
+At **block 66,400** the reward model changed: the full 50 IRM block reward now goes to a single
+VRF-selected proposer instead of being split 55/22/13/10 across four roles. Proposer selection
+itself is unchanged and stays hardware-neutral — CPU, GPU and ASIC all have the same random chance,
+and extra hashrate does not improve it.
+
+**This is a hard fork. A node without the gate freezes at block 66,399** while still reporting
+itself connected. **No tagged release has the gate yet** (latest is v1.9.191, which predates it), so
+build from `main` at commit `d57d22a5` or later:
+
+```bash
+git pull && cargo build --release --bin iriumd
+strings target/release/iriumd | grep -c IRIUM_POAWX_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT   # must be 1
+```
 
 ## Important — startup re-validation
 

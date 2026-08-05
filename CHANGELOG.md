@@ -3,6 +3,40 @@
 All notable changes to Irium are documented in this file.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
+## [Unreleased]
+
+**Consensus change — HARD FORK, live on mainnet from block 66,400 (2026-08-05).**
+
+Live on mainnet from a local build stamped `v1.9.196` (commit `d57d22a5`). **No tagged release
+contains this yet** — the latest published release, v1.9.191, is commit `99859111` and predates it.
+A node on v1.9.191 or earlier stops following the chain at block 66,399.
+
+### Changed
+
+- **Single-payee reward model** (`MAINNET_SINGLE_PAYEE_REWARD_ACTIVATION_HEIGHT = Some(66_400)`).
+  At and after block 66,400 the coinbase pays the **full block subsidy to exactly one payee** — the
+  block's VRF-selected proposer — as a single P2PKH output. The 55/22/13/10 role split no longer
+  pays out, and block validity stops consulting the role manifest: no compute/verify/support claims,
+  no `RoleReward` binding, no §6 fan-out. Third-party fees are not supported (`fee_bps` must be 0).
+
+  Verified on mainnet by decoding coinbases across the boundary: block 66,399 carries four P2PKH
+  role outputs (2.75 / 1.10 / 0.65 / 0.50 IRM), block 66,400 carries one (50.00000000 IRM).
+
+  Below the activation height the legacy multi-role rules apply byte-identically, so persisted
+  history continues to re-validate on restart.
+
+### Unchanged — stated explicitly
+
+- **Proposer selection.** VRF sortition, proposer registration, the eligibility freeze, the
+  hardware-neutral PoW-demotion floor (block 61,414), anti-domination, fork-choice total order and
+  finality are all unaffected by this gate. Every eligible key still wins roughly `1/n` of blocks at
+  random, and CPU, GPU and ASIC still have identical odds — extra hashrate does not improve them.
+  The change is distributive, not selective.
+- **Role and candidate-set machinery is retained, not removed.** Role workers, role receipts and the
+  candidate-set admission gates remain in the codebase and still run; they simply no longer
+  determine payment. Retiring them is a separate activation-gated change that is designed but not
+  built.
+
 ## [1.9.156] - 2026-07-30
 
 Miner fix. **Not a consensus change.**

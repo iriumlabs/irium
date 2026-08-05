@@ -3300,13 +3300,40 @@ async fn agreement_verify_link_api(
     .await
 }
 
+/// The public Stratum pool was retired on 2026-08-05. These endpoints used to derive
+/// their figures by scanning recent CHAIN blocks and relabelling their producers as
+/// "pool workers", inventing an `estimated_hashrate` from blocks that are won by VRF
+/// sortition against a fixed floor -- so the numbers measured luck, not hashrate, and
+/// the addresses were the network's own producers, not pool miners. Rather than keep a
+/// corrected version of a meaningless number, every pool endpoint now returns an honest
+/// retirement payload. The `workers`/`workers_online` keys are retained (empty/zero) so
+/// existing integrations degrade to "nothing here" instead of crashing on a missing field.
+fn retired_pool_payload() -> Value {
+    json!({
+        "retired": true,
+        "retired_at": "2026-08-05",
+        "reason": "The Irium Stratum pool is retired. Block producers are selected by VRF \
+sortition over registered keys, not by hashrate, so pooling has no effect on selection.",
+        "see": "https://irium.org/pool/",
+        "workers_online": 0,
+        "workers": [],
+        "payouts": [],
+        "blocks_accepted": 0,
+        "healthy": false
+    })
+}
+
+
 async fn pool_stats(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(q): Query<PoolQuery>,
+    Query(_q): Query<PoolQuery>,
 ) -> Result<Json<Value>, StatusCode> {
     check_rate(&state, &addr, &headers)?;
+
+    // Pool retired 2026-08-05 -- see retired_pool_payload().
+    return Ok(Json(retired_pool_payload()));
 
     let status = proxy_value(&state, "/status").await?;
     let mining = proxy_value(&state, "/rpc/mining_metrics").await?;
@@ -3434,9 +3461,12 @@ async fn pool_payouts(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(q): Query<PoolQuery>,
+    Query(_q): Query<PoolQuery>,
 ) -> Result<Json<Value>, StatusCode> {
     check_rate(&state, &addr, &headers)?;
+
+    // Pool retired 2026-08-05 -- see retired_pool_payload().
+    return Ok(Json(retired_pool_payload()));
 
     let status = proxy_value(&state, "/status").await?;
     let chain_height = status.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -3497,9 +3527,12 @@ async fn pool_workers(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(q): Query<PoolQuery>,
+    Query(_q): Query<PoolQuery>,
 ) -> Result<Json<Value>, StatusCode> {
     check_rate(&state, &addr, &headers)?;
+
+    // Pool retired 2026-08-05 -- see retired_pool_payload().
+    return Ok(Json(retired_pool_payload()));
 
     let status = proxy_value(&state, "/status").await?;
     let chain_height = status.get("height").and_then(|v| v.as_u64()).unwrap_or(0);
@@ -3652,6 +3685,9 @@ async fn pool_health(
     headers: HeaderMap,
 ) -> Result<Json<Value>, StatusCode> {
     check_rate(&state, &addr, &headers)?;
+
+    // Pool retired 2026-08-05 -- see retired_pool_payload().
+    return Ok(Json(retired_pool_payload()));
 
     let mut issues: Vec<String> = Vec::new();
     let mut backend_connected = true;

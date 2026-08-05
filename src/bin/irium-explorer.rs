@@ -3328,7 +3328,7 @@ async fn pool_stats(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(_q): Query<PoolQuery>,
+    Query(q): Query<PoolQuery>,
 ) -> Result<Json<Value>, StatusCode> {
     check_rate(&state, &addr, &headers)?;
 
@@ -3461,7 +3461,7 @@ async fn pool_payouts(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(_q): Query<PoolQuery>,
+    Query(q): Query<PoolQuery>,
 ) -> Result<Json<Value>, StatusCode> {
     check_rate(&state, &addr, &headers)?;
 
@@ -3527,7 +3527,7 @@ async fn pool_workers(
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
     headers: HeaderMap,
-    Query(_q): Query<PoolQuery>,
+    Query(q): Query<PoolQuery>,
 ) -> Result<Json<Value>, StatusCode> {
     check_rate(&state, &addr, &headers)?;
 

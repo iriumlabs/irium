@@ -483,6 +483,31 @@
       </div>
     </div>
 
+    <div style="border:1px solid rgba(255,90,90,0.45);background:rgba(255,90,90,0.10);border-radius:12px;padding:18px 20px;margin:0 0 26px;">
+      <div style="font-weight:700;color:#ff8a8a;letter-spacing:.04em;margin-bottom:8px;">
+        ⚠ THE STRATUM POOL IS RETIRED — EVERY <code>pool.irium.org</code> ENDPOINT ON THIS PAGE IS OFFLINE
+      </div>
+      <p style="margin:0 0 10px;">
+        Ports <strong>3333, 3335, 3336, 443 and 80</strong> have been shut down and now refuse
+        connections. <strong>Do not point mining hardware at them</strong> — the pool cannot produce a
+        valid block and never could under the current rules. Any hashrate sent there earns nothing.
+      </p>
+      <p style="margin:0 0 10px;">
+        Irium picks each block's producer by <strong>verifiable random sortition over registered keys,
+        not by hashrate</strong>, so pooling hashrate cannot improve anyone's odds. Since block
+        <strong>66,400</strong> the full 50 IRM reward goes to the single selected proposer. Everything
+        below describing pool connection, ASIC setup or merge mining is <strong>obsolete</strong> and is
+        kept only until this page is rewritten.
+      </p>
+      <p style="margin:0;">
+        <strong>Mining still works — run a full node and the CLI miner:</strong>
+        <code>iriumd</code> then <code>irium-miner --poawx</code>. It is hardware-neutral: a commodity
+        CPU is enough, and no ASIC or GPU is required. See
+        <a href="/pool/">the retirement notice</a> and
+        <a href="https://github.com/iriumlabs/irium/blob/main/docs/run-your-own-producer.md">Run your own producer</a>.
+      </p>
+    </div>
+
     <div class="x-topgrid">
       <div class="x-panel">
         <div class="x-head">
@@ -509,7 +534,7 @@
             <ul class="m-list">
               <li><b>Algorithm:</b> SHA-256d</li>
               <li><b>Block time:</b> 2 min (120 s) — V2 fork at block 24,250</li>
-              <li><b>Block reward:</b> 50 IRM</li>
+              <li><b>Block reward:</b> 50 IRM — paid in full to a single VRF-selected miner (from block 66,400)</li>
               <li><b>Halving:</b> Every 1,050,000 blocks</li>
               <li><b>Coinbase maturity:</b> 100 blocks</li>
               <li><b>Max supply:</b> 100,000,000 IRM</li>
@@ -769,7 +794,9 @@ curl -k -sS $IRIUM_NODE_RPC/status</code></pre></article>
       <div class="m-grid" style="margin-top:12px;">
         <article class="m-card">
           <h3>Block reward: 50 IRM per block</h3>
-          <p class="m-muted">Current block reward is 50 IRM. First halving at block 1,050,000. Merge mining earns this reward on top of Bitcoin mining revenue.</p>
+          <p class="m-muted">Current block reward is 50 IRM. First halving at block 1,050,000.</p>
+          <p class="m-muted">From block 66,400 the whole 50 IRM goes to <b>one</b> miner — the block's VRF-selected proposer. There is no role split. Before 66,400 the reward was divided 55% proposer / 22% compute / 13% verify / 10% support.</p>
+          <p class="m-muted">Selection does not depend on your hardware. The proposer for each block is drawn by verifiable random sortition, and since block 61,414 an eligible proposer's block is checked against a constant floor rather than the full network target — so a CPU, a GPU and an ASIC all have the same chance, and extra hashrate does not improve your odds.</p>
         </article>
         <article class="m-card">
           <h3>Live network stats</h3>

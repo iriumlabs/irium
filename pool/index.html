@@ -475,294 +475,122 @@ body {
 </nav>
 
 <main class="pool-shell">
-<div class="pool-wrap">
 
-  <!-- ─── Hero ─────────────────────────────────────────── -->
   <section class="hero-block">
     <div class="hero-inner">
       <div>
-        <div class="hero-live"><span class="dot"></span> Public Stratum Pool — pool.irium.org</div>
-        <h1 class="hero-h1">Irium Mining Pool</h1>
-        <p class="hero-sub">SHA-256d · 0% fee · Direct coinbase payout · ASIC / CPU / GPU / Solo. Every SHA-256d miner that can mine Bitcoin can mine IRM with no hardware changes.</p>
-        <div class="ep-stack">
-          <div class="ep-row">
-            <span class="ep-tag asic">ASIC &nbsp;3333</span>
-            <div class="ep-val" id="ep-asic">stratum+tcp://pool.irium.org:3333</div>
-            <button class="copy-btn" data-ep="ep-asic">Copy</button>
-          </div>
-          <div class="ep-row">
-            <span class="ep-tag cpugpu">CPU/GPU &nbsp;3335</span>
-            <div class="ep-val" id="ep-cpugpu">stratum+tcp://pool.irium.org:3335</div>
-            <button class="copy-btn" data-ep="ep-cpugpu">Copy</button>
-          </div>
-          <div class="ep-row">
-            <span class="ep-tag solo">Solo &nbsp;3336</span>
-            <div class="ep-val" id="ep-solo">stratum+tcp://pool.irium.org:3336</div>
-            <button class="copy-btn" data-ep="ep-solo">Copy</button>
-          </div>
-          <div class="ep-row">
-            <span class="ep-tag fw">FW bypass &nbsp;443</span>
-            <div class="ep-val" id="ep-fw">stratum+tcp://pool.irium.org:443</div>
-            <button class="copy-btn" data-ep="ep-fw">Copy</button>
-          </div>
-          <div class="ep-row">
-            <span class="ep-tag fb">Fallback &nbsp;80</span>
-            <div class="ep-val" id="ep-fb">stratum+tcp://pool.irium.org:80</div>
-            <button class="copy-btn" data-ep="ep-fb">Copy</button>
-          </div>
+        <div class="hero-live" style="background:rgba(255,90,90,0.12);border-color:rgba(255,90,90,0.35);color:#ff8a8a">
+          <span class="dot" style="background:#ff5a5a"></span> RETIRED — the Stratum pool is shut down
         </div>
-        <p style="font-size:.74rem;color:var(--muted);margin-top:10px;">
-          ⚠ Port 443 is plain TCP routed via sslh — use <code>stratum+tcp://</code>, <strong>not</strong> <code>stratum+ssl://</code>. Disable TLS in your miner config when using port 443.
+        <h1 class="hero-h1">The Irium mining pool is retired</h1>
+        <p class="hero-sub">
+          <strong>Do not point mining hardware at <code>pool.irium.org</code>.</strong> The Stratum
+          endpoints (ports 3333, 3335, 3336 and 443) have been stopped and will refuse connections.
+          Hashrate sent here cannot earn anything.
         </p>
       </div>
-      <aside class="hero-right">
-        <h3>Pool Config</h3>
-        <div class="cfg-row"><span class="cfg-k">Algorithm</span><span class="cfg-v">SHA-256d</span></div>
-        <div class="cfg-row"><span class="cfg-k">Fee</span><span class="cfg-v green">0%</span></div>
-        <div class="cfg-row"><span class="cfg-k">Payout</span><span class="cfg-v">Direct coinbase</span></div>
-        <div class="cfg-row"><span class="cfg-k">Min payout</span><span class="cfg-v">On block found</span></div>
-        <div class="cfg-row"><span class="cfg-k">Username</span><span class="cfg-v">IRM_ADDRESS.worker</span></div>
-        <div class="cfg-row"><span class="cfg-k">Password</span><span class="cfg-v">x</span></div>
-        <div class="cfg-row"><span class="cfg-k">Maturity</span><span class="cfg-v">100 blocks (~3 h)</span></div>
-        <div class="cfg-row"><span class="cfg-k">API status</span><span class="cfg-v live" id="hero-api-status">Loading…</span></div>
-        <div class="cfg-row"><span class="cfg-k">Updated</span><span class="cfg-v" id="hero-updated">—</span></div>
-        <div style="margin-top:14px;">
-          <a href="/docs/mining/" style="display:block;text-align:center;padding:9px;border-radius:8px;background:rgba(108,139,255,.14);border:1px solid rgba(108,139,255,.35);color:#9bb5ff;font-size:.78rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;">Full Mining Guide ↗</a>
-        </div>
-      </aside>
     </div>
   </section>
 
-  <!-- ─── KPI bar ─────────────────────────────────────── -->
-  <div class="kpi-bar">
-    <div class="kpi"><div class="label">Network Height</div><div class="value" id="k-height">—</div></div>
-    <div class="kpi"><div class="label">Network Hashrate</div><div class="value" id="k-hashrate">—</div></div>
-    <div class="kpi"><div class="label">Difficulty</div><div class="value" id="k-diff">—</div></div>
-    <div class="kpi"><div class="label">Miners Online</div><div class="value ok" id="k-miners">—</div></div>
-    <div class="kpi"><div class="label">Pool Blocks Accepted</div><div class="value" id="k-blocks">—</div></div>
-    <div class="kpi"><div class="label">Circulating Supply</div><div class="value" id="k-supply">—</div></div>
+  <div class="panel-grid">
+
+    <article class="panel full-row">
+      <h3>Why it was retired</h3>
+      <p class="panel-sub">This is a consensus-level change, not an outage.</p>
+      <p>
+        Irium selects who produces each block using <strong>verifiable random sortition (VRF)</strong>
+        over the set of registered, eligible proposer keys — not by who does the most work. The
+        selection threshold is computed purely from the number of eligible keys. Hashrate is not an
+        input to it in any form.
+      </p>
+      <p>
+        <strong>Pooling hashrate therefore cannot improve anyone's odds of being selected.</strong>
+        Combining ten machines gives exactly the same chance as one, because the draw is over keys,
+        not over work. There is nothing for a pool to aggregate.
+      </p>
+      <p>
+        Since block <strong>66,400</strong> the network also pays the <strong>full 50 IRM block
+        reward to the single VRF-selected proposer</strong>. There is no role split and no residual
+        share a pooled miner could receive.
+      </p>
+      <p>
+        The pool had accepted <strong>0 shares</strong> and produced <strong>0 blocks</strong>. It was
+        not able to build a valid block under the current rules, and no amount of connected hardware
+        would have changed that.
+      </p>
+    </article>
+
+    <article class="panel full-row">
+      <h3>The statistics previously shown on this page have been removed</h3>
+      <p class="panel-sub">They did not mean what they appeared to mean.</p>
+      <p>
+        This page used to show a &ldquo;Miners Online&rdquo; count, a pool hashrate, and an active-miner
+        leaderboard. Those figures were derived by scanning recent chain blocks and attributing them
+        to the pool. The addresses listed were <strong>the network's own block producers, not pool
+        miners</strong>, and the &ldquo;estimated hashrate&rdquo; was back-computed from blocks won by
+        random VRF selection at a fixed low difficulty — so it measured luck, not hashrate.
+      </p>
+      <p>
+        Presenting those numbers alongside connection instructions implied a working pool with active
+        miners. That was misleading, so the display has been removed rather than corrected. Real chain
+        data remains available in the <a href="/explorer/">block explorer</a>.
+      </p>
+    </article>
+
+    <article class="panel full-row">
+      <h3>What actually works today</h3>
+      <p class="panel-sub">Mining Irium is still open to anyone — it just doesn't go through a pool.</p>
+      <p>
+        Block production is <strong>hardware-neutral</strong>. A selected proposer's block is checked
+        against a fixed low difficulty floor, so a commodity CPU produces blocks just as readily as a
+        GPU or an ASIC. Extra hardware buys no advantage, and none is needed.
+      </p>
+      <p>Run your own node and miner:</p>
+      <pre><code>cargo build --release --bin iriumd --bin irium-miner
+./target/release/iriumd                       # run a full node, let it sync
+
+openssl rand -hex 32 &gt; ~/.irium/producer.secret
+chmod 600 ~/.irium/producer.secret
+
+IRIUM_POAWX_MINER_SECRET_HEX="$(cat ~/.irium/producer.secret)" \
+IRIUM_NODE_RPC=http://127.0.0.1:38300 \
+  ./target/release/irium-miner --poawx --threads 1</code></pre>
+      <p>
+        Registration is permissionless and automatic — no allowlist, no approval, no operator
+        involvement. After a short freeze your key becomes eligible and wins its fair share of blocks
+        by random selection.
+      </p>
+      <p>
+        Full walkthrough:
+        <a href="https://github.com/iriumlabs/irium/blob/main/docs/run-your-own-producer.md">Run your own producer</a>
+        &middot;
+        <a href="https://github.com/iriumlabs/irium/blob/main/docs/POAWX.md">PoAW-X consensus</a>
+        &middot;
+        <a href="https://github.com/iriumlabs/irium/blob/main/docs/MINING.md">Mining guide</a>
+      </p>
+      <p>
+        <strong>Note:</strong> mining requires a full <code>iriumd</code> node. A Stratum connection
+        alone has not been sufficient to produce a valid block since block 50,000, because each block
+        must carry a verifiable proposer assignment that only a full node can build.
+      </p>
+    </article>
+
+    <article class="panel full-row">
+      <h3>If you were mining here</h3>
+      <p>
+        Your hardware was not earning Irium, and no rewards were withheld — the pool never produced a
+        block for anyone. If you want to keep participating, use the full-node path above; it works on
+        ordinary hardware and does not require an ASIC.
+      </p>
+      <p>
+        A future collective-mining design may return (for example, variance smoothing across
+        participants), but it will not be hashrate pooling, because hashrate does not affect selection
+        under these rules.
+      </p>
+    </article>
+
   </div>
 
-  <!-- ─── Two-column: Stratum telemetry + block economics ─ -->
-  <div class="main-grid">
-
-    <!-- Stratum telemetry -->
-    <article class="panel">
-      <h3>Live Stratum Telemetry</h3>
-      <p class="panel-sub">Real-time data from <code>api.irium.org/api/pool/stats</code> — refreshes every 15 s.</p>
-      <div class="port-grid">
-        <div class="port-panel">
-          <h4 class="asic">ASIC · :3333</h4>
-          <div class="port-stat"><span class="ps-k">Miners</span><span class="ps-v ok" id="pt-asic-miners">—</span></div>
-          <div class="port-stat"><span class="ps-k">Accepted</span><span class="ps-v" id="pt-asic-acc">—</span></div>
-          <div class="port-stat"><span class="ps-k">Rejected</span><span class="ps-v" id="pt-asic-rej">—</span></div>
-          <div class="port-stat"><span class="ps-k">Blocks</span><span class="ps-v" id="pt-asic-blk">—</span></div>
-          <div class="port-stat"><span class="ps-k">Hashrate</span><span class="ps-v" id="pt-asic-hr">—</span></div>
-        </div>
-        <div class="port-panel">
-          <h4 class="cpugpu">CPU/GPU · :3335</h4>
-          <div class="port-stat"><span class="ps-k">Miners</span><span class="ps-v" id="pt-cpu-miners">—</span></div>
-          <div class="port-stat"><span class="ps-k">Accepted</span><span class="ps-v" id="pt-cpu-acc">—</span></div>
-          <div class="port-stat"><span class="ps-k">Rejected</span><span class="ps-v" id="pt-cpu-rej">—</span></div>
-          <div class="port-stat"><span class="ps-k">Blocks</span><span class="ps-v" id="pt-cpu-blk">—</span></div>
-          <div class="port-stat"><span class="ps-k">Hashrate</span><span class="ps-v" id="pt-cpu-hr">—</span></div>
-        </div>
-        <div class="port-panel">
-          <h4 class="solo">Solo · :3336</h4>
-          <div class="port-stat"><span class="ps-k">Miners</span><span class="ps-v" id="pt-solo-miners">—</span></div>
-          <div class="port-stat"><span class="ps-k">Accepted</span><span class="ps-v" id="pt-solo-acc">—</span></div>
-          <div class="port-stat"><span class="ps-k">Rejected</span><span class="ps-v" id="pt-solo-rej">—</span></div>
-          <div class="port-stat"><span class="ps-k">Blocks</span><span class="ps-v" id="pt-solo-blk">—</span></div>
-          <div class="port-stat"><span class="ps-k">Hashrate</span><span class="ps-v" id="pt-solo-hr">—</span></div>
-        </div>
-      </div>
-      <ul class="meta-list" style="margin-top:16px;">
-        <li><span class="k">Total miners online</span><span class="v ok" id="tl-total-miners">—</span></li>
-        <li><span class="k">Total blocks found (all time)</span><span class="v" id="tl-total-blocks">—</span></li>
-        <li><span class="k">Blocks found today</span><span class="v" id="tl-today-blocks">—</span></li>
-        <li><span class="k">Pool hashrate (chain-derived)</span><span class="v" id="tl-pool-hr">—</span></li>
-        <li><span class="k">Share integrity</span><span class="v" id="tl-integrity">—</span></li>
-        <li><span class="k">Rejected share rate</span><span class="v" id="tl-rej-rate">—</span></li>
-        <li><span class="k">Candidates detected / submitted</span><span class="v" id="tl-candidates">—</span></li>
-        <li><span class="k">Chain-attributed blocks</span><span class="v" id="tl-chain-attr">—</span></li>
-        <li><span class="k">Last accepted share</span><span class="v" id="tl-last-acc">—</span></li>
-      </ul>
-    </article>
-
-    <!-- Block economics + network -->
-    <article class="panel">
-      <h3>Block Economics &amp; Network</h3>
-      <p class="panel-sub">Consensus parameters and live network metrics from <code>/api/stats</code>.</p>
-      <ul class="meta-list">
-        <li><span class="k">Block reward</span><span class="v ok">50 IRM</span></li>
-        <li><span class="k">Block time target</span><span class="v">2 min (120 s) — V2 active at block 24,250</span></li>
-        <li><span class="k">Difficulty adjustment</span><span class="v">LWMA v2, 30-block window (active block 19,740)</span></li>
-        <li><span class="k">Halving interval</span><span class="v">1,050,000 blocks (~4 yr)</span></li>
-        <li><span class="k">Next halving at block</span><span class="v" id="econ-next-halving">1,050,000</span></li>
-        <li><span class="k">Blocks until halving</span><span class="v" id="econ-blocks-to-halving">—</span></li>
-        <li><span class="k">Total supply cap</span><span class="v">100,000,000 IRM</span></li>
-        <li><span class="k">Current circulating supply</span><span class="v" id="econ-supply">—</span></li>
-        <li><span class="k">Coinbase maturity</span><span class="v">100 blocks (~3 h at 2 min blocks)</span></li>
-        <li><span class="k">Algorithm</span><span class="v">SHA-256d (identical to Bitcoin)</span></li>
-        <li><span class="k">Consensus</span><span class="v">Objective-only PoW — no admin keys</span></li>
-        <li><span class="k">AuxPoW merged mining</span><span class="v warn">Activates at block 26,500</span></li>
-        <li><span class="k">Current height</span><span class="v" id="econ-height">—</span></li>
-        <li><span class="k">Live difficulty</span><span class="v" id="econ-diff">—</span></li>
-        <li><span class="k">Network peers</span><span class="v" id="econ-peers">—</span></li>
-        <li><span class="k">Expected blocks / 24 h</span><span class="v">720</span></li>
-        <li><span class="k">Expected daily emission</span><span class="v">36,000 IRM</span></li>
-      </ul>
-    </article>
-
-    <!-- Workers leaderboard -->
-    <article class="panel full-row">
-      <h3>Active Miners — Last 144 Blocks</h3>
-      <p class="panel-sub">From <code>/api/pool/workers?window=144&amp;limit=20</code>. Hashrate estimated from blocks found in window. Refresh every 30 s.</p>
-      <div class="tbl-wrap">
-        <table class="tbl">
-          <thead><tr>
-            <th>#</th>
-            <th>Address</th>
-            <th>Blocks Found</th>
-            <th>Share %</th>
-            <th>Est. Hashrate</th>
-            <th>Distribution</th>
-          </tr></thead>
-          <tbody id="workers-body"><tr><td colspan="6" class="dim" style="padding:18px 12px;">Loading miners…</td></tr></tbody>
-        </table>
-      </div>
-    </article>
-
-    <!-- Pool blocks -->
-    <article class="panel full-row">
-      <h3>Recent Pool Blocks</h3>
-      <p class="panel-sub">Blocks submitted and accepted through the public Stratum pool from <code>/api/pool/blocks</code>. Direct coinbase payout to miner address on each block.</p>
-      <div class="tbl-wrap">
-        <table class="tbl">
-          <thead><tr>
-            <th>Height</th>
-            <th>Time</th>
-            <th>Miner Address</th>
-            <th>Reward</th>
-            <th>Status</th>
-            <th>Block Hash</th>
-          </tr></thead>
-          <tbody id="pool-blocks-body"><tr><td colspan="6" class="dim" style="padding:18px 12px;">Loading pool blocks…</td></tr></tbody>
-        </table>
-      </div>
-    </article>
-
-    <!-- Network recent blocks -->
-    <article class="panel full-row">
-      <h3>Recent Network Blocks</h3>
-      <p class="panel-sub">Latest blocks from <code>/api/blocks?limit=15</code> — includes all miners, pool and non-pool.</p>
-      <div class="tbl-wrap">
-        <table class="tbl">
-          <thead><tr>
-            <th>Height</th>
-            <th>Time</th>
-            <th>Miner Address</th>
-            <th>Block Hash</th>
-            <th>Source</th>
-          </tr></thead>
-          <tbody id="net-blocks-body"><tr><td colspan="5" class="dim" style="padding:18px 12px;">Loading network blocks…</td></tr></tbody>
-        </table>
-      </div>
-    </article>
-
-    <!-- Miner lookup -->
-    <article class="panel">
-      <h3>Miner Account Lookup</h3>
-      <p class="panel-sub">Fetch your block history, paid total, pending balance, and last found block from <code>/api/pool/account/{address}</code>.</p>
-      <div class="lookup">
-        <input id="acct-input" type="text" placeholder="Enter IRM address (starts with Q or P)…">
-        <button id="acct-btn">Lookup</button>
-      </div>
-      <div id="acct-result" class="lookup-result">Enter a miner address above to fetch pool account data.</div>
-    </article>
-
-    <!-- Quick config snippets -->
-    <article class="panel">
-      <h3>Quick Connect Snippets</h3>
-      <p class="panel-sub">Replace <code>YOUR_IRM_ADDRESS</code> with your wallet address. Worker suffix (<code>.rig1</code>) is for labelling only.</p>
-      <div class="cfg-grid">
-        <div class="cfg-card">
-          <h4>ASIC Firmware (any SHA-256d)</h4>
-          <pre id="cfg-asic">Algorithm: SHA-256d
-Pool URL:  stratum+tcp://pool.irium.org:3333
-Worker:    YOUR_IRM_ADDRESS.rig1
-Password:  x</pre>
-          <button class="copy-btn" data-copy="cfg-asic">Copy</button>
-        </div>
-        <div class="cfg-card">
-          <h4>CPU Miner — cpuminer-opt (Linux/macOS)</h4>
-          <pre id="cfg-cpu">./cpuminer -a sha256d \
-  -o stratum+tcp://pool.irium.org:3335 \
-  -u YOUR_IRM_ADDRESS.cpu1 \
-  -p x -t 4</pre>
-          <button class="copy-btn" data-copy="cfg-cpu">Copy</button>
-        </div>
-        <div class="cfg-card">
-          <h4>CPU Miner — cpuminer-opt (Windows)</h4>
-          <pre id="cfg-win">.\cpuminer-avx2.exe -a sha256d ^
-  -o stratum+tcp://pool.irium.org:3335 ^
-  -u YOUR_IRM_ADDRESS.cpu1 ^
-  -p x -t 4</pre>
-          <button class="copy-btn" data-copy="cfg-win">Copy</button>
-        </div>
-      </div>
-    </article>
-
-    <!-- Hardware compatibility -->
-    <article class="panel full-row">
-      <h3>Hardware Compatibility</h3>
-      <p class="panel-sub">Any SHA-256d hardware that mines Bitcoin will mine Irium at full rated efficiency — no firmware changes, no extra configuration.</p>
-      <div class="tbl-wrap">
-        <table class="tbl">
-          <thead><tr><th>Hardware / Software</th><th>Port</th><th>Status</th><th>Notes</th></tr></thead>
-          <tbody>
-            <tr><td>Antminer S19 / S21 family</td><td class="mono">3333</td><td><span class="badge ok">Recommended</span></td><td>SHA-256d ASIC — full efficiency, no changes needed.</td></tr>
-            <tr><td>Whatsminer M50 / M60 family</td><td class="mono">3333</td><td><span class="badge ok">Recommended</span></td><td>SHA-256d ASIC — full efficiency, no changes needed.</td></tr>
-            <tr><td>Bitaxe (open-source ASIC)</td><td class="mono">3333</td><td><span class="badge ok">Supported</span></td><td>Set pool URL + worker in AxeOS web UI.</td></tr>
-            <tr><td>Avalon A13 / A14 family</td><td class="mono">3333</td><td><span class="badge ok">Supported</span></td><td>Full SHA-256d compatibility.</td></tr>
-            <tr><td>Any SHA-256d ASIC</td><td class="mono">3333</td><td><span class="badge ok">Supported</span></td><td>If it mines Bitcoin, it mines Irium.</td></tr>
-            <tr><td>cpuminer-opt</td><td class="mono">3335</td><td><span class="badge warn">Supported</span></td><td>Use <code>-a sha256d</code>. Low hashrate but functional for testing.</td></tr>
-            <tr><td>GPU (T-Rex, lolMiner, NBMiner)</td><td class="mono">3335</td><td><span class="badge warn">Supported</span></td><td>SHA-256d GPU mining. Use <code>stratum+tcp://</code>, disable TLS.</td></tr>
-            <tr><td>Irium Core desktop app</td><td class="mono">3335</td><td><span class="badge ok">Bundled</span></td><td>CPU + GPU miner bundled in Irium Core v1.0.77. One-click setup.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </article>
-
-    <!-- AuxPoW status -->
-    <article class="panel">
-      <h3>AuxPoW Merged Mining</h3>
-      <p class="panel-sub">Mine IRM alongside Bitcoin at zero extra energy cost.</p>
-      <ul class="meta-list">
-        <li><span class="k">Status</span><span class="v warn">Activates at block 26,500</span></li>
-        <li><span class="k">Current height</span><span class="v" id="auxpow-height">—</span></li>
-        <li><span class="k">Blocks remaining</span><span class="v" id="auxpow-remaining">—</span></li>
-        <li><span class="k">What it means</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">SHA-256d ASICs mine IRM as a secondary chain alongside BTC — zero extra electricity, zero extra hardware</span></li>
-        <li><span class="k">Docs</span><span class="v"><a href="https://github.com/iriumlabs/irium/blob/main/docs/MERGED-MINING.md" target="_blank" rel="noopener" style="color:#9bb5ff;">MERGED-MINING.md ↗</a></span></li>
-      </ul>
-    </article>
-
-    <!-- Troubleshoot -->
-    <article class="panel">
-      <h3>Troubleshooting</h3>
-      <p class="panel-sub">Common issues and how to fix them.</p>
-      <ul class="meta-list">
-        <li><span class="k">Port 3333 blocked by ISP</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Use port 443 — same Stratum, plain TCP via sslh. Disable TLS in miner config.</span></li>
-        <li><span class="k">Port 443 also blocked</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Use port 80 — second fallback.</span></li>
-        <li><span class="k">Shares rejected (stale)</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Check your internet latency to pool.irium.org. Use <code>ping pool.irium.org</code>.</span></li>
-        <li><span class="k">Firmware auto-enables TLS on port 443</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Find the SSL/TLS toggle in your miner UI and disable it explicitly.</span></li>
-        <li><span class="k">Reward not received</span><span class="v" style="font-family:inherit;font-size:.78rem;text-align:right;">Coinbase outputs mature after 100 blocks (~3 h). Check the lookup tool above.</span></li>
-        <li><span class="k">Get help</span><span class="v"><a href="https://t.me/iriumlabs" target="_blank" rel="noopener" style="color:#9bb5ff;">Telegram ↗</a></span></li>
-      </ul>
-    </article>
-
-  </div><!-- /main-grid -->
-</div><!-- /pool-wrap -->
 </main>
 
 <footer class="footer">
@@ -797,283 +625,12 @@ Password:  x</pre>
 </footer>
 
 <script>
-const API = 'https://api.irium.org/api';
-const STRATUM_STATS = 'http://pool.irium.org:3337/stats';
-const HALVING = 1050000;
-
-// ─── formatters ──────────────────────────────────────────
-function fmtHr(hs) {
-  const n = Number(hs);
-  if (!Number.isFinite(n) || n <= 0) return '—';
-  const units = ['H/s','KH/s','MH/s','GH/s','TH/s','PH/s','EH/s'];
-  let v = n, i = 0;
-  while (v >= 1000 && i < units.length - 1) { v /= 1000; i++; }
-  return `${v >= 100 ? v.toFixed(0) : v >= 10 ? v.toFixed(1) : v.toFixed(2)} ${units[i]}`;
-}
-function fmtNum(n, d = 0) {
-  const v = Number(n);
-  if (!Number.isFinite(v)) return '—';
-  return v.toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
-}
-function fmtTime(ts) {
-  const t = Number(ts);
-  if (!t) return '—';
-  const d = new Date(t * 1000);
-  const age = Math.floor((Date.now() - d) / 1000);
-  if (age < 120) return `${age}s ago`;
-  if (age < 3600) return `${Math.floor(age/60)}m ago`;
-  if (age < 86400) return `${Math.floor(age/3600)}h ago`;
-  return d.toLocaleDateString();
-}
-function fmtAbsTime(ts) {
-  const t = Number(ts);
-  if (!t) return '—';
-  return new Date(t * 1000).toLocaleString(undefined, { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit', second:'2-digit', hour12: false });
-}
-function shortAddr(a) {
-  if (!a || a.length < 16) return a || '—';
-  return a.slice(0, 10) + '…' + a.slice(-6);
-}
-function shortHash(h) {
-  if (!h || h.length < 20) return h || '—';
-  return h.slice(0, 14) + '…' + h.slice(-8);
-}
-function set(id, v) { const e = document.getElementById(id); if (e) e.textContent = v; }
-
-// ─── fetch helpers ────────────────────────────────────────
-async function getJson(url) {
-  const r = await fetch(url, { cache: 'no-store' });
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  return r.json();
-}
-
-// ─── copy buttons ─────────────────────────────────────────
-document.querySelectorAll('[data-ep]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const el = document.getElementById(btn.dataset.ep);
-    if (!el) return;
-    navigator.clipboard.writeText(el.textContent.trim()).then(() => {
-      const prev = btn.textContent;
-      btn.textContent = 'Copied!';
-      btn.classList.add('copied');
-      setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 2000);
-    });
-  });
-});
-document.querySelectorAll('[data-copy]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const el = document.getElementById(btn.dataset.copy);
-    if (!el) return;
-    navigator.clipboard.writeText(el.textContent.trim()).then(() => {
-      const prev = btn.textContent;
-      btn.textContent = 'Copied!';
-      btn.classList.add('copied');
-      setTimeout(() => { btn.textContent = prev; btn.classList.remove('copied'); }, 2000);
-    });
-  });
-});
-
-// ─── mobile hamburger ────────────────────────────────────
-const hbtn = document.getElementById('nav-hamburger');
-const hmenu = document.getElementById('nav-links');
-if (hbtn && hmenu) {
-  hbtn.addEventListener('click', () => {
-    const open = hmenu.classList.toggle('is-open');
-    hbtn.classList.toggle('is-open', open);
-    hbtn.setAttribute('aria-expanded', open ? 'true' : 'false');
-  });
-  hmenu.querySelectorAll('a').forEach(a => a.addEventListener('click', () => {
-    hmenu.classList.remove('is-open');
-    hbtn.classList.remove('is-open');
-  }));
-}
-
-// ─── main data load ───────────────────────────────────────
-async function loadAll() {
-  try {
-    // parallel fetch
-    const [stats, netStats, workersData, poolBlocks, netBlocks] = await Promise.allSettled([
-      getJson(`${API}/pool/stats`),
-      getJson(`${API}/stats`),
-      getJson(`${API}/pool/workers?window=144&limit=20`),
-      getJson(`${API}/pool/blocks?limit=15`),
-      getJson(`${API}/blocks?limit=15`),
-    ]);
-
-    const now = new Date().toLocaleTimeString();
-
-    // ── Pool stats ──────────────────────────────────────
-    if (stats.status === 'fulfilled') {
-      const s = stats.value;
-      set('k-miners',  fmtNum(s.workers_online));
-      set('k-blocks',  fmtNum(s.blocks_accepted));
-      set('k-hashrate', fmtHr(s.pool_hashrate));
-      set('k-diff',    fmtNum(s.difficulty, 0));
-      set('k-height',  fmtNum(s.network_height));
-      set('tl-total-miners',  `${fmtNum(s.workers_online)} online`);
-      set('tl-total-blocks',  fmtNum(s.blocks_accepted));
-      set('tl-today-blocks',  s.blocks_found_today != null ? fmtNum(s.blocks_found_today) : '—');
-      set('tl-pool-hr',  fmtHr(s.pool_hashrate));
-      set('tl-candidates', `${fmtNum(s.candidates_detected)} / ${fmtNum(s.candidates_submitted)}`);
-      set('tl-chain-attr', fmtNum(s.pool_blocks_accepted_chain_attributed));
-      set('tl-last-acc',   s.last_share_accepted_at ? fmtAbsTime(s.last_share_accepted_at) : '—');
-      set('tl-rej-rate',   s.rejected_shares != null && s.accepted_shares
-        ? `${((s.rejected_shares / (s.accepted_shares + s.rejected_shares)) * 100).toFixed(2)}%`
-        : '—');
-      set('tl-integrity', s.stratum_metrics_connected ? '✓ Connected' : '⚠ Degraded');
-      set('hero-api-status', s.backend_connected ? '✓ Online' : '⚠ Degraded');
-      set('hero-updated', now);
-    }
-
-    // ── Network stats ───────────────────────────────────
-    if (netStats.status === 'fulfilled') {
-      const n = netStats.value;
-      set('k-supply',  fmtNum(n.supply_irm, 0) + ' IRM');
-      set('econ-supply', fmtNum(n.supply_irm, 0) + ' IRM');
-      set('econ-height', fmtNum(n.height));
-      set('econ-diff',   fmtNum(n.difficulty || 0, 0));
-      set('econ-peers',  fmtNum(n.peers_connected));
-      if (n.height) {
-        const halvingBlock = Math.ceil(n.height / HALVING) * HALVING;
-        const remaining = halvingBlock - n.height;
-        set('econ-next-halving', fmtNum(halvingBlock));
-        set('econ-blocks-to-halving', `${fmtNum(remaining)} blocks (~${Math.round(remaining * 2 / 60 / 24)} days)`);
-        set('k-height', fmtNum(n.height));
-        set('auxpow-height', fmtNum(n.height));
-        set('auxpow-remaining', n.height < 26500 ? `${fmtNum(26500 - n.height)} blocks (~${Math.round((26500 - n.height) * 2 / 60 / 24)} days)` : 'Active');
-      }
-      if (n.difficulty) set('k-diff', fmtNum(n.difficulty, 0));
-    }
-
-    // ── Stratum stats (from pool:3337) ──────────────────
-    try {
-      const st = await getJson(STRATUM_STATS);
-      const fillPort = (prefix, obj) => {
-        if (!obj) return;
-        set(`pt-${prefix}-miners`, fmtNum(obj.active_miners));
-        set(`pt-${prefix}-acc`,    fmtNum(obj.accepted_shares));
-        set(`pt-${prefix}-rej`,    fmtNum(obj.rejected_shares));
-        set(`pt-${prefix}-blk`,    fmtNum(obj.blocks_found));
-        set(`pt-${prefix}-hr`,     fmtHr(obj.hashrate_estimate_hps));
-      };
-      fillPort('asic', st.asic);
-      fillPort('cpu',  st.cpu_gpu);
-      fillPort('solo', st.solo);
-      if (stats.status !== 'fulfilled') {
-        set('k-miners', fmtNum(st.total_miners));
-        set('k-blocks', fmtNum(st.total_blocks_found));
-      }
-    } catch (_) { /* stratum proxy may be blocked by CORS; pool/stats is the main source */ }
-
-    // ── Workers table ────────────────────────────────────
-    if (workersData.status === 'fulfilled') {
-      const wd = workersData.value;
-      const tbody = document.getElementById('workers-body');
-      if (tbody && wd.workers && wd.workers.length) {
-        tbody.innerHTML = wd.workers.map((w, i) => {
-          const pct = (w.share_pct || 0).toFixed(1);
-          return `<tr>
-            <td class="dim">${i + 1}</td>
-            <td><span class="mono">${shortAddr(w.address)}</span></td>
-            <td><b>${fmtNum(w.blocks_found)}</b></td>
-            <td>${pct}%</td>
-            <td>${fmtHr(w.estimated_hashrate_hs)}</td>
-            <td><div class="worker-bar"><div class="worker-bar-fill" style="width:${Math.min(100, parseFloat(pct))}%"></div></div></td>
-          </tr>`;
-        }).join('');
-      } else if (tbody) {
-        tbody.innerHTML = '<tr><td colspan="6" class="dim" style="padding:18px 12px;">No active miners in current window.</td></tr>';
-      }
-    }
-
-    // ── Pool blocks table ────────────────────────────────
-    if (poolBlocks.status === 'fulfilled') {
-      const pb = poolBlocks.value;
-      const tbody = document.getElementById('pool-blocks-body');
-      const rows = (pb.blocks || pb || []).slice(0, 15);
-      if (tbody && rows.length) {
-        tbody.innerHTML = rows.map(b => {
-          const mature = b.header ? null : (b.mature != null ? b.mature : null);
-          const status = b.status === 'on_chain' ? '<span class="badge ok">On-chain</span>'
-                       : b.status === 'orphan'   ? '<span class="badge bad">Orphan</span>'
-                       : '<span class="badge dim">Pending</span>';
-          const addr = b.miner_address || '—';
-          const hash = b.header ? b.header.hash : (b.hash || '—');
-          const ts   = b.header ? b.header.time : (b.time || 0);
-          const ht   = b.height || '—';
-          return `<tr>
-            <td><b>${fmtNum(ht)}</b></td>
-            <td>${fmtTime(ts)}</td>
-            <td><span class="mono">${shortAddr(addr)}</span></td>
-            <td class="ok">50 IRM</td>
-            <td>${status}</td>
-            <td><span class="mono dim">${shortHash(hash)}</span></td>
-          </tr>`;
-        }).join('');
-      } else if (tbody) {
-        tbody.innerHTML = '<tr><td colspan="6" class="dim" style="padding:18px 12px;">No pool blocks found.</td></tr>';
-      }
-    }
-
-    // ── Network blocks table ─────────────────────────────
-    if (netBlocks.status === 'fulfilled') {
-      const nb = netBlocks.value;
-      const tbody = document.getElementById('net-blocks-body');
-      const rows = (nb.blocks || nb || []).slice(0, 15);
-      if (tbody && rows.length) {
-        tbody.innerHTML = rows.map(b => {
-          const addr = b.miner_address || '—';
-          const hash = b.header ? b.header.hash : '—';
-          const ts   = b.header ? b.header.time : 0;
-          const src  = b.submit_source ? `<span class="badge dim">${b.submit_source.replace('_', ' ')}</span>` : '<span class="badge dim">unknown</span>';
-          return `<tr>
-            <td><b>${fmtNum(b.height)}</b></td>
-            <td>${fmtTime(ts)}</td>
-            <td><span class="mono">${shortAddr(addr)}</span></td>
-            <td><span class="mono dim">${shortHash(hash)}</span></td>
-            <td>${src}</td>
-          </tr>`;
-        }).join('');
-      } else if (tbody) {
-        tbody.innerHTML = '<tr><td colspan="5" class="dim" style="padding:18px 12px;">No blocks loaded.</td></tr>';
-      }
-    }
-
-  } catch (err) {
-    console.error('Pool dashboard error:', err);
-    set('hero-api-status', '⚠ Error');
-  }
-}
-
-// ── Account lookup ─────────────────────────────────────────
-document.getElementById('acct-btn').addEventListener('click', async () => {
-  const addr = document.getElementById('acct-input').value.trim();
-  const out   = document.getElementById('acct-result');
-  if (!addr) { out.textContent = 'Please enter an IRM address.'; return; }
-  out.textContent = 'Loading…';
-  try {
-    const d = await getJson(`${API}/pool/account/${encodeURIComponent(addr)}`);
-    const last = d.last_found;
-    out.innerHTML = [
-      `<b>Address:</b> ${d.address}`,
-      `<b>Blocks found:</b> ${fmtNum(d.blocks_found)}`,
-      `<b>Paid total:</b> ${fmtNum(d.paid_total_irm, 2)} IRM`,
-      `<b>Pending balance:</b> ${fmtNum(d.pending_balance_irm, 2)} IRM`,
-      `<b>Est. hashrate:</b> ${fmtHr(d.estimated_hashrate_hs)}`,
-      last ? [
-        `<b>Last block:</b> #${fmtNum(last.height)} — ${fmtAbsTime(last.time)}`,
-        `  Status: ${last.status} | Confirmations: ${fmtNum(last.confirmations)} | Mature in: ${last.mature ? 'spendable' : `${last.maturity_remaining} blocks`}`,
-        `  Hash: ${shortHash(last.hash)}`,
-      ].join('\n') : '',
-    ].filter(Boolean).join('\n');
-  } catch (err) {
-    out.textContent = `Error: ${err.message}`;
-  }
-});
-
-// ── Initial load + polling ─────────────────────────────────
-loadAll();
-setInterval(loadAll, 15000);
+// The live pool-stats fetchers were removed when the Stratum pool was retired.
+// They rendered chain-derived figures as pool activity: the "workers" were the
+// network's own block producers, and "estimated hashrate" was back-computed from
+// VRF-selected blocks at a fixed floor difficulty, so it measured luck rather than
+// hashrate. Rather than keep a corrected version of a meaningless number, the
+// display is gone. Real chain data lives in /explorer/.
 </script>
 <script src="/nav.js"></script>
 <script src="/assets/js/elite-theme.js?v=1"></script>

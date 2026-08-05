@@ -1864,32 +1864,30 @@ fn run_poawx_solo_gpu(gpus: &mut [GpuMiner]) -> Result<(), String> {
             let tail = tail_from_header(&ser);
             let target_words = target_to_words(target);
             gpu.update_template(&midstate, &tail, &target_words)?;
-            // Local-compute-rate accounting. Counts GENUINE hashes: every nonce a
-            // dispatched batch actually evaluated. A rate is reported per batch over
-            // that batch's own elapsed time, never cumulatively.
+            // TODO(gpu-compute-rate): NOT emitting a local compute rate here yet, on
+            // purpose. GPU mining works; the MEASUREMENT does not, and a wrong number
+            // is worse than none because it invites CPU-vs-GPU comparison — exactly
+            // the "more = better odds" misread this metric exists to avoid.
             //
-            // This measures how fast this GPU hashes. It does NOT indicate better
-            // odds of producing a block: selection is VRF sortition over registered
-            // keys and proposer_threshold() takes no hashrate input, so finishing the
-            // same fixed grind sooner wins zero extra blocks.
-            let solve_start = std::time::Instant::now();
-            let mut total_attempts: u64 = 0;
+            // Four concrete accounting defects to fix before this can ship:
+            //  1. Winning batch: the kernel evaluates ALL `batch_size` nonces in
+            //     parallel, it does not stop at the hit. Counting only up to the hit
+            //     nonce undercounts the real work of the final batch.
+            //  2. Dispatch cost: `mine_batch` includes result-buffer write, arg set,
+            //     enqueue, wait and readback. Dividing by that wall time mixes host
+            //     round-trip overhead into a figure presented as hash throughput;
+            //     kernel time and dispatch cost need separating.
+            //  3. First-batch warmup: initial kernel build/dispatch is far slower than
+            //     steady state, so the first sample is unrepresentative.
+            //  4. Suspicious/shrunk batches (watchdog path) execute but do not advance
+            //     `nonce_base`; whether their work counts is undecided.
+            //
+            // Until those are resolved the GPU tab shows "Hashing (rate coming soon)"
+            // rather than a number. See the scoped follow-up task.
             let mut nonce_base: u64 = 0;
             while nonce_base <= u32::MAX as u64 {
-                let batch_start = std::time::Instant::now();
-                let batch_size = gpu.batch_size as u64;
                 match gpu.mine_batch(nonce_base as u32)? {
                     Some(nonce) => {
-                        // Attempts in the winning batch: nonces up to and including
-                        // the hit, not the whole batch.
-                        total_attempts += (nonce as u64).saturating_sub(nonce_base).saturating_add(1);
-                        let elapsed = solve_start.elapsed().as_secs_f64();
-                        let rate = if elapsed > 0.0 { total_attempts as f64 / elapsed } else { 0.0 };
-                        println!(
-                            "[poawx] pow solved height={height} nonce={nonce} attempts={total_attempts} elapsed_ms={:.1} rate={rate:.0} H/s",
-                            elapsed * 1000.0
-                        );
-                        let _ = std::io::Write::flush(&mut std::io::stdout());
                         header.nonce = nonce;
                         // Re-verify on CPU with the REAL consensus check before
                         // trusting the kernel result.
@@ -1916,17 +1914,7 @@ fn run_poawx_solo_gpu(gpus: &mut [GpuMiner]) -> Result<(), String> {
                             }
                             continue;
                         }
-                        total_attempts += batch_size;
-                        let w = batch_start.elapsed().as_secs_f64();
-                        if w > 0.0 {
-                            println!(
-                                "[poawx] compute rate={:.0} H/s attempts={batch_size} window_ms={:.1} height={height}",
-                                batch_size as f64 / w,
-                                w * 1000.0
-                            );
-                            let _ = std::io::Write::flush(&mut std::io::stdout());
-                        }
-                        nonce_base += batch_size;
+                        nonce_base += gpu.batch_size as u64;
                     }
                 }
             }

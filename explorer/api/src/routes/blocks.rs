@@ -4,6 +4,7 @@ use serde::Deserialize;
 use sqlx::PgPool;
 use crate::{db, error::{ApiError, ApiResult}};
 use axum::http::StatusCode;
+use super::no_store_headers;
 
 pub fn router() -> Router<PgPool> {
     Router::new()
@@ -18,10 +19,10 @@ struct Pagination { limit: Option<i64>, offset: Option<i64> }
 async fn list_blocks(
     State(pool): State<PgPool>,
     Query(p): Query<Pagination>,
-) -> ApiResult<Json<Vec<crate::models::BlockSummary>>> {
+) -> ApiResult<(axum::http::HeaderMap, Json<Vec<crate::models::BlockSummary>>)> {
     let limit = p.limit.unwrap_or(20).min(100);
     let offset = p.offset.unwrap_or(0);
-    Ok(Json(db::get_blocks(&pool, limit, offset).await?))
+    Ok((no_store_headers(), Json(db::get_blocks(&pool, limit, offset).await?)))
 }
 
 async fn get_by_height(

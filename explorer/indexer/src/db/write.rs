@@ -40,6 +40,14 @@ pub async fn index_block(pool: &PgPool, block: &RpcBlock) -> Result<()> {
         .and_then(|(_, t)| t.inputs.first())
         .and_then(|inp| extract_coinbase_tag(&inp.script_sig));
 
+    // The node's convenience `miner_address` field is absent for some historical
+    // block formats. The first positive-value address output is the canonical
+    // primary/proposer payee (newer receipts place a zero-value commitment first),
+    // so derive it from the transaction and use RPC only as a fallback.
+    let decoded_miner_address: Option<String> = parsed_txs.first()
+        .and_then(|(_, tx)| primary_payee_address(&tx.outputs));
+    let miner_address = decoded_miner_address.as_deref().or(block.miner_address.as_deref());
+
     // Upsert block
     sqlx::query(
         "INSERT INTO blocks \
@@ -56,7 +64,7 @@ pub async fn index_block(pool: &PgPool, block: &RpcBlock) -> Result<()> {
     .bind(block.header.nonce.to_string())
     .bind(parsed_txs.len() as i32)
     .bind(total_reward)
-    .bind(block.miner_address.as_deref())
+    .bind(miner_address)
     .bind(0i32)
     .bind(clean_opt(coinbase_tag.as_deref()))
     .execute(&mut *dbtx)
@@ -99,7 +107,7 @@ pub async fn index_block(pool: &PgPool, block: &RpcBlock) -> Result<()> {
         }
     }
 
-    if let Some(miner) = &block.miner_address {
+    if let Some(miner) = miner_address {
         upsert_miner(&mut dbtx, miner, total_reward, block.height, &block.header.hash).await?;
     }
 
@@ -346,12 +354,192 @@ fn extract_coinbase_tag(script_sig: &[u8]) -> Option<String> {
     None
 }
 
+fn primary_payee_address(outputs: &[TxOutput]) -> Option<String> {
+    outputs.iter().find_map(|output| {
+        if output.value <= 0 { return None; }
+        match classify_script(&output.script_pubkey, output.value) {
+            ScriptClass::P2Pkh { address, .. } => Some(address),
+            ScriptClass::Htlc(params) => Some(params.recipient_addr),
+            _ => None,
+        }
+    })
+}
+
 pub async fn rollback_above(pool: &PgPool, reorg_height: i64) -> Result<()> {
     let mut dbtx = pool.begin().await?;
+
+    // These tables do not have foreign keys to blocks/txs, so remove their
+    // orphaned on-chain rows explicitly before deleting the forked blocks.
+    sqlx::query("DELETE FROM proofs WHERE block_height > $1")
+        .bind(reorg_height).execute(&mut *dbtx).await?;
+    sqlx::query("DELETE FROM agreements WHERE block_height > $1")
+        .bind(reorg_height).execute(&mut *dbtx).await?;
+    sqlx::query("DELETE FROM htlc_outputs WHERE block_height > $1")
+        .bind(reorg_height).execute(&mut *dbtx).await?;
+
     sqlx::query("DELETE FROM blocks WHERE height > $1")
         .bind(reorg_height).execute(&mut *dbtx).await?;
-    sqlx::query("UPDATE indexer_state SET synced_height=$1, synced_block_hash='' WHERE id=1")
+
+    // Spending references are intentionally denormalized and have no FK. A
+    // reorg can remove their spending transaction while leaving the output.
+    sqlx::query(
+        "UPDATE tx_outputs o SET spent_by_txid=NULL, spent_by_vin=NULL \
+         WHERE spent_by_txid IS NOT NULL \
+           AND NOT EXISTS (SELECT 1 FROM txs t WHERE t.txid=o.spent_by_txid)"
+    ).execute(&mut *dbtx).await?;
+    sqlx::query(
+        "UPDATE htlc_outputs h SET state='pending', spend_txid=NULL, spend_block_height=NULL \
+         WHERE spend_txid IS NOT NULL \
+           AND NOT EXISTS (SELECT 1 FROM txs t WHERE t.txid=h.spend_txid)"
+    ).execute(&mut *dbtx).await?;
+
+    // Recompute all incremental aggregates from the retained canonical rows.
+    // This is deliberately comprehensive: subtracting only the removed fork's
+    // visible rewards cannot repair repeated or previously partial rollbacks.
+    sqlx::query("DELETE FROM address_stats")
+        .execute(&mut *dbtx).await?;
+    sqlx::query(
+        "INSERT INTO address_stats \
+         (address,balance,total_received,total_sent,tx_count,first_seen_height,last_seen_height) \
+         SELECT o.address, \
+                SUM(CASE WHEN o.spent_by_txid IS NULL THEN o.value ELSE 0 END), \
+                SUM(o.value), \
+                SUM(CASE WHEN o.spent_by_txid IS NOT NULL THEN o.value ELSE 0 END), \
+                COUNT(*)::int, MIN(t.block_height), MAX(t.block_height) \
+         FROM tx_outputs o JOIN txs t ON t.txid=o.txid \
+         WHERE o.address IS NOT NULL GROUP BY o.address"
+    ).execute(&mut *dbtx).await?;
+
+    sqlx::query("DELETE FROM mining_leaderboard")
+        .execute(&mut *dbtx).await?;
+    sqlx::query(
+        "INSERT INTO mining_leaderboard \
+         (address,blocks_mined,total_reward,last_block_height,last_block_hash) \
+         SELECT totals.address, totals.blocks_mined, totals.total_reward, \
+                latest.height, latest.hash \
+         FROM ( \
+           SELECT miner_address AS address, COUNT(*)::int AS blocks_mined, \
+                  SUM(total_reward) AS total_reward \
+           FROM blocks WHERE miner_address IS NOT NULL GROUP BY miner_address \
+         ) totals \
+         JOIN LATERAL ( \
+           SELECT height,hash FROM blocks \
+           WHERE miner_address=totals.address ORDER BY height DESC LIMIT 1 \
+         ) latest ON TRUE"
+    ).execute(&mut *dbtx).await?;
+
+    sqlx::query(
+        "UPDATE indexer_state SET \
+         synced_height=$1, \
+         synced_block_hash=COALESCE((SELECT hash FROM blocks WHERE height=$1), ''), \
+         last_updated_at=NOW() \
+         WHERE id=1"
+    )
         .bind(reorg_height).execute(&mut *dbtx).await?;
     dbtx.commit().await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod rollback_tests {
+    use super::{primary_payee_address, rollback_above};
+    use crate::decoder::tx::TxOutput;
+    use sqlx::{PgPool, Row};
+
+    #[test]
+    fn primary_payee_skips_zero_value_receipt_commitment() {
+        let outputs = vec![
+            TxOutput { value: 0, script_pubkey: vec![0x6a, 0x00] },
+            TxOutput {
+                value: 5_000_000_000,
+                script_pubkey: hex::decode(
+                    "76a914222a0b48f534f9e3ef98ee3261ef3f0a344cc41d88ac"
+                ).unwrap(),
+            },
+        ];
+
+        assert_eq!(
+            primary_payee_address(&outputs).as_deref(),
+            Some("PzP2TzB4Je6uu4uC7932s4RwCTwnidcBiX")
+        );
+    }
+
+    #[tokio::test]
+    async fn rollback_removes_fork_and_rebuilds_derived_state() -> anyhow::Result<()> {
+        let Ok(url) = std::env::var("EXPLORER_TEST_DATABASE_URL") else {
+            return Ok(());
+        };
+        let pool = PgPool::connect(&url).await?;
+        sqlx::migrate!("./migrations").run(&pool).await?;
+        sqlx::query(
+            "TRUNCATE proofs,agreement_parties,agreements,htlc_outputs,tx_inputs,tx_outputs, \
+             txs,blocks,address_stats,mining_leaderboard RESTART IDENTITY CASCADE"
+        ).execute(&pool).await?;
+        sqlx::query("UPDATE indexer_state SET synced_height=-1,synced_block_hash='' WHERE id=1")
+            .execute(&pool).await?;
+
+        for (height, hash, prev, miner) in [
+            (0_i64, "h0", "genesis", "miner-a"),
+            (1_i64, "fork-h1", "h0", "miner-b"),
+        ] {
+            sqlx::query(
+                "INSERT INTO blocks \
+                 (height,hash,prev_hash,merkle_root,timestamp,difficulty,nonce,tx_count, \
+                  total_reward,miner_address,size_bytes) \
+                 VALUES ($1,$2,$3,'m',NOW(),'d','0',1,5000,$4,0)"
+            ).bind(height).bind(hash).bind(prev).bind(miner).execute(&pool).await?;
+            let txid = format!("tx-{height}");
+            sqlx::query(
+                "INSERT INTO txs \
+                 (txid,block_height,block_hash,tx_index,version,locktime,is_coinbase, \
+                  input_count,output_count,total_out,fee) \
+                 VALUES ($1,$2,$3,0,1,0,true,1,1,5000,0)"
+            ).bind(&txid).bind(height).bind(hash).execute(&pool).await?;
+            sqlx::query(
+                "INSERT INTO tx_outputs (txid,vout,value,script_hex,script_type,address,spent_by_txid) \
+                 VALUES ($1,0,5000,'','p2pkh','payee',$2)"
+            ).bind(&txid).bind((height == 0).then_some("tx-1")).execute(&pool).await?;
+        }
+        sqlx::query(
+            "INSERT INTO address_stats \
+             (address,balance,total_received,total_sent,tx_count,first_seen_height,last_seen_height) \
+             VALUES ('payee',999999,999999,0,99,0,99)"
+        ).execute(&pool).await?;
+        sqlx::query(
+            "INSERT INTO mining_leaderboard \
+             (address,blocks_mined,total_reward,last_block_height,last_block_hash) \
+             VALUES ('miner-a',7,35000,1,'fork-h1')"
+        ).execute(&pool).await?;
+        sqlx::query(
+            "UPDATE indexer_state SET synced_height=1,synced_block_hash='fork-h1' WHERE id=1"
+        ).execute(&pool).await?;
+
+        rollback_above(&pool, 0).await?;
+
+        let block_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM blocks")
+            .fetch_one(&pool).await?;
+        assert_eq!(block_count, 1);
+        let output = sqlx::query(
+            "SELECT spent_by_txid FROM tx_outputs WHERE txid='tx-0'"
+        ).fetch_one(&pool).await?;
+        assert!(output.get::<Option<String>, _>("spent_by_txid").is_none());
+        let stats = sqlx::query(
+            "SELECT balance,total_received,total_sent,tx_count,last_seen_height \
+             FROM address_stats WHERE address='payee'"
+        ).fetch_one(&pool).await?;
+        assert_eq!(stats.get::<i64, _>("balance"), 5000);
+        assert_eq!(stats.get::<i64, _>("total_received"), 5000);
+        assert_eq!(stats.get::<i64, _>("total_sent"), 0);
+        assert_eq!(stats.get::<i32, _>("tx_count"), 1);
+        assert_eq!(stats.get::<i64, _>("last_seen_height"), 0);
+        let miner = sqlx::query(
+            "SELECT blocks_mined,total_reward,last_block_height,last_block_hash \
+             FROM mining_leaderboard WHERE address='miner-a'"
+        ).fetch_one(&pool).await?;
+        assert_eq!(miner.get::<i32, _>("blocks_mined"), 1);
+        assert_eq!(miner.get::<i64, _>("total_reward"), 5000);
+        assert_eq!(miner.get::<i64, _>("last_block_height"), 0);
+        assert_eq!(miner.get::<String, _>("last_block_hash"), "h0");
+        Ok(())
+    }
 }

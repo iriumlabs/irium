@@ -28,9 +28,12 @@ impl Config {
             .parse()
             .context("INDEXER_POLL_MS must be a positive integer")?;
         let reorg_scan_depth: u64 = env("INDEXER_REORG_DEPTH")
-            .unwrap_or_else(|_| "6".to_string())
+            .unwrap_or_else(|_| "499".to_string())
             .parse()
             .context("INDEXER_REORG_DEPTH must be a positive integer")?;
+        if !(1..=499).contains(&reorg_scan_depth) {
+            anyhow::bail!("INDEXER_REORG_DEPTH must be between 1 and 499");
+        }
         Ok(Self { rpc_url, database_url, batch_size, poll_interval_ms, reorg_scan_depth })
     }
 }

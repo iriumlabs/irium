@@ -84,17 +84,19 @@ async fn detect_reorg(
 ) -> Result<Option<(i64, String)>> {
     if synced_hash.is_empty() { return Ok(None); }
 
-    let tip_matches = match tip_hash_hint {
-        Some(node_tip_hash) => node_tip_hash == synced_hash,
-        None => {
-            let resp = rpc.get_blocks(synced_height, 1).await?;
-            let tip = resp.blocks.first().ok_or_else(|| anyhow::anyhow!(
-                "node returned no block at indexed height {synced_height}"
-            ))?;
-            tip.header.hash == synced_hash
-        }
-    };
-    if tip_matches { return Ok(None); }
+    if tip_hash_hint == Some(synced_hash) { return Ok(None); }
+
+    // The best-header hint can briefly advertise an equal-height sibling before
+    // that sibling becomes the node's canonical stored block. Confirm a hint
+    // mismatch against the canonical block endpoint before doing an expensive
+    // rollback and derived-state rebuild.
+    let resp = rpc.get_blocks(synced_height, 1).await?;
+    let tip = resp.blocks.first().ok_or_else(|| anyhow::anyhow!(
+        "node returned no block at indexed height {synced_height}"
+    ))?;
+    if !confirmed_tip_mismatch(synced_hash, tip_hash_hint, &tip.header.hash) {
+        return Ok(None);
+    }
 
     let count = (synced_height - scan_from + 1).max(1) as u64;
     let node_blocks = rpc.get_blocks(scan_from, count).await?;
@@ -104,6 +106,14 @@ async fn detect_reorg(
         .ok_or_else(|| anyhow::anyhow!(
             "no common ancestor in reorg scan window {scan_from}..={synced_height}"
         ))
+}
+
+fn confirmed_tip_mismatch(
+    synced_hash: &str,
+    tip_hash_hint: Option<&str>,
+    canonical_hash: &str,
+) -> bool {
+    tip_hash_hint != Some(synced_hash) && canonical_hash != synced_hash
 }
 
 fn find_common_ancestor(
@@ -124,7 +134,7 @@ fn find_common_ancestor(
 
 #[cfg(test)]
 mod tests {
-    use super::find_common_ancestor;
+    use super::{confirmed_tip_mismatch, find_common_ancestor};
     use crate::rpc::{RpcBlock, RpcHeader};
 
     fn block(height: i64, hash: &str) -> RpcBlock {
@@ -163,5 +173,19 @@ mod tests {
         let node = vec![block(10, "new10")];
 
         assert_eq!(find_common_ancestor(&indexed, &node), None);
+    }
+
+    #[test]
+    fn candidate_header_mismatch_requires_canonical_confirmation() {
+        assert!(!confirmed_tip_mismatch(
+            "indexed-tip",
+            Some("candidate-sibling"),
+            "indexed-tip",
+        ));
+        assert!(confirmed_tip_mismatch(
+            "indexed-tip",
+            Some("candidate-sibling"),
+            "candidate-sibling",
+        ));
     }
 }

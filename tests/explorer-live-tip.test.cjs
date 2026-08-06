@@ -188,3 +188,18 @@ test('live tip and recent-block requests bypass cache while historical pages do 
   assert.match(html, /cacheBust = live \? '&_=' \+ Date\.now\(\) : '';/);
   assert.match(html, /request\.signal, live\)/);
 });
+
+test('retired pool is not polled or advertised as live', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'explorer', 'index.html'), 'utf8');
+  assert.match(html, /Pool Retired/);
+  assert.match(html, /STRATUM ENDPOINTS ARE OFFLINE/);
+  assert.doesNotMatch(html, /loadPoolStats/);
+  assert.doesNotMatch(html, /api\.irium\.org\/pool-stats/);
+});
+
+test('network hashrate and proposer eligibility come from live chain endpoints', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'explorer', 'index.html'), 'utf8');
+  assert.match(html, /API \+ '\/rpc\/mining_metrics\?_=' \+ t/);
+  assert.match(html, /status\.poawx_proposer_eligible_count/);
+  assert.match(html, /Round-0 VRF odds/);
+});

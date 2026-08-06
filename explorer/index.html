@@ -409,7 +409,7 @@ body {
     <div class="xp-tabs" role="tablist">
       <button class="xp-tab xp-active" id="xp-tab-ov" onclick="xpTab('ov')">Overview</button>
       <button class="xp-tab" id="xp-tab-rl" onclick="xpTab('rl')">Rich List</button>
-      <button class="xp-tab" id="xp-tab-ps" onclick="xpTab('ps')">Pool Stats</button>
+      <button class="xp-tab" id="xp-tab-ps" onclick="xpTab('ps')">Pool Retired</button>
     </div>
 
     <!-- ===== OVERVIEW ===== -->
@@ -443,7 +443,7 @@ body {
           <div class="xp-sc-sub">connected</div>
         </div>
         <div class="xp-sc">
-          <div class="xp-sc-hdr"><span class="xp-sc-label">Active Miners</span><span class="xp-sc-icon"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg></span></div>
+          <div class="xp-sc-hdr"><span class="xp-sc-label">Observed Proposers</span><span class="xp-sc-icon"><svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg></span></div>
           <div class="xp-sc-val" id="s-txcount">—</div>
           <div class="xp-sc-sub">recent blocks</div>
         </div>
@@ -472,9 +472,9 @@ body {
           <p class="xp-ctitle">NETWORK INFO</p>
           <div class="xp-sr"><span>Last block</span><span id="s-lastblock">—</span></div>
           <div class="xp-sr"><span>Tip hash</span><span id="s-tiphash" style="font-family:var(--xp-mono);font-size:11px;">—</span></div>
-          <div class="xp-sr"><span>Pool URL</span><span id="s-poolurl">—</span></div>
-          <div class="xp-sr"><span>ASIC port</span><span id="s-asicport">—</span></div>
-          <div class="xp-sr"><span>CPU/GPU port</span><span id="s-cpuport">—</span></div>
+          <div class="xp-sr"><span>Eligible proposers</span><span id="s-eligible">—</span></div>
+          <div class="xp-sr"><span>Round-0 VRF odds</span><span id="s-vrfodds">—</span></div>
+          <div class="xp-sr"><span>Selection model</span><span>VRF proposer</span></div>
         </div>
 
       </div>
@@ -557,21 +557,21 @@ body {
 
     </div><!-- /xp-rl -->
 
-    <!-- ===== POOL STATS ===== -->
+    <!-- ===== RETIRED POOL ===== -->
     <div id="xp-ps" style="display:none">
-      <div class="xp-sl">POOL OVERVIEW</div>
-      <div class="xp-g6" id="xp-ps-grid">
-        <div class="xp-sc" style="grid-column:1/-1"><div class="xp-ldg">Loading pool stats...</div></div>
-      </div>
-      <div class="xp-p2">
-        <div class="xp-card">
-          <p class="xp-ctitle">ASIC POOL</p>
-          <div id="xp-ps-asic"><div class="xp-ldg">Loading...</div></div>
-        </div>
-        <div class="xp-card">
-          <p class="xp-ctitle">CPU / GPU POOL</p>
-          <div id="xp-ps-cpu"><div class="xp-ldg">Loading...</div></div>
-        </div>
+      <div class="xp-sl">POOL STATUS</div>
+      <div class="xp-card" style="border-color:rgba(255,90,90,0.30)">
+        <p class="xp-ctitle" style="color:#ff8a8a">RETIRED — STRATUM ENDPOINTS ARE OFFLINE</p>
+        <p style="color:var(--xp-t2);line-height:1.7;margin:0 0 12px">
+          Irium selects block proposers by VRF sortition over registered eligible keys, not by
+          pooled hashrate. Pooling therefore cannot improve proposer odds, and the former official
+          Stratum pool has been shut down.
+        </p>
+        <p style="color:var(--xp-t2);line-height:1.7;margin:0 0 16px">
+          Do not point mining hardware at pool.irium.org. Run your own full node and use the
+          supported solo proposer workflow instead.
+        </p>
+        <a class="xp-sbtn" href="/pool/" style="display:inline-block;text-decoration:none">Read the retirement notice</a>
       </div>
     </div><!-- /xp-ps -->
 
@@ -633,13 +633,12 @@ GitHub</a>
   'use strict';
 
   var API          = 'https://api.irium.org';
-  var POOL         = 'https://api.irium.org/pool-stats/';
   var PER_PAGE     = 50;
   var REWARD_DENOM = 1e8;
   var BLOCKS_DAY      = 288;
   var HALVING_INTERVAL = 1050000;
 
-  var st = { offset: 0, pool: null, chainHashrate: 0, rlDone: false, activeTab: 'ov', tipHeight: 0, tipHash: '', lastOverviewTs: 0, lastBlocks: [], atGenesis: false, blocksGate: window.IriumLiveTip.createLatestRequestGate(), livePoller: null };
+  var st = { offset: 0, chainHashrate: 0, rlDone: false, activeTab: 'ov', tipHeight: 0, tipHash: '', lastOverviewTs: 0, lastBlocks: [], atGenesis: false, blocksGate: window.IriumLiveTip.createLatestRequestGate(), livePoller: null };
 
   function $id(id) { return document.getElementById(id); }
   function set(id, v) { var e = $id(id); if (e) e.textContent = v; }
@@ -768,7 +767,6 @@ GitHub</a>
       }
     });
     if (tab === 'rl' && !st.rlDone) loadRichList();
-    if (tab === 'ps') { if (st.pool) renderPoolStats(st.pool); else loadPoolStats(); }
   }
   window.xpTab = xpTab;
 
@@ -823,22 +821,6 @@ GitHub</a>
     });
   }
 
-  /* --- pool stats --- */
-  function loadPoolStats() {
-    return get(POOL).then(function (p) {
-      st.pool = p;
-      // Pool counters only see miners connected to the STRATUM pool. Producers running a
-      // full node + CLI miner (which is how the chain is currently mined) never appear
-      // there, so this showed 0 while blocks were being found every ~65s. Prefer the
-      // on-chain count computed from who is actually being rewarded; fall back to the pool
-      // number only when we have no block data yet.
-      var activeMiners = (p.asic ? (p.asic.active_miners || 0) : 0) + (p.cpu_gpu ? (p.cpu_gpu.active_miners || 0) : 0);
-      var onChain = onChainParticipants();
-      set('s-txcount', fmtN(onChain != null ? onChain : activeMiners));
-      if (st.activeTab === 'ps') renderPoolStats(p);
-    }).catch(function (e) { console.error('pool:', e); });
-  }
-
   /* --- chain stats (mining metrics + status + richlist) --- */
   function loadChainStats() {
     var t = Date.now();
@@ -862,6 +844,11 @@ GitHub</a>
         var nextHalving = Math.ceil((status.height + 1) / HALVING_INTERVAL) * HALVING_INTERVAL;
         set('s-supply-sub', 'excl. founder vesting · Next halving: #' + fmtN(nextHalving));
       }
+      if (status && status.poawx_proposer_eligible_count != null) {
+        var eligible = Number(status.poawx_proposer_eligible_count);
+        set('s-eligible', fmtN(eligible));
+        set('s-vrfodds', eligible > 0 ? '1 in ' + fmtN(eligible) + ' (' + (100 / eligible).toFixed(1) + '%)' : 'bootstrap');
+      }
       if (richlist && richlist.total_supply_sats != null) {
         var circulatingSats = richlist.total_supply_sats - 350000000000000;
         var supIrm = Math.max(0, circulatingSats) / REWARD_DENOM;
@@ -870,49 +857,11 @@ GitHub</a>
     }).catch(function () {});
   }
 
-  /* --- render pool stats panel --- */
-  function renderPoolStats(p) {
-    if (!p) return;
-    var grid = $id('xp-ps-grid');
-    if (grid) {
-      var items = [
-        ['Pool',         p.pool             || '—'],
-        ['Total Miners', fmtN(p.total_miners)],
-        ['Total Blocks', fmtN(p.total_blocks_found)],
-        ['Blocks Today', fmtN(p.blocks_found_today)],
-        ['ASIC Port',    p.asic_port        || '—'],
-        ['CPU/GPU Port', p.cpu_gpu_port     || '—'],
-      ];
-      grid.innerHTML = items.map(function (c) {
-        return '<div class="xp-sc"><div class="xp-sc-label">' + c[0] +
-               '</div><div class="xp-sc-val">' + c[1] + '</div></div>';
-      }).join('');
-    }
-    renderPoolSect('xp-ps-asic', p.asic);
-    renderPoolSect('xp-ps-cpu',  p.cpu_gpu);
-  }
-
-  function renderPoolSect(elId, d) {
-    var el = $id(elId);
-    if (!el || !d) return;
-    var rows = [
-      ['Active miners',  fmtN(d.active_miners)],
-      ['Hashrate',       fmtHps(d.hashrate_estimate_hps)],
-      ['Current diff',   d.current_diff != null ? Number(d.current_diff).toFixed(2) : '—'],
-      ['Accepted shares',fmtN(d.accepted_shares)],
-      ['Rejected shares',fmtN(d.rejected_shares)],
-      ['Blocks found',   fmtN(d.blocks_found)],
-      ['Reject rate',    d.recent_reject_rate_pct != null
-                           ? d.recent_reject_rate_pct.toFixed(1) + '%' : '—'],
-    ];
-    el.innerHTML = rows.map(function (r) {
-      return '<div class="xp-sr"><span>' + r[0] + '</span><span>' + r[1] + '</span></div>';
-    }).join('');
-  }
-
   /* --- block table --- */
   function renderBlocks(blocks) {
     st.lastBlocks = blocks || [];
+    var participants = onChainParticipants();
+    set('s-txcount', participants == null ? '—' : fmtN(participants));
     var tbody = $id('xp-tbody');
     if (!tbody) return;
     if (!blocks || !blocks.length) {
@@ -1397,13 +1346,6 @@ GitHub</a>
   window.xpSearch = xpSearch;
 
   /* --- init --- */
-  /* Pool retired 2026-08-05: the Stratum endpoints are shut down and refuse
-     connections, and PoAW-X selects producers by VRF sortition, not hashrate.
-     Showing a pool URL and ports here advertised a service that cannot work. */
-  set('s-poolurl', 'retired — mine solo, see docs/JOIN-MINING.md');
-  set('s-asicport', '—');
-  set('s-cpuport', '—');
-
   st.livePoller = window.IriumLiveTip.createTipPoller({
     fetchTip: fetchTip,
     visibility: document,
@@ -1421,7 +1363,7 @@ GitHub</a>
     }
   });
   st.livePoller.start();
-  Promise.all([loadPoolStats(), loadChainStats()]).then(updateCalc);
+  loadChainStats().then(updateCalc);
 
   var hrEl = $id('xp-hr'), huEl = $id('xp-hu'), qEl = $id('xp-q');
   if (hrEl) hrEl.addEventListener('input', updateCalc);
@@ -1438,7 +1380,6 @@ GitHub</a>
   }
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
 
-  setInterval(loadPoolStats, 30000);
   setInterval(loadChainStats, 60000);
   setInterval(refreshAges, 30000);
 

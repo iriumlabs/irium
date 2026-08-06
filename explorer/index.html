@@ -627,6 +627,7 @@ GitHub</a>
 
 <script src="/assets/js/elite-theme.js?v=1"></script>
 <script src="/nav.js"></script>
+<script src="/assets/js/explorer-live-tip.js?v=20260806"></script>
 <script>
 (function () {
   'use strict';
@@ -638,7 +639,7 @@ GitHub</a>
   var BLOCKS_DAY      = 288;
   var HALVING_INTERVAL = 1050000;
 
-  var st = { offset: 0, pool: null, chainHashrate: 0, rlDone: false, activeTab: 'ov', tipHeight: 0, lastOverviewTs: 0, lastBlocks: [], atGenesis: false };
+  var st = { offset: 0, pool: null, chainHashrate: 0, rlDone: false, activeTab: 'ov', tipHeight: 0, tipHash: '', lastOverviewTs: 0, lastBlocks: [], atGenesis: false, blocksGate: window.IriumLiveTip.createLatestRequestGate(), livePoller: null };
 
   function $id(id) { return document.getElementById(id); }
   function set(id, v) { var e = $id(id); if (e) e.textContent = v; }
@@ -744,8 +745,11 @@ GitHub</a>
     return get(url).catch(function () { return null; });
   }
 
-  function get(url) {
-    return fetch(url, { cache: 'no-store' }).then(function (r) {
+  function get(url, signal, live) {
+    var options = {};
+    if (live) options.cache = 'no-store';
+    if (signal) options.signal = signal;
+    return fetch(url, Object.keys(options).length ? options : undefined).then(function (r) {
       if (!r.ok) throw new Error('HTTP ' + r.status);
       return r.json();
     });
@@ -769,26 +773,53 @@ GitHub</a>
   window.xpTab = xpTab;
 
   /* --- overview --- */
-  function loadOverview() {
+  function tipFromStatus(status) {
+    var hash = status.best_header_tip && status.best_header_tip.hash;
+    if (typeof status.height !== 'number' || !hash) throw new Error('status missing canonical tip');
+    return { height: status.height, hash: hash, status: status };
+  }
+
+  function applyTip(tip) {
+    st.tipHeight = tip.height;
+    st.tipHash = tip.hash;
+    st.lastOverviewTs = Date.now();
+    set('xp-status', 'Block #' + fmtN(tip.height) + ' · Synced');
+    set('s-height', '#' + fmtN(tip.height));
+    set('s-tiphash', tip.hash.slice(0, 22) + '…');
+  }
+
+  function fetchTip() {
     var t = Date.now();
-    return get(API + '/status?_=' + t).then(function (status) {
-      st.tipHeight = status.height;
-      st.lastOverviewTs = Date.now();
-      set('xp-status', 'Block #' + fmtN(status.height) + ' · Synced');
-      set('s-height',  '#' + fmtN(status.height));
-      var tipHash = status.best_header_tip && status.best_header_tip.hash;
-      set('s-tiphash', tipHash ? tipHash.slice(0, 22) + '…' : '—');
-      var fromH = Math.max(0, status.height - st.offset - (PER_PAGE - 1));
-      return get(API + '/rpc/blocks?from=' + fromH + '&count=' + PER_PAGE + '&_=' + t);
-    }).then(function (data) {
+    return get(API + '/status?_=' + t, null, true).then(tipFromStatus);
+  }
+
+  function loadBlocksForTip(tip) {
+    var request = st.blocksGate.begin();
+    var fromH = Math.max(0, tip.height - st.offset - (PER_PAGE - 1));
+    var live = st.offset === 0;
+    var cacheBust = live ? '&_=' + Date.now() : '';
+
+    return get(API + '/rpc/blocks?from=' + fromH + '&count=' + PER_PAGE + cacheBust, request.signal, live).then(function (data) {
+      if (!st.blocksGate.isLatest(request)) return;
       var raw    = (data && data.blocks) ? data.blocks : [];
       var blocks = raw.slice().reverse().map(normalizeBlock);
+      if (st.offset === 0 && blocks.length &&
+          (blocks[0].height !== tip.height || blocks[0].hash !== tip.hash)) {
+        throw new Error('recent blocks response does not match canonical tip');
+      }
       st.atGenesis = blocks.length > 0 && blocks[blocks.length - 1].height === 0;
       if (blocks.length) set('s-lastblock', fmtAge(blocks[0].timestamp, blocks[0].height));
       renderBlocks(blocks);
-    }).catch(function (e) {
+    });
+  }
+
+  function loadCurrentPage() {
+    if (!st.tipHeight || !st.tipHash) return Promise.resolve();
+    return loadBlocksForTip({ height: st.tipHeight, hash: st.tipHash }).catch(function (e) {
+      if (e && e.name === 'AbortError') return;
       console.error('overview:', e);
-      set('xp-status', 'API error');
+      set('xp-status', 'API unavailable · retrying');
+      if (st.livePoller) st.livePoller.refreshNow();
     });
   }
 
@@ -960,7 +991,7 @@ GitHub</a>
     var next = st.offset + dir * PER_PAGE;
     if (next < 0) return;
     st.offset = next;
-    loadOverview();
+    loadCurrentPage();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   window.xpPage = xpPage;
@@ -977,7 +1008,7 @@ GitHub</a>
     if (!tip) return;
     if (target > tip) target = tip;
     st.offset = Math.max(0, tip - target);
-    loadOverview();
+    loadCurrentPage();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   window.xpJump = xpJump;
@@ -1373,7 +1404,24 @@ GitHub</a>
   set('s-asicport', '—');
   set('s-cpuport', '—');
 
-  Promise.all([loadOverview(), loadPoolStats(), loadChainStats()]).then(updateCalc);
+  st.livePoller = window.IriumLiveTip.createTipPoller({
+    fetchTip: fetchTip,
+    visibility: document,
+    onTip: function (tip) {
+      applyTip(tip);
+    },
+    onTipChange: function (tip, previousTip) {
+      if (previousTip) st.offset = 0;
+      return loadBlocksForTip(tip);
+    },
+    onError: function (error) {
+      if (error && error.name === 'AbortError') return;
+      console.error('live explorer refresh:', error);
+      set('xp-status', 'API unavailable · retrying');
+    }
+  });
+  st.livePoller.start();
+  Promise.all([loadPoolStats(), loadChainStats()]).then(updateCalc);
 
   var hrEl = $id('xp-hr'), huEl = $id('xp-hu'), qEl = $id('xp-q');
   if (hrEl) hrEl.addEventListener('input', updateCalc);
@@ -1390,11 +1438,6 @@ GitHub</a>
   }
   document.addEventListener('keydown', function (e) { if (e.key === 'Escape') closeModal(); });
 
-  setInterval(function () {
-    console.log('[interval] auto-refresh at', new Date().toLocaleTimeString());
-    st.offset = 0; // always refresh back to the latest page
-    loadOverview();
-  }, 15000);
   setInterval(loadPoolStats, 30000);
   setInterval(loadChainStats, 60000);
   setInterval(refreshAges, 30000);
